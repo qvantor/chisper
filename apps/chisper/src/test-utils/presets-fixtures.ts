@@ -6,4 +6,5 @@ export const fakePreset = async (id: string): Promise<Preset> => ({
   name: `Preset ${id}`,
   data: presetDataSchema.parse({}),
   createdAt: '2026-01-01T00:00:00Z',
+  clip: null,
 });

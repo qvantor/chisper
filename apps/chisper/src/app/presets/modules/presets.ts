@@ -12,6 +12,7 @@ import {
 import { applySnapshot, getSnapshot, $snapshotChanges } from '../../app';
 import { readStored, writeStored } from '../../common/services';
 import type { SoundSwitchModule } from '../../synth/common/modules/sound-switch';
+import type { TrackModule } from '../../synth/track/modules/track';
 import {
   clearUrlPresetId,
   getEditToken,
@@ -28,7 +29,25 @@ export interface CurrentPreset {
   // opened on start without a choice of the user, its listens and stays are not counted (see usePresetUsageTracker);
   // not in the url: after a reload it would open from the link as chosen
   auto?: boolean;
+  // the clip it opens with (missing: none)
+  clipId?: string;
 }
+
+// a preset as the server gives it saved (or opened, by the id of its clip): the clip it opens with (null or missing:
+// none)
+interface SavedPreset {
+  id: string;
+  name: string;
+  clipId?: string | null;
+}
+
+// the current preset of one the server gave (its other fields left out)
+const currentOf = ({ id, name, clipId }: SavedPreset, auto = false): CurrentPreset => ({
+  id,
+  name,
+  ...(auto && { auto }),
+  ...(clipId && { clipId }),
+});
 
 // the id the url keeps: of a chosen preset, none of Init or an auto one
 export const chosenId = (current: CurrentPreset | null) => (current && !current.auto ? current.id : null);
@@ -59,8 +78,13 @@ interface TabState {
 }
 
 const isCurrentPreset = (value: unknown): value is CurrentPreset => {
-  const { id, name, auto } = (value ?? {}) as Partial<Record<keyof CurrentPreset, unknown>>;
-  return typeof id === 'string' && typeof name === 'string' && (auto === undefined || auto === true);
+  const { id, name, auto, clipId } = (value ?? {}) as Partial<Record<keyof CurrentPreset, unknown>>;
+  return (
+    typeof id === 'string' &&
+    typeof name === 'string' &&
+    (auto === undefined || auto === true) &&
+    (clipId === undefined || typeof clipId === 'string')
+  );
 };
 
 // params out of the schema drop the state, those of another version of the app get its defaults (`restore`)
@@ -76,9 +100,11 @@ const isTabState = (value: unknown): value is TabState => {
 interface Dependencies {
   // a preset switch silences the synth until the next preset can play
   soundSwitch: SoundSwitchModule;
+  // the track opens the clip of a preset with its sound
+  track: TrackModule;
 }
 
-export const presets = ({ soundSwitch: [, { switchSound }] }: Dependencies) =>
+export const presets = ({ soundSwitch: [, { switchSound }], track: [, { openPresetClip }] }: Dependencies) =>
   rxModel(() => {
     const $current = new BehaviorSubject<CurrentPreset | null>(null);
     const $loadedHash = new BehaviorSubject<string | null>(null);
@@ -121,10 +147,12 @@ export const presets = ({ soundSwitch: [, { switchSound }] }: Dependencies) =>
       const loadFailed = (e: unknown, message?: string) =>
         toast.error(message ?? (e instanceof Error ? e.message : 'Preset loading failed'));
 
-      // in silence, once the sound of the preset before has faded out (a preset chosen meanwhile replaces it);
-      // one that throws as it is applied doesn't become the current one
+      // in silence, once the sound of the preset before has faded out (a preset chosen meanwhile replaces it), its
+      // clip with it (the track keeps a clip of the user); one that throws as it is applied doesn't become the
+      // current one
       const applyPreset = (preset: Preset, auto = false) => {
         const data = normalizePreset(preset.data);
+        const { clip } = preset;
         switchSound(() => {
           try {
             applySnapshot(data);
@@ -132,7 +160,8 @@ export const presets = ({ soundSwitch: [, { switchSound }] }: Dependencies) =>
             loadFailed(e);
             return;
           }
-          setCurrent({ id: preset.id, name: preset.name, ...(auto && { auto }) }, presetHash(data));
+          if (clip) openPresetClip(clip);
+          setCurrent(currentOf({ ...preset, clipId: clip?.id }, auto), presetHash(data));
           markOpened(preset.id);
         });
       };
@@ -210,7 +239,7 @@ export const presets = ({ soundSwitch: [, { switchSound }] }: Dependencies) =>
         prev: () => step(-1),
         setList: (list: PresetListItem[]) => $list.next(list),
         // the saved preset becomes current, current params are its params
-        setSaved: (preset: CurrentPreset) => setCurrent(preset, currentHash()),
+        setSaved: (preset: SavedPreset) => setCurrent(currentOf(preset), currentHash()),
         // back to Init: the default sound without a preset
         reset: () => {
           lastRequest++; // a preset still loading is not applied over Init

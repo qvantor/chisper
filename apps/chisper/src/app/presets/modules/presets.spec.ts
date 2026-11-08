@@ -1,5 +1,6 @@
 import toast from 'react-hot-toast';
 import {
+  CLIP_BAR,
   DEFAULT_WAVETABLE_PATH,
   ENVELOPE_DEFAULTS,
   ENVELOPE_DIVISIONS,
@@ -12,6 +13,7 @@ import {
   createEnvelopes,
   createFx,
   createSynth,
+  fakeTrack,
   immediateSoundSwitch,
   initModel,
 } from '../../../test-utils/models';
@@ -72,10 +74,21 @@ const tabState = () => JSON.parse(sessionStorage.getItem('presetState') ?? 'null
 // resolves pending getPreset promises
 const flush = () => new Promise((resolve) => jest.requireActual('timers').setImmediate(resolve));
 
-const setup = () => {
+const setup = (soundSwitch = immediateSoundSwitch()) => {
   const env = createEnvelopes();
-  const model = initModel(presets({ soundSwitch: immediateSoundSwitch() }), 'presets', undefined);
-  return { env, model };
+  const track = fakeTrack();
+  const model = initModel(presets({ soundSwitch, track }), 'presets', undefined);
+  return { env, model, track };
+};
+
+// a sound switch that applies once a test calls the next of `pending` (once the sound before has faded out)
+const deferredSwitch = () => {
+  const pending: (() => void)[] = [];
+  const soundSwitch = [
+    {},
+    { switchSound: (apply: () => void) => pending.push(apply) },
+  ] as unknown as SoundSwitchModule;
+  return { pending, soundSwitch };
 };
 
 // the popular list is still loading on start; resolveTop delivers ['a']
@@ -118,14 +131,11 @@ describe('presets model', () => {
   });
 
   it('applies a preset and Init through the sound switch: the sound and the current preset change in it', async () => {
-    // the switch applies them once the sound before has faded out
-    const pending: (() => void)[] = [];
-    const soundSwitch = [
-      {},
-      { switchSound: (apply: () => void) => pending.push(apply) },
-    ] as unknown as SoundSwitchModule;
-    const [{ $envelopes }] = createEnvelopes();
-    const [{ $current }, { loadById, reset }] = initModel(presets({ soundSwitch }), 'presets', undefined);
+    const { pending, soundSwitch } = deferredSwitch();
+    const {
+      env: [{ $envelopes }],
+      model: [{ $current }, { loadById, reset }],
+    } = setup(soundSwitch);
     getPresetMock.mockResolvedValue(preset('p1', 0.5));
 
     await loadById('p1');
@@ -144,12 +154,10 @@ describe('presets model', () => {
 
   it('a preset that throws as it is applied shows an error and does not become current', async () => {
     // the switch applies it from its poll, after loadById returned
-    const pending: (() => void)[] = [];
-    const soundSwitch = [
-      {},
-      { switchSound: (apply: () => void) => pending.push(apply) },
-    ] as unknown as SoundSwitchModule;
-    const [{ $current }, { loadById }] = initModel(presets({ soundSwitch }), 'presets', undefined);
+    const { pending, soundSwitch } = deferredSwitch();
+    const {
+      model: [{ $current }, { loadById }],
+    } = setup(soundSwitch);
     getPresetMock.mockResolvedValue(preset('p1', 0.5));
     jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
       throw new Error('Broken preset');
@@ -799,6 +807,98 @@ describe('presets model', () => {
       setEnvelopeValue('env1', 'attack', 0.4);
       window.dispatchEvent(new Event('pagehide'));
       expect(tabState()?.data.env.e1.attack).toBe(0.4);
+    });
+  });
+
+  describe('the clip of a preset', () => {
+    const clip = { id: 'c1', clip: { bpm: 100, length: CLIP_BAR, notes: [], name: 'Riff' } };
+    const withClip = (id: string, attack: number): Preset => ({ ...preset(id, attack), clip });
+
+    it('goes to the track with the sound, in the switch: the preset knows its clip', async () => {
+      const { pending, soundSwitch } = deferredSwitch();
+      const {
+        env: [{ $envelopes }],
+        model: [{ $current }, { loadById }],
+        track: [, { openPresetClip }],
+      } = setup(soundSwitch);
+      // the sound is applied first: the clip opens as the preset is applied
+      jest.mocked(openPresetClip).mockImplementation(() => expect($envelopes.value.env1.attack).toBe(0.5));
+      getPresetMock.mockResolvedValue(withClip('p1', 0.5));
+
+      await loadById('p1');
+      expect(openPresetClip).not.toHaveBeenCalled();
+      pending.shift()?.();
+      expect(openPresetClip).toHaveBeenCalledWith(clip);
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+    });
+
+    it('a preset without a clip leaves the track as it is', async () => {
+      const {
+        model: [{ $current }, { loadById }],
+        track: [, { openPresetClip }],
+      } = setup();
+      getPresetMock.mockResolvedValue({ ...preset('p1', 0.5), clip: null });
+      await loadById('p1');
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1' });
+      expect(openPresetClip).not.toHaveBeenCalled();
+    });
+
+    it('the preset opened on start brings its clip too', async () => {
+      getTopPresetsMock.mockResolvedValue(['a'].map(listItem));
+      getPresetMock.mockResolvedValue(withClip('a', 0.5));
+      const {
+        model: [{ $current }],
+        track: [, { openPresetClip }],
+      } = setup();
+      await flush();
+      expect($current.value).toEqual({ id: 'a', name: 'Preset a', auto: true, clipId: 'c1' });
+      expect(openPresetClip).toHaveBeenCalledWith(clip);
+    });
+
+    it('a preset that throws as it is applied opens no clip', async () => {
+      const {
+        model: [, { loadById }],
+        track: [, { openPresetClip }],
+      } = setup();
+      getPresetMock.mockResolvedValue(withClip('p1', 0.5));
+      jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
+        throw new Error('Broken preset');
+      });
+      await loadById('p1');
+      expect(openPresetClip).not.toHaveBeenCalled();
+    });
+
+    it('a reload keeps the clip of the preset, the track keeps its own state', async () => {
+      getUrlPresetIdMock.mockReturnValue('p1');
+      storeTabState({ id: 'p1', name: 'Preset p1', clipId: 'c1' }, 0.3, 0.5);
+      const {
+        model: [{ $current }],
+        track: [, { openPresetClip }],
+      } = setup();
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      await flush();
+      expect(openPresetClip).not.toHaveBeenCalled();
+      expect(getPresetMock).not.toHaveBeenCalled();
+    });
+
+    it('a saved preset keeps the clip it was saved with, in the tab too', () => {
+      const {
+        env: [, { setEnvelopeValue }],
+        model: [{ $current }, { setSaved }],
+      } = setup();
+      setSaved({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      setEnvelopeValue('env1', 'attack', 0.4);
+      window.dispatchEvent(new Event('pagehide'));
+      expect(tabState()?.current).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+    });
+
+    it('a tab state of a clip id that is not a string is dropped', () => {
+      getUrlPresetIdMock.mockReturnValue('p1');
+      storeTabState({ id: 'p1', name: 'Preset p1', clipId: 42 } as unknown as CurrentPreset, 0.3, 0.5);
+      getPresetMock.mockResolvedValue(preset('p1', 0.5));
+      setup();
+      expect(getPresetMock).toHaveBeenCalledWith('p1');
     });
   });
 

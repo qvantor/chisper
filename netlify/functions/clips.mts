@@ -11,7 +11,7 @@ import type { Clip, ClipResponse, SaveClipResponse, UpdateClipResponse } from '.
 import { db } from '../utils/db';
 import { matchesEditToken, newEditToken } from '../utils/edit-token';
 import { errorResponse, getIpHash, HttpError, json, readJson } from '../utils/http';
-import { countLastHour, isUniqueViolation } from '../utils/queries';
+import { clipOfRow, countLastHour, isUniqueViolation } from '../utils/queries';
 import { verifyTurnstile } from '../utils/turnstile';
 
 // clips of the track: opened only by their links (`?clip=<id>`), no list, no search, no scores
@@ -124,9 +124,8 @@ const getClip = async (id: string) => {
   if (!row) throw new HttpError(404, 'Clip not found');
 
   const { name, data, createdAt } = row;
-  const clip: Clip = { ...data, ...(name !== null && { name }) };
   // not cached: the author can overwrite the clip
-  return json({ id: row.id, clip, createdAt } as ClipResponse);
+  return json({ id: row.id, clip: clipOfRow(name, data), createdAt } as ClipResponse);
 };
 
 export default async (req: Request, context: Context) => {

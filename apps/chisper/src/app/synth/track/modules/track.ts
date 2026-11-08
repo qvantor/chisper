@@ -32,6 +32,7 @@ import {
   emptyClip,
   normalizeClip,
   normalizedClipHash,
+  PresetClip,
 } from '@chisper/preset-schema';
 import type { AppModule } from '../../../app/modules';
 import { readStored, writeStored } from '../../../common/services';
@@ -80,24 +81,26 @@ export interface PendingMidi {
 }
 
 // the state of the tab (sessionStorage): the clip, its id and the hash it was saved or loaded with, so a reload
-// keeps a clip not saved yet
+// keeps a clip not saved yet; whether a preset opened it (missing: no)
 const TAB_STATE_KEY = 'trackState';
 interface TabState {
   clip: Clip;
   id: string | null;
   hash: string | null;
+  byPreset?: boolean;
 }
 const isTabState = (value: unknown): value is TabState => {
-  const { clip, id, hash } = (value ?? {}) as Partial<Record<keyof TabState, unknown>>;
+  const { clip, id, hash, byPreset } = (value ?? {}) as Partial<Record<keyof TabState, unknown>>;
   return (
     (id === null || typeof id === 'string') &&
     (hash === null || typeof hash === 'string') &&
+    (byPreset === undefined || typeof byPreset === 'boolean') &&
     clipSchema.safeParse(clip).success
   );
 };
 
 // changed since it was saved or loaded (by the hashes); not saved yet: once it has notes
-const dirtyOf = (clip: Clip, hash: string | null) =>
+export const dirtyOf = (clip: Clip, hash: string | null) =>
   hash === null ? clip.notes.length > 0 : clipHash(clip) !== hash;
 
 const bodyOf = ({ length, notes }: Clip): ClipBody => ({ length, notes });
@@ -116,7 +119,7 @@ interface Dependencies {
 
 // the track: one clip of notes in a loop, played into the synth at the tempo and the position of the transport (a
 // note of the source `track`, TRACK_LEAD ahead of its time); edited by the piano roll with an undo, kept by the tab,
-// saved apart from the presets and opened by a link (?clip=)
+// saved apart from the presets and opened by a link (?clip=) or by a preset that names it
 export const track = ({
   app: [{ $windowKeyDown }],
   synthCore: [{ audioCtx }],
@@ -181,6 +184,9 @@ export const track = ({
       history: null as ClipHistory | null,
       full: false,
     };
+    // where the clip came from: a preset opened it (the next preset may take its place while it is unchanged), a
+    // clip of a link is loading (a preset meanwhile doesn't open its own)
+    const origin = { byPreset: false, linkLoading: false };
     // ticks from beat 0 of the transport (over the loops) the output plays at `ms` of performance.now(), not before
     // the start of the play
     const tickAt = (ms = performance.now()) => beatAt(Math.max(contextTimeAt(ms), player.from)) * CLIP_PPQ;
@@ -211,6 +217,7 @@ export const track = ({
       player,
       gesture,
       recorder,
+      origin,
       releaseHeld,
       tickAt,
       finish,
@@ -246,6 +253,7 @@ export const track = ({
         player,
         gesture,
         recorder,
+        origin,
       } = model;
       // (the notes as they play before the clip: its subscribers play them)
       const setClip = (clip: Clip) => {
@@ -257,18 +265,29 @@ export const track = ({
       const takeTempo = (bpm: number) => {
         if ($source.value !== 'midi') setBpm(bpm);
       };
+      // the clip is saved (or loaded) under `id` with `hash` (null: not saved); whether a preset opened it, else it is
+      // the user's
+      const setSavedAs = (id: string | null, hash: string | null, byPreset = false) => {
+        origin.byPreset = byPreset;
+        $id.next(id);
+        $savedHash.next(hash);
+      };
       // a clip opened: no undo across it (nor a recording: the notes held go into no clip)
-      const open = (clip: Clip, id: string | null, hash: string | null) => {
+      const open = (clip: Clip, id: string | null, hash: string | null, byPreset = false) => {
         recorder.held.clear();
         recorder.pending = [];
         recorder.history = null;
         setClip(clip);
-        $id.next(id);
-        $savedHash.next(hash);
+        setSavedAs(id, hash, byPreset);
         $history.next(emptyHistory());
         takeTempo(clip.bpm);
         // (the url as it is when it has the clip: a start keeps what else it has)
         if (getUrlClipId() !== id) setUrlClipId(id);
+      };
+      // a saved clip (of a link, of a preset) opened as the server gave it
+      const openSaved = ({ id, clip }: PresetClip, byPreset = false) => {
+        const normalized = normalizeClip(clip);
+        open(normalized, id, normalizedClipHash(normalized), byPreset);
       };
       const playFrom = (beat: number) => {
         $armed.next(true);
@@ -344,8 +363,7 @@ export const track = ({
       };
       // a clip of its own: not saved, out of the url (a Save makes a new link, the clip saved before keeps its notes)
       const detach = () => {
-        $id.next(null);
-        $savedHash.next(null);
+        setSavedAs(null, null);
         setUrlClipId(null);
       };
       // the clip of a .mid in place of the notes (it can be undone): its tempo, its name (none without one). A new
@@ -443,24 +461,34 @@ export const track = ({
         },
         cancelImport: () => $midiImport.next(null),
         // saved (or updated) under `id` with the notes of `clip` (those sent: an edit while it went is not saved),
-        // in the url
+        // in the url; the clip of the user now (a preset doesn't take its place)
         setSaved: (id: string, clip: Clip) => {
-          $id.next(id);
-          $savedHash.next(clipHash(clip));
+          setSavedAs(id, clipHash(clip));
           setUrlClipId(id);
         },
         // the clip of a link: loaded, its tempo taken
         loadById: async (id: string) => {
+          origin.linkLoading = true;
           try {
             const { clip } = await loadClip(id);
-            const normalized = normalizeClip(clip);
-            open(normalized, id, normalizedClipHash(normalized));
+            openSaved({ id, clip });
           } catch {
             toast.error('Clip from the link was not found');
+          } finally {
+            origin.linkLoading = false;
           }
         },
         // the state of the tab after a reload
-        restore: ({ clip, id, hash }: TabState) => open(normalizeClip(clip), id, hash),
+        restore: ({ clip, id, hash, byPreset }: TabState) => open(normalizeClip(clip), id, hash, byPreset),
+        // the clip a preset opens with (as it is applied), its tempo taken; only in place of a clip that isn't the
+        // user's: none (no notes) or the one a preset opened, unchanged. Not over a clip of a link still loading (the
+        // link wins), nor while REC records; the clip open already stays as it is (its edits too)
+        openPresetClip: (saved: PresetClip) => {
+          if ($id.value === saved.id || origin.linkLoading || $recording.value) return;
+          const current = $clip.value;
+          const free = current.notes.length === 0 || (origin.byPreset && !dirtyOf(current, $savedHash.value));
+          if (free) openSaved(saved, true);
+        },
         // Play: from beat 0 TRACK_LEAD from now (the free LFOs of HOST with it); a MIDI Clock leads: armed, its Start
         // and Stop play it
         play: () => {
@@ -499,6 +527,7 @@ export const track = ({
         $recording,
         player,
         recorder,
+        origin,
         releaseHeld,
       } = model;
       const send = ({ tick, on, pitch, velocity }: TrackEvent) => {
@@ -567,11 +596,13 @@ export const track = ({
       const saveTabState = () => {
         const clip = $clip.value;
         const kept = clip.notes.length > 0 || $id.value !== null;
-        writeStored(
-          'sessionStorage',
-          TAB_STATE_KEY,
-          kept ? { clip, id: $id.value, hash: $savedHash.value } : null
-        );
+        const state: TabState = {
+          clip,
+          id: $id.value,
+          hash: $savedHash.value,
+          ...(origin.byPreset && { byPreset: true }),
+        };
+        writeStored('sessionStorage', TAB_STATE_KEY, kept ? state : null);
       };
       return [
         // the clip of the link, or of the tab after a reload (unless it was given a link to another clip)
@@ -677,3 +708,5 @@ export const {
   useModel: useTrack,
   Context: TrackContext,
 } = rxModelReact('track', track);
+
+export type TrackModule = ReturnType<typeof useTrack>;

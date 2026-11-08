@@ -96,8 +96,6 @@ export const emptyClip = (bpm: number): Clip => ({
 
 // API
 
-export const clipIdSchema = z.string().uuid();
-
 // a clip as it is saved: under a name it can be saved under (the issue on its name: the server tells it)
 const savedClipSchema = clipSchema.refine(({ name }) => clipNameAllowed(name), {
   message: CLIP_NAME_REFUSED,

@@ -5,7 +5,7 @@ import { db } from '../utils/db';
 // (GREATEST skips NULLs), listeners who didn't play a preset during the 60 days of the scores, and reports of hidden
 // presets (they did their job, a preset shown again counts from 0) or older than 180 days: REPORT_HIDE_THRESHOLD
 // reports in half a year hide a preset, not those of years; and clips not saved, edited or opened by their link for
-// 180 days
+// 180 days, but those a preset opens with (they live as long as it names them)
 export default async () => {
   const sql = db();
   await sql`
@@ -19,7 +19,8 @@ export default async () => {
       OR preset_id IN (SELECT id FROM presets WHERE hidden)`;
   await sql`
     DELETE FROM clips
-    WHERE GREATEST(created_at, updated_at, opened_at) < now() - interval '180 days'`;
+    WHERE GREATEST(created_at, updated_at, opened_at) < now() - interval '180 days'
+      AND NOT EXISTS (SELECT 1 FROM presets WHERE clip_id = clips.id)`;
 };
 
 export const config: Config = {

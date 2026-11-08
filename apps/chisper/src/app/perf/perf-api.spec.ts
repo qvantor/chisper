@@ -70,8 +70,12 @@ const setup = async ({ ready = true } = {}) => {
     'fx',
     undefined
   );
-  const presetsModule = initModel(presets({ soundSwitch: immediateSoundSwitch() }), 'presets', undefined);
   const { track, clock } = createTrack(modules);
+  const presetsModule = initModel(
+    presets({ soundSwitch: immediateSoundSwitch(), track }),
+    'presets',
+    undefined
+  );
   const models = {
     synthCore: modules.synthCore,
     inputController: modules.inputController,

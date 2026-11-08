@@ -221,11 +221,12 @@ const FxInternal = ({ children }: React.PropsWithChildren) => {
   );
 };
 
-// a preset is applied through the sound switch
+// a preset is applied through the sound switch, the track opens its clip
 const PresetsInternal = ({ children }: React.PropsWithChildren) => {
   const soundSwitch = useSoundSwitch();
+  const track = useTrack();
   return (
-    <PresetsProvider initial={{}} soundSwitch={soundSwitch}>
+    <PresetsProvider initial={{}} soundSwitch={soundSwitch} track={track}>
       {children}
     </PresetsProvider>
   );

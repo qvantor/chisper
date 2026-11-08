@@ -1,5 +1,6 @@
-import { BehaviorSubject } from 'rxjs';
-import type { ClipResponse } from '@chisper/preset-schema';
+import { BehaviorSubject, combineLatest } from 'rxjs';
+import { PrimitiveBS } from '@chisper/rxjs-react';
+import { Clip, clipHash, ClipResponse, emptyClip, TEMPO_DEFAULT } from '@chisper/preset-schema';
 import { appModel } from '../app/app/modules/app-module';
 import { envelopes } from '../app/synth/common/modules/envelopes';
 import { lfos } from '../app/synth/common/modules/lfos';
@@ -17,7 +18,8 @@ import { oscillator } from '../app/synth/common/modules/oscillator';
 import { synth } from '../app/synth/common/modules/synth';
 import { synthCore } from '../app/synth/common/modules/synth-core';
 import { transport } from '../app/synth/common/modules/transport';
-import { track } from '../app/synth/track/modules/track';
+import { dirtyOf, track } from '../app/synth/track/modules/track';
+import type { TrackModule } from '../app/synth/track/modules/track';
 import type { CreateTrackClock } from '../app/synth/track/track-clock';
 import type { LoadNoiseSample, LoadWavetable } from '../app/synth/services';
 import { initModel } from './model-registry';
@@ -153,6 +155,24 @@ export const createTrack = (
 // a sound switch that applies a preset at once: the presets without the synth
 export const immediateSoundSwitch = () =>
   [{}, { switchSound: (apply: () => void) => apply() }] as unknown as SoundSwitchModule;
+
+// a track for the presets without the synth: an empty clip not saved (a spec puts its clip in); a save of it takes
+// its id and hash and it tells a change as the track does, the clips of presets it is given are recorded
+export const fakeTrack = () => {
+  const $clip = new BehaviorSubject<Clip>(emptyClip(TEMPO_DEFAULT));
+  const $id = new PrimitiveBS<string | null>(null);
+  const $savedHash = new PrimitiveBS<string | null>(null);
+  const $dirty = new PrimitiveBS<boolean>(false);
+  combineLatest([$clip, $savedHash]).subscribe(([clip, hash]) => $dirty.next(dirtyOf(clip, hash)));
+  const setSaved = jest.fn((id: string, clip: Clip) => {
+    $id.next(id);
+    $savedHash.next(clipHash(clip));
+  });
+  return [
+    { $clip, $id, $savedHash, $dirty },
+    { setSaved, openPresetClip: jest.fn() },
+  ] as unknown as TrackModule;
+};
 
 // an input controller with onPress/onRelease spied, for the controllers that feed it
 export const createSpiedInputController = () => {

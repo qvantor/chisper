@@ -1099,6 +1099,159 @@ describe('track', () => {
     });
   });
 
+  describe('the clip of a preset', () => {
+    const riff: Clip = { bpm: 100, length: CLIP_BAR, notes: [note(0, 1, 60)], name: 'Riff' };
+    const bass: Clip = { bpm: 140, length: CLIP_BAR * 2, notes: [note(1, 1, 40)], name: 'Bass' };
+    const ofPreset = (id: string, clip: Clip) => ({ id, clip });
+
+    it('opens in an empty track with its tempo, in the url', async () => {
+      const { actions, model, transportModel } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      expect(model.$clip.value).toEqual(riff);
+      expect(model.$id.value).toBe('c1');
+      expect(model.$savedHash.value).toBe(clipHash(riff));
+      expect(transportModel.$bpm.value).toBe(100);
+      expect(window.location.search).toBe('?clip=c1');
+      await wait(150);
+      expect(model.$dirty.value).toBe(false);
+    });
+
+    it('takes the place of the clip a preset opened, unchanged', async () => {
+      const { actions, model } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$clip.value).toEqual(bass);
+      expect(model.$id.value).toBe('c2');
+    });
+
+    it("the clip of a preset changed is the user's: the next preset leaves it, Undo goes on", async () => {
+      const { actions, model } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      actions.setNotes([note(0, 2, 62)]);
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c1');
+      expect(model.$clip.value.notes).toEqual([note(0, 2, 62)]);
+      actions.undo();
+      expect(model.$clip.value.notes).toEqual(riff.notes);
+    });
+
+    it("the clip of a preset at another tempo is the user's", async () => {
+      const { actions, model, transportActions } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      transportActions.setBpm(130);
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c1');
+    });
+
+    it.each<[string, (actions: Awaited<ReturnType<typeof setup>>['actions']) => void]>([
+      ['drawn', (actions) => actions.setNotes([note(0, 1, 70)])],
+      [
+        'saved',
+        (actions) => {
+          actions.openPresetClip(ofPreset('c1', riff));
+          actions.setNotes([note(0, 1, 70)]);
+          actions.setSaved('c3', { ...riff, notes: [note(0, 1, 70)] });
+        },
+      ],
+      [
+        'of a .mid',
+        (actions) => {
+          actions.openPresetClip(ofPreset('c1', riff));
+          actions.importMidi(writeMidiFile({ ...riff, notes: [note(0, 1, 70)] }));
+        },
+      ],
+    ])('leaves a clip of the user: %s', async (_, make) => {
+      const { actions, model } = await setup();
+      make(actions);
+      const before = model.$clip.value;
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$clip.value).toBe(before);
+      expect(model.$id.value).not.toBe('c2');
+    });
+
+    it('leaves the clip of a link', async () => {
+      window.history.replaceState(null, '', '/?clip=c9');
+      const loadClip = jest.fn().mockResolvedValue({ id: 'c9', clip: riff, createdAt: '' });
+      const { actions, model } = await setup(loadClip);
+      await flush();
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c9');
+    });
+
+    it('does not open while a clip of the link loads: the link wins', async () => {
+      window.history.replaceState(null, '', '/?clip=c9');
+      let resolve: (value: unknown) => void = () => undefined;
+      const loadClip = jest.fn(() => new Promise((r) => (resolve = r)));
+      const { actions, model } = await setup(loadClip as never);
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$clip.value.notes).toEqual([]);
+      resolve({ id: 'c9', clip: riff, createdAt: '' });
+      await flush();
+      expect(model.$id.value).toBe('c9');
+      // the link failed: a preset opens its clip in the empty track
+      stopModels();
+      window.history.replaceState(null, '', '/?clip=gone');
+      const next = await setup();
+      await flush();
+      next.actions.openPresetClip(ofPreset('c2', bass));
+      expect(next.model.$id.value).toBe('c2');
+    });
+
+    it('does not open while REC records', async () => {
+      const { actions, model } = await setup();
+      actions.record();
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBeNull();
+      actions.stop();
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c2');
+    });
+
+    it('the clip open already stays as it is, its edits too', async () => {
+      const { actions, model } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      actions.setNotes([note(0, 2, 62)]);
+      actions.openPresetClip(ofPreset('c1', riff));
+      expect(model.$clip.value.notes).toEqual([note(0, 2, 62)]);
+    });
+
+    it('plays on with the new clip', async () => {
+      const { actions, model, sent, play } = await setup();
+      actions.openPresetClip(ofPreset('c1', riff));
+      actions.play();
+      await play(0.02);
+      expect(sent).toEqual(['on C4 @0.05']);
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$playing.value).toBe(true);
+      expect(model.$clip.value).toEqual(bass);
+    });
+
+    it('a reload keeps the clip a preset opened: the next preset takes its place', async () => {
+      const first = await setup();
+      first.actions.openPresetClip(ofPreset('c1', riff));
+      await wait(250);
+      expect(JSON.parse(sessionStorage.getItem('trackState') ?? 'null')).toMatchObject({ byPreset: true });
+      stopModels();
+      const { actions, model } = await setup(jest.fn());
+      await flush();
+      expect(model.$id.value).toBe('c1');
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c2');
+    });
+
+    it('a reload keeps a clip of the user so: no preset takes its place', async () => {
+      const first = await setup();
+      first.actions.setNotes([note(0, 1, 70)]);
+      await wait(250);
+      expect(JSON.parse(sessionStorage.getItem('trackState') ?? 'null')).not.toHaveProperty('byPreset');
+      stopModels();
+      const { actions, model } = await setup(jest.fn());
+      await flush();
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBeNull();
+    });
+  });
+
   describe('Space', () => {
     // a keydown of Space on `target` (none focused: the body)
     const space = (init: KeyboardEventInit = {}, target: EventTarget = document.body) => {

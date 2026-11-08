@@ -29,13 +29,14 @@ it('removes unqualified presets not saved, edited or opened by their author for 
   );
 });
 
-it('removes clips not saved, edited or opened by their link for 180 days', async () => {
+it('removes clips not saved, edited or opened by their link for 180 days, but those a preset opens with', async () => {
   await cleanup();
   const clips = mockSql.find(/^DELETE FROM clips/);
   expect(clips).toHaveLength(1);
   // GREATEST skips NULLs: a clip never edited nor opened counts from its creation
   expect(clips[0].text).toBe(
-    "DELETE FROM clips WHERE GREATEST(created_at, updated_at, opened_at) < now() - interval '180 days'"
+    "DELETE FROM clips WHERE GREATEST(created_at, updated_at, opened_at) < now() - interval '180 days' " +
+      'AND NOT EXISTS (SELECT 1 FROM presets WHERE clip_id = clips.id)'
   );
   expect(clips[0].values).toEqual([]);
 });

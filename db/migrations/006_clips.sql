@@ -15,3 +15,8 @@ CREATE TABLE clips (
 );
 -- "10 clips per hour per IP"
 CREATE INDEX ON clips (ip_hash, created_at);
+
+-- the clip a preset opens with, chosen by its author in its Save dialog (null: none); the cleanup keeps a clip a
+-- preset names
+ALTER TABLE presets ADD COLUMN clip_id uuid REFERENCES clips (id) ON DELETE SET NULL;
+CREATE INDEX ON presets (clip_id) WHERE clip_id IS NOT NULL;

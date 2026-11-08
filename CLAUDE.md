@@ -240,6 +240,9 @@ an oscillator) are read, never written.
   `cleanup.mts` (daily).
 - Client: the `presets` model (current preset, dirty flag by hash, `?preset=<id>`, applied through the sound
   switch); a start without `?preset=` opens a random popular preset as `auto`; sessionStorage keeps an edited state.
+- A preset may name the clip it opens with (`presets.clip_id`, a checkbox of the Save dialog saves the clip of the
+  track first if needed; GET returns the clip). The track opens it (`openPresetClip`) only over no notes or an
+  unchanged clip a preset opened, never over a clip of the user or a `?clip=` link; cleanup keeps such clips.
 
 ### Wavetables and noises
 
