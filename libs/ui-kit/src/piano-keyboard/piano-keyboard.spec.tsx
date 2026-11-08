@@ -39,6 +39,24 @@ describe('PianoKeyboard', () => {
     expect(container.querySelector('[data-octave="3"][data-note="D"]')?.textContent).toBe('');
   });
 
+  it('lights the notes another source plays apart from the pressed ones', () => {
+    const { container } = render(
+      <PianoKeyboard
+        pressed={{ 3: ['C'] }}
+        played={{ 3: ['C', 'E'], 4: ['F#'] }}
+        octaves={[3, 4]}
+        fitScreen={false}
+      />
+    );
+    const key = (octave: number, note: string) =>
+      container.querySelector(`[data-octave="${octave}"][data-note="${note}"]`)?.className ?? '';
+    expect(key(3, 'C')).toMatch(/pressed/);
+    expect(key(3, 'E')).toMatch(/played/);
+    expect(key(3, 'E')).not.toMatch(/pressed/);
+    expect(key(4, 'F#')).toMatch(/played/);
+    expect(key(4, 'G')).not.toMatch(/played/);
+  });
+
   it('a pointer on a key presses its note in the pointerdown event, the pointerup releases it', () => {
     const { onPress, onRelease, key, pointAt } = setup();
     pointAt(key(3, 'E'));

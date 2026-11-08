@@ -1,5 +1,5 @@
-// Checks presets API limits against a running deployment.
-// Run against a dev/staging database only: it creates presets and stays.
+// Checks presets and clips API limits against a running deployment.
+// Run against a dev/staging database only: it creates presets, stays and clips.
 //
 //   BASE_URL=http://localhost:8888 node scripts/check-limits.mjs [--reports]
 //
@@ -81,6 +81,70 @@ if (!presetId) {
   );
   console.log(`     verify in the database, expected no row if this IP saved the preset, otherwise one heard and stayed today:
        SELECT heard, stayed FROM listens WHERE preset_id = '${presetId}';`);
+}
+
+// clips: 10 saves per hour per IP, an update once per 5 s
+const clip = (i, pitch = 60) => ({
+  bpm: 120,
+  length: 3840,
+  // unique notes per run and save (whole ticks within the loop), otherwise saves are deduplicated
+  notes: [[run % 3840, 1 + i, pitch, 1 + (Math.floor(run / 3840) % 127)]],
+});
+const saveClip = (i) =>
+  api('/api/clips', { method: 'POST', body: JSON.stringify({ clip: clip(i), turnstileToken: TOKEN }) });
+
+const clipSaves = [];
+for (let i = 0; i < 11; i++) clipSaves.push(await saveClip(i));
+const clipsCreated = clipSaves.filter((r) => r.status === 201);
+check(
+  'clip save rate limit: 11th save in an hour is 429',
+  clipSaves.at(-1).status === 429,
+  clipSaves.map((r) => r.status)
+);
+if (clipsCreated.length < 10)
+  console.log(
+    `     note: only ${clipsCreated.length} clip saves succeeded, this IP already saved clips during the last hour`
+  );
+
+const again = await saveClip(0);
+check(
+  'the same notes again return the clip without a token',
+  again.status === 200 && again.body.existed === true && !again.body.editToken,
+  again
+);
+check(
+  'clip body larger than 64 KB is rejected',
+  (await api('/api/clips', { method: 'POST', body: 'x'.repeat(65 * 1024) })).status === 413
+);
+check('no list of clips', (await api('/api/clips')).status === 405);
+check('clip with an invalid id is 400', (await api('/api/clips/not-a-uuid')).status === 400);
+
+const [firstClip] = clipsCreated;
+if (!firstClip) {
+  console.log('no clip created in this run to check updates, skipping');
+} else {
+  const { id, editToken } = firstClip.body;
+  const update = (pitch) =>
+    api(`/api/clips/${id}`, { method: 'PUT', body: JSON.stringify({ clip: clip(0, pitch), editToken }) });
+  check('clip update is accepted', (await update(61)).status === 200);
+  check('second clip update within 5 s is 429', (await update(62)).status === 429);
+  await new Promise((resolve) => setTimeout(resolve, 5500));
+  check('clip update after 5 s is accepted', (await update(63)).status === 200);
+  const opened = await api(`/api/clips/${id}`);
+  check(
+    'the clip plays the last update',
+    opened.status === 200 && opened.body.clip.notes[0]?.[2] === 63,
+    opened
+  );
+  check(
+    'clip update with a wrong token is 403',
+    (
+      await api(`/api/clips/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ clip: clip(0, 64), editToken: 'x'.repeat(43) }),
+      })
+    ).status === 403
+  );
 }
 
 if (checkReports) {

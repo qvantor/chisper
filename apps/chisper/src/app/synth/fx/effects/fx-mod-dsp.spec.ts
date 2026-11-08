@@ -95,6 +95,83 @@ describe('createFxModLines', () => {
     expect(Math.abs(out[1] - out[0])).toBeLessThan(0.01);
   });
 
+  describe('a note sent ahead of its time (the track)', () => {
+    const lfoWire = (period: number): LfoWire => ({
+      mode: FREE,
+      delay: 0,
+      rise: 0,
+      smooth: 0,
+      phase: 0,
+      anchor: { time: 0, phase: 0, period },
+      table: lfoTable('sine'),
+    });
+    // [AI] Lo-Fi Tape Keys: the delay a tape, Time 16 ms moved ±2.97 ms by a free sine of 1.8 s
+    const wow: FxRoute = { param: 'time', source: 4, amount: 0.006 * 0.99, min: 0.01, max: 1, bipolar: true };
+    const tape = () => {
+      const lines = createFxModLines(RATE);
+      lines.setLfos({
+        at: 0,
+        instantly: true,
+        lfos: [lfoWire(1.8), lfoWire(0.5), lfoWire(0.5), lfoWire(0.5)],
+      });
+      lines.setLine(DELAY_LINES.time, { routes: [wow], base: 0.016, map: 'linear' });
+      return lines;
+    };
+    // the line over `blocks` from 0 with the notes of `starts` (seconds) each sent at the block `ahead` seconds
+    // before it (0: the first block from its start, as a note of the keys comes)
+    const play = (
+      lines: ReturnType<typeof createFxModLines>,
+      starts: number[],
+      ahead: number,
+      blocks: number
+    ) => {
+      const out = new Float32Array(blocks * BLOCK);
+      const channels = Array.from({ length: FX_MOD_LINES }, () => new Float32Array(BLOCK));
+      const waiting = [...starts];
+      for (let b = 0; b < blocks; b++) {
+        const frame = b * BLOCK;
+        while (waiting.length && frame >= (waiting[0] - ahead) * RATE) lines.setNote(note(waiting.shift()));
+        lines.process(frame, channels);
+        out.set(channels[DELAY_LINES.time], frame);
+      }
+      return out;
+    };
+    const steepest = (out: Float32Array) => {
+      let step = 0;
+      for (let i = 1; i < out.length; i++) step = Math.max(step, Math.abs(out[i] - out[i - 1]));
+      return step;
+    };
+
+    it('starts at its time: a free LFO on the delay Time stays on its clock, no step', () => {
+      const starts = [0.3, 0.75, 1.1];
+      const blocks = Math.ceil((1.3 * RATE) / BLOCK);
+      const early = play(tape(), starts, 0.004, blocks);
+      expect(early).toEqual(play(tape(), starts, 0, blocks));
+      // past the glide into the line, as steep as the sine itself: 2.97 ms × 2π / 1.8 s a second
+      const slope = (0.00297 * 2 * Math.PI) / 1.8 / RATE;
+      expect(steepest(early.subarray(960))).toBeLessThan(slope * 1.01);
+    });
+
+    it('until its start the note before goes on, from its start the new one glides in', () => {
+      const lines = createFxModLines(RATE);
+      lines.setNote(note());
+      lines.setLine(DELAY_LINES.time, { routes: [time], base: 0.2, map: 'linear' });
+      // ENV 2 of the first note on its sustain: +0.2
+      render(lines, 0, 200);
+      const start = 200 * BLOCK + 300;
+      lines.setNote(note(start / RATE));
+      const before = render(lines, 200 * BLOCK, 3)[DELAY_LINES.time];
+      expect(before.every((value) => Math.abs(value - 0.2) < 1e-6)).toBe(true);
+      // the first block from its start: from the sustain towards the attack of the new note, in 10 ms
+      const after = render(lines, 203 * BLOCK, 8)[DELAY_LINES.time];
+      expect(after[0]).toBeCloseTo(0.2, 6);
+      expect(after[480]).toBeCloseTo(
+        routedValue(0.2, [time], note(start / RATE), (203 * BLOCK + 480) / RATE) - 0.2,
+        6
+      );
+    });
+  });
+
   it('runs the LFOs of its options and messages, without a note on their clocks', () => {
     const wire = (change: Partial<LfoWire> = {}): LfoWire => ({
       mode: FREE,

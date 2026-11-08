@@ -2,6 +2,7 @@ import React from 'react';
 import { styled } from 'styled-components';
 import { FxScreen } from '../fx';
 import { SynthScreen } from '../screens';
+import { MobileRoll, useLinkPreset } from '../track';
 import { SynthSections } from './synth-sections';
 
 const Root = styled.div`
@@ -16,10 +17,15 @@ const Fx = styled(FxScreen)`
   --fx-chart-width: 128px;
 `;
 
+// the piano roll of the clip of the track, as high as the view
+const ClipRoll = () => <MobileRoll presetId={useLinkPreset()} />;
+
 export const SynthView = ({ portrait, screen }: { portrait: boolean; screen: SynthScreen }) => (
   <Root>
     {screen === 'fx' ? (
       <Fx layout={portrait ? 'column' : 'row'} />
+    ) : screen === 'clip' ? (
+      <ClipRoll />
     ) : (
       <SynthSections layout={portrait ? 'column' : 'grid'} />
     )}

@@ -40,6 +40,11 @@ const Small = styled.small`
   margin-top: -6px;
 `;
 
+// the promo page of the synth (apps/site), its English version: the logo links to it in a new tab (the synth plays
+// on in its own with what no snapshot keeps: a table drawn or imported in the editor)
+export const ABOUT_PATH = '/wavetable-synth/';
+export const ABOUT_TITLE = 'About Chisper';
+
 // a full-height header section, divided from the previous one by a line
 export const HeaderSection = styled.div`
   border-left: 1px solid ${theme.colors.primaryLowContrast};
@@ -51,7 +56,7 @@ export const HeaderSection = styled.div`
 export const Header = ({ children }: React.PropsWithChildren) => {
   return (
     <Root>
-      <Logo href='https://github.com/qvantor/chisper' target='_blank' referrerPolicy='no-referrer'>
+      <Logo href={ABOUT_PATH} target='_blank' rel='noopener' title={ABOUT_TITLE}>
         <Name>CHISPER</Name>
         <Small>by Qvantor</Small>
       </Logo>

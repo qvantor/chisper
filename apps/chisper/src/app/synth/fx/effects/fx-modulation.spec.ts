@@ -103,6 +103,42 @@ describe('createFxModulator', () => {
     modulator.set({ note: { ...note(), start: 2 }, routes: [drive] });
     expect(modulator.block(frame(2))).toEqual({ drive: 2 });
   });
+
+  it('a note sent ahead of its time (the track): the note before until its start, from its block the new one', () => {
+    const modulator = createFxModulator(RATE, { drive: 2 });
+    modulator.set({ note: note(), routes: [drive] });
+    expect(modulator.block(frame(2))).toEqual({ drive: 5 });
+    modulator.set({ note: { ...note(), start: 2.5 }, routes: [drive] });
+    // the blocks before it: the sustain of the note before (set again after the message), as it was
+    expect(modulator.block(frame(2.5) - 256)).toEqual({ drive: 5 });
+    expect(modulator.block(frame(2.5) - 128)).toBeNull();
+    expect(modulator.block(frame(2.5))).toEqual({ drive: 2 });
+  });
+
+  it('a note sent ahead of its time keeps a free LFO on its clock until its start', () => {
+    const wire: LfoWire = {
+      mode: FREE,
+      delay: 0,
+      rise: 0,
+      smooth: 0,
+      phase: 0,
+      anchor: { time: 0, phase: 0, period: 1 },
+      table: lfoTable('saw-up'),
+    };
+    const saw: FxRoute = { param: 'drive', source: 4, amount: 6, min: 0, max: 12 };
+    const modulator = createFxModulator(
+      RATE,
+      { drive: 2 },
+      { at: 0, instantly: true, lfos: [wire, wire, wire, wire] }
+    );
+    modulator.set({ note: note(), routes: [saw] });
+    modulator.block(frame(1.5));
+    modulator.set({ note: { ...note(), start: 2.25 }, routes: [saw] });
+    // a saw of 1 s, not its left point (0) ahead of the note
+    const before = frame(2.25) - 128;
+    expect(modulator.block(before)?.['drive']).toBeCloseTo(2 + 6 * frac(before / RATE), 5);
+    expect(modulator.block(frame(2.25))?.['drive']).toBeCloseTo(2 + 6 * 0.25, 5);
+  });
 });
 
 describe('routedValue of a bipolar route and a pow knob', () => {

@@ -1,5 +1,5 @@
 import { Subscription } from 'rxjs';
-import { normalizePreset } from '@chisper/preset-schema';
+import { Clip, normalizePreset } from '@chisper/preset-schema';
 import { applySnapshot } from '../app';
 import { eventTime } from '../common/services';
 import type {
@@ -18,6 +18,7 @@ import type { useFilter } from '../synth/filter/modules';
 import type { FxStatus } from '../synth/fx/effects';
 import type { useFx } from '../synth/fx/modules';
 import type { usePresets } from '../presets/modules/presets';
+import type { useTrack } from '../synth/track';
 import { noteToString, stringToNote } from '../synth/services';
 import { matchNotes, NoteLatency, NoteRecord, noteLatency, PressRecord, ReleaseRecord } from './latency';
 import { PROBE_PROCESSOR, ProbeOnsetMessage, ProbeOptions } from './probe-dsp';
@@ -37,6 +38,7 @@ export interface PerfModels {
   fx: ReturnType<typeof useFx>;
   synth: ReturnType<typeof useSynth>;
   presets: ReturnType<typeof usePresets>;
+  track: ReturnType<typeof useTrack>;
 }
 
 // a step of a script, `at` ms after its start: a note through the input controller ('A4')
@@ -240,7 +242,7 @@ export const createPerfApi = (models: PerfModels) => {
       })
     );
     tracing.add(
-      $onRelease.subscribe((note) =>
+      $onRelease.subscribe(({ note }) =>
         releases.push({
           note: noteToString(note),
           ...inputTime(),
@@ -251,7 +253,8 @@ export const createPerfApi = (models: PerfModels) => {
     );
   };
   // the notes traced so far (their voices post their starts a block or two after the note on: the runner
-  // waits before it stops)
+  // waits before it stops); the starts of every voice traced too (a note of the track is scheduled ahead of its
+  // press: none matches it, its voice started late when after its frame)
   const takeTrace = () => {
     stopTrace();
     const { sampleRate } = audioCtx;
@@ -259,7 +262,19 @@ export const createPerfApi = (models: PerfModels) => {
       ...record,
       ...noteLatency(record, sampleRate),
     }));
-    return { notes, releases, onsets };
+    return { notes, releases, onsets, starts };
+  };
+
+  // the track plays a clip (as saved: tempo, length, notes) from beat 0 in a loop at its tempo, the piano roll open
+  // or not (it draws while the track plays); stop() stops it, its notes released
+  const track = {
+    play: (clip: Clip, { roll = false }: { roll?: boolean } = {}) => {
+      const [, actions] = models.track;
+      actions.restore({ clip, id: null, hash: null });
+      actions.setRollOpen(roll);
+      actions.play();
+    },
+    stop: () => models.track[1].stop(),
   };
 
   return {
@@ -271,6 +286,7 @@ export const createPerfApi = (models: PerfModels) => {
     stopRuns,
     stats,
     trace: { start: startTrace, stop: takeTrace },
+    track,
     probe: { install: installProbe },
     destroy: () => {
       stopRuns();

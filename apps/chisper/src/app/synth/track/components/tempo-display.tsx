@@ -5,8 +5,8 @@ import { CaretDownOutlined, CaretUpOutlined } from '@ant-design/icons';
 import { number } from '@chisper/math';
 import { SegmentDisplay, singlePointerTracker, text10, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
-import { CaretButton } from '../../common/components';
-import { useTransport } from '../common/modules';
+import { CaretButton } from '../../../common/components';
+import { useTransport } from '../../common/modules';
 
 // the tempo the display sets: dragged, stepped or typed, within them
 const MIN = 30;
@@ -33,20 +33,21 @@ const blink = keyframes`
   }
 `;
 
-// a screen of the synth: the tempo on the left, the carets on the right; while dragged or typed a ring of the accent
+// px of its digits (it is as tall as its place)
+const DIGITS_HEIGHT = 18;
+
+// on the plate of the strip of the piano roll: the tempo on the left, the carets on the right; while dragged or
+// typed a ring of the accent inside it
 const Screen = styled.div`
   position: relative;
-  height: 36px;
+  height: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 6px 0 10px;
-  border-radius: 3px;
-  background: ${theme.colors.primaryDark};
-  box-shadow: inset 0 1px 3px rgb(0 0 0 / 70%);
+  gap: 6px;
+  padding: 0 2px 0 8px;
   transition: box-shadow 150ms;
 
-  // a drag selects nothing: the popover's text is selectable
+  // a drag selects nothing
   &.editable {
     cursor: ns-resize;
     touch-action: none;
@@ -57,9 +58,7 @@ const Screen = styled.div`
 
   &.active,
   &.typing {
-    box-shadow:
-      inset 0 1px 3px rgb(0 0 0 / 70%),
-      0 0 0 1px ${theme.colors.accent};
+    box-shadow: inset 0 0 0 1px ${theme.colors.accent};
   }
 
   // the value as it was, all of it selected: it blinks until the first key replaces it
@@ -79,10 +78,11 @@ const Input = styled.input`
   cursor: text;
 `;
 
+// centered, its margin over it: its bottom by the bottom of the digits (its line 10 px)
 const Unit = styled.span`
   ${text10};
-  align-self: flex-end;
-  margin-bottom: 9px;
+  align-self: center;
+  margin-top: ${DIGITS_HEIGHT - 12}px;
   font-weight: 600;
   letter-spacing: 1px;
   color: ${theme.colors.primaryDarkHighContrast};
@@ -103,10 +103,10 @@ const Step = styled(CaretButton)`
   width: 18px;
 `;
 
-// the tempo of the synth on a seven-segment display (in the settings): dragged up or right a step of 1 every 4 px
-// (Shift 0.01 a px), its carets step it by 1 (Shift 0.01), a double click types it, Enter or a click elsewhere takes
-// it, Escape doesn't; within 30..240. The tempo a MIDI Clock
-// leads is only shown, to 0.1, as EXT
+// the tempo of the synth on a seven-segment display, on the plate of the strip of the piano roll: dragged up or
+// right a step of 1 every 4 px (Shift 0.01 a px), its carets step it by 1 (Shift 0.01), a double click types it,
+// Enter or a click elsewhere takes it, Escape doesn't; within 30..240. The tempo a MIDI Clock leads is only shown,
+// to 0.1, as EXT
 export const TempoDisplay = () => {
   const [{ $bpm, $tempo, $source }, { setBpm }] = useTransport();
   const bpm = useBehaviorSubject($bpm);
@@ -166,7 +166,7 @@ export const TempoDisplay = () => {
       onPointerDown={onPointerDown}
       onDoubleClick={startTyping}
     >
-      <SegmentDisplay value={cells(typing?.text ?? shown.toFixed(2))} small={2} height={20} />
+      <SegmentDisplay value={cells(typing?.text ?? shown.toFixed(2))} small={2} height={DIGITS_HEIGHT} />
       <Unit>{editable ? 'BPM' : 'EXT'}</Unit>
       {typing !== null && (
         <Input

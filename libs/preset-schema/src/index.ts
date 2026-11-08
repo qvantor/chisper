@@ -3,3 +3,4 @@ export * from './tempo';
 export * from './normalize';
 export * from './hash';
 export * from './profanity';
+export * from './clip';

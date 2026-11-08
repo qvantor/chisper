@@ -12,6 +12,7 @@ import {
 import { useFilter } from '../synth/filter/modules';
 import { useFx } from '../synth/fx/modules';
 import { usePresets } from '../presets/modules/presets';
+import { useTrack } from '../synth/track';
 import { createPerfApi } from './perf-api';
 import type { PerfHook as NoopPerfHook } from './perf-hook';
 
@@ -30,6 +31,7 @@ export const PerfHook: typeof NoopPerfHook = () => {
     fx: useFx(),
     synth: useSynth(),
     presets: usePresets(),
+    track: useTrack(),
   };
   // a provider gives a new [model, actions] at each of its renders, the model and the actions stay (a new model
   // remounts the hook too): the API is built once, from the models at the mount

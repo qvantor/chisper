@@ -14,7 +14,7 @@ use crate::targets::{
     self, mask, BLEND, CUTOFF, FILTER, FILTER_GAIN, FINE, GAIN, LFO_KNOBS, OSC, PITCH, POSITION, RESONANCE,
     SPREAD,
 };
-use crate::velocity::{Velocity, VoiceVelocity, Volume};
+use crate::velocity::{PendingVelocities, Velocity, VoiceVelocity, Volume};
 use alloc::{boxed::Box, vec, vec::Vec};
 use jsmath::{ceil, cos, floor, log2, max, min, pow, round, sin, PI};
 
@@ -1459,6 +1459,9 @@ pub struct Voice {
     env_start_frame: f64,
     envelopes: Vec<EnvelopeBlock>,
     velocity: Velocity,
+    // the velocities notes take the voice over with (mono), each from its frame: the notes of the track are sent
+    // ahead of their times
+    pending_velocities: PendingVelocities,
     filter: VoiceFilter,
     stop_frame: f64,
     kill_from: f64,
@@ -1548,6 +1551,7 @@ impl Voice {
             env_start_frame,
             envelopes,
             velocity: Velocity::new(sample_rate, options.velocity),
+            pending_velocities: PendingVelocities::default(),
             filter: VoiceFilter::new(sample_rate, options.filter),
             stop_frame: f64::INFINITY,
             kill_from: f64::INFINITY,
@@ -1761,10 +1765,21 @@ impl Voice {
         }
     }
 
-    /// a note took the voice over (mono): its VELO and its amp glide to the velocity of that note
-    pub fn set_velocity(&mut self, velocity: VoiceVelocity) {
-        self.velocity.set(velocity);
-        self.wake_routes();
+    /// a note took the voice over (mono): its VELO and its amp glide to the velocity of that note from the first
+    /// block that starts at `time` (seconds of the context) or after it; one before the next block (0: now) glides
+    /// from the next block. Several wait, each for its block (notes of the track sent ahead); one sent replaces those
+    /// that wait from its time on
+    pub fn set_velocity(&mut self, velocity: VoiceVelocity, time: f64) {
+        self.pending_velocities
+            .push(ceil(time * self.sample_rate - 1e-6), velocity);
+    }
+
+    // the last velocity whose frame the block starting at `frame` has reached
+    fn take_velocity(&mut self, frame: f64) {
+        if let Some(velocity) = self.pending_velocities.take(frame) {
+            self.velocity.set(velocity);
+            self.wake_routes();
+        }
     }
 
     /// a block starting at `frame` into the outputs, `bend` the pitch bend of the node (cents: one value or one a
@@ -1789,6 +1804,7 @@ impl Voice {
         }
         self.grow(n, shared);
         self.block_frame = frame;
+        self.take_velocity(frame);
         let a = max(0.0, self.start_frame - frame);
         if a >= nf {
             out_l.fill(0.0);

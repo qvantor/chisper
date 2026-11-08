@@ -124,6 +124,9 @@ const createRecorder = (canvas: HTMLCanvasElement) => {
     },
     arc: (x: number, y: number, radius: number) => path.arcs.push({ x, y, radius }),
     rect: (x: number, y: number, width: number, height: number) => path.rects.push([x, y, width, height]),
+    // a rect with round corners: its rect
+    roundRect: (x: number, y: number, width: number, height: number) =>
+      path.rects.push([x, y, width, height]),
     fill: () => push('fill', path),
     stroke: () => push('stroke', path),
     clip: () => {
@@ -131,6 +134,12 @@ const createRecorder = (canvas: HTMLCanvasElement) => {
     },
     fillRect: (x: number, y: number, width: number, height: number) =>
       push('fill', { ...emptyPath(), rects: [[x, y, width, height]] }),
+    strokeRect: (x: number, y: number, width: number, height: number) =>
+      push('stroke', { ...emptyPath(), rects: [[x, y, width, height]] }),
+    // a text is no shape: its font and baseline are kept, nothing is recorded
+    font: '10px sans-serif',
+    textBaseline: 'alphabetic',
+    fillText: () => undefined,
     createLinearGradient: () => ({ addColorStop: () => undefined }),
   };
   return { context, shapes };

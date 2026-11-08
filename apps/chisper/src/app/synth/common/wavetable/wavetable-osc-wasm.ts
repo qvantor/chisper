@@ -618,9 +618,10 @@ export const createVoiceWasm = (
       writeFilter(scope.command(), 0, filter);
       exports.osc_voice_set_filter(handle);
     },
-    setVelocity: (velocity: VoiceVelocity) => {
+    setVelocity: (velocity: VoiceVelocity, time = 0) => {
       if (ended) return;
-      writeVelocity(scope.command(), 0, velocity);
+      const command = scope.command();
+      command[writeVelocity(command, 0, velocity)] = time;
       exports.osc_voice_set_velocity(handle);
     },
     // new knobs of a module (those no param carries: the noise's); a voice that doesn't play it takes nothing
@@ -749,7 +750,8 @@ export const createVoiceScopeWasm = (
       } else if (event.kind === 'velocity') {
         flush();
         guard(() => {
-          writeVelocity(scope.command(), 0, event.velocity);
+          const command = scope.command();
+          command[writeVelocity(command, 0, event.velocity)] = event.time ?? 0;
           event.voices.forEach((id) => guard(() => exports.osc_scope_velocity(handle, id)));
         });
       } else if (event.kind === 'knobs') {
@@ -853,8 +855,8 @@ export const createVoiceScopeWasm = (
     setRoutes: (id: number, routes: VoiceRoute[]) => apply([{ kind: 'routes', voices: [id], routes }]),
     setFilter: (id: number, filter: VoiceFilterOptions | null) =>
       apply([{ kind: 'filter', voices: [id], filter }]),
-    setVelocity: (id: number, velocity: VoiceVelocity) =>
-      apply([{ kind: 'velocity', voices: [id], velocity }]),
+    setVelocity: (id: number, velocity: VoiceVelocity, time?: number) =>
+      apply([{ kind: 'velocity', voices: [id], velocity, ...(time !== undefined && { time }) }]),
     setKnobs: <M extends KnobsModule>(id: number, module: M, values: VoiceModuleKnobs[M]) =>
       apply([{ kind: 'knobs', voices: [id], module, values } as VoiceEvent]),
     // the pitch bend of every voice (cents): it glides there in 10 ms

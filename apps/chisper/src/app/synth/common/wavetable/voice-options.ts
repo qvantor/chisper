@@ -159,11 +159,13 @@ export interface VoicesFilter {
   voices: number[];
   filter: VoiceFilterOptions | null;
 }
-// a note took the voice over (mono): its VELO and its amp glide to its velocity in 10 ms
+// a note took the voice over (mono): its VELO and its amp glide to its velocity in 10 ms, from the first block at
+// `time` or after it (seconds of the context; none: the next block): a note of the track is sent ahead of its time
 export interface VoicesVelocity {
   kind: 'velocity';
   voices: number[];
   velocity: VoiceVelocity;
+  time?: number;
 }
 // the knobs of a module of playing voices changed (those that don't play it take nothing)
 export type VoicesKnobs = {

@@ -31,7 +31,7 @@ export interface CurrentPreset {
 }
 
 // the id the url keeps: of a chosen preset, none of Init or an auto one
-const chosenId = (current: CurrentPreset | null) => (current && !current.auto ? current.id : null);
+export const chosenId = (current: CurrentPreset | null) => (current && !current.auto ? current.id : null);
 
 // null: params out of the schema
 const hashOf = (data: Record<string, unknown>) => {

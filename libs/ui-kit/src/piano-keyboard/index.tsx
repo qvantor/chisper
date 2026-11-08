@@ -12,6 +12,8 @@ const Root = styled.div`
 
 interface Props {
   pressed: Record<number, Notes[]>;
+  // the notes another source plays (the track): lit in another color, by octave
+  played?: Record<number, Notes[]>;
   octaves?: [number, number];
   // limit the octaves count by the screen width (desktop behaviour)
   fitScreen?: boolean;
@@ -43,6 +45,7 @@ export const PianoKeyboard = ({
   onPress,
   onRelease,
   pressed,
+  played,
 }: Props) => {
   const [width] = useScreenSize();
   const octavesCount = fitScreen
@@ -117,6 +120,7 @@ export const PianoKeyboard = ({
             key={octave}
             octave={octave}
             pressed={pressed[octave] ?? NO_NOTES}
+            played={played?.[octave] ?? NO_NOTES}
             keyWidth={keyWidth}
             keyHeight={keyHeight}
           />

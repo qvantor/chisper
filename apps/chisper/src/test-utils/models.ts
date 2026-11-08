@@ -1,4 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
+import type { ClipResponse } from '@chisper/preset-schema';
+import { appModel } from '../app/app/modules/app-module';
 import { envelopes } from '../app/synth/common/modules/envelopes';
 import { lfos } from '../app/synth/common/modules/lfos';
 import { modulation } from '../app/synth/common/modules/modulation';
@@ -15,6 +17,8 @@ import { oscillator } from '../app/synth/common/modules/oscillator';
 import { synth } from '../app/synth/common/modules/synth';
 import { synthCore } from '../app/synth/common/modules/synth-core';
 import { transport } from '../app/synth/common/modules/transport';
+import { track } from '../app/synth/track/modules/track';
+import type { CreateTrackClock } from '../app/synth/track/track-clock';
 import type { LoadNoiseSample, LoadWavetable } from '../app/synth/services';
 import { initModel } from './model-registry';
 import { MessageChannelStub } from './worker-stub';
@@ -104,6 +108,46 @@ export const createSynth = (
     noise: noiseModule,
     synth: synthModule,
   };
+};
+
+// a clock of the track the spec ticks: tick() runs a tick of the player while it was started
+export const createTestClock = () => {
+  const clock = {
+    running: false,
+    onTick: () => undefined as void,
+    tick: () => clock.running && clock.onTick(),
+  };
+  const create: CreateTrackClock = (onTick) => {
+    clock.onTick = onTick;
+    return {
+      start: () => (clock.running = true),
+      stop: () => (clock.running = false),
+      destroy: () => (clock.running = false),
+    };
+  };
+  return { clock, create };
+};
+
+// the track on the synth of `createSynth`, its clock ticked by the spec
+export const createTrack = (
+  modules: ReturnType<typeof createSynth>,
+  loadClip: (id: string) => Promise<ClipResponse> = () => Promise.reject(new Error('no clip'))
+) => {
+  const { clock, create } = createTestClock();
+  const module = initModel(
+    track({
+      app: initModel(appModel(), 'appModel', undefined),
+      synthCore: modules.synthCore,
+      transport: modules.transport,
+      inputController: modules.inputController,
+      synth: modules.synth,
+      createClock: create,
+      loadClip,
+    }),
+    'track',
+    undefined
+  );
+  return { track: module, clock };
 };
 
 // a sound switch that applies a preset at once: the presets without the synth

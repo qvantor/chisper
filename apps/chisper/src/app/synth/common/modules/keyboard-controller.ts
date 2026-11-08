@@ -80,16 +80,17 @@ const noteFilter = (e: KeyboardEvent) =>
 
 const OCTAVE_KEYS: Record<string, number> = { ArrowDown: -1, ArrowUp: 1 };
 
-// the arrows belong to the focused control: a text field (antd's select too), a native select, a dialog (its lists
-// scroll; the octave behind it isn't shown), or a control that took them already (a fader, a strip of values, the
-// point of a curve, antd's tabs, a keyboard drag of the effects: they are listened on the window, after all of them)
-const takesArrows = (e: KeyboardEvent) =>
+// the arrows and Space belong to the focused control: a text field (antd's select too), a native select, a dialog
+// (its lists scroll, its buttons are pressed; the octave behind it isn't shown), or a control that took them already
+// (a fader, a strip of values, the point of a curve, antd's tabs, a keyboard drag of the effects: they are listened
+// on the window, after all of them)
+export const focusTakesKeys = (e: KeyboardEvent) =>
   e.defaultPrevented ||
   isTextInput(e.target) ||
   (e.target instanceof HTMLElement && e.target.tagName === 'SELECT') ||
   (e.target instanceof Element && e.target.closest('[role="dialog"]') !== null);
 
-const octaveFilter = (e: KeyboardEvent) => e.code in OCTAVE_KEYS && !isShortcut(e) && !takesArrows(e);
+const octaveFilter = (e: KeyboardEvent) => e.code in OCTAVE_KEYS && !isShortcut(e) && !focusTakesKeys(e);
 
 const sameNote = (a: Note, b: Note) => a[0] === b[0] && a[1] === b[1];
 

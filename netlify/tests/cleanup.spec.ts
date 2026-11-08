@@ -15,7 +15,7 @@ it('runs daily', () => {
 it('removes unqualified presets not saved, edited or opened by their author for 90 days, old listeners and reports', async () => {
   await cleanup();
   const [presets, listens, reports] = mockSql.queries;
-  expect(mockSql.queries).toHaveLength(3);
+  expect(mockSql.queries).toHaveLength(4);
   expect(presets.text).toBe(
     'DELETE FROM presets WHERE GREATEST(created_at, updated_at, author_opened_at) ' +
       "< now() - interval '90 days' AND qualified_at IS NULL AND NOT featured"
@@ -27,4 +27,15 @@ it('removes unqualified presets not saved, edited or opened by their author for 
     "DELETE FROM reports WHERE created_at < now() - interval '180 days' " +
       'OR preset_id IN (SELECT id FROM presets WHERE hidden)'
   );
+});
+
+it('removes clips not saved, edited or opened by their link for 180 days', async () => {
+  await cleanup();
+  const clips = mockSql.find(/^DELETE FROM clips/);
+  expect(clips).toHaveLength(1);
+  // GREATEST skips NULLs: a clip never edited nor opened counts from its creation
+  expect(clips[0].text).toBe(
+    "DELETE FROM clips WHERE GREATEST(created_at, updated_at, opened_at) < now() - interval '180 days'"
+  );
+  expect(clips[0].values).toEqual([]);
 });

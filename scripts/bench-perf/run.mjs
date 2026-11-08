@@ -21,7 +21,7 @@ import { runDspBenchmarks } from './dsp.mjs';
 import { runLatencyCase } from './latency.mjs';
 import { prepareReference } from './reference.mjs';
 import { evaluate, loadBaseline, summarizeCpu, updateBaseline, writeReport } from './report.mjs';
-import { selectCases, TABLES } from './scenes.mjs';
+import { clipSteps, selectCases, TABLES } from './scenes.mjs';
 import { buildProbe, buildSite, downloadTables, serve } from './site.mjs';
 import {
   fixed,
@@ -81,9 +81,47 @@ const engineDeltas = (s0, s1) => {
   };
 };
 
+// the seconds a script of a clip covers: the warm-up, the recording, the quanta, the reads between them
+const CLIP_SECONDS = 40;
+
+// the notes of a case: held (its notes), or its clip played by the track (the piano roll open or not), or where
+// the tree has no track (the reference of an A/B run) the same notes by a script of the hook. Gives what stops them
+const playCase = async (page, call, kase) => {
+  if (!kase.clip) {
+    await call(
+      'run',
+      kase.notes.map((note) => ({ at: 0, note, on: true }))
+    );
+    return { track: false, stop: () => call('releaseAll') };
+  }
+  const track = await page.evaluate(() => Boolean(window.__chisperPerf.track));
+  if (track) {
+    await call('track.play', kase.clip, { roll: kase.roll });
+    return { track, stop: () => call('track.stop') };
+  }
+  // (the script runs on in the page: its promise settles when it is stopped)
+  const script = call('run', clipSteps(kase.clip, CLIP_SECONDS)).catch(() => undefined);
+  return {
+    track,
+    stop: async () => {
+      await call('stopRuns');
+      await script;
+      await call('releaseAll');
+    },
+  };
+};
+
+// the voices of the notes of the track that started after their frames: their note on came late (a note of the
+// track is sent TRACK_LEAD ahead: the main thread stood longer); null for notes of the keys (late by design)
+const lateNotes = (starts, track) =>
+  track && starts
+    ? { traced: starts.length, late: starts.filter(({ started, scheduled }) => started > scheduled).length }
+    : null;
+
 // a run of a CPU case: a fresh page, the snapshot and the notes, the warm-up, then Instruments records while the
 // hook reads its counters at the start and the end; `previous` (the analysis of the run before) ends before this
-// one records. The render quanta of Chromium in the first run of a case only (of each side of an A/B run)
+// one records. The render quanta of Chromium in the first run of a case only (of each side of an A/B run). A case
+// of a clip traces the starts of its voices over the recording (both sides: the same work)
 const recordRun = async ({ launched, origin, kase, side, index, previous }) => {
   fs.mkdirSync(tracesDir, { recursive: true });
   const traceFile = path.join(tracesDir, `${launched.name}-${kase.id}-${side}-${index}.trace`);
@@ -93,10 +131,7 @@ const recordRun = async ({ launched, origin, kase, side, index, previous }) => {
   const trace = (categories, during) => traceEvents(launched.browser, page, categories, during);
   try {
     await call('apply', kase.snapshot, 60000);
-    await call(
-      'run',
-      kase.notes.map((note) => ({ at: 0, note, on: true }))
-    );
+    const playing = await playCase(page, call, kase);
     await sleep(WARMUP);
     await previous;
     fs.rmSync(traceFile, { recursive: true, force: true });
@@ -104,6 +139,7 @@ const recordRun = async ({ launched, origin, kase, side, index, previous }) => {
     await recording.started;
     // the recorded span (its time limit counts from the notification): the counters at its ends, the glitches
     // of Chromium within it
+    if (kase.clip) await call('trace.start');
     const s0 = await call('stats');
     let s1 = null;
     const span = async () => {
@@ -111,12 +147,13 @@ const recordRun = async ({ launched, origin, kase, side, index, previous }) => {
       s1 = await call('stats');
     };
     const glitches = chromium ? countGlitches(await trace(GLITCH_CATEGORIES, span)) : (await span(), null);
+    const notes = kase.clip ? lateNotes((await call('trace.stop')).starts, playing.track) : null;
     // Instruments saves the trace; then the render quanta of Chromium in a window of their own (their tracing
     // costs the worklet thread some cycles)
     await recording.done;
     const quantaEvents = quanta ? await trace(QUANTA_CATEGORIES, () => sleep(QUANTA_WINDOW)) : null;
-    await call('releaseAll');
-    return { window: { traceFile, s0, s1, glitches, quantaEvents }, errors };
+    await playing.stop();
+    return { window: { traceFile, s0, s1, glitches, quantaEvents, notes }, errors };
   } finally {
     await context.close();
   }
@@ -138,6 +175,7 @@ const analyzeWindow = async (launched, window, { dump }) => {
     glitches: window.glitches,
     engine: engineDeltas(s0, s1),
     quanta,
+    notes: window.notes,
   };
 };
 
@@ -173,7 +211,9 @@ const runCpuCase = async ({ launched, origins, kase }) => {
             )} Mcps (${analysis.page?.thread ?? 'no audio thread'}), memory ${fixed(
               analysis.memory?.steady,
               0
-            )} MB, realtime ${fixed(analysis.realtime, 4)}`
+            )} MB, realtime ${fixed(analysis.realtime, 4)}${
+              analysis.notes ? `, late notes ${analysis.notes.late} of ${analysis.notes.traced}` : ''
+            }`
           );
         },
         (error) => {

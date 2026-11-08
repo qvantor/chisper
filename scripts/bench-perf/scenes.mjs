@@ -63,7 +63,46 @@ const BOTH_U8 = {
 // effect, Poly 12
 const HEAVY = patch({ ...BOTH_U8, filter: FILTER, fx: fx(['distortion', 'delay', 'reverb']) });
 
-// --- CPU and memory: the notes are held, xctrace records 10 s after a warm-up ---
+// --- the clip of the track cases (libs/preset-schema/src/clip.ts) ---
+
+const PPQ = 960;
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+// MIDI 60 is C4 (services/note.ts)
+const pitchOf = (name) => {
+  const [, note, octave] = name.match(/^(.+?)(-?\d+)$/);
+  return (Number(octave) + 1) * 12 + NOTE_NAMES.indexOf(note);
+};
+const nameOf = (pitch) => `${NOTE_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+
+// 2 bars at 120 BPM: a chord of 4 held through each bar, an arpeggio of 16ths over it (each a dotted 32nd long):
+// ~10 notes on a second, up to 12 voices with their releases where the chords change (Poly 12: stealing). No
+// pitch overlaps itself: the script of a reference plays the same notes through the keys
+const ARPEGGIO = ['C4', 'E4', 'G4', 'B4', 'C5', 'B4', 'G4', 'E4'];
+const CLIP = {
+  bpm: 120,
+  length: 8 * PPQ,
+  notes: [
+    ...[0, 4 * PPQ].flatMap((bar) =>
+      ['C3', 'E3', 'G3', 'B3'].map((name) => [bar, 4 * PPQ - PPQ / 8, pitchOf(name), 100])
+    ),
+    ...Array.from({ length: 32 }, (_, k) => [(k * PPQ) / 4, (3 * PPQ) / 16, pitchOf(ARPEGGIO[k % 8]), 100]),
+  ],
+};
+
+// the clip as a script of the test hook (window.__chisperPerf.run): its notes through the keys, looped over
+// `seconds` (a tree without the track, the reference of an A/B run, plays the same notes so)
+export const clipSteps = ({ bpm, length, notes }, seconds) => {
+  const ms = 60000 / bpm / PPQ;
+  const loops = Math.ceil((seconds * 1000) / (length * ms));
+  return Array.from({ length: loops }, (_, loop) =>
+    notes.flatMap(([start, duration, pitch]) => [
+      { at: (loop * length + start) * ms, note: nameOf(pitch), on: true },
+      { at: (loop * length + start + duration) * ms, note: nameOf(pitch), on: false },
+    ])
+  ).flat();
+};
+
+// --- CPU and memory: the notes are held (or the clip plays), xctrace records 10 s after a warm-up ---
 
 export const CPU_CASES = [
   {
@@ -72,6 +111,22 @@ export const CPU_CASES = [
     title: 'the heavy patch, 12 notes',
     snapshot: HEAVY,
     notes: ['C3', 'D3', 'E3', 'G3', 'A3', 'C4', 'D4', 'E4', 'G4', 'A4', 'B4', 'C5'],
+  },
+  {
+    id: 'T1',
+    group: 'cpu',
+    title: 'the heavy patch, a clip played by the track',
+    snapshot: HEAVY,
+    clip: CLIP,
+    roll: false,
+  },
+  {
+    id: 'T2',
+    group: 'cpu',
+    title: 'T1 with the piano roll open',
+    snapshot: HEAVY,
+    clip: CLIP,
+    roll: true,
   },
 ];
 

@@ -1,9 +1,12 @@
+import React from 'react';
+import { NEVER, Observable } from 'rxjs';
 import { styled } from 'styled-components';
 import { PianoKeyboard, PITCH_WHEEL_WIDTH, theme, useElementSize } from '@chisper/ui-kit';
-import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import { OctaveControl } from '../../common/components';
 import { KEYBOARD_OCTAVES, useInputController, useKeyboardController } from '../common/modules';
 import { pianoOctaves } from '../common/piano-octaves';
+import { pitchesByOctave } from '../services';
 import { PitchBend } from '../pitch-bend';
 
 // px of the keys: the row of the keys and the pitch bend
@@ -47,15 +50,28 @@ const Keys = styled.div`
   justify-content: center;
 `;
 
-// the keys: they alone render on every note
-const DesktopKeys = ({ octaves, keyWidth }: { octaves: [number, number]; keyWidth: number }) => {
+const NO_PITCHES: number[] = [];
+
+// the keys: they alone render on every note (of the keys, of the track: `$played`, in their own color)
+const DesktopKeys = ({
+  octaves,
+  keyWidth,
+  $played,
+}: {
+  octaves: [number, number];
+  keyWidth: number;
+  $played?: Observable<number[]>;
+}) => {
   const [{ $pressed }, { onPress, onRelease }] = useInputController();
   const pressed = useBehaviorSubject($pressed);
+  const pitches = useObservable($played ?? NEVER, NO_PITCHES);
+  const played = React.useMemo(() => pitchesByOctave(pitches), [pitches]);
   return (
     <PianoKeyboard
       onPress={onPress}
       onRelease={onRelease}
       pressed={pressed}
+      played={played}
       octaves={octaves}
       fitScreen={false}
       keyWidth={keyWidth}
@@ -66,8 +82,14 @@ const DesktopKeys = ({ octaves, keyWidth }: { octaves: [number, number]; keyWidt
 
 // the bottom row of the desktop: the wheel, the octave of the computer keyboard and the octaves that fit beside
 // them, their keys narrower rather than one octave fewer; they follow the octave of the computer keyboard, ▲ and ▼
-// (or ↓ and ↑) shift both
-export const DesktopPiano = () => {
+// (or ↓ and ↑) shift both. `aside` right of the keys (the clip of the track), the pitches `$played` lights
+export const DesktopPiano = ({
+  aside,
+  $played,
+}: {
+  aside?: React.ReactNode;
+  $played?: Observable<number[]>;
+}) => {
   const [{ $octave }, { setOctave }] = useKeyboardController();
   const octave = useBehaviorSubject($octave);
   const [keysRef, [width]] = useElementSize<HTMLDivElement>();
@@ -90,9 +112,11 @@ export const DesktopPiano = () => {
           <DesktopKeys
             octaves={pianoOctaves(octave, octaves)}
             keyWidth={Math.min(KEY_WIDTH, width / (7 * octaves))}
+            $played={$played}
           />
         )}
       </Keys>
+      {aside}
     </PianoContainer>
   );
 };

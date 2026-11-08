@@ -1,4 +1,3 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Config, Context } from '@netlify/functions';
 import type postgres from 'postgres';
 import type { z } from 'zod';
@@ -23,8 +22,10 @@ import type {
   UpdatePresetResponse,
 } from '../../libs/preset-schema/src';
 import { db } from '../utils/db';
+import { matchesEditToken, newEditToken } from '../utils/edit-token';
 import { envNumber } from '../utils/env';
 import { empty, errorResponse, getIpHash, HttpError, json, readJson, sha256 } from '../utils/http';
+import { countLastHour, isUniqueViolation } from '../utils/queries';
 import { verifyTurnstile } from '../utils/turnstile';
 
 const MAX_BODY_BYTES = 20 * 1024;
@@ -34,11 +35,6 @@ const TOP_SIZE = 50;
 const PAGE_SIZE = 30;
 const UPDATE_INTERVAL_SECONDS = 5;
 
-const isUniqueViolation = (error: unknown, constraint: string) => {
-  const { code, constraint_name } = error as { code?: string; constraint_name?: string };
-  return code === '23505' && constraint_name === constraint;
-};
-
 const nameTakenError = (name: string) => new HttpError(409, `Name “${name}” is already taken`);
 
 // names are unique case-insensitively, hidden presets keep their names too
@@ -47,14 +43,6 @@ const isNameTaken = async (name: string) =>
 
 const findByHash = async (hash: string) =>
   (await db()<{ id: string; name: string }[]>`SELECT id, name FROM presets WHERE hash = ${hash}`)[0];
-
-const countLastHour = async (table: 'presets' | 'reports', ipHash: string) => {
-  const sql = db();
-  const [{ count }] = await sql<{ count: number }[]>`
-    SELECT count(*)::int AS count FROM ${sql(table)}
-    WHERE ip_hash = ${ipHash} AND created_at > now() - interval '1 hour'`;
-  return count;
-};
 
 const parsePresetBody = async <T extends { name: string; data: unknown }>(
   req: Request,
@@ -92,11 +80,11 @@ const savePreset = async (req: Request, context: Context) => {
     throw new HttpError(403, 'Captcha check failed, try again');
 
   // the author gets the token once, only its hash is stored
-  const editToken = randomBytes(32).toString('base64url');
+  const { token: editToken, hash: editTokenHash } = newEditToken();
   try {
     const [inserted] = await sql<{ id: string; name: string }[]>`
       INSERT INTO presets (hash, name, data, ip_hash, edit_token_hash)
-      VALUES (${hash}, ${name}, ${sql.json(data)}, ${ipHash}, ${sha256(editToken)})
+      VALUES (${hash}, ${name}, ${sql.json(data)}, ${ipHash}, ${editTokenHash})
       ON CONFLICT (hash) DO NOTHING
       RETURNING id, name`;
     if (inserted) return json({ ...inserted, existed: false, editToken } as SavePresetResponse, 201);
@@ -107,9 +95,6 @@ const savePreset = async (req: Request, context: Context) => {
   }
   return json({ ...(await findByHash(hash)), existed: true } as SavePresetResponse);
 };
-
-const isSameHash = (a: string, b: string) =>
-  a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 // overwrites sound and name, links to the preset play the updated sound
 const updatePreset = async (id: string, req: Request) => {
@@ -122,7 +107,7 @@ const updatePreset = async (id: string, req: Request) => {
       COALESCE(updated_at > now() - make_interval(secs => ${UPDATE_INTERVAL_SECONDS}), false) AS throttled
     FROM presets WHERE id = ${presetId}`;
   if (!preset || preset.hidden) throw new HttpError(404, 'Preset not found');
-  if (!preset.editTokenHash || !isSameHash(preset.editTokenHash, sha256(editToken)))
+  if (!matchesEditToken(preset.editTokenHash, editToken))
     throw new HttpError(403, 'You can only edit presets saved from this browser');
   if (preset.throttled) throw new HttpError(429, 'Too many updates, try again in a few seconds');
 

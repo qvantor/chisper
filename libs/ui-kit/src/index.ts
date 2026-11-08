@@ -47,15 +47,21 @@ export { MiddleEllipsis } from './middle-ellipsis';
 export { DraggableNumber } from './draggable-number';
 export { DragValue } from './drag-value';
 export { SegmentDisplay } from './segment-display';
-export { Checkbox } from './checkbox';
+export { Checkbox, checkboxLit, checkboxOff } from './checkbox';
 export { TapeSwitch } from './tape-switch';
 export { ModeSwitch } from './mode-switch';
 export { Lamp } from './lamp';
 export {
+  ActionKey,
   AnchorIcon,
   DottedIcon,
+  FollowIcon,
+  LegatoIcon,
   LoopIcon,
   OneShotIcon,
+  QuantizeIcon,
+  SelectIcon,
+  SnapIcon,
   SwitchKey,
   SwitchKeys,
   TrackIcon,

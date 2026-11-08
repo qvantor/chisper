@@ -105,6 +105,30 @@ export const routedValue = (base: number, routes: FxRoute[], note: FxNote, t: nu
     routes[0]
   );
 
+// the fx take a note at the block of `frame`: none (null) at once, a note from the first block at or after its
+// start. The track sends its notes ahead of their time (followFx: FX_EARLY): until its start the note before goes
+// on, its envelopes and its LFOs (a runner started ahead of its note would hold the left point of its shape until
+// then, a free LFO stepped off its clock and back), as a note of the keys, which comes after its start
+const noteDue = (note: FxNote | null, frame: number, sampleRate: number) =>
+  note === null || note.start * sampleRate <= frame;
+
+// the note of the last message until its block: take() gives it once it is due (noteDue), else undefined (none waits,
+// or not yet)
+export const createDueNote = (sampleRate: number) => {
+  let next: FxNote | null | undefined;
+  return {
+    set: (note: FxNote | null) => {
+      next = note;
+    },
+    take: (frame: number): FxNote | null | undefined => {
+      if (next === undefined || !noteDue(next, frame, sampleRate)) return undefined;
+      const note = next;
+      next = undefined;
+      return note;
+    },
+  };
+};
+
 // the routes grouped by knob
 export const routesByParam = (routes: FxRoute[]) =>
   routes.reduce<Record<string, FxRoute[]>>((groups, route) => {
@@ -199,7 +223,8 @@ export type NoteLfos = ReturnType<typeof createNoteLfos>;
 // (the moved ones are set at the next block), block() gives the values to set at the block of `frame`: the
 // moved knobs whose value has changed (one value per block: the dsp glides to it; the LFOs worked out in points of
 // 32 samples to it), and a knob that lost its route back at its base. Without a route nothing is computed; without
-// a note only the routes of the LFOs move (on their clocks: the envelopes and VELO are 0)
+// a note only the routes of the LFOs move (on their clocks: the envelopes and VELO are 0). set() takes the routes at
+// once, the note at its time (noteDue)
 export const createFxModulator = (
   sampleRate: number,
   initial: Record<string, number>,
@@ -209,6 +234,7 @@ export const createFxModulator = (
   const noteLfos = createNoteLfos(sampleRate);
   if (lfos) noteLfos.setLfos(lfos);
   let note: FxNote | null = null;
+  const due = createDueNote(sampleRate);
   let moved: { param: string; routes: FxRoute[]; last: number }[] = [];
   // knobs to set at the next block: back at their base, or moved anew
   let pending: string[] = [];
@@ -221,8 +247,8 @@ export const createFxModulator = (
   return {
     set: (mod: FxModulation | null) => {
       const before = moved.map(({ param }) => param);
-      note = mod?.note ?? null;
-      noteLfos.follow(note);
+      // (the note from its time, the routes at once)
+      due.set(mod?.note ?? null);
       noteLfos.setRoutes(mod?.routes ?? []);
       const groups = routesByParam((mod?.routes ?? []).filter(({ param }) => !isLfoKnob(param)));
       moved = Object.keys(groups).map((param) => ({ param, routes: groups[param], last: NaN }));
@@ -244,6 +270,11 @@ export const createFxModulator = (
       return passed;
     },
     block: (frame: number) => {
+      const taken = due.take(frame);
+      if (taken !== undefined) {
+        note = taken;
+        noteLfos.follow(note);
+      }
       if (moved.length === 0 && pending.length === 0) return null;
       let values: Record<string, number> | null = null;
       for (let i = 0; i < pending.length; i++) (values ??= {})[pending[i]] = bases[pending[i]];

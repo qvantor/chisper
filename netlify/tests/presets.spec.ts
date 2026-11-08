@@ -3,7 +3,7 @@ import { sha256 } from '../utils/http';
 import { verifyTurnstile } from '../utils/turnstile';
 import handler, { config } from '../functions/presets.mjs';
 import { createFakeSql, JsonValue, pgError } from './fake-sql';
-import { context, ID, IP_HASH, IP_SALT, OTHER_ID, request } from './helpers';
+import { caller, ID, IP_HASH, IP_SALT, OTHER_ID } from './helpers';
 
 const mockSql = createFakeSql();
 jest.mock('../utils/db', () => ({ db: () => mockSql.sql }));
@@ -34,11 +34,7 @@ const Q = {
   hide: /^UPDATE presets SET hidden/,
 };
 
-const call = async (method: string, path: string, body?: unknown) => {
-  const response = await handler(request(method, path, body), context);
-  const text = await response.text();
-  return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
-};
+const call = caller(handler);
 
 const decodeCursor = (cursor: string) => JSON.parse(Buffer.from(cursor, 'base64url').toString());
 const encodeCursor = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');

@@ -1,8 +1,23 @@
 import React from 'react';
 import cls from 'classnames';
-import { styled } from 'styled-components';
+import { css, styled } from 'styled-components';
 import { theme } from '../common/constants';
 import { Label } from '../label';
+
+// the box of a checkbox of the synth: grey while off, lit in blue while on (for other checkboxes to look the same)
+export const checkboxOff = css`
+  background: ${theme.colors.primaryHighContrast};
+  border: 1px solid ${theme.colors.primaryDarkMediumContrast};
+  border-radius: 3px;
+  box-shadow: none;
+`;
+
+export const checkboxLit = css`
+  background: ${theme.colors.secondAccent};
+  box-shadow:
+    inset 0 0 0 1px #99cbec,
+    0 0 3px 2px rgba(153, 203, 236, 0.5);
+`;
 
 const Root = styled.div`
   display: flex;
@@ -11,19 +26,13 @@ const Root = styled.div`
 `;
 
 const Indicator = styled.div`
+  ${checkboxOff};
   width: 12px;
   height: 12px;
-  background: ${theme.colors.primaryHighContrast};
-  border: 1px solid ${theme.colors.primaryDarkMediumContrast};
-  border-radius: 3px;
-  box-shadow: none;
   transition: all 150ms;
 
   &.checked {
-    background: ${theme.colors.secondAccent};
-    box-shadow:
-      inset 0 0 0 1px #99cbec,
-      0 0 3px 2px rgba(153, 203, 236, 0.5);
+    ${checkboxLit};
   }
 `;
 

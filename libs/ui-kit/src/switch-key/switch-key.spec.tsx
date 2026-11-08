@@ -1,7 +1,19 @@
 import React from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { hoverSwitchKey, switchKeyTip } from '../common/test-utils';
-import { SWITCH_KEY_TIP_DELAY, SwitchKey, SwitchKeys, TripletIcon } from './index';
+import { cssColor, hoverSwitchKey, switchKeyTip } from '../common/test-utils';
+import { theme } from '../common/constants';
+import {
+  ActionKey,
+  FollowIcon,
+  LegatoIcon,
+  QuantizeIcon,
+  SelectIcon,
+  SnapIcon,
+  SWITCH_KEY_TIP_DELAY,
+  SwitchKey,
+  SwitchKeys,
+  TripletIcon,
+} from './index';
 
 describe('SwitchKey', () => {
   beforeEach(() => jest.useFakeTimers());
@@ -22,6 +34,14 @@ describe('SwitchKey', () => {
     expect(onChange).toHaveBeenLastCalledWith(false);
   });
 
+  it('is lit green while on, or in its own color', () => {
+    const { rerender } = render(<SwitchKey on label='T' name='Triplets' />);
+    const key = screen.getByRole('button', { name: 'Triplets' });
+    expect(getComputedStyle(key).color).toBe(cssColor(theme.colors.accent));
+    rerender(<SwitchKey on label='T' name='Triplets' lit={theme.colors.red} />);
+    expect(getComputedStyle(key).color).toBe(cssColor(theme.colors.red));
+  });
+
   it('does nothing while disabled', () => {
     const onChange = jest.fn();
     render(<SwitchKey on={false} label='BPM' name='Tempo sync' onChange={onChange} disabled />);
@@ -34,6 +54,27 @@ describe('SwitchKey', () => {
     const key = screen.getByRole('button', { name: 'Triplets' });
     expect(key.textContent).toBe('');
     expect(key.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows the four corners of a frame on the key of selecting', () => {
+    render(<SwitchKey on={false} icon={<SelectIcon />} name='Select notes' />);
+    const icon = screen.getByRole('button', { name: 'Select notes' }).querySelector('svg');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(icon?.querySelectorAll('path')).toHaveLength(4);
+  });
+
+  it('shows the playhead and an arrow on the key of following it', () => {
+    render(<SwitchKey on icon={<FollowIcon />} name='Follow the playhead' />);
+    const key = screen.getByRole('button', { name: 'Follow the playhead' });
+    expect(key.textContent).toBe('');
+    expect(key.querySelector('svg')?.querySelectorAll('path')).toHaveLength(4);
+  });
+
+  it('shows a magnet on the key of snapping to the grid', () => {
+    render(<SwitchKey on icon={<SnapIcon />} name='Snap to the grid' />);
+    const key = screen.getByRole('button', { name: 'Snap to the grid' });
+    expect(key.textContent).toBe('');
+    expect(key.querySelector('svg')?.querySelectorAll('path')).toHaveLength(2);
   });
 
   it('hovered 700 ms tells its name and what it does, no title of the browser', () => {
@@ -163,5 +204,60 @@ describe('SwitchKeys', () => {
     expect((screen.getByRole('button', { name: 'Tempo sync' }) as HTMLButtonElement).disabled).toBe(false);
     expect(switchKeyTip('Tempo sync')).toBe('Tempo sync');
     expect(switchKeyTip('Triplets')).toBe('TripletsTurn on BPM');
+  });
+});
+
+describe('ActionKey', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('does its action on a click, never pressed nor lit, its full name for screen readers', () => {
+    const onClick = jest.fn();
+    render(<ActionKey label='QUANT' name='Quantize' onClick={onClick} />);
+    const key = screen.getByRole('button', { name: 'Quantize' });
+    expect(key.textContent).toBe('QUANT');
+    expect(key.hasAttribute('aria-pressed')).toBe(false);
+    fireEvent.click(key);
+    fireEvent.click(key);
+    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(key.classList.contains('on')).toBe(false);
+  });
+
+  it('shows an icon of its action instead of a label: notes on a grid, notes up to the next', () => {
+    render(
+      <>
+        <ActionKey name='Quantize' icon={<QuantizeIcon />} />
+        <ActionKey name='Legato' icon={<LegatoIcon />} />
+      </>
+    );
+    const icon = (name: string) => screen.getByRole('button', { name }).querySelector('svg');
+    expect(screen.getByRole('button', { name: 'Quantize' }).textContent).toBe('');
+    expect(icon('Quantize')?.querySelectorAll('rect')).toHaveLength(2);
+    expect(icon('Legato')?.querySelectorAll('rect')).toHaveLength(3);
+  });
+
+  it('takes no focus, does nothing while disabled and tells why', () => {
+    const onClick = jest.fn();
+    render(
+      <>
+        <button type='button'>before</button>
+        <ActionKey name='Undo' hint='Cmd/Ctrl+Z' onClick={onClick} disabled disabledHint='Nothing to undo' />
+      </>
+    );
+    const key = screen.getByRole('button', { name: 'Undo' });
+    expect(key.getAttribute('tabindex')).toBe('-1');
+    fireEvent.click(key);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(switchKeyTip('Undo')).toBe('UndoCmd/Ctrl+ZNothing to undo');
+  });
+
+  it('on a plate all off: disabled with the reason of the plate', () => {
+    render(
+      <SwitchKeys aria-label='Edits' disabled disabledHint='The clock leads'>
+        <ActionKey name='Quantize' label='Q' />
+      </SwitchKeys>
+    );
+    expect((screen.getByRole('button', { name: 'Quantize' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(switchKeyTip('Quantize')).toBe('QuantizeThe clock leads');
   });
 });

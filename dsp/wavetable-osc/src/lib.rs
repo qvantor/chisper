@@ -327,17 +327,20 @@ pub unsafe extern "C" fn osc_scope_bend(scope: *mut Scope, cents: f64, instantly
     (*scope).set_bend(cents, instantly != 0);
 }
 
-/// a note took voice `id` over (mono): its velocity glides to the one in the command buffer (VELO, amp)
+/// a note took voice `id` over (mono): its velocity glides to the one in the command buffer (VELO, amp) from the
+/// time after it (seconds of the context; 0: now)
 ///
 /// # Safety
 /// `scope` comes from osc_scope_new and was not freed
 #[no_mangle]
 pub unsafe extern "C" fn osc_scope_velocity(scope: *mut Scope, id: f64) {
-    let velocity = read_velocity(&mut Reader {
+    let mut reader = Reader {
         values: command(),
         at: 0,
-    });
-    (*scope).set_velocity(id, velocity);
+    };
+    let velocity = read_velocity(&mut reader);
+    let time = reader.next();
+    (*scope).set_velocity(id, velocity, time);
 }
 
 /// the params of voice `id` given directly from now on, for blocks of `frames`: their lengths (1: one value), then
@@ -796,17 +799,20 @@ pub unsafe extern "C" fn osc_voice_set_knobs(voice: *mut Voice, module: usize, c
     (*voice).set_knobs(module, &command()[..count.min(COMMAND_SIZE)]);
 }
 
-/// a note took the voice over (mono): its velocity glides to the one in the command buffer (VELO, amp)
+/// a note took the voice over (mono): its velocity glides to the one in the command buffer (VELO, amp) from the
+/// time after it (seconds of the context; 0: now)
 ///
 /// # Safety
 /// `voice` comes from osc_voice_new and was not freed
 #[no_mangle]
 pub unsafe extern "C" fn osc_voice_set_velocity(voice: *mut Voice) {
-    let velocity = read_velocity(&mut Reader {
+    let mut reader = Reader {
         values: command(),
         at: 0,
-    });
-    (*voice).set_velocity(velocity);
+    };
+    let velocity = read_velocity(&mut reader);
+    let time = reader.next();
+    (*voice).set_velocity(velocity, time);
 }
 
 /// ends the voice at once (its process threw): its versions and mixes are given back

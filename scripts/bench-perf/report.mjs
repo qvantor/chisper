@@ -41,6 +41,17 @@ export const summarizeCpu = (runs) => ({
   // (coarse: its time moves by device buffers, 0.5% is 50 ms of 10 s)
   dropouts: runs.filter((run) => run.glitches > 0 || run.realtime < 0.995).length,
   glitches: runs.reduce((sum, run) => sum + (run.glitches ?? 0), 0),
+  // the notes of the track (a case of a clip) over the recordings, those whose voices started after their frames
+  // (none traced: null)
+  notes: runs.some((run) => run.notes)
+    ? runs.reduce(
+        (sum, { notes }) => ({
+          traced: sum.traced + (notes?.traced ?? 0),
+          late: sum.late + (notes?.late ?? 0),
+        }),
+        { traced: 0, late: 0 }
+      )
+    : null,
 });
 
 // percentiles of the latency of the notes of a latency case, ms
@@ -282,6 +293,15 @@ export const evaluate = (results, baseline) => {
           );
         else if (summary.dropouts)
           add('warn', 'invariant', browser, kase.id, `dropouts in ${summary.dropouts} run(s)`);
+        // the track sends its notes TRACK_LEAD ahead: one late is the main thread standing longer
+        if (summary.notes?.late)
+          add(
+            'warn',
+            'invariant',
+            browser,
+            kase.id,
+            `${summary.notes.late} of ${summary.notes.traced} notes of the track started after their frames`
+          );
         if (summary.memSteady > BUDGETS.heavyMemory)
           add(
             'warn',
@@ -516,6 +536,7 @@ export const writeReport = (results, checks) => {
             'worker pool MB',
             'build ms',
             'realtime',
+            'late notes',
           ],
           cpu
             .filter(({ summary }) => summary)
@@ -531,6 +552,7 @@ export const writeReport = (results, checks) => {
               fixed(s.poolMB, 1),
               fixed(s.buildMs, 0),
               fixed(s.realtime, 4),
+              s.notes ? `${s.notes.late} of ${s.notes.traced}` : '–',
             ])
         ),
         ''

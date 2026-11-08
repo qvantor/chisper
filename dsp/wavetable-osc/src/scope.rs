@@ -216,9 +216,10 @@ impl Scope {
         }
     }
 
-    pub fn set_velocity(&mut self, id: f64, velocity: crate::velocity::VoiceVelocity) {
+    /// voice `id` glides to `velocity` from `time` (seconds of the context; 0: now)
+    pub fn set_velocity(&mut self, id: f64, velocity: crate::velocity::VoiceVelocity, time: f64) {
         if let Some(voice) = self.voice(id) {
-            voice.voice.set_velocity(velocity);
+            voice.voice.set_velocity(velocity, time);
         }
     }
 

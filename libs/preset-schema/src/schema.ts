@@ -593,7 +593,8 @@ export const NOISE_DEFAULTS: PresetData['noise'] = PRESET_DEFAULTS.noise;
 
 export const PRESET_NAME_MAX_LENGTH = 40;
 
-const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+// trimmed, whitespace collapsed (the names of presets and clips)
+export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
 
 // trimmed, whitespace collapsed; names are unique case-insensitively (see nameKey)
 export const presetNameSchema = z
@@ -606,7 +607,7 @@ export const nameKey = (name: string) => normalizeName(name).toLowerCase();
 export const presetIdSchema = z.string().uuid();
 
 // a Cloudflare Turnstile response, single use
-const turnstileTokenSchema = z.string().min(1).max(4096);
+export const turnstileTokenSchema = z.string().min(1).max(4096);
 
 export const savePresetRequestSchema = z.object({
   name: presetNameSchema,
@@ -615,8 +616,8 @@ export const savePresetRequestSchema = z.object({
 });
 export type SavePresetRequest = z.input<typeof savePresetRequestSchema>;
 
-// the secret of the author (SavePresetResponse.editToken)
-const editTokenSchema = z.string().min(20).max(128);
+// the secret of the author (SavePresetResponse.editToken, SaveClipResponse.editToken)
+export const editTokenSchema = z.string().min(20).max(128);
 
 export const updatePresetRequestSchema = z.object({
   name: presetNameSchema,

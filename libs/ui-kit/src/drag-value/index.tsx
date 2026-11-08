@@ -16,7 +16,10 @@ import { StepArrows } from '../draggable-number/step-arrows';
 import { useControlMenu } from '../control-menu';
 
 interface DragValueProps {
+  // shown before the value (none: '')
   label: string;
+  // its accessible name and the name in its menu, when the label is short or none (Bars of LEN): the label by default
+  name?: string;
   value: number;
   min?: number;
   max?: number;
@@ -178,6 +181,7 @@ const markCanvas = (width: number): MarkCanvas => ({
 // along its bottom
 export const DragValue = ({
   label,
+  name = label,
   value,
   min = 0,
   max = 1,
@@ -220,7 +224,7 @@ export const DragValue = ({
 
   // a right click or a long press: the routes, Default, Clear modulation
   const menu = useControlMenu({
-    name: label,
+    name,
     value,
     formatValue,
     defaultValue,
@@ -273,7 +277,7 @@ export const DragValue = ({
       {...(editable && {
         role: 'slider',
         tabIndex: 0,
-        'aria-label': label,
+        'aria-label': name,
         'aria-valuemin': min,
         'aria-valuemax': max,
         'aria-valuenow': value,
@@ -282,7 +286,7 @@ export const DragValue = ({
         onKeyDown,
       })}
     >
-      <Label>{label}</Label>
+      {label && <Label>{label}</Label>}
       <Value style={wholeNumber ? { width: `${Math.max(`${min}`.length, `${max}`.length)}ch` } : undefined}>
         {formatted}
       </Value>

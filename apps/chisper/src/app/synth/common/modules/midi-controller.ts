@@ -10,18 +10,12 @@ import {
   Subscription,
 } from 'rxjs';
 import { rxModel, rxModelReact } from '@chisper/rxjs-react';
-import { Note, Notes } from '@chisper/ui-kit';
 import toast from 'react-hot-toast';
 import { messageTime, readStored, writeStored } from '../../../common/services';
+import { midiToNote } from '../../services';
 import { CLOCK_LOST_MS, createMidiClock } from '../transport/midi-clock';
 import { InputControllerModule } from './input-controller';
 import type { TransportModule } from './transport';
-
-export const midiToNote = (midiNote: number): Note => {
-  const notes: Notes[] = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const octave = Math.floor(midiNote / 12 - 1);
-  return [octave, notes[midiNote % 12]];
-};
 
 // the 14 bits of a pitch bend message at rest and all the way up
 const BEND_REST = 8192;
@@ -81,9 +75,11 @@ const STOP = 0xfc;
 const SONG_POSITION = 0xf2;
 // the first status of the system messages
 const SYSTEM = 0xf0;
+// the notes of the input: its own voices (a note the computer keyboard holds too is another voice)
+const MIDI_SOURCE = { source: 'midi' } as const;
 
 export const midiController = ({
-  inputController: [{ $pressed, $bend }, { onPress, onRelease, setBend }],
+  inputController: [{ $bend }, { onPress, onRelease, setBend }],
   transport: [{ $source, beatAt, tempoAt, contextTimeAt }, { follow, locate, setPlaying, setSource }],
 }: Dependencies) =>
   rxModel(() => {
@@ -276,12 +272,10 @@ export const midiController = ({
                   const noteOn = control >= 144 && control <= 159;
                   // many devices send note on with velocity 0 instead of note off
                   if (noteOn && velocity > 0) {
-                    const note = midiToNote(midi);
                     const channels = held.get(midi);
-                    // held by QWERTY or the piano: theirs to release, not on a channel or input switch
-                    if (!channels && $pressed.value[note[0]].includes(note[1])) return;
                     held.set(midi, (channels ?? new Set<number>()).add(channel));
-                    onPress(note, velocity);
+                    // (held on another channel: one voice of the input)
+                    if (!channels?.size) onPress(midiToNote(midi), velocity, MIDI_SOURCE);
                   } else if (noteOn || (control >= 128 && control <= 143)) {
                     const channels = held.get(midi);
                     // not pressed on this channel: filtered out then, or another source's note
@@ -289,7 +283,7 @@ export const midiController = ({
                     // still held on another channel
                     if (channels.size) return;
                     held.delete(midi);
-                    onRelease(midiToNote(midi));
+                    onRelease(midiToNote(midi), MIDI_SOURCE);
                   }
                 }),
             ]);
@@ -312,7 +306,7 @@ export const midiController = ({
           });
           if (channels.size > 0) return;
           held.delete(midi);
-          onRelease(midiToNote(midi));
+          onRelease(midiToNote(midi), MIDI_SOURCE);
         });
       };
       return [
