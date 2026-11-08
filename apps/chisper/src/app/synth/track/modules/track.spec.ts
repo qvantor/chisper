@@ -134,6 +134,21 @@ describe('track', () => {
       expect(sent).toEqual(['on C4 @0.05', 'off C4 @0.55', 'on C4 @0.55', 'off C4 @0.8']);
     });
 
+    it('after the page stood leaves out the notes that ended meanwhile, plays one that still sounds', async () => {
+      const { actions, sent, play, travel, clock } = await setup();
+      // C4 sounds before the stall, D4 starts and ends in it, E4 starts in it and sounds after
+      actions.setNotes([note(0, 0.25), note(0.25, 0.25, 62), note(0.5, 2, 64)]);
+      actions.play();
+      await play(0.02);
+      expect(sent).toEqual(['on C4 @0.05']);
+      // a long task: no tick for 0.4 s
+      await travel(0.4);
+      clock.tick();
+      expect(sent).toEqual(['on C4 @0.05', 'off C4 @0.175', 'on E4 @0.3']);
+      await play(0.9);
+      expect(sent).toEqual(['on C4 @0.05', 'off C4 @0.175', 'on E4 @0.3', 'off E4 @1.3']);
+    });
+
     it('in Poly 1 a chord plays its lowest note, a melody over it goes back there, released on its own note', async () => {
       const { actions, synth, synthCore, audioCtx, sent, play } = await setup();
       const [, synthActions] = synth;
@@ -861,7 +876,7 @@ describe('track', () => {
       actions.setNotes([note(0, 1)]);
       await wait(150);
       expect(model.$dirty.value).toBe(true);
-      actions.setSaved('c1');
+      actions.setSaved('c1', model.$clip.value);
       await wait(150);
       expect(model.$dirty.value).toBe(false);
       expect(window.location.search).toBe('?clip=c1');
@@ -870,13 +885,27 @@ describe('track', () => {
       expect(model.$dirty.value).toBe(true);
     });
 
+    it('saved with the notes sent: an edit made while they went stays dirty', async () => {
+      const { actions, model } = await setup();
+      actions.setNotes([note(0, 1)]);
+      const sent = model.$clip.value;
+      actions.setNotes([note(0, 1), note(1, 1, 64)]);
+      actions.setSaved('c1', sent);
+      expect(model.$savedHash.value).toBe(clipHash(sent));
+      await wait(150);
+      expect(model.$dirty.value).toBe(true);
+      actions.setNotes([note(0, 1)]);
+      await wait(150);
+      expect(model.$dirty.value).toBe(false);
+    });
+
     it('under a name the filter refuses: dirty and clean as any other', async () => {
       const { actions, model } = await setup();
       actions.setNotes([note(0, 1)]);
       actions.setName('Sexy pad');
       await wait(150);
       expect(model.$dirty.value).toBe(true);
-      actions.setSaved('c1');
+      actions.setSaved('c1', model.$clip.value);
       await wait(150);
       expect(model.$dirty.value).toBe(false);
       actions.setNotes([note(0, 2)]);
@@ -888,7 +917,7 @@ describe('track', () => {
       const { actions, model } = await setup();
       actions.setNotes([note(0, 1)]);
       actions.setName('Bass');
-      actions.setSaved('c1');
+      actions.setSaved('c1', model.$clip.value);
       actions.newClip();
       expect(model.$clip.value.notes).toEqual([]);
       expect(model.$clip.value.name).toBeUndefined();
@@ -946,7 +975,7 @@ describe('track', () => {
       const { actions, model } = await setup();
       actions.setNotes([note(0, 1)]);
       actions.setName('Bass');
-      actions.setSaved('c1');
+      actions.setSaved('c1', model.$clip.value);
       actions.importMidi(writeMidiFile({ bpm: 120, length: CLIP_BAR, notes: [note(0, 1, 48)] }));
       expect(model.$clip.value.notes).toEqual([note(0, 1, 48)]);
       expect(model.$clip.value.name).toBeUndefined();
@@ -957,7 +986,7 @@ describe('track', () => {
       expect(model.$dirty.value).toBe(true);
 
       // its parts chosen: the same, the name of the part
-      actions.setSaved('c2');
+      actions.setSaved('c2', model.$clip.value);
       actions.importMidi(
         songFile([
           { name: 'Lead', notes: [note(0, 1, 72)] },

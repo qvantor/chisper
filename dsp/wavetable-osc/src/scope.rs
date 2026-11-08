@@ -134,21 +134,28 @@ impl Scope {
         self.voices.iter_mut().find(|voice| voice.id == id)
     }
 
-    /// a voice of a note: its options and the values of its params at the note on. Made, with the room of its place,
-    /// before it holds its versions and its phrase: a trap of an allocation pins nothing
+    /// a voice of a note: its options and the values of its params at the note on; `report`: it tells its start on
+    /// time too, `linger`: it lives on after its release (a voice of mono: Voice::linger). Made, with the room of
+    /// its place, before it holds its versions and its phrase: a trap of an allocation pins nothing
+    #[allow(clippy::too_many_arguments)]
     pub fn on(
         &mut self,
         id: f64,
         options: VoiceOptions,
         values: [f64; PARAMS],
         report: bool,
+        linger: bool,
         store: &mut Store,
         shared: &mut Shared,
     ) {
         let (rate, ranges) = (self.rate, self.ranges);
+        let mut created = Voice::new(rate, options, shared);
+        if linger {
+            created.linger();
+        }
         let mut voice = ScopeVoice {
             id,
-            voice: Voice::new(rate, options, shared),
+            voice: created,
             timelines: core::array::from_fn(|k| Timeline::new(rate, values[k], ranges[k].0, ranges[k].1)),
             direct: Vec::new(),
             report,

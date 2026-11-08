@@ -116,7 +116,8 @@ export interface VoiceOptions {
   // the voices node tells its start (VoiceStartedMessage) once (the perf test hook times the notes)
   trace?: boolean;
   // a voice of mono (Poly 1): the notes it takes over may start its envelopes again, the voices node tells its
-  // start once, on time too
+  // start once, on time too; it lives on RELEASE_LEAD after the end of its release (silent, its phases running),
+  // so a note sent it before that end takes it over (its gate comes at most RELEASE_LEAD late)
   mono?: boolean;
 }
 

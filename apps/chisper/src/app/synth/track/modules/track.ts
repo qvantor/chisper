@@ -52,6 +52,7 @@ import {
   playedNotes,
   soundingAt,
   TrackEvent,
+  withoutEnded,
 } from '../track-events';
 import { ClipBody, ClipHistory, emptyHistory, record, redo, undo } from '../track-history';
 import { finishNote, HeldNote, insertNotes, loopLength, withLength } from '../track-edit';
@@ -441,10 +442,11 @@ export const track = ({
           if (read) applyMidi(read);
         },
         cancelImport: () => $midiImport.next(null),
-        // saved (or updated) under `id`: clean, in the url
-        setSaved: (id: string) => {
+        // saved (or updated) under `id` with the notes of `clip` (those sent: an edit while it went is not saved),
+        // in the url
+        setSaved: (id: string, clip: Clip) => {
           $id.next(id);
-          $savedHash.next(clipHash($clip.value));
+          $savedHash.next(clipHash(clip));
           setUrlClipId(id);
         },
         // the clip of a link: loaded, its tempo taken
@@ -528,16 +530,20 @@ export const track = ({
         player.offset = start;
         extendLoop(Math.min(CLIP_LENGTH_MAX, (Math.floor((horizon - start) / CLIP_BAR) + 1) * CLIP_BAR));
       };
+      // a tick whose time has passed (on the newest segment, as the notes are sent)
+      const passed = (at: number) => timeAt(at / CLIP_PPQ) <= audioCtx.currentTime;
       // every tick: the notes up to TRACK_LEAD from now, at the times of their beats on the transport now (a new
-      // tempo plays from the next notes on); the fx follow a note whose time has come, the keys light those the
-      // output plays
+      // tempo plays from the next notes on); after the page stood (a long task) those that ended meanwhile don't
+      // play, one that still sounds plays from now. The fx follow a note whose time has come, the keys light those
+      // the output plays
       const tick = () => {
         if (!$playing.value || player.waiting) return;
         const horizon = beatAt(audioCtx.currentTime + TRACK_LEAD) * CLIP_PPQ;
         const next = player.next ?? startAt(horizon);
         if (horizon > next) {
           runOn(next, horizon);
-          loopEvents(player.played, $clip.value.length, next, horizon, player.offset).forEach(send);
+          const events = loopEvents(player.played, $clip.value.length, next, horizon, player.offset);
+          withoutEnded(events, passed).forEach(send);
           player.next = horizon;
         }
         followFx();

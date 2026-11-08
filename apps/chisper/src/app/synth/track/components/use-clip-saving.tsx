@@ -51,7 +51,7 @@ export const useClipSaving = (presetId: () => string | null) => {
         }
         if (kind !== 'new' && id !== null && editToken) {
           await updateClip(id, clip, editToken);
-          setSaved(id);
+          setSaved(id, clip);
           await done(id);
           return;
         }
@@ -61,7 +61,7 @@ export const useClipSaving = (presetId: () => string | null) => {
         }
         const result = await saveClip(clip, turnstileToken);
         if (result.editToken) setClipEditToken(result.id, result.editToken);
-        setSaved(result.id);
+        setSaved(result.id, clip);
         await done(result.id, result.existed ? 'The same notes are saved: their link' : undefined);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Saving failed');

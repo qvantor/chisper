@@ -1,5 +1,5 @@
 import { ClipNote } from '@chisper/preset-schema';
-import { loopEvents, loopTick, passStart, playedNotes, soundingAt } from './track-events';
+import { loopEvents, loopTick, passStart, playedNotes, soundingAt, withoutEnded } from './track-events';
 
 const events = (notes: ClipNote[], length: number, from: number, to: number, origin?: number) =>
   loopEvents(playedNotes(notes, length), length, from, to, origin).map(
@@ -118,6 +118,45 @@ describe('loopEvents', () => {
       'on 60 @1920',
       'off 60 @1930',
     ]);
+  });
+});
+
+describe('withoutEnded', () => {
+  // the events of [from, to) but the notes ended by `now` (ticks)
+  const kept = (notes: ClipNote[], from: number, to: number, now: number) =>
+    withoutEnded(loopEvents(playedNotes(notes, 960), 960, from, to), (tick) => tick <= now).map(
+      ({ tick, on, pitch }) => `${on ? 'on' : 'off'} ${pitch} @${tick}`
+    );
+
+  it('leaves out the on of a note that ended, keeps its off and the on of one that sounds', () => {
+    const notes: ClipNote[] = [
+      [0, 100, 60, 100],
+      [100, 100, 62, 100],
+      [150, 300, 64, 100],
+    ];
+    // 62 ended; 64 sounds (its off past them)
+    expect(kept(notes, 50, 300, 250)).toEqual(['off 60 @100', 'on 64 @150', 'off 62 @200']);
+    expect(kept(notes, 50, 460, 250)).toEqual(['off 60 @100', 'on 64 @150', 'off 62 @200', 'off 64 @450']);
+    // 64 ended too
+    expect(kept(notes, 50, 460, 460)).toEqual(['off 60 @100', 'off 62 @200', 'off 64 @450']);
+  });
+
+  it('of two notes of a pitch one after the other leaves out the one that ended', () => {
+    const notes: ClipNote[] = [
+      [0, 100, 60, 100],
+      [100, 400, 60, 90],
+    ];
+    expect(kept(notes, 0, 200, 150)).toEqual(['off 60 @100', 'on 60 @100']);
+    expect(kept(notes, 0, 200, 50)).toEqual(['on 60 @0', 'off 60 @100', 'on 60 @100']);
+  });
+
+  it('keeps all of them when none ended', () => {
+    const notes: ClipNote[] = [
+      [0, 100, 60, 100],
+      [100, 100, 62, 100],
+    ];
+    const events = loopEvents(playedNotes(notes, 960), 960, 0, 960);
+    expect(withoutEnded(events, (tick) => tick < 0)).toEqual(events);
   });
 });
 

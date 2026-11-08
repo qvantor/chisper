@@ -86,7 +86,7 @@ export interface OscExports extends CoreExports {
   osc_voice_start_frame: (voice: number) => number;
   osc_scope_new: (sampleRate: number) => number;
   osc_scope_free: (scope: number, store: number, shared: number) => void;
-  osc_scope_on: (scope: number, store: number, shared: number, id: number, report: number) => void;
+  osc_scope_on: (scope: number, store: number, shared: number, id: number, flags: number) => void;
   osc_scope_events: (scope: number, store: number, shared: number, count: number) => void;
   osc_scope_routes: (scope: number, id: number) => void;
   osc_scope_filter: (scope: number, id: number) => void;
@@ -704,8 +704,11 @@ export const createVoiceScopeWasm = (
       DESCRIPTORS.forEach((descriptor, k) => {
         command[at + k] = params[VOICE_PARAM_ORDER[k]] ?? descriptor?.defaultValue ?? 0;
       });
+      // the flags of osc_scope_on: it tells its start on time too (traced, mono: 1), it lives on after its
+      // release (mono: 2)
       const report = (__PERF__ && !!options.trace) || !!options.mono;
-      exports.osc_scope_on(handle, store.handle, shared.handle, id, report ? 1 : 0);
+      const flags = (report ? 1 : 0) | (options.mono ? 2 : 0);
+      exports.osc_scope_on(handle, store.handle, shared.handle, id, flags);
     } catch (error) {
       onError(error);
       failed.push(id);

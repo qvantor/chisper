@@ -2,7 +2,7 @@ import React from 'react';
 import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import toast from 'react-hot-toast';
 import hexToRgba from 'hex-to-rgba';
-import { CLIP_BAR, CLIP_PITCH_MIN, CLIP_PPQ, ClipNote } from '@chisper/preset-schema';
+import { CLIP_BAR, CLIP_PITCH_MIN, CLIP_PPQ, Clip, ClipNote, clipHash } from '@chisper/preset-schema';
 import { theme } from '@chisper/ui-kit';
 import { cssColor, drawn, switchKeyTip, withElementSize } from '@chisper/ui-kit/test-utils';
 import { songFile } from '../../../../test-utils/midi-file';
@@ -1408,8 +1408,40 @@ describe('the toolbar of the roll', () => {
     expect(saveClip).toHaveBeenCalledTimes(1);
   });
 
+  it('marks saved the notes it sent: those added while the request goes stay unsaved', async () => {
+    const { model, actions } = await setup([[0, SIXTEENTH, 60, 100]]);
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    // a new clip, after the captcha
+    let saved!: (result: { id: string; existed: boolean; editToken: string }) => void;
+    (saveClip as jest.Mock).mockReturnValue(new Promise((resolve) => (saved = resolve)));
+    fireEvent.click(screen.getByRole('button', { name: /Save$/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Pass captcha' }));
+    await flush();
+    const sent: Clip = (saveClip as jest.Mock).mock.calls[0][0];
+    act(() => actions.setNotes([...sent.notes, [CLIP_BAR, SIXTEENTH, 64, 100]]));
+    await act(async () => saved({ id: 'c1', existed: false, editToken: 'secret-token-of-the-clip' }));
+    expect(model.$id.value).toBe('c1');
+    expect(model.$savedHash.value).toBe(clipHash(sent));
+    await settle();
+    expect(model.$dirty.value).toBe(true);
+
+    // its own clip updated
+    let updated!: (result: { id: string }) => void;
+    (updateClip as jest.Mock).mockReturnValue(new Promise((resolve) => (updated = resolve)));
+    fireEvent.click(screen.getByRole('button', { name: /Save$/ }));
+    await flush();
+    const resent: Clip = (updateClip as jest.Mock).mock.calls[0][1];
+    expect(resent.notes).toHaveLength(2);
+    act(() => actions.setNotes([...resent.notes, [2 * CLIP_BAR, SIXTEENTH, 67, 100]]));
+    await act(async () => updated({ id: 'c1' }));
+    expect(model.$savedHash.value).toBe(clipHash(resent));
+    await settle();
+    expect(model.$dirty.value).toBe(true);
+  });
+
   it('tells of a name the server would refuse before the captcha, saves nothing', async () => {
-    const { actions } = await setup([[0, SIXTEENTH, 60, 100]]);
+    const { model, actions } = await setup([[0, SIXTEENTH, 60, 100]]);
     fireEvent.change(screen.getByLabelText('Clip name'), { target: { value: 'Sexy pad' } });
     fireEvent.click(screen.getByRole('button', { name: /Save$/ }));
     await flush();
@@ -1417,7 +1449,7 @@ describe('the toolbar of the roll', () => {
     expect(screen.queryByRole('button', { name: 'Pass captcha' })).toBeNull();
     // its own clip: not overwritten either
     setClipEditToken('c3', 'secret-token-of-the-clip');
-    actions.setSaved('c3');
+    actions.setSaved('c3', model.$clip.value);
     actions.setNotes([[0, SIXTEENTH, 62, 100]]);
     fireEvent.click(screen.getByRole('button', { name: /Save$/ }));
     await flush();
@@ -1429,9 +1461,9 @@ describe('the toolbar of the roll', () => {
   it('shares the link of a saved clip with the preset whose sound is unchanged', async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
-    const { actions } = await setup([[0, SIXTEENTH, 60, 100]], () => 'p1');
+    const { model, actions } = await setup([[0, SIXTEENTH, 60, 100]], () => 'p1');
     setClipEditToken('c2', 'secret-token-of-the-clip');
-    actions.setSaved('c2');
+    actions.setSaved('c2', model.$clip.value);
     fireEvent.click(screen.getByRole('button', { name: /Share$/ }));
     await flush();
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/?preset=p1&clip=c2`);

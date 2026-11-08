@@ -438,7 +438,7 @@ fn an_event_without_memory_ends_its_voice_the_others_take_theirs() {
     let (mut store, mut shared) = (Store::default(), Shared::default());
     let mut scope = Scope::new(RATE, [(-BIG, BIG); PARAMS]);
     for id in [1.0, 2.0] {
-        scope.on(id, note(), [0.0; PARAMS], false, &mut store, &mut shared);
+        scope.on(id, note(), [0.0; PARAMS], false, false, &mut store, &mut shared);
     }
     scope.event(SET, 1.0, 0, 100.0, 0.0, 0.0, &mut store, &mut shared);
     // in place of one of its kind at its time: no memory needed
@@ -449,6 +449,48 @@ fn an_event_without_memory_ends_its_voice_the_others_take_theirs() {
     assert_eq!((scope.voices(), scope.ended.as_slice()), (1, [1.0].as_slice()));
     scope.event(SET, 2.0, 1, 0.0, 0.1, 0.0, &mut store, &mut shared);
     assert_eq!(scope.events(), 1);
+    scope.end(&mut store, &mut shared);
+}
+
+#[test]
+fn a_voice_of_mono_lives_on_release_lead_after_its_release_a_note_meanwhile_takes_it_over() {
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    let mut scope = Scope::new(RATE, [(-BIG, BIG); PARAMS]);
+    // ENV 1 released over 10 ms, the gate held at the note on
+    let released = EnvelopeParams {
+        sustain: 1.0,
+        release: 0.01,
+        ..EnvelopeParams::default()
+    };
+    let options = || VoiceOptions {
+        envelopes: vec![released; 3],
+        ..note()
+    };
+    let mut held = [0.0; PARAMS];
+    held[1] = 1.0;
+    // 1 of Poly, 2–4 of mono (they linger)
+    for (id, linger) in [(1.0, false), (2.0, true), (3.0, true), (4.0, true)] {
+        scope.on(id, options(), held, false, linger, &mut store, &mut shared);
+    }
+    // released at 0.01 s (frame 480), held 0.01 s: their releases end at frame 960
+    for id in [1.0, 2.0, 3.0] {
+        scope.event(SET, id, 1, 2.01, 0.01, 0.0, &mut store, &mut shared);
+    }
+    // 4 stolen there: its fade (20 ms) ends it
+    scope.event(SET, 4.0, 1, -1.0, 0.01, 0.0, &mut store, &mut shared);
+    // a note takes 3 over at 0.05 s (frame 2400): after the end of its release, within RELEASE_LEAD of it
+    scope.event(SET, 3.0, 1, 1.5, 0.05, 0.0, &mut store, &mut shared);
+    let mut ends = Vec::new();
+    let mut frame = 0.0;
+    while frame < 0.2 * RATE {
+        scope.process(frame, 128, &mut store, &mut shared);
+        ends.extend(scope.ended.drain(..).map(|id| (id, frame)));
+        frame += 128.0;
+    }
+    // each in the block of its end: 1 at its release's (960), 4 at its fade's (480 + 960), 2 RELEASE_LEAD (2400
+    // frames) after its release's (3360); 3 plays on
+    assert_eq!(ends, [(1.0, 896.0), (4.0, 1408.0), (2.0, 3328.0)]);
+    assert_eq!(scope.voices(), 1);
     scope.end(&mut store, &mut shared);
 }
 

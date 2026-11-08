@@ -36,7 +36,9 @@ export const RELEASE_GATE = 2;
 
 // seconds: the most a release starts after it is seen (on the main thread, after now). currentTime moves by
 // device buffers (10 ms on Windows, up to 40 ms on Android), a longer lead would be a stalled or suspended
-// clock: a note held over it would be released that much later
+// clock: a note held over it would be released that much later. Also the most an event of a voice comes late: a
+// voice of mono lives on that long after its release, a note takes over another voice only that long before
+// its release ends
 export const RELEASE_LEAD = 0.05;
 
 // where the release of a voice starts: at `held` (its first sample + the time its key was held), not before

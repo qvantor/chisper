@@ -64,8 +64,19 @@ describe('the work of a note on the main thread', () => {
     expect(measure(() => onRelease(note(1)))).toEqual({ messages: 1, voices: 0, automation: 10, changes: 0 });
   });
 
-  it('a note over the polyphony fades the oldest voice out', async () => {
+  it('a note over the polyphony: the oldest voice plays it, no voice', async () => {
     const { onPress, synthActions, measure } = await setup();
+    synthActions.setMaxVoices(2);
+    onPress(note(0));
+    onPress(note(1));
+    // the stolen voice: its pitch steps there (a point, a cancel after it; portamento 0), its gate held again (a
+    // cancel, a set)
+    expect(measure(() => onPress(note(2)))).toEqual({ messages: 1, voices: 0, automation: 4, changes: 0 });
+  });
+
+  it('in legato a note over the polyphony fades the oldest voice out', async () => {
+    const { onPress, synthActions, measure } = await setup();
+    synthActions.setLegato(true);
     synthActions.setMaxVoices(2);
     onPress(note(0));
     onPress(note(1));
@@ -89,14 +100,14 @@ describe('the work of a note on the main thread', () => {
     expect(measure(() => onRelease(note(0)))).toEqual({ messages: 1, voices: 0, automation: 2, changes: 0 });
   });
 
-  it('a chord of 12 at Poly 8 (in one task): one message, 4 voices stolen as they start; its release', async () => {
+  it('a chord of 12 at Poly 8 (in one task): one message, 4 voices stolen as they start play its last notes; its release', async () => {
     const { onPress, onRelease, measure } = await setup();
     const chord = Array.from({ length: 12 }, (_, i) => note(i));
-    // nothing for the first 8 (no portamento), then 4 steals of 2
+    // nothing for the first 8 (no portamento), then 4 steals of 4 (the pitch, the gate)
     expect(measure(() => chord.forEach((n) => onPress(n)))).toEqual({
       messages: 1,
-      voices: 12,
-      automation: 8,
+      voices: 8,
+      automation: 16,
       changes: 0,
     });
     // the gates of the 8 voices held

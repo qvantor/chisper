@@ -1473,6 +1473,8 @@ pub struct Voice {
     crossfade_length: f64,
     frame_fade_limit: f64,
     lead_length: f64,
+    // the frames it lives on, silent, after the end of its release (a voice of mono: lead_length, else 0)
+    linger: f64,
     in_phrase: bool,
     joined: bool,
     phrase: f64,
@@ -1563,6 +1565,7 @@ impl Voice {
             crossfade_length: max(1.0, round(CROSSFADE * sample_rate)),
             frame_fade_limit: FRAME_FADE * sample_rate,
             lead_length: round(RELEASE_LEAD * sample_rate),
+            linger: 0.0,
             in_phrase,
             joined: false,
             phrase: options.phrase,
@@ -1658,6 +1661,13 @@ impl Voice {
         // the versions of every source first: they release nothing that allocates, the mixes may
         each_source!(self.slots, source => source.release(store));
         each_source!(self.slots, source => source.free(shared));
+    }
+
+    /// a voice of mono: it lives on RELEASE_LEAD after the end of its release (silent, its phases running), so a
+    /// note the main thread sends it before that end takes it over: its gate comes at most RELEASE_LEAD late. A
+    /// stolen one ends with its fade
+    pub fn linger(&mut self) {
+        self.linger = self.lead_length;
     }
 
     fn retrigger(&mut self, at: f64) {
@@ -1837,7 +1847,7 @@ impl Voice {
                         envelope.release(at);
                     }
                     self.wake_routes();
-                    self.stop_frame = min(self.stop_frame, self.envelopes[0].end_frame());
+                    self.stop_frame = min(self.stop_frame, self.envelopes[0].end_frame() + self.linger);
                 }
                 i += 1.0;
                 continue;

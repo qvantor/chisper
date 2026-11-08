@@ -232,8 +232,13 @@ pub unsafe extern "C" fn osc_scope_free(scope: *mut Scope, store: *mut Store, sh
     scope.end(&mut *store, &mut *shared);
 }
 
+// the bits of `flags` of osc_scope_on: the voice tells its start on time too (mono, traced); it lives on
+// RELEASE_LEAD after its release (mono: a note the main thread sends before the end of the release takes it over)
+const SCOPE_ON_REPORT: i32 = 1;
+const SCOPE_ON_LINGER: i32 = 2;
+
 /// a voice `id` of a note, its options in the command buffer followed by the values of its params at the note on;
-/// `report`: it tells its start on time too (mono, traced)
+/// `flags`: SCOPE_ON_REPORT, SCOPE_ON_LINGER
 ///
 /// # Safety
 /// `scope`, `store` and `shared` come from their constructors and were not freed
@@ -243,7 +248,7 @@ pub unsafe extern "C" fn osc_scope_on(
     store: *mut Store,
     shared: *mut Shared,
     id: f64,
-    report: i32,
+    flags: i32,
 ) {
     let mut reader = Reader {
         values: command(),
@@ -251,7 +256,8 @@ pub unsafe extern "C" fn osc_scope_on(
     };
     let options = read_voice_options(&mut reader);
     let values = core::array::from_fn(|_| reader.next());
-    (*scope).on(id, options, values, report != 0, &mut *store, &mut *shared);
+    let (report, linger) = (flags & SCOPE_ON_REPORT != 0, flags & SCOPE_ON_LINGER != 0);
+    (*scope).on(id, options, values, report, linger, &mut *store, &mut *shared);
 }
 
 /// `count` automation events in the command buffer, in order: kind, voice, param, value, time, time constant each

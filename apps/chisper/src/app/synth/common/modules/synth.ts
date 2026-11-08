@@ -588,6 +588,13 @@ class Voice {
     return this.level(at) > 0 ? at + this.current.envelopes[0].release : at;
   }
 
+  // a note at `time` (seconds of the context) can take it over: it sounds then and its processor sees the gate
+  // before it ends (an event comes at most RELEASE_LEAD late). Held, it never ends by itself; a voice of mono
+  // lives on RELEASE_LEAD after its release, another one has to sound that much longer
+  outlives(time: number) {
+    return this.releaseEnd > time + (this.config.mono ? 0 : RELEASE_LEAD);
+  }
+
   // the level of an envelope (ENV 1: the volume) at `now` (seconds of the context) as its processor renders
   // it: from the start of its phrase (its own, in legato the first note's; where they started, once processed
   // late; in mono where a note started them again, from their levels then), released at releaseAt
@@ -825,11 +832,11 @@ class Voicing {
     return index >= 0;
   }
 
-  // a voice above Poly is stolen (it fades out from `now`): the quietest released one at `now` (ENV 1 × the amp of
-  // its velocity: the smallest step; the oldest of equal ones), else the oldest held one. Not one that hasn't
-  // started by then (a note of the track ahead of its time: silent until it starts, it would be the quietest),
-  // unless every one is such
-  private steal(now: number, at?: number) {
+  // the voice above Poly to steal at `now`: the quietest released one then (ENV 1 × the amp of its velocity: the
+  // smallest step; the oldest of equal ones), else the oldest held one. Not one that hasn't started by then (a
+  // note of the track ahead of its time: silent until it starts, it would be the quietest), unless every one is
+  // such
+  private victim(now: number): Voice | undefined {
     const started = (voice: Voice) => voice.scheduled <= now;
     const released = this.released.some(started) ? this.released.filter(started) : this.released;
     if (released.length) {
@@ -842,23 +849,62 @@ class Voicing {
           quietest = voice;
         }
       });
-      this.forget(quietest);
-      quietest.immediatelyStop(at);
-      return;
+      return quietest;
     }
     const keys = Object.keys(this.voices);
     const key = keys.find((item) => started(this.voices[item])) ?? keys[0];
-    this.voices[key]?.immediatelyStop(at);
-    delete this.voices[key];
+    return this.voices[key];
   }
 
-  // a new voice for a note (held under `key`) from `at` (none: now), gliding from the last key held (with `glide`);
-  // the voices above Poly are stolen first (all of them when Poly went down)
+  // `voice` no longer counts: released, it is forgotten; held, its key holds nothing
+  private uncount(voice: Voice) {
+    if (this.forget(voice)) return;
+    const key = Object.keys(this.voices).find((item) => this.voices[item] === voice);
+    if (key !== undefined) delete this.voices[key];
+  }
+
+  // a stolen voice fades out from `at` (none: now; 20 ms, a raised cosine), no longer counted
+  private kill(voice: Voice, at?: number) {
+    this.uncount(voice);
+    voice.immediatelyStop(at);
+  }
+
+  // a stolen voice plays the new note at `now` instead of fading out (its phases go on: no second voice under the
+  // new note, no click at its start): above Poly 1 out of legato (in legato a new note joins the phrase of the
+  // held ones; a voice of Poly doesn't live on as one of mono has to), started by then, sounding until its gate
+  // comes, its envelopes and sources those of the knobs
+  private canTake(voice: Voice, now: number) {
+    return (
+      this.config.$maxVoices.value > 1 &&
+      !this.config.$legato.value &&
+      voice.scheduled <= now &&
+      voice.outlives(now) &&
+      this.canRetrigger(voice)
+    );
+  }
+
+  // a new voice for a note (held under `key`) from `at` (none: now), gliding from the last key held (with `glide`).
+  // At Poly a voice is stolen first (all those above it when Poly went down): the last one plays the note if it
+  // can (canTake), the others fade out. The released voices whose release ends before a steal could take effect
+  // no longer count: they end by themselves, sooner than its fade
   private startVoice(note: Note, key: string, glide = true, at?: number) {
     const keys = Object.keys(this.voices);
     const from = glide && keys.length > 0 ? this.voices[keys[keys.length - 1]].note : undefined;
     const now = timeOf(this.config.audioCtx, at);
-    while (this.voicesCount > 0 && this.voicesCount >= this.config.$maxVoices.value) this.steal(now, at);
+    const max = this.config.$maxVoices.value;
+    if (this.voicesCount >= max)
+      this.released = this.released.filter((voice) => voice.releaseEnd > now + RELEASE_LEAD);
+    while (this.voicesCount > 0 && this.voicesCount >= max) {
+      const victim = this.victim(now);
+      if (!victim) break;
+      if (this.voicesCount === max && this.canTake(victim, now)) {
+        const { $portamento } = this.config;
+        const seconds = from && $portamento.value > 0 ? $portamento.value / 1000 : 0;
+        this.handOver(victim, note, key, seconds, true, at);
+        return victim;
+      }
+      this.kill(victim, at);
+    }
     const voice = this.getVoice(note, key, from, at);
     if (!voice) return null;
     this.voices[key] = voice;
@@ -874,39 +920,49 @@ class Voicing {
     this.followFx();
   }
 
+  // `voice` can start its envelopes again as a new note: they are those of the knobs, it plays their sources (on/off,
+  // the unison and its shape: its processor reads them at its note on)
+  private canRetrigger(voice: Voice) {
+    const { $envelopes, tempo } = this.config;
+    return sameEnvelopes(voice.phrase.envelopes, $envelopes.value, tempo()) && voice.playsKnobs();
+  }
+
+  // `voice` plays `note` (held under `key`) from `at` (none: now): it leaves the key it played (held or released),
+  // glides there in `seconds` from where it is (0: a step), takes the velocity of `key`; `again`: its envelopes
+  // start again from their levels (its phases go on), else they go on (legato)
+  private handOver(voice: Voice, note: Note, key: string, seconds: number, again: boolean, at?: number) {
+    this.uncount(voice);
+    this.voices[key] = voice;
+    voice.glide(note, key, seconds, timeOf(this.config.audioCtx, at));
+    this.takeVelocity(voice, key, at);
+    if (!again) {
+      // in legato a note for the fx only by its velocity
+      this.followFx();
+      return;
+    }
+    // a new note for the fx: from its time, from the levels of the envelopes
+    voice.retrigger(at);
+    this.followNote(voice);
+  }
+
   // mono: the voice takes over `note` (held under `key`), the key on top of the stack, from `at` (none: now). While
   // another key was held (`held`) it glides there from where it is, in legato its envelopes go on, else they start
-  // again; from its release it plays it at once (Always is off) and they start again. False when a new voice plays
-  // it: its release ends before its processor would see the gate (it would have ended), or its envelopes would
-  // start again as others than the knobs' or with other oscillators (on/off, the unison and its shape; its
-  // processor reads them at its note on; a glide in legato keeps it)
+  // again; in its release (back-to-back notes too: a key released at the time of the next one) it plays it at once
+  // (Always is off) and they start again. False when a new voice plays it: its release is over by then (the note
+  // starts from silence, from the Phase of each oscillator), or its envelopes would start again as others than the
+  // knobs' or with other sources (a glide in legato keeps it)
   private takeOver(note: Note, key: string, held: boolean, at?: number) {
     const { mono } = this;
     if (!mono) return false;
     const { voice } = mono;
     const again = !held || !this.config.$legato.value;
-    const time = timeOf(this.config.audioCtx, at);
-    if (voice.releaseEnd <= time + RELEASE_LEAD) return false;
-    const { $envelopes, tempo } = this.config;
-    if (again && !(sameEnvelopes(voice.phrase.envelopes, $envelopes.value, tempo()) && voice.playsKnobs()))
-      return false;
-    delete this.voices[voice.key];
-    this.voices[key] = voice;
-    this.forget(voice);
-    voice.glide(note, key, held ? this.config.$portamento.value / 1000 : 0, time);
-    this.takeVelocity(voice, key, at);
-    if (!again) {
-      // in legato a note for the fx only by its velocity
-      this.followFx();
-      return true;
-    }
-    // a new note for the fx: from its time, from the levels of the envelopes
-    voice.retrigger(at);
-    this.followNote(voice);
+    if (!voice.outlives(timeOf(this.config.audioCtx, at))) return false;
+    if (again && !this.canRetrigger(voice)) return false;
+    this.handOver(voice, note, key, held ? this.config.$portamento.value / 1000 : 0, again, at);
     return true;
   }
 
-  // mono: the voice plays the velocity of `key` from `at` (none: now; VELO and its amp glide there in 10 ms)
+  // the voice plays the velocity of `key` from `at` (none: now; VELO and its amp glide there in 10 ms)
   private takeVelocity(voice: Voice, key: string, at?: number) {
     const velocity = this.velocityOf(key);
     const { level, amp } = velocity;

@@ -5,7 +5,13 @@ import { expectSameBits } from '../../../../test-utils/parity';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import { LfosState, lfoTable, LfoWire, RETRIG } from '../lfo/lfo-curve';
 import type { VoiceEvent, VoiceOptions, VoiceOscOptions } from './voice-options';
-import { HELD_AGAIN_GATE, RELEASE_GATE, VOICE_PARAMETERS, VoiceParam } from './wavetable-osc-params';
+import {
+  HELD_AGAIN_GATE,
+  RELEASE_GATE,
+  RELEASE_LEAD,
+  VOICE_PARAMETERS,
+  VoiceParam,
+} from './wavetable-osc-params';
 import { createVoiceScopeWasm, createVoiceSharedWasm, VOICE_PARAM_ORDER } from './wavetable-osc-wasm';
 
 // the voices of one node in the core (scope.rs): their params from the events of the main thread (a timeline
@@ -209,6 +215,47 @@ describe('the voices of one node', () => {
     expect(held[7].some((value) => value !== 0)).toBe(true);
     expect(again[19].some((value) => value !== 0)).toBe(true);
     expect(voices.stats()).toEqual({ voices: 1, events: 2 });
+    voices.free();
+  });
+
+  it('a voice of mono lives on RELEASE_LEAD after its release, silent: a held gate meanwhile starts it again', () => {
+    const { voices } = node();
+    const lead = Math.round(RELEASE_LEAD * RATE);
+    // ENV 1 released over 10 ms at frame 1000: over at 1480
+    const envelopes = [{ ...FLAT, release: 0.01 }, FLAT, FLAT];
+    voices.apply(
+      [1, 2, 3].map((id) => ({
+        kind: 'on' as const,
+        voice: id,
+        options: note({ envelopes, phrase: id, ...(id > 1 && { mono: true }) }),
+        params: {},
+      }))
+    );
+    voices.apply(
+      [1, 2, 3].map((id) => ({ kind: 'set' as const, voice: id, param: 'gate', value: 0, time: 1000 / RATE }))
+    );
+    // 3 held again after the end of its release, within RELEASE_LEAD of it
+    const again = 1480 + lead / 2;
+    voices.apply([{ kind: 'set', voice: 3, param: 'gate', value: HELD_AGAIN_GATE, time: again / RATE }]);
+    const ends: [number, number][] = [];
+    const sound: Record<number, boolean[]> = { 2: [], 3: [] };
+    for (let frame = 0; frame < 1480 + 2 * lead; frame += BLOCK) {
+      const { report, taps } = render(voices, frame);
+      report?.ended?.forEach((id) => ends.push([id, frame]));
+      // the blocks after the end of the release
+      if (frame >= 1536)
+        taps.forEach(({ voice, left }) => sound[voice]?.push(left.some((value) => value !== 0)));
+    }
+    const block = (frame: number) => Math.floor(frame / BLOCK) * BLOCK;
+    // 1 in the block of the end of its release, 2 RELEASE_LEAD later, silent meanwhile; 3 plays again
+    expect(ends).toEqual([
+      [1, block(1480)],
+      [2, block(1480 + lead)],
+    ]);
+    expect(sound[2].length).toBeGreaterThan(0);
+    expect(sound[2].every((sounds) => !sounds)).toBe(true);
+    expect(sound[3].at(-1)).toBe(true);
+    expect(voices.stats().voices).toBe(1);
     voices.free();
   });
 

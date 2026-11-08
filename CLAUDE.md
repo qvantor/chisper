@@ -190,9 +190,11 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - `oscillator.ts` — the table (`$waveTable`, morph tables expand to 256 frames), position, pitch (oct/semi/fine),
   unison, phases, gain; sends its table to the engine.
 - `noise.ts` (+ `synth/noise/`) — a sample player in every voice; samples from the noise bucket.
-- `synth.ts` + `synth/voicing/` — voices per note: poly with stealing (quietest released first), legato,
-  portamento (`glide.ts`), mono (Poly 1: one voice, a stack of held keys), velocity, pitch bend (one `bend` event for
-  the whole node). Playing notes follow most knobs; unison, phases and envelopes apply to new notes.
+- `synth.ts` + `synth/voicing/` — voices per note: poly with stealing (quietest released first; out of legato the
+  stolen voice takes the new note, its phases go on, else it fades out), legato, portamento (`glide.ts`), mono
+  (Poly 1: one voice, a stack of held keys; a note takes it over while it sounds, its core keeps it `RELEASE_LEAD`
+  after its release so the takeover never comes late), velocity, pitch bend (one `bend` event for the whole node).
+  Playing notes follow most knobs; unison, phases and envelopes apply to new notes.
 - `sound-switch.ts` — a preset switch fades the output, waits for voices to end, applies the preset, clears FX tails
   and the limiter, then unmutes; held keys restart on the new preset.
 - `envelopes.ts` (ENV 1–3, velocity curve; curves shared via `envelope/envelope-curve.ts`), `lfos.ts` (LFO 1–4,

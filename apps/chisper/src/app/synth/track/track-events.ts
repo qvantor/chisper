@@ -89,6 +89,27 @@ export const loopEvents = (
   return events.sort(playOrder).map(({ tick, on, pitch, velocity }) => ({ tick, on, pitch, velocity }));
 };
 
+// the events (in the order they are played) but the ons of the notes that ended: their end `ended` (a tick over
+// the loops whose time has passed: sent late, the page stood) — they would sound all at once with the rest. A note
+// that still sounds plays (late). Its end is the next off of its pitch (the notes of a pitch don't overlap; an off
+// of a tick comes before its on); a note whose off isn't among them ends past them. The offs stay (one of a note
+// that is held releases it, one of a note left out releases nothing)
+export const withoutEnded = (
+  events: readonly TrackEvent[],
+  ended: (tick: number) => boolean
+): TrackEvent[] => {
+  // the tick of the next off of each pitch
+  const ends = new Map<number, number>();
+  const kept: TrackEvent[] = [];
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event.on) ends.set(event.pitch, event.tick);
+    const end = ends.get(event.pitch);
+    if (!event.on || end === undefined || !ended(end)) kept.push(event);
+  }
+  return kept.reverse();
+};
+
 // the position in the loop (ticks) at `tick` over the loops (a tick before beat 0: the loop before it)
 export const loopTick = (tick: number, length: number) => ((tick % length) + length) % length;
 
