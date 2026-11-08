@@ -2304,11 +2304,16 @@ describe('synth', () => {
 
   describe('voice starts', () => {
     it('traces no voice unless its starts are observed', async () => {
-      const { onPress, voices } = await setup();
+      const { onPress, voices, synthModel, started } = await setup();
       onPress([4, 'A']);
-      expect(voices()[0].options).not.toHaveProperty('trace');
-      // out of mono it tells its start only when late
+      // (out of mono it doesn't live on after its release)
       expect(voices()[0].options).not.toHaveProperty('mono');
+      const starts: unknown[] = [];
+      const subscription = synthModel.$voiceStarts.subscribe((start) => starts.push(start));
+      // the node tells the start of every voice: one made while not observed isn't traced
+      started(voices()[0], 0, 0);
+      expect(starts).toEqual([]);
+      subscription.unsubscribe();
     });
 
     it('traces the voices while observed: their starts come with their note', async () => {
@@ -2317,7 +2322,6 @@ describe('synth', () => {
       const subscription = synthModel.$voiceStarts.subscribe((start) => starts.push(start));
       onPress([4, 'A']);
       const [voice] = voices();
-      expect(voice.options).toMatchObject({ trace: true });
       started(voice, 140, 0);
       expect(starts).toEqual([{ note: 'A4', scheduled: 0, started: 140 }]);
       // a start doesn't end the voice, the end still does
@@ -2327,7 +2331,8 @@ describe('synth', () => {
 
       subscription.unsubscribe();
       onPress([4, 'C']);
-      expect(voices()[1].options).not.toHaveProperty('trace');
+      started(voices()[1], 300, 300);
+      expect(starts).toHaveLength(1);
     });
   });
 
@@ -2481,6 +2486,69 @@ describe('synth', () => {
       await travel(0.5);
       synthActions.followFx();
       expect(synthModel.$fxNote.value?.start).toBe(0.5);
+      stopModels();
+    });
+
+    it('the fx follow every note of the track at its time, also those sent together (closer than its lead)', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 60, { ...TRACK, at: 0.53 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
+      await travel(0.5);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.5, velocity: 100 / 127 });
+      await travel(0.03);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.53, velocity: 60 / 127 });
+      stopModels();
+    });
+
+    it('in mono the fx follow a note of the track that takes the voice over from its time, not as it is sent', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      synthActions.setMaxVoices(1);
+      synthActions.setPortamento(0);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 60, { ...TRACK, at: 0.53 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
+      await travel(0.5);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.5, velocity: 100 / 127 });
+      expect(synthModel.$fxNote.value?.from).toBeUndefined();
+      await travel(0.03);
+      synthActions.followFx();
+      // its envelopes start again there, from their levels
+      expect(synthModel.$fxNote.value).toMatchObject({
+        start: 0.53,
+        velocity: 60 / 127,
+        from: expect.any(Array),
+      });
+      stopModels();
+    });
+
+    it('the fx follow a voice of Poly a note of the track takes over from the time of that note', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'D']);
+      const held = synthModel.$fxNote.value;
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.3 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBe(held);
+      await travel(0.3);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value?.start).toBe(0.3);
+      stopModels();
+    });
+
+    it('a preset switch drops the notes of the track the fx wait for', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.2 });
+      synthActions.pause();
+      await travel(0.2);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
       stopModels();
     });
 

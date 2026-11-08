@@ -669,7 +669,7 @@ export interface TappedVoice {
 // options as createVoiceWasm takes them, the values of its params at the note on), apply() takes the events of the
 // main thread in their order (a new voice, the automation of its params, its routes and its filter), process()
 // renders a block of every voice in the order they were made, by the same Voice::process, into the sum of their
-// outputs; reports() tells the voices that started (late, of mono, traced) and ended since. A voice that traps ends
+// outputs; reports() tells the voices that started (each once, on time too) and ended since. A voice that traps ends
 // (it is told ended, its output is not in the sum: `onError` hears why), the others play on; a note on that
 // traps is told ended too. params() gives the params of a voice directly from the next block on, past its
 // timelines (the specs: params that are functions of the frame); tap() keeps the output of every voice apart
@@ -704,10 +704,9 @@ export const createVoiceScopeWasm = (
       DESCRIPTORS.forEach((descriptor, k) => {
         command[at + k] = params[VOICE_PARAM_ORDER[k]] ?? descriptor?.defaultValue ?? 0;
       });
-      // the flags of osc_scope_on: it tells its start on time too (traced, mono: 1), it lives on after its
-      // release (mono: 2)
-      const report = (__PERF__ && !!options.trace) || !!options.mono;
-      const flags = (report ? 1 : 0) | (options.mono ? 2 : 0);
+      // the flags of osc_scope_on: it tells its start on time too (every voice: a note may take it over, the main
+      // thread keeps its starts again until then), it lives on after its release (mono: 2)
+      const flags = 1 | (options.mono ? 2 : 0);
       exports.osc_scope_on(handle, store.handle, shared.handle, id, flags);
     } catch (error) {
       onError(error);

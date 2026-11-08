@@ -371,10 +371,9 @@ interface VoiceConfig {
   // the voices node started it later than scheduled, at `startedAt` (seconds of the context): its note on came
   // after that block began
   onLate: (startedAt: number) => void;
-  // traces the voice: the voices node tells the frames of its start
+  // traces the voice: the frames of its start, as the voices node tells them (the perf test hook)
   onStarted?: (message: VoiceStartedMessage) => void;
-  // a voice of mono (Poly 1): the notes it takes over may start its envelopes again, the voices node tells the
-  // frames of its start (on time too: the voice keeps its starts again until then)
+  // a voice of mono (Poly 1): it lives on RELEASE_LEAD after its release, a note sent before then takes it over
   mono: boolean;
 }
 
@@ -400,7 +399,6 @@ const createVoiceHandle = ({
   routes: modRoutes,
   filter,
   lfoRanges,
-  onStarted,
   mono,
 }: VoiceConfig): CreatedVoice | null => {
   const values: Partial<Record<VoiceParam, number>> = { frequency: pitch.from };
@@ -429,7 +427,6 @@ const createVoiceHandle = ({
       routes,
       filter,
       velocity: { level, amp },
-      ...(onStarted && { trace: true }),
       ...(mono && { mono: true }),
     },
     values
@@ -459,14 +456,17 @@ class Voice {
   private startedAt: number;
   // the key was released (null while it is held)
   private stopped: Stopped | null = null;
-  // its starts again (mono) until its processor tells where it started (null from then on): when, and whether
-  // its key was released then; processed late, they are worked out again from its first sample
+  // its starts again (a note took it over) until its processor tells where it started (null from then on, it tells
+  // every voice once): when, and whether its key was released then; processed late, they are worked out again from
+  // its first sample
   private restarts: { at: number; stopped: Stopped | null }[] | null = [];
   // the routes its voice has (JSON): a change of the routes of other knobs sends nothing
   private routes: string;
-  // the note it plays (the key it is held under; in mono the top of the stack) and the glide of its pitch to it
+  // the note it plays (the key it is held under; in mono the top of the stack), the seconds of the context it plays
+  // from (its start; of a note that took it over its time) and the glide of its pitch to it
   note: Note;
   key: string;
+  private noteAt: number;
   private pitch: Glide;
   // its envelopes: those of its note, in legato of its phrase, in mono from where a note started them again
   private current: Phrase;
@@ -485,6 +485,7 @@ class Voice {
     this.pressed = pressedAt(config.audioCtx, config.at);
     this.note = config.note;
     this.key = config.key;
+    this.noteAt = config.start;
     this.pitch = config.pitch;
     this.current = config.phrase;
     this.sources = sources;
@@ -507,6 +508,12 @@ class Voice {
   // the seconds of the context it was scheduled to start at (a note of the track: ahead of now)
   get scheduled() {
     return this.config.start;
+  }
+
+  // the seconds of the context the note it plays starts at: its start, the time of a note that took it over (a note
+  // of the track: ahead of now)
+  get noteTime() {
+    return this.noteAt;
   }
 
   private get gate() {
@@ -546,13 +553,14 @@ class Voice {
     return this.sources[kind] !== null;
   }
 
-  // mono: the voice plays `note` (held under `key`) instead from `time` (seconds of the context), its pitch glides
-  // there in `seconds` along the curve from where it is then (a glide the note interrupts goes on from its value
-  // there); 0: at once
+  // a note takes the voice over: it plays `note` (held under `key`) instead from `time` (seconds of the context), its
+  // pitch glides there in `seconds` along the curve from where it is then (a glide the note interrupts goes on from
+  // its value there); 0: at once
   glide = (note: Note, key: string, seconds: number, time: number) => {
     const param = this.handle.params.frequency;
     this.note = note;
     this.key = key;
+    this.noteAt = time;
     this.pitch = glideFrom(param, this.pitch, getFq(note), time, seconds);
   };
 
@@ -690,8 +698,18 @@ interface VoicingContext {
 
 // the fx switch to a note of the track at its time, not as it is sent ahead of it: up to this many seconds early
 // (a timer is late by the main thread's tasks, currentTime moves by device buffers); their worklets take it at the
-// first block from its start (noteDue of fx-modulation.ts)
+// first block from its start (noteDue of fx-modulation.ts), one note at a time: the notes of the track sent together
+// (TRACK_LEAD ahead) wait in the synth, each until its time (sendFx)
 const FX_EARLY = 0.005;
+
+// the fx follow the same note: its envelopes from the same start, released at the same time, the same velocity
+const sameFxNote = (a: FxNote | null, b: FxNote) =>
+  a?.envelopes === b.envelopes &&
+  a.start === b.start &&
+  a.release === b.release &&
+  a.from === b.from &&
+  a.velo === b.velo &&
+  a.velocity === b.velocity;
 
 class Voicing {
   private config: VoicingContext;
@@ -708,7 +726,9 @@ class Voicing {
   // started; released with the release of `fxRelease` (the last note, in legato the last key of its phrase)
   private last: Voice | null = null;
   private fxRelease: Voice | null = null;
-  // the fx wait for a note of the track until its time (followFx)
+  // the notes for the fx waiting for their time (notes of the track sent ahead of it), by their time; the timer of
+  // the first one
+  private fxWaiting: { at: number; note: FxNote }[] = [];
   private fxTimer: ReturnType<typeof setTimeout> | null = null;
   // Poly 1 (mono): its voice and the keys held, the last one pressed on top. A note pressed while another key
   // is held takes the voice over (it glides there; in legato its envelopes go on), the key on top released
@@ -794,36 +814,50 @@ class Voicing {
   };
 
   // the envelopes the fx follow: those of the phrase of the last note from where they started, released with
-  // fxRelease; the velocity of the last note. A note of the track sent ahead of its time: from its time (a timer,
-  // and every tick of the track: a timer of a hidden page waits a second)
+  // fxRelease; the velocity of the last note. From the time of its note (noteTime): a note of the track sent ahead of
+  // it waits, those sent after it wait behind it (sendFx). A note of a time replaces those waiting from that time on
+  // (a key of now all of them: the fx follow the last note pressed)
   followFx = () => {
-    if (!this.last) return;
-    const { envelopes, started, from } = this.last.phrase;
-    const { level: velo, share: velocity } = this.last.velocity;
-    const release = this.fxRelease?.releaseAt ?? null;
-    // a note of the phrase, or a late voice that didn't move its start, changes nothing; a note that started
-    // the envelopes again does (also at the same time), a note of another velocity too
-    const note = this.config.$fxNote.value;
-    if (
-      note?.envelopes === envelopes &&
-      note.start === started &&
-      note.release === release &&
-      note.from === from &&
-      note.velo === velo &&
-      note.velocity === velocity
-    )
-      return;
-    this.stopTimers();
-    const wait = this.last.scheduled - this.config.audioCtx.currentTime;
-    if (wait > FX_EARLY) {
-      this.fxTimer = setTimeout(() => {
-        this.fxTimer = null;
-        this.followFx();
-      }, wait * 1000);
-      return;
+    if (this.last) {
+      const { envelopes, started, from } = this.last.phrase;
+      const { level: velo, share: velocity } = this.last.velocity;
+      const note: FxNote = {
+        envelopes,
+        start: started,
+        release: this.fxRelease?.releaseAt ?? null,
+        from,
+        velo,
+        velocity,
+      };
+      // a note of the phrase, or a late voice that didn't move its start, changes nothing; a note that started
+      // the envelopes again does (also at the same time), a note of another velocity too
+      if (!sameFxNote(this.fxWaiting.at(-1)?.note ?? this.config.$fxNote.value, note)) {
+        const at = this.last.noteTime;
+        this.fxWaiting = this.fxWaiting.filter((waiting) => waiting.at < at);
+        this.fxWaiting.push({ at, note });
+      }
     }
-    this.config.$fxNote.next({ envelopes, start: started, release, from, velo, velocity });
+    this.sendFx();
   };
+
+  // the fx take the last of the notes whose time has come (FX_EARLY ahead), the others wait for theirs: a timer for
+  // the first one, and every tick of the track (a timer of a hidden page waits a second)
+  private sendFx() {
+    const now = this.config.audioCtx.currentTime;
+    let due: FxNote | null = null;
+    while (this.fxWaiting.length > 0 && this.fxWaiting[0].at - now <= FX_EARLY)
+      due = (this.fxWaiting.shift() as { note: FxNote }).note;
+    if (due) this.config.$fxNote.next(due);
+    this.stopTimers();
+    if (this.fxWaiting.length === 0) return;
+    this.fxTimer = setTimeout(
+      () => {
+        this.fxTimer = null;
+        this.sendFx();
+      },
+      (this.fxWaiting[0].at - now) * 1000
+    );
+  }
 
   // a released voice is no longer counted: it has ended or it is stolen; true if it was
   private forget(voice: Voice) {
@@ -1067,6 +1101,7 @@ class Voicing {
     this.phrase = undefined;
     this.last = null;
     this.fxRelease = null;
+    this.fxWaiting = [];
     this.stopTimers();
     this.config.$fxNote.next(null);
     this.config.onCount();
@@ -1087,7 +1122,7 @@ class Voicing {
     this.config.onCount();
   }
 
-  // the fx wait for nothing (a note followed, the synth paused or destroyed)
+  // the fx wait for no timer (another one comes, the synth paused or destroyed)
   stopTimers() {
     if (this.fxTimer !== null) clearTimeout(this.fxTimer);
     this.fxTimer = null;

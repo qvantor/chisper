@@ -60,8 +60,8 @@ export interface ParamAutomation {
   cancelScheduledValues: (time: number) => void;
 }
 
-// a voice of the voices node: its params; the node tells its start (late, of mono or traced: the frames it
-// started and was scheduled at, once) and its end (released to 0, stolen, failed, or the node failed)
+// a voice of the voices node: its params; the node tells its start (the frames it started and was scheduled at,
+// once) and its end (released to 0, stolen, failed, or the node failed)
 export interface VoiceHandle {
   readonly id: number;
   readonly params: Record<VoiceParam, ParamAutomation>;

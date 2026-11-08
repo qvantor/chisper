@@ -125,7 +125,7 @@ export const track = ({
   synthCore: [{ audioCtx }],
   transport: [
     { $bpm, $source, $playing: $transportPlaying, $changes, beatAt, timeAt, contextTimeAt },
-    { setBpm, locate, setPlaying },
+    { setBpm, locate, setPlaying, scheduleUntil },
   ],
   inputController: [{ $onPress, $onRelease }, { onPress, onRelease }],
   synth: [, { followFx }],
@@ -562,12 +562,15 @@ export const track = ({
       // a tick whose time has passed (on the newest segment, as the notes are sent)
       const passed = (at: number) => timeAt(at / CLIP_PPQ) <= audioCtx.currentTime;
       // every tick: the notes up to TRACK_LEAD from now, at the times of their beats on the transport now (a new
-      // tempo plays from the next notes on); after the page stood (a long task) those that ended meanwhile don't
+      // tempo plays from the next notes on, from the time they are sent up to); after the page stood (a long task) those that ended meanwhile don't
       // play, one that still sounds plays from now. The fx follow a note whose time has come, the keys light those
       // the output plays
       const tick = () => {
         if (!$playing.value || player.waiting) return;
-        const horizon = beatAt(audioCtx.currentTime + TRACK_LEAD) * CLIP_PPQ;
+        const until = audioCtx.currentTime + TRACK_LEAD;
+        const horizon = beatAt(until) * CLIP_PPQ;
+        // (a new tempo or a locate starts there at the soonest: the notes sent keep their times)
+        scheduleUntil(until);
         const next = player.next ?? startAt(horizon);
         if (horizon > next) {
           runOn(next, horizon);

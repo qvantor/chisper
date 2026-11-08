@@ -1,7 +1,7 @@
 //! the voices of one node (the voices processor of a context): each with its params as AudioParams would give them
 //! (a timeline of the events of the main thread per param, timeline.rs), rendered one after another in the order
 //! they were created by the same Voice::process, their outputs summed in f32 in that order. A block also tells the
-//! voices that started late (or of mono, or traced) and those that ended. A voice that traps is ended by the
+//! voices that started late (or on time too: `report`) and those that ended. A voice that traps is ended by the
 //! wrapper (fail), the others render on; the params of a voice may also come as the arrays of a block (direct:
 //! the specs), and a tap keeps the output of every voice apart (the specs, the parity of the browsers). The pitch
 //! bend is the node's: on top of the detune of every voice, gliding to each new value

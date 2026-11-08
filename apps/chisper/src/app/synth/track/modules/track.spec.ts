@@ -204,7 +204,7 @@ describe('track', () => {
       actions.play();
       await play(0.3);
       expect(sent).toEqual(['on C4 @0.05', 'off C4 @0.175']);
-      // 60 BPM from now + LFO_LEAD on, at the beat the transport is at there
+      // 60 BPM from the time the notes were sent up to on, at the beat the transport is at there
       transportActions.setBpm(60);
       await play(2);
       const time = (event: string) => Number(sent.find((item) => item.startsWith(event))?.split('@')[1]);
@@ -212,6 +212,29 @@ describe('track', () => {
       // a beat a second from then on
       expect(time('on E4') - time('on D4')).toBeCloseTo(1, 6);
       expect(time('off D4') - time('on D4')).toBeCloseTo(0.25, 6);
+    });
+
+    it('a faster tempo keeps the notes sent at their times: a note off never comes before its note on', async () => {
+      const { actions, transportModel, transportActions, sent, play } = await setup();
+      // on at beat 0.575 (0.3375 s), sent at 0.3; its off 0.0375 beats later, sent after the new tempo
+      actions.setNotes([[552, 36, 60, 100]]);
+      actions.play();
+      await play(0.3);
+      expect(sent).toEqual(['on C4 @0.3375']);
+      transportActions.setBpm(240);
+      // from the time the notes were sent up to (0.35), at beat 0.6 there
+      const [segment] = transportModel.$segments.value.slice(-1);
+      expect(segment).toMatchObject({
+        time: expect.closeTo(0.35, 9),
+        beat: expect.closeTo(0.6, 9),
+        bpm: 240,
+      });
+      await play(0.1);
+      const times = sent.map((item) => Number(item.split('@')[1]));
+      expect(sent.map((item) => item.split(' @')[0])).toEqual(['on C4', 'off C4']);
+      // at 4 beats a second from 0.35 (at 0.3333 if the tempo started at 0.31)
+      expect(times[1]).toBeCloseTo(0.35 + 0.0125 / 4, 4);
+      expect(times[1]).toBeGreaterThan(times[0]);
     });
 
     it('Stop releases what it holds now and sends nothing more', async () => {

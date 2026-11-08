@@ -141,6 +141,36 @@ describe('transport', () => {
     await interval();
   });
 
+  it('starts no segment before the time the track has sent its notes up to: they keep their times', () => {
+    const { model, actions, changes, audioCtx, travel } = setup();
+    travel(1);
+    const now = audioCtx.currentTime;
+    const until = now + 0.04;
+    actions.scheduleUntil(until);
+    actions.setBpm(240);
+    expect(changes.at(-1)).toEqual({
+      segment: { time: until, beat: expect.closeTo(until * 2, 12), bpm: 240 },
+      locate: false,
+    });
+    actions.locate(8, now);
+    expect(changes.at(-1)).toEqual({
+      segment: { time: until, beat: expect.closeTo(8 + 0.04 * 4, 12), bpm: 240 },
+      locate: true,
+    });
+    actions.setSource('midi');
+    actions.follow({ time: now, beat: 16, bpm: 128 });
+    expect(changes.at(-1)?.segment).toEqual({
+      time: until,
+      beat: expect.closeTo(16 + (0.04 * 128) / 60, 12),
+      bpm: 128,
+    });
+    // once it is past: now + LFO_LEAD again
+    travel(0.1);
+    actions.follow({ time: audioCtx.currentTime, beat: 32, bpm: 128 });
+    expect(changes.at(-1)?.segment.time).toBe(audioCtx.currentTime + LFO_LEAD);
+    expect(model.beatAt(until)).toBeCloseTo(16 + (0.04 * 128) / 60, 12);
+  });
+
   it('plays from a MIDI Start to its Stop', () => {
     const { model, actions } = setup();
     actions.setPlaying(true);

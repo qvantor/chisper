@@ -179,7 +179,7 @@ export const useRollEditor = ({ follow: following = false }: { follow?: boolean 
     nudge: (steps: number) =>
       selected.length && apply(moveNotes(notes, selected, steps * step, 0, workspace)),
     stretch: (steps: number) => selected.length && apply(resizeNotes(notes, selected, steps * step, step)),
-    quantize: () => apply(quantize(notes, selected, step)),
+    quantize: () => apply(quantize(notes, selected, step, clip.length)),
     legato: () => apply(legato(notes, selected, clip.length)),
     duplicate: () => selected.length && apply(duplicateNotes(notes, selected, step, workspace)),
     copy: () => {

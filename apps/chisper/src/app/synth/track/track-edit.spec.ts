@@ -1,4 +1,13 @@
-import { CLIP_BAR, CLIP_NOTES_MAX, CLIP_PITCH_MIN, CLIP_PPQ, ClipNote } from '@chisper/preset-schema';
+import {
+  CLIP_BAR,
+  CLIP_LENGTH_DEFAULT,
+  CLIP_LENGTH_MAX,
+  CLIP_NOTES_MAX,
+  CLIP_PITCH_MIN,
+  CLIP_PPQ,
+  ClipNote,
+  clipNoteSchema,
+} from '@chisper/preset-schema';
 import {
   addNote,
   autoLength,
@@ -129,14 +138,35 @@ describe('track edit', () => {
       [10, 200, 60, 100],
       [250, 10, 62, 100],
     ];
-    expect(quantize(loose, [], 240).notes).toEqual([
+    expect(quantize(loose, [], 240, CLIP_BAR).notes).toEqual([
       [0, 240, 60, 100],
       [240, 240, 62, 100],
     ]);
-    expect(quantize(loose, [1], 240)).toEqual({
+    expect(quantize(loose, [1], 240, CLIP_BAR)).toEqual({
       notes: [loose[0], [240, 240, 62, 100]],
       selected: [1],
     });
+  });
+
+  it('quantizes a start at the end of the loop to its start: the loop does not grow', () => {
+    // played a little before the downbeat of the next pass
+    const early: ClipNote[] = [
+      [960, 960, 64, 100],
+      [CLIP_LENGTH_DEFAULT - 80, 60, 60, 100],
+    ];
+    const { notes: quantized } = quantize(early, [], CLIP_PPQ, CLIP_LENGTH_DEFAULT);
+    expect(quantized).toEqual([
+      [0, CLIP_PPQ, 60, 100],
+      [960, 960, 64, 100],
+    ]);
+    expect(loopLength({ length: CLIP_LENGTH_DEFAULT, notes: early }, quantized)).toBe(CLIP_LENGTH_DEFAULT);
+  });
+
+  it('quantizes a note at the end of the longest loop into a note a clip can have', () => {
+    const last: ClipNote = [CLIP_LENGTH_MAX - 380, 380, 60, 100];
+    const [note] = quantize([last], [], CLIP_PPQ, CLIP_LENGTH_MAX).notes;
+    expect(note).toEqual([0, CLIP_PPQ, 60, 100]);
+    expect(clipNoteSchema.safeParse(note).success).toBe(true);
   });
 
   it('makes the notes legato: each up to the next start, the last to the end of the loop', () => {

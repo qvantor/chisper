@@ -58,9 +58,10 @@ const applySegment = ({ $tempo, $segments, $changes }: Segments, segment: TempoS
 };
 
 // the tempo and the transport: the beats on the clock of the context (tempo-map.ts), beat 0 at its time 0. A new
-// tempo is a segment from now + LFO_LEAD on at the beat the transport is at there (the grid goes on), at most every
-// LFO_STATE_INTERVAL (a drag of the field: each segment is a state of the LFOs in BPM to five threads). The LFOs,
-// the envelopes, the delay and the voices read it; the MIDI controller leads it by a MIDI Clock
+// tempo is a segment from now + LFO_LEAD on (not before the notes the track has sent: soonest) at the beat the
+// transport is at there (the grid goes on), at most every LFO_STATE_INTERVAL (a drag of the field: each segment is a
+// state of the LFOs in BPM to five threads). The LFOs, the envelopes, the delay and the voices read it; the MIDI
+// controller leads it by a MIDI Clock
 export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
   rxModel(() => {
     // the tempo of the field (kept)
@@ -72,6 +73,9 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
     const $playing = new PrimitiveBS<boolean>(false);
     const $segments = new BehaviorSubject<TempoSegment[]>([firstSegment($bpm.value)]);
     const $changes = new Subject<TempoChange>();
+    // the time of the context the track has sent its notes up to, at the times of their beats on the segments as
+    // they are (0: none)
+    const scheduled = { until: 0 };
     return {
       $bpm,
       $source,
@@ -79,6 +83,11 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
       $playing,
       $segments,
       $changes,
+      scheduled,
+      // the time a segment can start at: its states reach the audio threads before it, and the notes the track has
+      // sent stay at their times (one before them would move their beats: a note off of a faster tempo would come
+      // before the note on sent at the tempo before)
+      soonest: () => Math.max(audioCtx.currentTime + LFO_LEAD, scheduled.until),
       // the beat the transport is at at `t` (seconds of the context)
       beatAt: (t: number) => beatAt($segments.value, t),
       // the tempo at `t`
@@ -92,24 +101,22 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
     };
   })
     .actions((model) => {
-      const { $bpm, $source, $tempo, $playing } = model;
+      const { $bpm, $source, $tempo, $playing, scheduled, soonest } = model;
       const apply = (segment: TempoSegment, locate: boolean) => applySegment(model, segment, locate);
-      // the time a segment can start at: its states reach the audio threads before it
-      const soonest = () => audioCtx.currentTime + LFO_LEAD;
       return {
         // the tempo of the field (on its grid of 0.01, within 20..300)
         setBpm: (bpm: number) => {
           const next = tempoOf(bpm);
           if (next !== $bpm.value) $bpm.next(next);
         },
-        // the transport at `beat` at `at` (at `bpm`, by default the tempo in effect); at now + LFO_LEAD at the
-        // soonest, on the line of the beats from there
+        // the transport at `beat` at `at` (at `bpm`, by default the tempo in effect); at the soonest (now +
+        // LFO_LEAD, after the notes of the track sent), on the line of the beats from there
         locate: (beat: number, at: number, bpm = $tempo.value) => {
           const time = Math.max(at, soonest());
           apply({ time, beat: beat + ((time - at) * bpm) / 60, bpm }, true);
         },
         // a segment of a MIDI Clock: its tempo from `time` on, at `beat` there (no step of the beat when it is on
-        // the line before); at now + LFO_LEAD at the soonest, on its line
+        // the line before); at the soonest, on its line
         follow: ({ time, beat, bpm }: TempoSegment) => {
           const at = Math.max(time, soonest());
           apply({ time: at, beat: beat + ((at - time) * bpm) / 60, bpm }, false);
@@ -119,6 +126,10 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
         },
         setPlaying: (playing: boolean) => {
           if (playing !== $playing.value) $playing.next(playing);
+        },
+        // the track has sent its notes up to `time` (seconds of the context): no segment starts before it
+        scheduleUntil: (time: number) => {
+          scheduled.until = time;
         },
       };
     })
@@ -139,7 +150,7 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
         .subscribe((bpm) => {
           const segments = model.$segments.value;
           if (newest(segments).bpm === bpm) return;
-          applySegment(model, nextSegment(segments, audioCtx.currentTime + LFO_LEAD, bpm), false);
+          applySegment(model, nextSegment(segments, model.soonest(), bpm), false);
         }),
     ]);
 

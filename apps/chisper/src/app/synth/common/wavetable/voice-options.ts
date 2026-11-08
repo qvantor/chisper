@@ -111,12 +111,9 @@ export interface VoiceOptions {
   routes: VoiceRoute[];
   // the filter after the oscillators, null: off; its knobs change by a message
   filter: VoiceFilterOptions | null;
-  // its velocity (none: no VELO, the amp 1); a note that takes the voice over (mono) changes it by a message
+  // its velocity (none: no VELO, the amp 1); a note that takes the voice over changes it by a message
   velocity?: VoiceVelocity;
-  // the voices node tells its start (VoiceStartedMessage) once (the perf test hook times the notes)
-  trace?: boolean;
-  // a voice of mono (Poly 1): the notes it takes over may start its envelopes again, the voices node tells its
-  // start once, on time too; it lives on RELEASE_LEAD after the end of its release (silent, its phases running),
+  // a voice of mono (Poly 1): it lives on RELEASE_LEAD after the end of its release (silent, its phases running),
   // so a note sent it before that end takes it over (its gate comes at most RELEASE_LEAD late)
   mono?: boolean;
 }
@@ -197,18 +194,17 @@ export interface VoiceEventsMessage {
   events: VoiceEvent[];
 }
 
-// voices processor → main thread, after a block that has any: the voices that started (late, of mono, traced: its
-// id, the frame it started at and the one it was scheduled at, once) and those that ended (released to 0, stolen,
-// or failed)
+// voices processor → main thread, after a block that has any: the voices that started (each once: its id, the frame
+// it started at and the one it was scheduled at) and those that ended (released to 0, stolen, or failed)
 export interface VoicesReportMessage {
   started?: [number, number, number][];
   ended?: number[];
 }
 
-// the start of a voice the voices node tells, once: the frame it was scheduled at and the one it started at (its
-// first block: later when its note on came after its start). A traced voice and a voice of mono tell it always
-// (the main thread keeps the starts again of mono until then), another one only when late (the fx and Poly follow
-// it from its first sample)
+// the start of a voice the voices node tells, once, on time too: the frame it was scheduled at and the one it started
+// at (its first block: later when its note on came after its start; the fx and Poly follow it from its first
+// sample). A note may take the voice over before it is told (its envelopes start again): the main thread keeps
+// those starts again until then (the perf test hook times the notes by it)
 export interface VoiceStartedMessage {
   started: number;
   scheduled: number;

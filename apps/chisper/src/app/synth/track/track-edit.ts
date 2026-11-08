@@ -177,15 +177,22 @@ export const transpose = (notes: readonly ClipNote[], indexes: readonly number[]
   moveNotes(notes, indexes, 0, semitones, CLIP_LENGTH_MAX);
 
 // the selected notes (all of them when none is) on the grid: their starts and ends to the nearest lines, each at least
-// a step long
-export const quantize = (notes: readonly ClipNote[], indexes: readonly number[], grid: number): Edit => {
+// a step long. A start that comes to the end of the loop (`length`) or past it goes to its start, the nearest line
+// around the loop (as a recording wraps a note), its length kept within the loop: the loop doesn't grow by it
+export const quantize = (
+  notes: readonly ClipNote[],
+  indexes: readonly number[],
+  grid: number,
+  length: number
+): Edit => {
   const chosen = new Set(indexes.length ? indexes : notes.map((_, index) => index));
   return sorted(
     notes.map((note, index) => {
       if (!chosen.has(index)) return note;
       const start = roundTick(note[0], grid);
-      const end = Math.max(start + grid, roundTick(note[0] + note[1], grid));
-      return [start, end - start, note[2], note[3]] as ClipNote;
+      const duration = Math.max(grid, roundTick(note[0] + note[1], grid) - start);
+      if (start >= length) return [0, Math.min(duration, length), note[2], note[3]] as ClipNote;
+      return [start, duration, note[2], note[3]] as ClipNote;
     }),
     indexes
   );
