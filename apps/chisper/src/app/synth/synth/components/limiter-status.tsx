@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
-import { ToastActions, ToastBody, ToastButton } from '../../../common/components';
+import { Key, ToastAsk } from '../../../common/components';
 import { useSynthCore } from '../../common/modules';
 
 const LIMITER_TOAST = 'limiter-failed';
@@ -17,12 +17,9 @@ export const LimiterStatus = () => {
   useEffect(() => {
     if (!failed) return undefined;
     toast.error(
-      <ToastBody>
-        No sound: the master limiter failed
-        <ToastActions>
-          <ToastButton onClick={retryAudio}>Retry</ToastButton>
-        </ToastActions>
-      </ToastBody>,
+      <ToastAsk text='No sound: the master limiter failed'>
+        <Key onClick={retryAudio}>Retry</Key>
+      </ToastAsk>,
       { id: LIMITER_TOAST, duration: Infinity }
     );
     return () => toast.dismiss(LIMITER_TOAST);

@@ -1,8 +1,8 @@
 import React from 'react';
 import { styled } from 'styled-components';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from 'react-hot-toast';
 import { GlobalStyle, theme, useIsMobile } from '@chisper/ui-kit';
+import { Toasts } from '../common/components';
 import { AppProvider, useApp } from './modules';
 import { urlSnapshotPlugin, getSnapshot, applySnapshot, $snapshotChanges } from './plugins/snapshot';
 
@@ -33,7 +33,7 @@ export const App = ({ children }: React.PropsWithChildren) => {
       <AppProvider initial={{}}>
         <GlobalStyle />
         <Root className={isMobile ? 'mobile' : undefined}>{children}</Root>
-        <Toaster />
+        <Toasts />
       </AppProvider>
     </QueryClientProvider>
   );

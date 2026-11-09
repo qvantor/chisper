@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import toast from 'react-hot-toast';
+import type { Preset } from '@chisper/preset-schema';
 import { fakePreset } from '../../../test-utils/presets-fixtures';
 import { renderWithPresets } from '../../../test-utils/presets-wrapper';
 import { getPreset, getTopPresets, sharePreset } from '../services';
@@ -83,6 +84,48 @@ describe('PresetSection', () => {
     expect(name).toHaveTextContent(/^Init$/);
     expect(presets[0].$current.value).toBeNull();
     expect(window.location.search).toBe('');
+  });
+
+  it('shows the chosen preset at once over the bar of its loading, the current one back if it fails', async () => {
+    getTopPresetsMock.mockResolvedValueOnce(list);
+    const { user, next, name } = setupSection();
+    await waitFor(() => expect(name).toHaveTextContent(/^Preset a$/));
+    expect(screen.queryByRole('progressbar')).toBeNull();
+
+    let resolve!: (preset: Preset) => void;
+    getPresetMock.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    await user.click(next);
+    expect(name).toHaveTextContent(/^B$/);
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('10');
+    const b = await fakePreset('b');
+    await act(async () => resolve(b));
+    expect(name).toHaveTextContent(/^Preset b$/);
+    // (the switch of this wrapper is immediate: the sound is loaded at once)
+    expect(screen.queryByRole('progressbar')).toBeNull();
+
+    let reject!: (error: Error) => void;
+    getPresetMock.mockReturnValueOnce(new Promise((_, r) => (reject = r)));
+    await user.click(next);
+    expect(name).toHaveTextContent(/^C$/);
+    await act(async () => reject(new Error('Not found')));
+    expect(name).toHaveTextContent(/^Preset b$/);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(toast.error).toHaveBeenCalledWith('Not found');
+  });
+
+  it('shows Loading… for the preset of a link until it comes, no dirty mark while it loads', async () => {
+    window.history.replaceState(null, '', '/?preset=x');
+    let resolve!: (preset: Preset) => void;
+    getPresetMock.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    const { name, presets } = setupSection();
+    expect(name).toHaveTextContent(/^Loading…$/);
+    act(() => presets[0].$dirty.next(true));
+    expect(name).toHaveTextContent(/^Loading…$/);
+
+    const x = await fakePreset('x');
+    await act(async () => resolve(x));
+    expect(name).toHaveTextContent(/^Preset x$/);
+    window.history.replaceState(null, '', '/');
   });
 
   it('opens the preset browser by the name', async () => {

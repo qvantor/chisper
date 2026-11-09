@@ -22,7 +22,7 @@ jest.mock('@chisper/ui-kit', () => ({
 
 jest.mock('./hooks/use-wavetables', () => ({
   ...jest.requireActual('./hooks/use-wavetables'),
-  useWavetables: jest.fn(() => []),
+  useWavetables: jest.fn(() => ({ options: [], status: 'pending' })),
 }));
 
 // the status over the wave needs the synth core, it has its own spec

@@ -499,6 +499,29 @@ describe('wavetable engine', () => {
       expect(engine.$tables.value).toEqual({});
     });
 
+    it('none once the engine failed: the store is gone with them; retry sends them all again', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { engine, ack, worker, statuses } = setup();
+      engine.setTable('osc1', [saw]);
+      engine.setTable('osc2', [sine]);
+      await flush();
+      ack('osc1', 1);
+      expect(engine.$tables.value).toEqual({ osc1: 'stored', osc2: 'sending' });
+      const states: Record<string, string>[] = [];
+      engine.$tables.subscribe((tables) => states.push(tables));
+      worker()?.onerror?.(new Event('error'));
+      expect(statuses.at(-1)).toBe('failed');
+      expect(engine.$tables.value).toEqual({});
+      // (a table set meanwhile has none either: no store to send it to)
+      engine.setTable('osc1', [sine]);
+      expect(engine.$tables.value).toEqual({});
+
+      engine.retry();
+      await flush();
+      expect(engine.$tables.value).toEqual({ osc1: 'sending', osc2: 'sending' });
+      expect(states.slice(0, 2)).toEqual([{ osc1: 'stored', osc2: 'sending' }, {}]);
+    });
+
     it('retryTable sends a refused or failed version again, nothing else', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
       const { engine, builds, fromStore, worker } = setup();

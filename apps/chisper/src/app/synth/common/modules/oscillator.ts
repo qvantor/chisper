@@ -27,6 +27,7 @@ import {
   playedFrames,
 } from '../wavetable/wavetable-frames';
 import { OscParam } from '../wavetable/wavetable-osc-params';
+import { tableLoads } from './load-share';
 import { SynthCoreModule } from './synth-core';
 
 // one sine cycle, played until a table loads (a wave of 2 samples has no harmonics)
@@ -146,18 +147,17 @@ export const oscillator = ({
       })
     );
     const $gain = new PrimitiveBS<number>(0.5);
-    const $waveTableLoading = new PrimitiveBS<boolean>(false);
-    // where its table is in the wavetable oscillator (null: not sent yet); refused or failed: the version before
-    // it plays (OscillatorStatus shows why, Retry sends it again)
-    const $tableState = wavetables.$tables.pipe(
-      map((tables) => tables[id] ?? null),
-      distinctUntilChanged()
-    );
+    // its table loading, how far (load-share.ts), where it is in the wavetable oscillator (refused or failed:
+    // OscillatorStatus shows why, Retry sends it again), whether its notes play it (setWaveTable sends the table
+    // loaded before its load ends)
+    const tableLoad = tableLoads(wavetables.$tables, id);
+    const {
+      $loading: $waveTableLoading,
+      $progress: $tableProgress,
+      $state: $tableState,
+      played: tablePlayed,
+    } = tableLoad;
     const $params = new BehaviorSubject<Record<OscParam, number>>(baseParams(0, 1, $osc.value, $gain.value));
-    // its notes play the table of its path: loaded and in the wavetable oscillator (stored, or refused or failed:
-    // the version before plays); the table loaded goes to the oscillator before loading ends (setWaveTable sets
-    // it sending), so no moment between them reads as played
-    const tablePlayed = () => !$waveTableLoading.value && wavetables.$tables.value[id] !== 'sending';
 
     return {
       id,
@@ -175,8 +175,10 @@ export const oscillator = ({
       $params,
       $waveTablePath,
       $waveTableLoading,
+      $tableProgress,
       $tableState,
       tablePlayed,
+      tableLoad,
     };
   })
     .actions(({ $osc, $position, $active, $gain, $waveTable, $waveTablePath, $morph }) => ({
@@ -231,8 +233,8 @@ export const oscillator = ({
         .pipe(map(([position, frames, osc, gain]) => baseParams(position, frames, osc, gain)))
         .subscribe($params)
     )
-    // the table follows the path (also from presets) whatever screen is shown
-    .subscriptions(({ $waveTablePath, $waveTableLoading }, { setWaveTable }) => {
+    // the table follows the path (also from presets) whatever screen is shown, its progress with it
+    .subscriptions(({ $waveTablePath, tableLoad }, { setWaveTable }) => {
       // the table loaded or loading: the same path again keeps edited waves; cleared on a failure to load it again
       let tableId = '';
       return $waveTablePath
@@ -243,8 +245,8 @@ export const oscillator = ({
           // slower response can't overwrite its table
           switchMap((id) => {
             tableId = id;
-            $waveTableLoading.next(true);
-            return abortable((signal) => load(id, signal)).pipe(
+            tableLoad.start();
+            return abortable((signal) => load(id, signal, tableLoad.report(signal))).pipe(
               retry({ count: 2, delay: 1000 }),
               catchError((error) => {
                 console.error(`Failed to load the wavetable ${id}`, error);
@@ -256,9 +258,10 @@ export const oscillator = ({
         )
         .subscribe((wavetable) => {
           if (wavetable) setWaveTable(wavetable.frames, wavetable.morph);
-          $waveTableLoading.next(false);
+          tableLoad.end(!!wavetable);
         });
     })
+    .subscriptions(({ tableLoad }) => tableLoad.clearOnPlayed())
     .plugins(
       urlSnapshotPlugin({
         modelToSnap: (model) => {

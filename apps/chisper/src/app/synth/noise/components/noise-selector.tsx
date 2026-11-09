@@ -1,6 +1,6 @@
 import React from 'react';
-import { CascadeSelect } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { FileSelect, SelectProgress } from '../../../common/components';
 import { useNoise } from '../../common/modules';
 import { sampleName, useNoiseSamples } from '../hooks/use-noise-samples';
 
@@ -11,19 +11,25 @@ export const pathLabel = (path: (string | number)[]): string => {
   return key === undefined ? '' : sampleName(String(key));
 };
 
+const SampleProgress = () => {
+  const [{ $sampleProgress }] = useNoise();
+  return <SelectProgress progress={useBehaviorSubject($sampleProgress)} />;
+};
+
 // the sample of the noise, by category; ◀ ▶ through all of them
 export const NoiseSelector = () => {
-  const samples = useNoiseSamples();
-  const [{ $samplePath, $sampleLoading }, { setSamplePath }] = useNoise();
+  const { options: samples, status } = useNoiseSamples();
+  const [{ $samplePath }, { setSamplePath }] = useNoise();
   const path = useBehaviorSubject($samplePath);
-  const loading = useBehaviorSubject($sampleLoading);
   return (
-    <CascadeSelect
+    <FileSelect
       options={samples}
       value={path}
       setValue={setSamplePath}
-      loading={loading}
+      progress={<SampleProgress />}
       label={pathLabel(path)}
+      title='Noise'
+      status={status}
     />
   );
 };

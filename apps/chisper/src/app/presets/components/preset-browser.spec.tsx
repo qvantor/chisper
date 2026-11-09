@@ -2,6 +2,8 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import toast from 'react-hot-toast';
 import { PresetListItem } from '@chisper/preset-schema';
+import { theme } from '@chisper/ui-kit';
+import { cssColor } from '@chisper/ui-kit/test-utils';
 import { fakePreset } from '../../../test-utils/presets-fixtures';
 import { renderWithPresets } from '../../../test-utils/presets-wrapper';
 import { getPreset, getTopPresets, listPresets, reportPreset, sharePreset } from '../services';
@@ -27,6 +29,8 @@ const top = [item('t1', 'Top one', 12), item('t2', 'Top two')];
 const rowButtons = async (name: string) =>
   within((await screen.findByText(name)).parentElement as HTMLElement).getAllByRole('button');
 
+const nameColor = (name: string) => getComputedStyle(screen.getByText(name)).color;
+
 const setup = () => {
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
   const onClose = jest.fn();
@@ -51,6 +55,9 @@ describe('PresetBrowser', () => {
     expect(await screen.findByText('Top one')).toBeInTheDocument();
     expect(screen.getByText('Top two')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
+    // numbered as the programs of a synth
+    expect(screen.getByText('001')).toBeInTheDocument();
+    expect(screen.getByText('002')).toBeInTheDocument();
     // the full list is loaded only when its tab is opened
     expect(listPresetsMock).not.toHaveBeenCalled();
     // the popular list comes from the model's request on start
@@ -89,10 +96,34 @@ describe('PresetBrowser', () => {
     expect(await screen.findByText('All one')).toBeInTheDocument();
     expect(listPresetsMock).toHaveBeenLastCalledWith({ q: '', sort: 'new', cursor: undefined });
 
+    expect(screen.getByRole('button', { name: 'New' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByText('A–Z'));
     await waitFor(() =>
       expect(listPresetsMock).toHaveBeenLastCalledWith({ q: '', sort: 'name', cursor: undefined })
     );
+    expect(screen.getByRole('button', { name: 'A–Z' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'New' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('sorts only the list of all presets', async () => {
+    const { user } = setup();
+    expect(screen.getByRole('tab', { name: 'Popular' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('group', { name: 'Sort' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'All' }));
+    expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Popular' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('group', { name: 'Sort' })).toBeInTheDocument();
+  });
+
+  it('gives each tab its own list: the scroll of one never moves to the other', async () => {
+    const { user } = setup();
+    await screen.findByText('Top one');
+    const popular = screen.getByTestId('preset-list');
+
+    await user.click(screen.getByRole('tab', { name: 'All' }));
+    await screen.findByText('All one');
+    expect(screen.getByTestId('preset-list')).not.toBe(popular);
   });
 
   it('searches all presets after typing stops', async () => {
@@ -168,9 +199,33 @@ describe('PresetBrowser', () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Already reported'));
   });
 
-  it('closes with Done', async () => {
+  it('lights the preset playing on the dark screen', async () => {
+    const { user, presets } = setup();
+    await waitFor(() => expect(presets[0].$current.value?.id).toBe('t1'));
+    expect(
+      getComputedStyle(screen.getByTestId('preset-list').parentElement as HTMLElement).backgroundColor
+    ).toBe(cssColor(theme.colors.primaryDark));
+    expect(nameColor('Top one')).toBe(cssColor(theme.colors.secondAccent));
+    expect(nameColor('Top two')).toBe(cssColor(theme.colors.white));
+
+    await user.click(screen.getByText('Top two'));
+    await waitFor(() => expect(nameColor('Top two')).toBe(cssColor(theme.colors.secondAccent)));
+    expect(nameColor('Top one')).toBe(cssColor(theme.colors.white));
+  });
+
+  it('names the preset playing under the list, its mark while it is changed', async () => {
+    const { presets } = setup();
+    expect(await screen.findByText('Preset t1')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Changed' })).not.toBeInTheDocument();
+
+    act(() => presets[0].$dirty.next(true));
+    expect(screen.getByRole('img', { name: 'Changed' })).toBeInTheDocument();
+  });
+
+  it('closes with Done and the close key', async () => {
     const { user, onClose } = setup();
     await user.click(screen.getByRole('button', { name: 'Done' }));
-    expect(onClose).toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

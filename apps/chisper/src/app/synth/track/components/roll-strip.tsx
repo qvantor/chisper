@@ -25,6 +25,7 @@ import {
   theme,
 } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { Spacer } from '../../../common/components';
 import { useTrack } from '../modules/track';
 import { GRID_STEPS, gridIndex } from '../track-edit';
 import { PositionDisplay } from './play-position';
@@ -71,11 +72,6 @@ const Group = styled.div`
     background: transparent;
     border-radius: 0;
   }
-`;
-
-// the view on the right end
-const Spacer = styled.div`
-  flex: 1 1 0;
 `;
 
 // a value of the strip, as tall as it

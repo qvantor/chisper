@@ -28,9 +28,12 @@ const setup = async ({ running = true } = {}) => {
   const clearLimiter = jest.spyOn(masterLimiter, 'clear');
   const [osc1, osc2] = [modules.osc1[0], modules.osc2[0]];
   // the tables of both oscillators in the store (createSynth loads none: a loader that never resolves)
-  [osc1, osc2].forEach(({ $waveTableLoading }) => $waveTableLoading.next(false));
+  [osc1, osc2].forEach(({ $waveTableLoading, $tableProgress }) => {
+    $waveTableLoading.next(false);
+    $tableProgress.next(null);
+  });
   wavetables.$tables.next({ [osc1.id]: 'stored', [osc2.id]: 'stored' });
-  const [, { switchSound }] = initModel(
+  const [{ $progress }, { switchSound }] = initModel(
     soundSwitch({
       synthCore: modules.synthCore,
       synth: modules.synth,
@@ -56,6 +59,7 @@ const setup = async ({ running = true } = {}) => {
   const opened = () => last('setValueAtTime') > last('linearRampToValueAtTime');
   return {
     switchSound,
+    $progress,
     onPress,
     voices,
     end,
@@ -316,5 +320,106 @@ describe('soundSwitch', () => {
     stopModels();
     render(1.1);
     expect(apply).not.toHaveBeenCalled();
+  });
+
+  describe('its progress', () => {
+    it('is 0 until the next sound is applied, then how far the tables of the oscillators on are loaded', async () => {
+      const { switchSound, $progress, osc1, osc2, render } = await setup();
+      expect($progress.value).toBeNull();
+      expect(osc2.$active.value).toBe(false);
+      switchSound(() => {
+        osc1.$tableProgress.next(0);
+        osc2.$tableProgress.next(0);
+      });
+      expect($progress.value).toBe(0);
+      render(1.01);
+      expect($progress.value).toBe(0);
+
+      render(1.02);
+      expect($progress.value).toBe(0);
+      osc1.$tableProgress.next(0.45);
+      expect($progress.value).toBe(0.45);
+      // (off: not waited for)
+      osc2.$tableProgress.next(0.9);
+      expect($progress.value).toBe(0.45);
+      osc2.$tableProgress.next(null);
+      osc1.$tableProgress.next(0.95);
+      expect($progress.value).toBe(0.95);
+      osc1.$tableProgress.next(null);
+      expect($progress.value).toBeNull();
+      // over: a later load is no switch
+      osc1.$tableProgress.next(0.5);
+      expect($progress.value).toBeNull();
+    });
+
+    it('takes the mean of every source on, a played one counts whole', async () => {
+      const { switchSound, $progress, osc1, osc2, noise, render } = await setup();
+      const [model] = noise;
+      switchSound(() => {
+        osc2.$active.next(true);
+        model.$active.next(true);
+        osc1.$tableProgress.next(0.3);
+        model.$sampleProgress.next(0.6);
+      });
+      render(1.02);
+      expect($progress.value).toBeCloseTo((0.3 + 1 + 0.6) / 3);
+      osc1.$tableProgress.next(null);
+      expect($progress.value).toBeCloseTo((1 + 1 + 0.6) / 3);
+      model.$sampleProgress.next(null);
+      expect($progress.value).toBeNull();
+    });
+
+    it('ends at once with a sound that loads nothing', async () => {
+      const { switchSound, $progress, render } = await setup();
+      switchSound(jest.fn());
+      render(1.02);
+      expect($progress.value).toBeNull();
+    });
+
+    it('goes on after the output opened at MAX_SILENCE, while a table still loads', async () => {
+      const { switchSound, $progress, osc1, render, opened } = await setup();
+      switchSound(() => {
+        osc1.$waveTableLoading.next(true);
+        osc1.$tableProgress.next(0.2);
+      });
+      render(1.02);
+      render(3, 2000);
+      expect(opened()).toBe(true);
+      expect($progress.value).toBe(0.2);
+      osc1.$waveTableLoading.next(false);
+      osc1.$tableProgress.next(null);
+      expect($progress.value).toBeNull();
+    });
+
+    it('starts again with the next switch, the loads of the sound before are left', async () => {
+      const { switchSound, $progress, osc1, osc2, render } = await setup();
+      switchSound(() => osc1.$tableProgress.next(0.5));
+      render(1.02);
+      expect($progress.value).toBe(0.5);
+
+      // while silent: applied at once
+      switchSound(() => {
+        osc1.$tableProgress.next(null);
+        osc2.$active.next(true);
+        osc2.$tableProgress.next(0.1);
+      });
+      expect($progress.value).toBeCloseTo((1 + 0.1) / 2);
+      render(3, 2000);
+      // after the output opened: 0 again during the fade
+      switchSound(jest.fn());
+      expect($progress.value).toBe(0);
+      osc2.$tableProgress.next(0.8);
+      expect($progress.value).toBe(0);
+    });
+
+    it('follows the loads of a preset that throws', async () => {
+      const { switchSound, $progress, osc1, render } = await setup();
+      switchSound(() => {
+        osc1.$tableProgress.next(0.5);
+        throw new Error('broken preset');
+      });
+      expect(() => render(1.02)).toThrow('broken preset');
+      expect($progress.value).toBe(0.5);
+    });
   });
 });

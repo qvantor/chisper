@@ -16,6 +16,7 @@ import { urlSnapshotPlugin } from '../../../app';
 import { abortable } from '../../../common/services';
 import { loadNoiseSample, LoadNoiseSample, NoiseSample, wavetableId } from '../../services';
 import type { VoiceNoiseKnobs, VoiceNoiseOptions } from '../wavetable/voice-options';
+import { tableLoads } from './load-share';
 import { SynthCoreModule } from './synth-core';
 
 interface Dependencies {
@@ -75,25 +76,24 @@ export const noise = ({
       level: [0, 1],
     };
     const $active = new PrimitiveBS<boolean>(NOISE_DEFAULTS.a);
-    // the cascade path of its sample: its folder (a category), its key in the bucket
+    // the path of its sample in its select: its folder (a category), its key in the bucket
     const $samplePath = new ArrayBS<(string | number)[]>(NOISE_DEFAULTS.p);
     const $noise = new ObjectBS<NoiseKnobs>(KNOB_DEFAULTS);
     // the sample loaded (the overview draws it), loading
     const $sample = new BehaviorSubject<NoiseSample | null>(null);
-    const $sampleLoading = new PrimitiveBS<boolean>(false);
-    // where its sample is in the wavetable oscillator (null: not sent yet); refused or failed: the version before
-    // plays (NoiseStatus shows why, Retry sends it again)
-    const $sampleState = wavetables.$tables.pipe(
-      map((tables) => tables[id] ?? null),
-      distinctUntilChanged()
-    );
+    // its sample loading, how far (load-share.ts), where it is in the wavetable oscillator (refused or failed:
+    // NoiseStatus shows why, Retry sends it again), whether its notes play it
+    const sampleLoad = tableLoads(wavetables.$tables, id);
+    const {
+      $loading: $sampleLoading,
+      $progress: $sampleProgress,
+      $state: $sampleState,
+      played: samplePlayed,
+    } = sampleLoad;
     const $params = new BehaviorSubject<VoiceNoiseKnobs>(noiseParams($noise.value));
     // the key of the sample new notes play: the latest one the wavetable oscillator stored (null: none yet; one
     // still on its way, refused or failed: the one before plays). Mono keeps a voice while it is the same
     const $playedSample = new PrimitiveBS<string | null>(null);
-    // its notes play the sample of its path: loaded and in the wavetable oscillator (stored, or refused or failed:
-    // the version before plays)
-    const samplePlayed = () => !$sampleLoading.value && wavetables.$tables.value[id] !== 'sending';
     // the noise of a note (null while off)
     const voiceNoise = (): VoiceNoiseOptions | null => {
       if (!$active.value) return null;
@@ -108,10 +108,12 @@ export const noise = ({
       $noise,
       $sample,
       $sampleLoading,
+      $sampleProgress,
       $sampleState,
       $params,
       $playedSample,
       samplePlayed,
+      sampleLoad,
       voiceNoise,
     };
   })
@@ -133,8 +135,9 @@ export const noise = ({
         )
         .subscribe($params)
     )
-    // the sample of the path while it is on (also from presets), whatever screen is shown
-    .subscriptions(({ id, $active, $samplePath, $sample, $sampleLoading, $sampleState, $playedSample }) => {
+    // the sample of the path while it is on (also from presets), whatever screen is shown, its progress with it
+    .subscriptions((model) => {
+      const { id, $active, $samplePath, $sample, $sampleState, $playedSample, sampleLoad } = model;
       // the sample loaded or loading: cleared on a failure, to load it again
       let sampleId = '';
       // the key of the sample last sent to the wavetable oscillator: new notes play it once it is stored
@@ -148,8 +151,8 @@ export const noise = ({
             // a newer path cancels the pending load, its download aborted
             switchMap((key) => {
               sampleId = key;
-              $sampleLoading.next(true);
-              return abortable((signal) => load(key, signal)).pipe(
+              sampleLoad.start();
+              return abortable((signal) => load(key, signal, sampleLoad.report(signal))).pipe(
                 map((sample) => ({ key, sample })),
                 retry({ count: 2, delay: 1000 }),
                 catchError((error) => {
@@ -167,9 +170,10 @@ export const noise = ({
               wavetables.setSample(id, loaded.sample.channels, loaded.sample.sampleRate);
               $sample.next(loaded.sample);
             }
-            $sampleLoading.next(false);
+            sampleLoad.end(!!loaded);
           }),
         $sampleState.pipe(filter((state) => state === 'stored')).subscribe(() => $playedSample.next(sent)),
+        sampleLoad.clearOnPlayed(),
       ];
     })
     .plugins(

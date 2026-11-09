@@ -1,3 +1,4 @@
+import { BehaviorSubject, combineLatest, map, Subscription, takeWhile } from 'rxjs';
 import { rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { KILL_FADE } from '../wavetable/voice-options';
 import type { FxModule } from '../../fx/modules/fx';
@@ -35,13 +36,16 @@ const POLL = 10;
 // still held start on it (synth resume). A preset chosen meanwhile replaces one waiting for the fade, after it is
 // applied at once (the synth is silent) and the wait starts again. A context that doesn't run isn't waited for,
 // a clock that doesn't move MAX_CLOCK_WAIT at most at either stage. A preset that throws doesn't keep the synth
-// silent: its error goes on, the sound before is forgotten all the same and the output opens on what it set
+// silent: its error goes on, the sound before is forgotten all the same and the output opens on what it set.
+// `$progress` shows how far the next sound is (0..1, null: none switching): 0 until it is applied, then the mean of
+// the progress of the tables of the oscillators on and of the sample of the noise on (load-share.ts; one played
+// counts whole), null once all of them are played, also after the output opened at MAX_SILENCE
 const createSoundSwitch = ({
   synthCore: [{ audioCtx, masterLimiter, wavetables }, { mute, unmute }],
   synth: [{ voicing }, { pause, resume }],
   fx: [, { clear }],
   oscillator,
-  noise: [{ $active: $noise, samplePlayed }],
+  noise: [{ $active: $noise, samplePlayed, $sampleProgress }],
 }: Deps) => {
   // set while it switches (the poll of its stage)
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -50,6 +54,26 @@ const createSoundSwitch = ({
   // the seconds of the context the stage waits for, and its start (performance.now)
   let until = 0;
   let since = 0;
+  const $progress = new BehaviorSubject<number | null>(null);
+  // the loads of the sound applied, followed until they are all played
+  let loads: Subscription | undefined;
+  const sources = combineLatest([
+    ...oscillator.map(([{ $active, $tableProgress }]) => combineLatest([$active, $tableProgress])),
+    combineLatest([$noise, $sampleProgress]),
+  ]);
+  const followLoads = () => {
+    loads?.unsubscribe();
+    loads = sources
+      .pipe(
+        map((states) => {
+          const on = states.filter(([active]) => active).map(([, progress]) => progress);
+          if (on.every((progress) => progress === null)) return null;
+          return on.reduce<number>((sum, progress) => sum + (progress ?? 1), 0) / on.length;
+        }),
+        takeWhile((progress) => progress !== null, true)
+      )
+      .subscribe((progress) => $progress.next(progress));
+  };
 
   const wait = (seconds: number) => {
     until = audioCtx.currentTime + seconds;
@@ -78,6 +102,7 @@ const createSoundSwitch = ({
       clear();
       masterLimiter.clear();
       wait(SWITCH_LEAD);
+      followLoads();
     }
   };
 
@@ -96,7 +121,10 @@ const createSoundSwitch = ({
   };
 
   return {
+    $progress,
     switchSound: (next: () => void) => {
+      loads?.unsubscribe();
+      $progress.next(0);
       if (pending) pending = next;
       else if (timer !== undefined) apply(next);
       else {
@@ -109,6 +137,7 @@ const createSoundSwitch = ({
     },
     destroy: () => {
       if (timer !== undefined) clearTimeout(timer);
+      loads?.unsubscribe();
     },
   };
 };

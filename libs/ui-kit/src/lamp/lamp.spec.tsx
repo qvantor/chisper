@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { theme } from '../common/constants';
 import { cssColor } from '../common/test-utils';
-import { Lamp } from './index';
+import { Lamp, LampLight } from './index';
 
 describe('Lamp', () => {
   it('shows the state through aria-pressed and the on class', () => {
@@ -61,5 +61,25 @@ describe('Lamp', () => {
     expect(borderColor('Green')).toBe(cssColor(theme.colors.accent));
     // off: the glass is dark, the color shows only when lit
     expect(borderColor('Off')).toBe(cssColor(theme.colors.primaryDarkMediumContrast));
+  });
+});
+
+describe('LampLight', () => {
+  it('is the glass alone: no key, hidden from screen readers, off', () => {
+    const { container } = render(<LampLight />);
+    const light = container.firstElementChild as HTMLElement;
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(light.tagName).toBe('SPAN');
+    expect(light.getAttribute('aria-hidden')).toBe('true');
+    expect(light.classList.contains('on')).toBe(false);
+  });
+
+  it('gives its element to a ref (a flash switches its class)', () => {
+    const ref = React.createRef<HTMLSpanElement>();
+    render(<LampLight ref={ref} color={theme.colors.accent} />);
+    ref.current?.classList.add('on');
+    expect(window.getComputedStyle(ref.current as HTMLElement).borderColor).toBe(
+      cssColor(theme.colors.accent)
+    );
   });
 });

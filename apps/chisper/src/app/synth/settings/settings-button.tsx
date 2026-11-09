@@ -1,11 +1,20 @@
-import { MdSettings } from 'react-icons/md';
-import { styled } from 'styled-components';
-import { Label, Select, PanelButton, theme } from '@chisper/ui-kit';
 import { useEffect, useState } from 'react';
-import { Popover } from 'antd';
+import { MdSettings } from 'react-icons/md';
+import cls from 'classnames';
+import { styled } from 'styled-components';
+import { PanelButton, text10, text12, textBold12, theme } from '@chisper/ui-kit';
 import toast from 'react-hot-toast';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
-import { ToastActions, ToastBody, ToastButton } from '../../common/components';
+import {
+  Choice,
+  ChoiceKeys,
+  GroupLabel,
+  Key,
+  PopoverGroup,
+  PopoverNote,
+  SectionPopover,
+  ToastAsk,
+} from '../../common/components';
 import { useSynthCore } from '../common/modules';
 import { canCountDropouts } from '../common/latency/dropouts';
 import {
@@ -20,23 +29,22 @@ import {
   switchToNormalLatency,
 } from '../common/latency/latency';
 
-const Content = styled.div`
-  width: 300px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+const { colors } = theme;
+
+// two lines in a key: Auto over the latency it picked, both over the line of the key chosen
+const LatencyKeys = styled.div`
+  & [role='radio'] {
+    height: 36px;
+    padding-bottom: 5px;
+  }
 `;
 
-// a label sits closer to its select than to the field above
-const Field = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const Note = styled.div`
-  font-size: 12px;
-  color: ${theme.colors.primaryHighContrast};
+const Picked = styled.span`
+  ${text10};
+  margin-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  opacity: 0.75;
 `;
 
 const NoteButton = styled.button`
@@ -45,9 +53,29 @@ const NoteButton = styled.button`
   border: none;
   background: none;
   font: inherit;
-  color: ${theme.colors.secondAccent};
+  color: ${colors.secondAccent};
   text-decoration: underline;
   cursor: pointer;
+`;
+
+// a count of the section: its name on the left, the number on the right (red once there is one)
+const Count = styled.div`
+  ${text12};
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: ${colors.primaryHighContrast};
+`;
+
+const CountValue = styled.span`
+  ${textBold12};
+  margin-left: auto;
+  color: ${colors.primaryDarkMediumContrast};
+  font-variant-numeric: tabular-nums;
+
+  &.some {
+    color: ${colors.red};
+  }
 `;
 
 // a square key of the icon alone, as ◀ ▶ of the presets above it
@@ -61,11 +89,21 @@ const DROPOUT_TOAST = 'latency-dropouts';
 
 const LATENCY_NAMES: Record<Latency, string> = { low: 'Low', normal: 'Normal' };
 
-// Auto chosen shows the latency it picked: Auto (Low)
-const latencyOptions = (mode: LatencyMode, auto: Latency): { name: string; value: LatencyMode }[] => [
-  { name: mode === 'auto' ? `Auto (${LATENCY_NAMES[auto]})` : 'Auto', value: 'auto' },
-  { name: LATENCY_NAMES.low, value: 'low' },
-  { name: LATENCY_NAMES.normal, value: 'normal' },
+// Auto chosen shows the latency it picked under it: Auto (Low)
+const latencyOptions = (mode: LatencyMode, auto: Latency): Choice<LatencyMode>[] => [
+  mode === 'auto'
+    ? {
+        value: 'auto',
+        label: (
+          <>
+            Auto<Picked>{LATENCY_NAMES[auto]}</Picked>
+          </>
+        ),
+        name: `Auto (${LATENCY_NAMES[auto]})`,
+      }
+    : { value: 'auto', label: 'Auto' },
+  { value: 'low', label: LATENCY_NAMES.low },
+  { value: 'normal', label: LATENCY_NAMES.normal },
 ];
 
 export const SettingsButton = () => {
@@ -87,15 +125,10 @@ export const SettingsButton = () => {
       if (switchNow) switchToNormalLatency();
     };
     toast(
-      <ToastBody>
-        The sound crackles. Switch to Normal for a steady sound?
-        <ToastActions>
-          <ToastButton onClick={() => answer(true)}>Switch to Normal</ToastButton>
-          <ToastButton className='secondary' onClick={() => answer(false)}>
-            Not now
-          </ToastButton>
-        </ToastActions>
-      </ToastBody>,
+      <ToastAsk text='The sound crackles. Switch to Normal for a steady sound?'>
+        <Key onClick={() => answer(false)}>Not now</Key>
+        <Key onClick={() => answer(true)}>Switch to Normal</Key>
+      </ToastAsk>,
       { id: DROPOUT_TOAST, duration: Infinity }
     );
   }, [warning, dismissDropoutWarning]);
@@ -107,11 +140,11 @@ export const SettingsButton = () => {
 
   // where the browser counts no dropouts nothing warns of them and auto stays normal (latency.ts)
   const counts = canCountDropouts();
-  // what auto has learnt (after dropouts in this session it differs from the latency playing); Auto chosen in
-  // the select again would change nothing, so a key forgets it
+  // what auto has learnt (after dropouts in this session it differs from the latency playing); its key, the one
+  // chosen, would change nothing, so a key of the note forgets it
   const auto = autoLatency();
   const learntNormal = mode === 'auto' && counts && auto === 'normal';
-  // short, in the words of what is heard: the response of the keys and a crackle; the select names the latency
+  // short, in the words of what is heard: the response of the keys and a crackle; the keys name the latency
   const note = () => {
     if (mode === 'low')
       return counts
@@ -123,37 +156,51 @@ export const SettingsButton = () => {
   };
 
   const latencyField = () => {
-    if (!canChooseLatency()) return <Note>This browser sets the latency itself.</Note>;
-    if (!keeps) return <Note>Normal: site data is blocked, a choice would not be kept.</Note>;
+    if (!canChooseLatency()) return <PopoverNote>This browser sets the latency itself.</PopoverNote>;
+    if (!keeps) return <PopoverNote>Normal: site data is blocked, a choice would not be kept.</PopoverNote>;
     return (
       <>
-        {/* no arrows: a step through Low on the way to Normal would be a reload */}
-        <Select value={mode} options={latencyOptions(mode, auto)} onChange={changeMode} arrows={false} />
-        <Note>
+        {/* a key a choice: a step through Low on the way to Normal would be a reload */}
+        <LatencyKeys>
+          <ChoiceKeys
+            aria-label='Latency'
+            value={mode}
+            options={latencyOptions(mode, auto)}
+            onChange={changeMode}
+          />
+        </LatencyKeys>
+        <PopoverNote>
           {note()}
           {learntNormal && <NoteButton onClick={() => changeMode('auto')}>Try low again</NoteButton>}
-        </Note>
-        {dropouts !== null && <Note>Dropouts since the page opened: {dropouts}</Note>}
+        </PopoverNote>
       </>
     );
   };
 
   return (
-    <Popover
-      trigger='click'
-      placement='bottom'
+    <SectionPopover
+      title='Settings'
+      width={300}
       content={
-        <Content>
-          <Field>
-            <Label>Latency</Label>
+        <>
+          <PopoverGroup>
+            <GroupLabel>Latency</GroupLabel>
             {latencyField()}
-          </Field>
-        </Content>
+          </PopoverGroup>
+          {dropouts !== null && (
+            <PopoverGroup>
+              <Count>
+                Dropouts since the page opened
+                <CountValue className={cls({ some: dropouts > 0 })}>{dropouts}</CountValue>
+              </Count>
+            </PopoverGroup>
+          )}
+        </>
       }
       open={open}
       onOpenChange={setOpen}
     >
       <GearButton icon={<MdSettings />} active={open} aria-label='Settings' />
-    </Popover>
+    </SectionPopover>
   );
 };

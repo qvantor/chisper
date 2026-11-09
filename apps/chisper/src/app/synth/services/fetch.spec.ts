@@ -1,5 +1,13 @@
 import { jsonResponse as response } from '../../../test-utils/query-client';
-import { bucketLoader, fetchList, fetchOk, FIRST_LIMITS, RATE_WINDOW_MS, SECOND_LIMITS } from './fetch';
+import {
+  bucketLoader,
+  fetchList,
+  fetchOk,
+  FIRST_LIMITS,
+  RATE_WINDOW_MS,
+  SECOND_LIMITS,
+  UNKNOWN_SHARE_MAX,
+} from './fetch';
 
 const fetchMock = jest.fn();
 
@@ -55,12 +63,19 @@ describe('bucketLoader', () => {
       arrayBuffer: () => Promise.resolve(bytes(text).buffer),
     }) as Response;
   // an answer whose body comes in these chunks, each when its promise resolves
-  const streamed = (...chunks: Promise<string>[]) => {
+  const streamed = (...chunks: Promise<string>[]) => withHeaders({}, ...chunks);
+  // the same with these headers
+  const withHeaders = (headers: Record<string, string>, ...chunks: Promise<string>[]) => {
     const read = jest.fn(async () => {
       const chunk = chunks.shift();
       return chunk ? { done: false, value: bytes(await chunk) } : { done: true, value: undefined };
     });
-    return { ok: true, status: 200, body: { getReader: () => ({ read }) } } as unknown as Response;
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers(headers),
+      body: { getReader: () => ({ read }) },
+    } as unknown as Response;
   };
   const never = () => new Promise<never>(() => undefined);
   const after = (ms: number, text: string) =>
@@ -378,5 +393,58 @@ describe('bucketLoader', () => {
     // the response of the status not read: let go
     expect(signal(0).aborted).toBe(true);
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  describe('its progress', () => {
+    const chunks = (...texts: string[]) => texts.map((text) => Promise.resolve(text));
+
+    it('reports the share of the Content-Length: 0 at the response, then after every chunk', async () => {
+      const load = bucketLoader(ORIGIN, PROXY);
+      const progress = jest.fn();
+      fetchMock.mockResolvedValueOnce(withHeaders({ 'content-length': '4' }, ...chunks('f', 'il', 'e')));
+
+      await expect(load('one.wav', parse, undefined, progress)).resolves.toBe('file');
+      expect(progress.mock.calls.map(([share]) => share)).toEqual([0, 0.25, 0.75, 1]);
+    });
+
+    it.each([
+      ['without a Content-Length', {}],
+      [
+        'with an encoded body (its length counts it encoded)',
+        { 'content-length': '2', 'content-encoding': 'br' },
+      ],
+    ])('nears a share under the whole %s', async (_, headers) => {
+      const load = bucketLoader(ORIGIN, PROXY);
+      const progress = jest.fn();
+      const big = 'x'.repeat(4 * 1024 * 1024);
+      fetchMock.mockResolvedValueOnce(withHeaders(headers, ...chunks('fi', 'le', big)));
+
+      await load('one.wav', () => 'file', undefined, progress);
+      const shares: number[] = progress.mock.calls.map(([share]) => share);
+      expect(shares[0]).toBe(0);
+      // growing with the bytes, never the whole
+      shares.slice(1).forEach((share, i) => expect(share).toBeGreaterThan(shares[i]));
+      expect(shares[shares.length - 1]).toBeLessThanOrEqual(UNKNOWN_SHARE_MAX);
+      expect(shares[shares.length - 1]).toBeGreaterThan(0.8 * UNKNOWN_SHARE_MAX);
+    });
+
+    it('reports 0 for a response without a body, as it is read at once', async () => {
+      const load = bucketLoader(ORIGIN, PROXY);
+      const progress = jest.fn();
+      fetchMock.mockResolvedValueOnce(file(200));
+
+      await load('one.wav', parse, undefined, progress);
+      expect(progress.mock.calls).toEqual([[0]]);
+    });
+
+    it('starts from 0 again on the other route', async () => {
+      const load = bucketLoader(ORIGIN, PROXY);
+      const progress = jest.fn();
+      fetchMock.mockResolvedValueOnce(withHeaders({ 'content-length': '6' }, ...chunks('<h', 'tml>')));
+      fetchMock.mockResolvedValueOnce(withHeaders({ 'content-length': '4' }, ...chunks('fi', 'le')));
+
+      await expect(load('one.wav', parse, undefined, progress)).resolves.toBe('file');
+      expect(progress.mock.calls.map(([share]) => share)).toEqual([0, 1 / 3, 1, 0, 0.5, 1]);
+    });
   });
 });

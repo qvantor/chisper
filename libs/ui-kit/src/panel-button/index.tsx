@@ -13,13 +13,13 @@ type Props = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 // pressed into the panel, a lighter version of the tape key's sunken shadow
-const sunken = `
+export const panelKeySunken = `
   inset 0 4px 6px -3px rgb(0 0 0 / 20%),
   inset 0 1px 2px rgb(0 0 0 / 12%)
 `;
 
 // fills its whole cell, so a row of them reads as one strip of keys
-const key = css`
+export const panelKeyStyle = css`
   flex: 1 1 0;
   min-width: 0;
   position: relative;
@@ -56,7 +56,7 @@ const key = css`
   &:active,
   &.active {
     background: ${theme.colors.primary};
-    box-shadow: ${sunken};
+    box-shadow: ${panelKeySunken};
   }
 
   &.active {
@@ -72,11 +72,11 @@ const key = css`
 `;
 
 const Root = styled.button`
-  ${key}
+  ${panelKeyStyle}
 `;
 
 const LinkRoot = styled.a`
-  ${key}
+  ${panelKeyStyle}
   text-decoration: none;
 `;
 
@@ -93,13 +93,18 @@ const Label = styled.span`
   }
 `;
 
-const Indicator = styled.span`
-  flex: 0 0 auto;
+// a small green dot that glows: on (connected, a clock leading)
+export const indicatorDot = css`
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: ${theme.colors.accent};
   box-shadow: 0 0 4px 1px ${hexToRgba(theme.colors.accent, 0.6)};
+`;
+
+const Indicator = styled.span`
+  flex: 0 0 auto;
+  ${indicatorDot}
 `;
 
 // true when the label doesn't fit next to the icon (phones); back to false once the button is wide enough
