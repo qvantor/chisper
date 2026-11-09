@@ -5,7 +5,7 @@ export const en = {
   meta: {
     title: 'Chisper: Free Online Wavetable Synth in Your Browser',
     description:
-      'Free online wavetable synth: two oscillators with 8-voice unison, a filter, envelopes and LFOs on any knob, effects, MIDI and shareable presets. Nothing to install.',
+      'Free online wavetable synth: two oscillators with 8-voice unison, noise, a filter, envelopes and LFOs on any knob, effects, a piano roll, MIDI and shareable presets.',
     ogImageAlt: 'Chisper, a free wavetable synth',
   },
   // the key into the synth: the header, the first section, the last one, the footer
@@ -16,7 +16,7 @@ export const en = {
     // ./index.ts)
     lead: 'Chisper is a **free wavetable synthesizer** that runs in the browser on a computer, a Chromebook or a phone: **no download, no account**.',
     details:
-      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, delay and reverb. Plug in a MIDI keyboard or play the computer keyboard.',
+      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a **noise oscillator**, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, delay and reverb. Plug in a MIDI keyboard or play the computer keyboard, and record what you play in the **piano roll**.',
     listen: 'Hear it',
     screenshotAlt:
       'The Chisper synth playing chords: the waves of both oscillators, the dots of the envelopes and the LFO, the filter and the spectrum moving',
@@ -71,6 +71,26 @@ export const en = {
         'Get the wide, thick supersaw of trance and EDM leads. Up to 8 voices per oscillator: Detune spreads them in pitch, Blend sets the balance of the centre voices and the side ones (75% by default), and the side voices alternate left and right for a wide stereo sound.',
       ],
     },
+    // the noise oscillator (Noise.astro): what it is (a lead, its **sounds** standing out) and its samples, what
+    // noise does in a sound (a list), the text of its drawing
+    noise: {
+      h2: 'Noise oscillator: white, pink and brown noise, 90 samples',
+      text: [
+        "Add what a pitched wave can't: **the hiss of a riser**, **the snap of a drum hit**, **the breath of a pad**. The noise oscillator plays in every voice beside the two wavetable oscillators, through the same filter and ENV 1.",
+        'Pick one of 90 samples, from white, pink and brown noise to hats, claps, bells, vinyl crackle, tape hiss and wind. Play it as a Loop or a One-shot; with Pitch Track it follows the keys.',
+      ],
+      uses: {
+        h3: 'What you can make with noise',
+        items: [
+          { term: 'Risers and sweeps', text: 'white noise that swells and opens up into the drop.' },
+          { term: 'Drum hits', text: 'the snap of a hat or a clap gives a bass or a pluck its punch.' },
+          { term: 'Lo-fi texture', text: 'vinyl crackle and tape hiss for the warmth of lo-fi hip hop.' },
+          { term: 'Air', text: 'a touch of pink noise makes pads and leads breathe.' },
+        ],
+      },
+      figureAlt:
+        'The colors of noise: the spectra of white noise (flat), pink (−3 dB per octave), brown (−6 dB per octave), blue (+3 dB) and violet noise (+6 dB) from 20 Hz to 20 kHz',
+    },
     filter: {
       h2: 'A filter in every voice: 8 types',
       text: [
@@ -95,6 +115,17 @@ export const en = {
       text: [
         'Play it like an instrument: a MIDI keyboard (velocity and pitch bend), the computer keyboard (with an octave shift) or the on-screen piano and its pitch wheel, on a touch screen too. Up to 12 notes in Poly, or mono, with legato and portamento.',
       ],
+    },
+    // the piano roll and its clip (Track.astro): what it is (a lead, the ways notes come in standing out), what it
+    // does with the notes and where they go, the text of its drawing
+    track: {
+      h2: 'Online piano roll: record, edit and import MIDI',
+      text: [
+        'Turn what you play into a loop: **record** from a MIDI keyboard, the computer keyboard or the on-screen piano, **draw notes** in the piano roll or **drop in a MIDI file**. The clip, a loop of up to 32 bars, plays through the synth at its tempo.',
+        'Quantize to a grid of 1/4 to 1/64 with triplets, shape the velocity, copy, duplicate and undo. Export the clip as a .mid for your DAW, or save it without signing up and share it as a link; a preset can open with its clip.',
+      ],
+      figureAlt:
+        'The piano roll of Chisper: a four-bar loop of chords and a melody over two octaves of keys, the velocity of each note under it, the playhead in the third bar',
     },
     editor: {
       h2: 'Wavetable editor: draw or import tables',
@@ -147,14 +178,16 @@ export const en = {
       'Tables of real instruments: a harp and a nylon guitar an octave above, each with its own decay.',
     'noise-riser':
       '8 + 4 unison voices for EDM build-ups; ENV 3 spreads the detune as the riser opens, the bend lifts it two semitones at the end.',
+    'wind-storm':
+      'Only the noise oscillator: white noise in four notes swelling through a resonant lowpass; a drawn LFO shape blows gusts into the cutoff and the noise Gain.',
     'acid-bass':
-      'A 303 saw table for acid house and techno; ENV 2 snaps the lowpass open on every note, slides between overlapping notes, a ping-pong delay.',
+      'A mono acid bass: a snappy one-shot table and a detuned analog saw an octave up; ENV 1 snaps a resonant lowpass open on every note, LFO 1 wobbles it, soft distortion.',
     helicopter: 'A custom LFO shape chops the volume; ENV 2 speeds the LFO up like a rotor spinning up.',
     'warehouse-lead':
       'A techno lead: LFO 1 moves the wave position, a fast LFO on Fine adds grit, ENV 3 closes the filter; distortion, delay and reverb.',
     'sonar-ping': 'Three pings answered by a long delay and reverb; ENV 2 moves the band of the echoes.',
     'zesty-drive-bass':
-      'Distortion and a ping-pong delay on a mono bass; overlapping notes glide without a new attack.',
+      'A mono bass through a resonant lowpass nearly closed at 70 Hz: ENV 2 snaps it open almost four octaves on every note, then it settles; soft distortion and a ping-pong delay after it, overlapping notes glide.',
     theremin: 'Mono legato: every note glides into the next (150 ms portamento), one breath in the middle.',
     'sub-bass':
       'An 808-style sub for trap and hip hop, gliding between overlapping notes; best on headphones.',
@@ -184,12 +217,24 @@ export const en = {
         a: 'Yes. Chisper loads any WAV wavetable of 2048-sample frames, from other wavetable synths or wavetable packs (its clm marker is read). You can also make a table from a short audio file or draw one by hand.',
       },
       {
+        q: 'Does Chisper have a noise oscillator?',
+        a: 'Yes. Next to its two wavetable oscillators, every voice of Chisper has a noise oscillator: 90 samples, from white, pink and brown noise to hats, claps, vinyl crackle and tape hiss, looped or played once, through the filter of the voice.',
+      },
+      {
+        q: 'Does Chisper have a piano roll?',
+        a: 'Yes. Chisper has a piano roll for a looped clip of up to 32 bars and 2048 notes. Record from a MIDI keyboard, the computer keyboard or the on-screen piano, draw and edit notes and their velocity, quantize them to the grid and share the clip as a link. On a phone you add a note with a tap.',
+      },
+      {
+        q: 'Can I import and export MIDI files?',
+        a: 'Yes. Drop a .mid file (a Standard MIDI File of format 0 or 1) on the piano roll and choose its parts: its tempo and name come with it. Export the clip as a .mid to finish the track in any DAW, such as Ableton Live, FL Studio or Logic Pro.',
+      },
+      {
         q: 'Can I use the sounds in my tracks?',
         a: 'Yes. The sounds you play on Chisper are yours to use in your tracks, commercial releases included.',
       },
       {
         q: 'How do I share a sound?',
-        a: 'Save it as a preset in Chisper and copy its link: whoever opens the link hears the same sound.',
+        a: "Save it as a preset and copy its link: whoever opens it hears the same sound, every knob, modulation and effect as you set them. To share a melody too, press Share in the piano roll: the link opens the clip with its notes and tempo; if you chose or saved a preset and haven't changed it since, the link opens that preset too (the random preset Chisper opens at start doesn't count). Check Default clip as you save a preset, and the preset opens with its clip.",
       },
       {
         q: 'Is the source code available?',

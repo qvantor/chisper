@@ -6,7 +6,7 @@ export const de: Messages = {
   meta: {
     title: 'Chisper: Wavetable-Synthesizer online & kostenlos',
     description:
-      'Kostenloser Online-Synthesizer im Browser: zwei Wavetable-Oszillatoren mit 8-stimmigem Unisono, Filter, Hüllkurven und LFOs auf jedem Regler, Effekte und MIDI. Ohne Installation.',
+      'Kostenloser Online-Synthesizer im Browser: zwei Wavetable-Oszillatoren mit 8-stimmigem Unisono, Rauschen, Hüllkurven, LFOs, Effekte, Piano Roll und MIDI. Ohne Installation.',
     ogImageAlt: 'Chisper, ein kostenloser Wavetable-Synthesizer',
   },
   openSynth: 'Synthesizer öffnen',
@@ -14,7 +14,7 @@ export const de: Messages = {
     h1: 'Chisper: kostenloser Wavetable-Synthesizer',
     lead: 'Chisper ist ein **kostenloser Wavetable-Synthesizer**, der im Browser läuft, auf dem Computer, einem Chromebook oder dem Smartphone: **ohne Download und ohne Konto**.',
     details:
-      '**Zwei Wavetable-Oszillatoren** mit **Supersaw-Unisono** aus bis zu 8 Stimmen, ein eigenes Filter pro Stimme, drei Hüllkurven und vier LFOs, die du auf **jeden Regler** ziehst, Distortion, Delay und Reverb. Schließ ein MIDI-Keyboard an oder spiel auf der Computertastatur.',
+      '**Zwei Wavetable-Oszillatoren** mit **Supersaw-Unisono** aus bis zu 8 Stimmen, ein **Rausch-Oszillator**, ein eigenes Filter pro Stimme, drei Hüllkurven und vier LFOs, die du auf **jeden Regler** ziehst, Distortion, Delay und Reverb. Schließ ein MIDI-Keyboard an oder spiel auf der Computertastatur und nimm dein Spiel in der **Piano Roll** auf.',
     listen: 'Reinhören',
     screenshotAlt:
       'Der Synthesizer Chisper spielt Akkorde: Die Wellen beider Oszillatoren, die Punkte der Hüllkurven und des LFO, das Filter und das Spektrum bewegen sich',
@@ -67,6 +67,27 @@ export const de: Messages = {
         'Der breite, dichte Supersaw der Trance- und EDM-Leads. Bis zu 8 Stimmen pro Oszillator: Detune verstimmt sie gegeneinander, Blend regelt das Verhältnis der mittleren zu den äußeren Stimmen (Standard 75 %), und die äußeren wechseln zwischen links und rechts: ein breiter Stereoklang.',
       ],
     },
+    noise: {
+      h2: 'Rausch-Oszillator: weißes, rosa und braunes Rauschen, 90 Samples',
+      text: [
+        'Rauschen bringt, was eine gestimmte Welle nicht kann: **das Zischen eines Risers**, **den Knack eines Drum-Hits**, **den Atem eines Pads**. Der Rausch-Oszillator spielt in jeder Stimme neben den beiden Wavetable-Oszillatoren, durch dasselbe Filter und ENV 1.',
+        'Wähle aus 90 Samples: weißes, rosa und braunes Rauschen, Hi-Hats, Claps, Glocken, Vinyl-Knistern, Bandrauschen und Wind. Spiel es als Loop oder One-shot; mit Pitch Track folgt es den Tasten.',
+      ],
+      uses: {
+        h3: 'Was du mit Rauschen machen kannst',
+        items: [
+          { term: 'Riser und Sweeps', text: 'weißes Rauschen, das anschwillt und sich zum Drop hin öffnet.' },
+          {
+            term: 'Drum-Hits',
+            text: 'der Snap einer Hi-Hat oder eines Claps gibt Bass und Pluck ihren Punch.',
+          },
+          { term: 'Lo-Fi-Textur', text: 'Vinyl-Knistern und Bandrauschen für die Wärme von Lo-Fi-Hip-Hop.' },
+          { term: 'Luft', text: 'ein Hauch rosa Rauschen lässt Pads und Leads atmen.' },
+        ],
+      },
+      figureAlt:
+        'Die Farben des Rauschens: die Spektren von weißem Rauschen (flach), rosa (−3 dB pro Oktave), braunem (−6 dB pro Oktave), blauem (+3 dB) und violettem Rauschen (+6 dB) von 20 Hz bis 20 kHz',
+    },
     filter: {
       h2: 'Ein Filter pro Stimme: 8 Typen',
       text: [
@@ -91,6 +112,15 @@ export const de: Messages = {
       text: [
         'Spiel ihn wie ein Instrument: auf einem MIDI-Keyboard (Anschlagstärke und Pitch Bend), der Computertastatur (mit Oktavumschaltung) oder dem Bildschirmklavier mit seinem Pitch-Rad, auch auf dem Touchscreen. Bis zu 12 Noten in Poly, oder Mono, mit Legato und Portamento.',
       ],
+    },
+    track: {
+      h2: 'Piano Roll online: Loops aufnehmen, Noten bearbeiten, MIDI importieren',
+      text: [
+        'Mach aus deinem Spiel einen Loop: **Nimm auf** mit einem MIDI-Keyboard, der Computertastatur oder dem Bildschirmklavier, **zeichne Noten** in die Piano Roll oder **zieh eine MIDI-Datei** hinein. Der Clip läuft als Loop von bis zu 32 Takten in seinem Tempo durch den Synth.',
+        'Quantisiere auf ein Raster von 1/4 bis 1/64 mit Triolen, forme die Anschlagstärke, kopiere, dupliziere und mach Schritte rückgängig. Exportiere den Clip als .mid für deine DAW, oder speichere ihn ohne Anmeldung und teile ihn als Link; ein Preset kann direkt mit seinem Clip starten.',
+      ],
+      figureAlt:
+        'Die Piano Roll von Chisper: ein Loop von vier Takten aus Akkorden und einer Melodie über zwei Oktaven Tasten, darunter die Anschlagstärke jeder Note, der Abspielkopf im dritten Takt',
     },
     editor: {
       h2: 'Wavetable-Editor: Tabellen zeichnen oder importieren',
@@ -144,8 +174,10 @@ export const de: Messages = {
       'Tabellen echter Instrumente: eine Harfe und eine Nylongitarre eine Oktave höher, jede mit eigenem Decay.',
     'noise-riser':
       '8 + 4 Unisono-Stimmen für EDM-Build-ups; ENV 3 fächert das Detune auf, während sich der Riser öffnet, der Bend hebt ihn am Ende um zwei Halbtöne.',
+    'wind-storm':
+      'Nur der Rausch-Oszillator: weißes Rauschen in vier Noten, die durch einen resonanten Tiefpass anschwellen; eine gezeichnete LFO-Form bläst Böen in Cutoff und Gain des Rauschens.',
     'acid-bass':
-      'Eine 303-Sägezahntabelle für Acid House und Techno; ENV 2 reißt den Lowpass bei jeder Note auf, Slides zwischen überlappenden Noten, ein Ping-Pong-Delay.',
+      'Ein Mono-Acid-Bass: eine knackige One-Shot-Tabelle und ein verstimmter Analog-Sägezahn eine Oktave höher; ENV 1 reißt einen resonanten Lowpass bei jeder Note auf, LFO 1 lässt ihn wabern, weiche Distortion.',
     helicopter:
       'Eine eigene LFO-Form zerhackt die Lautstärke; ENV 2 beschleunigt den LFO wie einen anlaufenden Rotor.',
     'warehouse-lead':
@@ -153,7 +185,7 @@ export const de: Messages = {
     'sonar-ping':
       'Drei Pings, beantwortet von einem langen Delay und Reverb; ENV 2 verschiebt das Band der Echos.',
     'zesty-drive-bass':
-      'Distortion und Ping-Pong-Delay auf einem Mono-Bass; überlappende Noten gleiten ohne neuen Anschlag.',
+      'Ein Mono-Bass durch einen resonanten Tiefpass, fast geschlossen bei 70 Hz: ENV 2 reißt ihn bei jeder Note fast vier Oktaven auf, dann pendelt er sich ein; danach sanfte Distortion und ein Ping-Pong-Delay, überlappende Noten gleiten.',
     theremin:
       'Mono-Legato: Jede Note gleitet in die nächste (150 ms Portamento), in der Mitte eine Atempause.',
     'sub-bass':
@@ -184,12 +216,24 @@ export const de: Messages = {
         a: 'Ja. Chisper lädt jede WAV-Wavetable mit Frames von 2048 Samples, aus anderen Wavetable-Synthesizern oder Wavetable-Packs (ihre clm-Markierung wird gelesen). Eine Tabelle lässt sich auch aus einer kurzen Audiodatei machen oder von Hand zeichnen.',
       },
       {
+        q: 'Hat Chisper einen Rauschgenerator?',
+        a: 'Ja. Neben den beiden Wavetable-Oszillatoren hat jede Stimme von Chisper einen Rausch-Oszillator: 90 Samples, von weißem, rosa und braunem Rauschen bis zu Hi-Hats, Claps, Vinyl-Knistern und Bandrauschen, im Loop oder einmal gespielt, durch das Filter der Stimme.',
+      },
+      {
+        q: 'Hat Chisper eine Piano Roll?',
+        a: 'Ja. Chisper hat eine Piano Roll für einen Clip als Loop von bis zu 32 Takten und 2048 Noten. Nimm mit einem MIDI-Keyboard, der Computertastatur oder dem Bildschirmklavier auf, zeichne und bearbeite Noten und ihre Anschlagstärke, quantisiere sie auf das Raster und teile den Clip als Link. Auf dem Handy setzt du eine Note mit einem Tippen.',
+      },
+      {
+        q: 'Kann ich MIDI-Dateien importieren und exportieren?',
+        a: 'Ja. Zieh eine .mid-Datei (ein Standard MIDI File im Format 0 oder 1) auf die Piano Roll und wähle ihre Spuren: Tempo und Name kommen mit. Exportiere den Clip als .mid, um den Track in jeder DAW fertigzustellen, etwa in Ableton Live, FL Studio oder Logic Pro.',
+      },
+      {
         q: 'Darf ich die Sounds in meinen Tracks verwenden?',
         a: 'Ja. Die Sounds, die du auf Chisper spielst, darfst du in deinen Tracks verwenden, auch in kommerziellen Releases.',
       },
       {
         q: 'Wie teile ich einen Sound?',
-        a: 'Speichere ihn in Chisper als Preset und kopiere den Link: Wer ihn öffnet, hört denselben Sound.',
+        a: 'Speichere ihn als Preset und kopiere den Link: Wer ihn öffnet, hört denselben Sound, mit jedem Regler, jeder Modulation und jedem Effekt so, wie du sie eingestellt hast. Um auch eine Melodie zu teilen, klick in der Piano Roll auf Share: Der Link öffnet den Clip mit seinen Noten und seinem Tempo; hast du ein Preset gewählt oder gespeichert und seitdem nicht verändert, öffnet er auch dieses Preset (das zufällige Preset, mit dem Chisper startet, zählt nicht). Setz beim Speichern eines Presets den Haken bei Default clip, dann öffnet sich das Preset mit seinem Clip.',
       },
       {
         q: 'Ist der Quellcode verfügbar?',

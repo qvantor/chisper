@@ -4,7 +4,7 @@ import type { ImageMetadata } from 'astro';
 import DemoCard from './DemoCard.astro';
 import { FEATURE_COLORS, type Scene } from '../art/scenes';
 import type { Demo } from '../data/demos';
-import type { Messages } from '../i18n';
+import { marks, type Messages } from '../i18n';
 
 interface Props {
   // its wave behind it, its color (the square of its label, the light behind its picture)
@@ -13,6 +13,8 @@ interface Props {
   label: string;
   title: string;
   text: string[];
+  // its first paragraph a lead: larger, its **words** standing out
+  lead?: boolean;
   demos?: Demo[];
   // the part of the synth it is about, beside the text
   image?: ImageMetadata;
@@ -26,12 +28,14 @@ interface Props {
 
 // a feature: its title, a few sentences and its clips under them; its picture beside them, as high as they are:
 // the picture takes no height of its own (size containment), it fits the column the text makes (container units),
-// smaller where it would be higher; a slot under the text (a key)
+// smaller where it would be higher; a slot under the text (a key, a list); in place of the picture, the slot
+// `figure` (a drawing and what goes with it) in a column of its own, in the middle of the height of the text
 const {
   id,
   label,
   title,
   text,
+  lead = false,
   demos = [],
   image,
   imageAlt = '',
@@ -39,7 +43,7 @@ const {
   side = 'right',
   m,
 } = Astro.props;
-const ratio = image ? image.width / image.height : 1;
+const drawing = !image && Astro.slots.has('figure');
 ---
 
 <section
@@ -49,12 +53,14 @@ const ratio = image ? image.width / image.height : 1;
   style={`--tint: ${FEATURE_COLORS[id]}`}
 >
   <canvas class='scene-canvas' data-scene={id} aria-hidden='true'></canvas>
-  <div class:list={['column', 'grid', { alone: !image, flip: side === 'left' }]}>
+  <div class:list={['column', 'grid', { alone: !image && !drawing, flip: side === 'left' }]}>
     <div class:list={['main', { short: demos.length === 0 }]}>
       <span class='label'>{label}</span>
       <h2 id={`${id}-title`}>{title}</h2>
-      {text.map((paragraph) => (
-        <p>{paragraph}</p>
+      {text.map((paragraph, i) => (
+        <p class:list={{ lead: lead && i === 0 }}>
+          {marks(paragraph).map((part) => (part.strong ? <strong>{part.text}</strong> : part.text))}
+        </p>
       ))}
       <slot />
       {demos.length > 0 && (
@@ -68,7 +74,7 @@ const ratio = image ? image.width / image.height : 1;
     {image && (
       <figure
         class:list={['figure', { phone, natural: demos.length === 0 }]}
-        style={`--ratio: ${ratio.toFixed(4)}`}
+        style={`--ratio: ${(image.width / image.height).toFixed(4)}`}
       >
         {phone ? (
           <div class='device'>
@@ -91,6 +97,11 @@ const ratio = image ? image.width / image.height : 1;
         )}
       </figure>
     )}
+    {drawing && (
+      <div class='side'>
+        <slot name='figure' />
+      </div>
+    )}
   </div>
 </section>
 
@@ -109,7 +120,8 @@ const ratio = image ? image.width / image.height : 1;
   }
 
   /* the picture on the left: the text keeps its column, the picture goes before it */
-  .grid.flip .figure {
+  .grid.flip .figure,
+  .grid.flip .side {
     order: -1;
   }
 
@@ -149,6 +161,27 @@ const ratio = image ? image.width / image.height : 1;
     letter-spacing: -0.3px;
   }
 
+  /* the first sentences, larger, their words under a stroke of the section's color (--mark); the rest quieter */
+  .lead {
+    font-size: 20px;
+    line-height: 1.5;
+    letter-spacing: -0.2px;
+    text-wrap: pretty;
+  }
+
+  .lead ~ p {
+    color: var(--text-muted);
+  }
+
+  .lead strong {
+    font-weight: 600;
+    color: #fff;
+    background: var(--mark, color-mix(in srgb, var(--tint) 42%, transparent)) 0 84% / 100% 0.4em no-repeat;
+    border-radius: 2px;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
   .demos {
     display: grid;
     gap: 16px;
@@ -170,6 +203,15 @@ const ratio = image ? image.width / image.height : 1;
   .figure.natural {
     min-height: 0;
     aspect-ratio: var(--ratio);
+  }
+
+  /* a drawing and what goes with it, beside the text: in the middle of its height */
+  .side {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 32px;
+    min-width: 0;
   }
 
   .figure::before {
@@ -252,7 +294,8 @@ const ratio = image ? image.width / image.height : 1;
       align-self: auto;
     }
 
-    .grid.flip .figure {
+    .grid.flip .figure,
+    .grid.flip .side {
       order: 0;
     }
 

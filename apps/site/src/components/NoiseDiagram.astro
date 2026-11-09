@@ -1,0 +1,83 @@
+---
+import { CHART, CHART_GRID, noiseChart } from '../art/noise';
+import { svgPoints } from '../art/wavetable';
+
+interface Props {
+  // what it shows, for those who don't see it
+  label: string;
+}
+
+// the colors of noise as the analyser of the synth would show them, on its dark screen (the screen is the figure's):
+// a spectrum of each over 20 Hz to 20 kHz, the faint grid of the decades and of 12 dB, the 0 dB line brighter; each
+// color named right of its end with its slope (the names of the synth's samples, the same in every language)
+const { label } = Astro.props;
+const lines = noiseChart();
+const slope = (value: number) => (value > 0 ? `+${value}` : value < 0 ? `−${-value}` : '0');
+---
+
+<svg class='drawing' viewBox={`0 0 ${CHART.width} ${CHART.height}`} role='img' aria-label={label}>
+  <g stroke='#fff' stroke-width='1'>
+    {CHART_GRID.hz.map((x) => (
+      <line x1={x} y1={CHART.top} x2={x} y2={CHART.bottom} stroke-opacity='0.07' />
+    ))}
+    {CHART_GRID.db.map(({ db, y }) => (
+      <line x1={CHART.left} y1={y} x2={CHART.right} y2={y} stroke-opacity={db === 0 ? '0.22' : '0.07'} />
+    ))}
+  </g>
+  <g fill='none' stroke-linejoin='round' stroke-linecap='round'>
+    {lines.map(({ name, color, xy }) => (
+      <polyline
+        class='spectrum'
+        points={svgPoints(xy)}
+        stroke={color}
+        stroke-width={name === 'White' ? '2.6' : '2'}
+      />
+    ))}
+  </g>
+  {lines.map(({ name, slope: value, color, end }) => (
+    <text class='name' x={end[0] + 10} y={end[1] + 6} fill={color}>
+      {name}
+      <tspan class='slope' dx='6'>
+        {slope(value)}
+      </tspan>
+    </text>
+  ))}
+  {CHART_GRID.db
+    .filter(({ db }) => db % 24 === 0)
+    .map(({ db, y }) => (
+      <text class='axis' x={CHART.left - 10} y={y + 5} text-anchor='end'>
+        {db === 0 ? '0 dB' : slope(db)}
+      </text>
+    ))}
+  {CHART_GRID.frequencies.map(({ label: frequency, x, anchor }) => (
+    <text class='axis' x={x} y={CHART.bottom + 34} text-anchor={anchor}>
+      {frequency}
+    </text>
+  ))}
+</svg>
+
+<style>
+  .drawing {
+    display: block;
+  }
+
+  text {
+    font-family: var(--font);
+  }
+
+  .name {
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .slope {
+    font-weight: 500;
+    fill: var(--text-muted);
+  }
+
+  .axis {
+    font-size: 19px;
+    font-weight: 600;
+    fill: var(--text-muted);
+  }
+</style>

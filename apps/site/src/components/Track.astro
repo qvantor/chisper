@@ -1,0 +1,34 @@
+---
+import Feature from './Feature.astro';
+import Screen from './Screen.astro';
+import TrackDiagram from './TrackDiagram.astro';
+import { ROLL } from '../art/track';
+import type { Messages } from '../i18n';
+
+interface Props {
+  // the side of its drawing (the features alternate)
+  side: 'left' | 'right';
+  m: Messages;
+}
+
+// the piano roll and its clip, after the keys that play into it: what it is (a lead, the ways notes come in marked),
+// what it does with them and where they go; beside the text, in the middle of its height, the clip of the page on the
+// piano roll of the synth, its notes flying through a playhead behind them (art/scenes.ts)
+const { side, m } = Astro.props;
+const t = m.features.track;
+---
+
+<Feature id='track' label='Clip · Piano roll' title={t.h2} text={t.text} lead side={side} m={m}>
+  <Fragment slot='figure'>
+    <Screen ratio={ROLL.width / ROLL.height}>
+      <TrackDiagram label={t.figureAlt} />
+    </Screen>
+  </Fragment>
+</Feature>
+
+<style>
+  /* the words of the lead under a stroke from the blue of the loop to the green of the notes */
+  :global(#track) {
+    --mark: linear-gradient(90deg, rgb(52 152 219 / 42%), rgb(46 204 113 / 42%));
+  }
+</style>

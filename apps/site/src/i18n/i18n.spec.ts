@@ -9,7 +9,21 @@ const leaves = (value: unknown, path = ''): [string, unknown][] =>
     : [[path, value]];
 
 // the names of the synth that stay in English in every language
-const GLOSSARY = ['Wave', 'Detune', 'Blend', 'ENV', 'LFO', 'VELO', 'Oct', 'Semi', 'Fine', 'Cutoff', 'Mix'];
+const GLOSSARY = [
+  'Wave',
+  'Detune',
+  'Blend',
+  'ENV',
+  'LFO',
+  'VELO',
+  'Oct',
+  'Semi',
+  'Fine',
+  'Cutoff',
+  'Mix',
+  'Pitch Track',
+  'One-shot',
+];
 
 describe('the messages', () => {
   const english = leaves(MESSAGES.en);
@@ -52,14 +66,17 @@ describe('the messages', () => {
     }
   });
 
-  it.each(LANGS)('%s marks words only under the title, each mark closed', (lang) => {
-    for (const [path, text] of leaves(MESSAGES[lang])) {
-      const count = (text as string).split('**').length - 1;
-      if (path === 'hero.lead' || path === 'hero.details') {
-        expect({ path, count: count > 0 && count % 2 === 0 }).toEqual({ path, count: true });
-      } else expect({ path, count }).toEqual({ path, count: 0 });
+  it.each(LANGS)(
+    '%s marks words only under the title and in the leads of the noise and the track, each mark closed',
+    (lang) => {
+      for (const [path, text] of leaves(MESSAGES[lang])) {
+        const count = (text as string).split('**').length - 1;
+        if (['hero.lead', 'hero.details', 'features.noise.text.0', 'features.track.text.0'].includes(path)) {
+          expect({ path, count: count > 0 && count % 2 === 0 }).toEqual({ path, count: true });
+        } else expect({ path, count }).toEqual({ path, count: 0 });
+      }
     }
-  });
+  );
 
   it('explains the wavetable once in Spanish', () => {
     expect(MESSAGES.es.hero.lead).toContain('tablas de ondas');
