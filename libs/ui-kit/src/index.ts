@@ -44,6 +44,7 @@ export { Filter, FilterResponse, frequencyResponseDb } from './filter';
 export { Select, SelectDumb, ContentContainer } from './select';
 export { MiddleEllipsis } from './middle-ellipsis';
 export { LoadProgress } from './load-progress';
+export type { LoadShare } from './load-progress';
 export { DraggableNumber } from './draggable-number';
 export { DragValue } from './drag-value';
 export { SegmentDisplay } from './segment-display';

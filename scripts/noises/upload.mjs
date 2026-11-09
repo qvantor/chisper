@@ -83,4 +83,5 @@ for (let i = 0; i < deletes.length; i += 1000)
       Delete: { Objects: deletes.slice(i, i + 1000).map((Key) => ({ Key })) },
     })
   );
-console.log('done');
+// the CDN keeps the list of the function a day (netlify/utils/index.ts)
+console.log('done: the synth lists them after a deploy or within a day');

@@ -10,6 +10,7 @@ import {
 } from 'rxjs';
 import toast from 'react-hot-toast';
 import { PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
+import type { LoadShare } from '@chisper/ui-kit';
 import {
   normalizePreset,
   presetDataSchema,
@@ -70,13 +71,19 @@ export const INIT_NAME = 'Init';
 
 // the progress of a preset opening (0..1): REQUEST_SHARE while its request is on (a click shows at once; on start
 // the request of the popular presets too, before one is picked), then SWITCH_FROM + the rest of the switch (the
-// fade, then the tables and the noise of the sound: sound-switch.ts)
+// fade, then the tables and the noise of the sound: sound-switch.ts); failed once one ended without its sound
 const REQUEST_SHARE = 0.1;
 const SWITCH_FROM = 0.15;
-const loadProgress = (opening: OpeningPreset | null, popularRequest: boolean, switching: number | null) => {
+const loadProgress = (
+  opening: OpeningPreset | null,
+  popularRequest: boolean,
+  switching: number | null,
+  failed: boolean
+): LoadShare => {
   if (opening?.requested || popularRequest) return REQUEST_SHARE;
   if (switching !== null) return SWITCH_FROM + (1 - SWITCH_FROM) * switching;
-  return opening ? SWITCH_FROM : null;
+  if (opening) return SWITCH_FROM;
+  return failed ? 'failed' : null;
 };
 
 // the id the url keeps: of a chosen preset, none of Init or an auto one
@@ -146,10 +153,14 @@ export const presets = ({
     // popular presets, loaded once on start for ◀ ▶ and the Popular tab; null until loaded
     const $top = new BehaviorSubject<PresetListItem[] | null>(null);
     const $topLoading = new PrimitiveBS<boolean>(false);
-    // the preset being opened (null: none) and the progress of the opening, until its sound is loaded (null: none)
+    // the preset being opened (null: none), whether the last opening ended without its sound (its request failed,
+    // the preset was refused, the start stayed in Init) and the progress of the opening, until its sound is loaded
+    // (null: none)
     const $opening = new BehaviorSubject<OpeningPreset | null>(null);
-    const $loadProgress = new BehaviorSubject<number | null>(null);
-    // on start the popular presets are requested, none picked yet (it shows in the progress only: the name stays)
+    const $openingFailed = new PrimitiveBS<boolean>(false);
+    const $loadProgress = new BehaviorSubject<LoadShare>(null);
+    // on start the popular presets are requested, none picked yet (it shows in the progress only: the name stays);
+    // over once an opening starts: the start opens nothing after it
     const $popularRequest = new PrimitiveBS<boolean>(false);
     return {
       $current,
@@ -159,12 +170,23 @@ export const presets = ({
       $top,
       $topLoading,
       $opening,
+      $openingFailed,
       $loadProgress,
       $popularRequest,
     };
   })
     .actions((model) => {
-      const { $current, $loadedHash, $dirty, $list, $top, $topLoading, $opening, $popularRequest } = model;
+      const {
+        $current,
+        $loadedHash,
+        $dirty,
+        $list,
+        $top,
+        $topLoading,
+        $opening,
+        $openingFailed,
+        $popularRequest,
+      } = model;
       // the current preset (null: Init) with the hash of its params, clean and in the url unless auto
       const setCurrent = (current: CurrentPreset | null, hash: string | null) => {
         $current.next(current);
@@ -201,10 +223,18 @@ export const presets = ({
       let lastOpening = 0;
       const startOpening = (opening: OpeningPreset) => {
         $opening.next(opening);
+        $openingFailed.next(false);
+        $popularRequest.next(false);
         return ++lastOpening;
       };
       const setOpening = (token: number, opening: OpeningPreset | null) => {
         if (token === lastOpening) $opening.next(opening);
+      };
+      // it ended without its sound: the progress fades where it is
+      const failOpening = (token: number) => {
+        if (token !== lastOpening) return;
+        $openingFailed.next(true);
+        $opening.next(null);
       };
 
       // in silence, once the sound of the preset before has faded out (a preset chosen meanwhile replaces it), its
@@ -219,7 +249,7 @@ export const presets = ({
             applySnapshot(data);
           } catch (e) {
             loadFailed(e);
-            setOpening(token, null);
+            failOpening(token);
             return;
           }
           if (clip) openPresetClip(clip);
@@ -242,7 +272,7 @@ export const presets = ({
           if (request === lastRequest) applyPreset(preset, token);
         } catch (e) {
           loadFailed(e, errorMessage);
-          setOpening(token, null);
+          failOpening(token);
         }
       };
 
@@ -301,8 +331,10 @@ export const presets = ({
           const untouched = () => lastRequest === start && !$current.value && isInit();
           $popularRequest.next(true);
           const top = await loadTop({ silent: true });
-          $popularRequest.next(false);
-          if (!top?.length || !untouched()) return;
+          if (!top?.length || !untouched()) {
+            $popularRequest.next(false);
+            return;
+          }
           const picked = top[Math.floor(Math.random() * top.length)];
           const token = startOpening({ name: picked.name, requested: true });
           const preset = await getPreset(picked.id).catch(() => null);
@@ -312,7 +344,7 @@ export const presets = ({
           } catch (e) {
             console.error('The popular preset could not be applied', e);
           }
-          setOpening(token, null);
+          failOpening(token);
         },
         next: () => step(1),
         prev: () => step(-1),
@@ -375,10 +407,12 @@ export const presets = ({
       ];
     })
     // the progress of an opening follows its request, then the switch of the sound
-    .subscriptions(({ $opening, $popularRequest, $loadProgress }) =>
-      combineLatest([$opening, $popularRequest, $switchProgress])
+    .subscriptions(({ $opening, $popularRequest, $openingFailed, $loadProgress }) =>
+      combineLatest([$opening, $popularRequest, $switchProgress, $openingFailed])
         .pipe(
-          map(([opening, popularRequest, switching]) => loadProgress(opening, popularRequest, switching)),
+          map(([opening, popularRequest, switching, failed]) =>
+            loadProgress(opening, popularRequest, switching, failed)
+          ),
           distinctUntilChanged()
         )
         .subscribe($loadProgress)

@@ -1,4 +1,4 @@
-import { BehaviorSubject, combineLatest, map, Subscription, takeWhile } from 'rxjs';
+import { BehaviorSubject, combineLatest, map, scan, Subscription, takeWhile } from 'rxjs';
 import { rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { KILL_FADE } from '../wavetable/voice-options';
 import type { FxModule } from '../../fx/modules/fx';
@@ -38,8 +38,10 @@ const POLL = 10;
 // a clock that doesn't move MAX_CLOCK_WAIT at most at either stage. A preset that throws doesn't keep the synth
 // silent: its error goes on, the sound before is forgotten all the same and the output opens on what it set.
 // `$progress` shows how far the next sound is (0..1, null: none switching): 0 until it is applied, then the mean of
-// the progress of the tables of the oscillators on and of the sample of the noise on (load-share.ts; one played
-// counts whole), null once all of them are played, also after the output opened at MAX_SILENCE
+// the progress of the tables of the oscillators on and of the sample of the noise on as it is applied
+// (load-share.ts; one played or failed counts whole), null once all of them ended, also after the output opened at
+// MAX_SILENCE. A source turned on after it, a load after the one of a source ended or replacing it (a table picked
+// meanwhile) aren't part of the switch
 const createSoundSwitch = ({
   synthCore: [{ audioCtx, masterLimiter, wavetables }, { mute, unmute }],
   synth: [{ voicing }, { pause, resume }],
@@ -55,21 +57,39 @@ const createSoundSwitch = ({
   let until = 0;
   let since = 0;
   const $progress = new BehaviorSubject<number | null>(null);
-  // the loads of the sound applied, followed until they are all played
+  // the loads of the sound applied, followed until they all ended
   let loads: Subscription | undefined;
-  const sources = combineLatest([
-    ...oscillator.map(([{ $active, $tableProgress }]) => combineLatest([$active, $tableProgress])),
-    combineLatest([$noise, $sampleProgress]),
-  ]);
+  // the sources of a sound: whether each is on and the progress of its load
+  const sources = [
+    ...oscillator.map(([{ $active, $tableProgress }]) => ({ $active, $share: $tableProgress })),
+    { $active: $noise, $share: $sampleProgress },
+  ];
+  // each source on as the sound is applied, until its load ended (played or failed: a progress that isn't a share)
+  // or another one replaced it (its progress went down); whole from then on
   const followLoads = () => {
     loads?.unsubscribe();
-    loads = sources
+    const followed = sources.filter(({ $active }) => $active.value);
+    if (followed.length === 0) {
+      $progress.next(null);
+      return;
+    }
+    const start = followed.map(() => ({ share: 0, ended: false }));
+    loads = combineLatest(followed.map(({ $share }) => $share))
       .pipe(
-        map((states) => {
-          const on = states.filter(([active]) => active).map(([, progress]) => progress);
-          if (on.every((progress) => progress === null)) return null;
-          return on.reduce<number>((sum, progress) => sum + (progress ?? 1), 0) / on.length;
-        }),
+        scan(
+          (states, shares) =>
+            shares.map((share, i) =>
+              states[i].ended || typeof share !== 'number' || share < states[i].share
+                ? { share: 1, ended: true }
+                : { share, ended: false }
+            ),
+          start
+        ),
+        map((states) =>
+          states.every(({ ended }) => ended)
+            ? null
+            : states.reduce((sum, { share }) => sum + share, 0) / states.length
+        ),
         takeWhile((progress) => progress !== null, true)
       )
       .subscribe((progress) => $progress.next(progress));

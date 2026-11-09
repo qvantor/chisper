@@ -206,7 +206,7 @@ describe('noise', () => {
         expect(model.$sampleProgress.value).toBe(0);
       });
 
-      it('ends when the load fails', async () => {
+      it('fails when the load fails', async () => {
         const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
         const { model, actions, reject } = createLoading();
         actions.toggleActive();
@@ -214,8 +214,18 @@ describe('noise', () => {
           await reject('Analog/White.wav');
           jest.advanceTimersByTime(1000);
         }
-        expect(model.$sampleProgress.value).toBeNull();
+        expect(model.$sampleProgress.value).toBe('failed');
         error.mockRestore();
+      });
+
+      it('fails with a sample the store refused', async () => {
+        const { model, actions, resolve, wavetables } = createLoading();
+        await flush();
+        actions.toggleActive();
+        await resolve('Analog/White.wav');
+        expect(model.$sampleProgress.value).toBe(0.95);
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'refused' });
+        expect(model.$sampleProgress.value).toBe('failed');
       });
     });
 

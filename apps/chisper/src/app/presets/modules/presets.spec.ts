@@ -470,7 +470,7 @@ describe('presets model', () => {
     expect(error).toHaveBeenCalledWith('The popular preset could not be applied', expect.any(Error));
     expect($current.value).toBeNull();
     expect($opening.value).toBeNull();
-    expect($loadProgress.value).toBeNull();
+    expect($loadProgress.value).toBe('failed');
     expect(getSnapshot()).toEqual(before);
     error.mockRestore();
   });
@@ -804,13 +804,13 @@ describe('presets model', () => {
       expect($opening.value).toEqual({ name: 'a', requested: true });
       expect($loadProgress.value).toBe(0.1);
 
-      // changed meanwhile: the popular one isn't applied over the change
+      // changed meanwhile: the popular one isn't applied over the change (its bar fades where it is)
       setEnvelopeValue('env1', 'attack', 0.7);
       loading.resolve(preset('a', 0.5));
       await flush();
       expect($current.value).toBeNull();
       expect($opening.value).toBeNull();
-      expect($loadProgress.value).toBeNull();
+      expect($loadProgress.value).toBe('failed');
     });
 
     it('ends on start without popular presets', async () => {
@@ -862,14 +862,61 @@ describe('presets model', () => {
         expect($loadProgress.value).toBe(0.1);
       });
 
-      it('ends with a failed request', async () => {
+      it('fails with a failed request, the next opening starts it again', async () => {
         const {
           model: [{ $loadProgress }, { loadById }],
         } = setup();
         await flush();
         getPresetMock.mockRejectedValue(new Error('Not found'));
         await loadById('p1');
+        expect($loadProgress.value).toBe('failed');
+
+        getPresetMock.mockReturnValue(new Promise(() => undefined));
+        loadById('p2');
+        expect($loadProgress.value).toBe(0.1);
+      });
+
+      it('fails with a preset that throws as it is applied', async () => {
+        const { pending, soundSwitch } = deferredSwitch();
+        const {
+          model: [{ $loadProgress, $current }, { loadById }],
+        } = setup(soundSwitch);
+        await flush();
+        getPresetMock.mockResolvedValue(preset('p1', 0.5));
+        await loadById('p1');
+        expect($loadProgress.value).toBe(0.15);
+        const apply = pending.shift();
+        jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
+          throw new Error('broken preset');
+        });
+        apply?.();
+        expect($current.value).toBeNull();
+        expect($loadProgress.value).toBe('failed');
+      });
+
+      it('follows an opening started while the popular presets are requested, the request no more', async () => {
+        const top = deferred<PresetListItem[]>();
+        getTopPresetsMock.mockReturnValue(top.promise);
+        const { pending, soundSwitch, $progress } = deferredSwitch();
+        const {
+          model: [{ $loadProgress }, { reset }],
+        } = setup(soundSwitch);
+        expect($loadProgress.value).toBe(0.1);
+
+        reset();
+        expect($loadProgress.value).toBe(0.15);
+        $progress.next(0);
+        pending.shift()?.();
+        $progress.next(0.5);
+        expect($loadProgress.value).toBeCloseTo(0.575);
+        $progress.next(null);
         expect($loadProgress.value).toBeNull();
+
+        // (the popular one isn't opened over Init)
+        top.resolve([listItem('a')]);
+        await flush();
+        expect($loadProgress.value).toBeNull();
+        expect(getPresetMock).not.toHaveBeenCalled();
       });
     });
   });

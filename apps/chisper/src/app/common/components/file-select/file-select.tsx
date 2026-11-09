@@ -7,6 +7,7 @@ import {
   ContentContainer,
   keepFocus,
   LoadProgress,
+  LoadShare,
   MiddleEllipsis,
   SelectDumb,
   theme,
@@ -61,8 +62,8 @@ const NameKey = styled.button.attrs({ type: 'button', onMouseDown: keepFocus })`
 // the share of the bar a load creeps in to at once: on a slow line it moves before its first bytes
 const LOAD_START = 0.25;
 
-// the progress of the load of the file chosen (0..1, null: none loading), drawn on the background of the name
-export const SelectProgress = ({ progress }: { progress: number | null }) => (
+// the progress of the load of the file chosen (0..1, null: none loading, failed), drawn on the background of the name
+export const SelectProgress = ({ progress }: { progress: LoadShare }) => (
   <LoadProgress progress={progress} look='gradient' color={colors.accent} start={LOAD_START} />
 );
 

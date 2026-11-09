@@ -19,14 +19,19 @@ const FADE_MS = 320;
 // the share counted as the end
 const END = 0.995;
 
+// the progress of a load: its share, 0..1, failed (it ended without what it loaded) or none (null: nothing loading,
+// or it loaded)
+export type LoadShare = number | 'failed' | null;
+
 // a load being shown: the share drawn, the progress of the load (0..1) and the share it starts with (it creeps in,
-// the progress fills the rest), whether the load ended (it runs to the end and fades), the times (ms, of the frames)
-// it showed, it started to fade and of its last frame
+// the progress fills the rest), whether the load ended (it runs to the end and fades) and failed (it fades where it
+// is), the times (ms, of the frames) it showed, it started to fade and of its last frame
 export interface Run {
   shown: number;
   progress: number;
   start: number;
   done: boolean;
+  failed: boolean;
   shownAt: number | null;
   fadeAt: number | null;
   last: number | null;
@@ -35,9 +40,10 @@ export interface Run {
 const clamp = (share: number) => Math.min(1, Math.max(0, share));
 
 // the run after a new progress: a load starts from nothing (from none, a load that ended, a progress under the one
-// before: another load, a retry); a progress of the load goes on; none ends the load
-export const nextRun = (run: Run | null, progress: number | null, start = 0): Run | null => {
+// before: another load); a progress of the load goes on; none ends the load, failed ends it where it is
+export const nextRun = (run: Run | null, progress: LoadShare, start = 0): Run | null => {
   if (progress === null) return run && { ...run, done: true };
+  if (progress === 'failed') return run && { ...run, done: true, failed: true };
   const share = clamp(progress);
   if (!run || run.done || share < run.progress)
     return {
@@ -45,6 +51,7 @@ export const nextRun = (run: Run | null, progress: number | null, start = 0): Ru
       progress: share,
       start: clamp(start),
       done: false,
+      failed: false,
       shownAt: null,
       fadeAt: null,
       last: null,
@@ -53,9 +60,11 @@ export const nextRun = (run: Run | null, progress: number | null, start = 0): Ru
 };
 
 // the share a run goes to `age` ms after it showed: its start crept in by then and its progress over the rest; the
-// end once loaded
-const goal = (run: Run, age: number) =>
-  run.done ? 1 : run.start * (1 - Math.exp(-age / START_MS)) + (1 - run.start) * run.progress;
+// end once loaded, the share shown once failed
+const goal = (run: Run, age: number) => {
+  if (run.failed) return run.shown;
+  return run.done ? 1 : run.start * (1 - Math.exp(-age / START_MS)) + (1 - run.start) * run.progress;
+};
 
 // the run at a frame and its alpha (null: it has faded out, nothing to draw)
 export const advance = (run: Run, time: number): { run: Run; alpha: number } | null => {
@@ -64,7 +73,7 @@ export const advance = (run: Run, time: number): { run: Run; alpha: number } | n
   const ease = 1 - Math.exp(-dt / (run.done ? FINISH_MS : EASE_MS));
   const eased = run.shown + (goal(run, time - shownAt) - run.shown) * ease;
   const shown = run.done && eased >= END ? 1 : eased;
-  const fadeAt = run.fadeAt ?? (run.done && shown >= END ? time : null);
+  const fadeAt = run.fadeAt ?? (run.failed || (run.done && shown >= END) ? time : null);
   const fade = fadeAt === null ? 1 : 1 - (time - fadeAt) / FADE_MS;
   if (fade <= 0) return null;
   return { run: { ...run, shown, shownAt, fadeAt, last: time }, alpha: Math.min(1, fade) };
@@ -147,8 +156,8 @@ const Canvas = styled.canvas`
 `;
 
 interface Props {
-  // the share loaded, 0..1 (null: nothing loading)
-  progress: number | null;
+  // the share loaded, 0..1 (null: nothing loading; failed: the bar fades out where it is)
+  progress: LoadShare;
   look: LoadProgressLook;
   color: string;
   // the share a load creeps in to at once, the progress fills the rest (a slow line: it moves before its bytes)
@@ -157,7 +166,8 @@ interface Props {
 
 // the progress of a load on the background of its parent (positioned; the content goes over it): drawn on a canvas
 // while it loads and as it runs to the end and fades out after, on the frames of the screen (at most every
-// MIN_FRAME_MS); then nothing, no frame. Without motion (prefers-reduced-motion) no sheen
+// MIN_FRAME_MS); then nothing, no frame. A failed load fades out where it is. Without motion (prefers-reduced-motion)
+// no sheen
 export const LoadProgress = ({ progress, look, color, start = 0 }: Props) => {
   const [rootRef, [width, height]] = useElementSize<HTMLSpanElement>();
   const { canvas, begin } = useCanvas(width, height);
@@ -202,7 +212,7 @@ export const LoadProgress = ({ progress, look, color, start = 0 }: Props) => {
     []
   );
 
-  const loading = progress !== null;
+  const loading = typeof progress === 'number';
   return (
     <Root
       ref={rootRef}

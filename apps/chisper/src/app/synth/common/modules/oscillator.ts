@@ -261,7 +261,7 @@ export const oscillator = ({
           tableLoad.end(!!wavetable);
         });
     })
-    .subscriptions(({ tableLoad }) => tableLoad.clearOnPlayed())
+    .subscriptions(({ tableLoad }) => tableLoad.followStore())
     .plugins(
       urlSnapshotPlugin({
         modelToSnap: (model) => {

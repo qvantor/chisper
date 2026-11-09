@@ -369,10 +369,57 @@ describe('soundSwitch', () => {
       expect($progress.value).toBeNull();
     });
 
-    it('ends at once with a sound that loads nothing', async () => {
-      const { switchSound, $progress, render } = await setup();
+    it('ends at once with a sound that loads nothing, or has no source on', async () => {
+      const { switchSound, $progress, osc1, render } = await setup();
       switchSound(jest.fn());
       render(1.02);
+      expect($progress.value).toBeNull();
+
+      render(3, 2000);
+      switchSound(() => osc1.$active.next(false));
+      expect($progress.value).toBe(0);
+      render(3.02);
+      expect($progress.value).toBeNull();
+    });
+
+    it('leaves out a source turned on after the sound is applied and a load after one that ended', async () => {
+      const { switchSound, $progress, osc1, osc2, noise, render } = await setup();
+      const [model] = noise;
+      switchSound(() => {
+        model.$active.next(true);
+        // (its sample played: whole)
+        model.$sampleProgress.next(null);
+        osc1.$tableProgress.next(0.2);
+      });
+      render(1.02);
+      expect($progress.value).toBeCloseTo((0.2 + 1) / 2);
+      // a sample picked, an oscillator turned on with a table loading
+      model.$sampleProgress.next(0);
+      model.$sampleProgress.next(0.3);
+      osc2.$active.next(true);
+      osc2.$tableProgress.next(0.1);
+      expect($progress.value).toBeCloseTo((0.2 + 1) / 2);
+      osc1.$tableProgress.next(0.6);
+      expect($progress.value).toBeCloseTo((0.6 + 1) / 2);
+      osc1.$tableProgress.next(null);
+      expect($progress.value).toBeNull();
+    });
+
+    it('counts a load replaced by another (its progress went down) and a failed one as whole', async () => {
+      const { switchSound, $progress, osc1, osc2, render } = await setup();
+      switchSound(() => {
+        osc2.$active.next(true);
+        osc1.$tableProgress.next(0.5);
+        osc2.$tableProgress.next(0.4);
+      });
+      render(1.02);
+      expect($progress.value).toBeCloseTo((0.5 + 0.4) / 2);
+      // (a table picked on it: a new load)
+      osc1.$tableProgress.next(0);
+      expect($progress.value).toBeCloseTo((1 + 0.4) / 2);
+      osc1.$tableProgress.next(0.9);
+      expect($progress.value).toBeCloseTo((1 + 0.4) / 2);
+      osc2.$tableProgress.next('failed');
       expect($progress.value).toBeNull();
     });
 

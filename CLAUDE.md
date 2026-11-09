@@ -251,7 +251,8 @@ an oscillator) are read, never written.
 
 - Wavetable files: mono 32-bit float WAV, 2048-sample frames, ≤256 frames, optional `clm ` chunk (a morph mark).
   Read by `synth/services/wav.ts` from the bytes, never with `decodeAudioData` (it resamples).
-- Lists come from Netlify functions (`get-wavetables-list.ts`, `get-noises-list.ts`) over R2; files are fetched
+- Lists come from Netlify functions (`get-wavetables-list.mts`, `get-noises-list.mts`) over R2, kept a day by the CDN
+  (`listResponse`; a deploy clears them: the free plan has 125k invocations a month); files are fetched
   from the public bucket domains (`synth/services/buckets.ts`), or through the site where a domain fails or stalls
   (`/files/*` rewrites of `netlify.toml`; `bucketLoader` of `synth/services/fetch.ts`). A load no model waits for
   any more is aborted with its download (`abortable`, `shared-loads.ts`).

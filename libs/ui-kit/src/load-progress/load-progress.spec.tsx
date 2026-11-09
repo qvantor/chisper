@@ -2,7 +2,7 @@ import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { drawn } from '../common/test-utils';
 import { sizedElements } from '../common/test-utils/element-size';
-import { advance, LoadProgress, LoadProgressLook, nextRun, Run } from '.';
+import { advance, LoadProgress, LoadProgressLook, LoadShare, nextRun, Run } from '.';
 
 // a run of a load at `progress`, nothing shown yet
 const run = (progress: number, extra: Partial<Run> = {}): Run => ({
@@ -10,6 +10,7 @@ const run = (progress: number, extra: Partial<Run> = {}): Run => ({
   progress,
   start: 0,
   done: false,
+  failed: false,
   shownAt: null,
   fadeAt: null,
   last: null,
@@ -30,13 +31,21 @@ describe('nextRun', () => {
     expect(nextRun(going, 0.6)).toEqual({ ...going, progress: 0.6 });
   });
 
-  it('starts again from nothing with a smaller progress (another load, a retry) and after a load that ended', () => {
+  it('starts again from nothing with a smaller progress (another load) and after a load that ended', () => {
     expect(nextRun(run(0.6, { shown: 0.6, shownAt: 10 }), 0.1)).toEqual(run(0.1));
     expect(nextRun(run(0.9, { shown: 1, done: true, fadeAt: 30 }), 0.95)).toEqual(run(0.95));
+    expect(nextRun(run(0.4, { shown: 0.4, done: true, failed: true, fadeAt: 30 }), 0)).toEqual(run(0));
   });
 
   it('ends the load: to the end', () => {
     expect(nextRun(run(0.4, { shown: 0.4 }), null)).toEqual(run(0.4, { shown: 0.4, done: true }));
+  });
+
+  it('ends a failed load where it is; nothing without one', () => {
+    expect(nextRun(run(0.4, { shown: 0.3 }), 'failed')).toEqual(
+      run(0.4, { shown: 0.3, done: true, failed: true })
+    );
+    expect(nextRun(null, 'failed')).toBeNull();
   });
 });
 
@@ -90,6 +99,15 @@ describe('advance', () => {
     expect(frame(step.run, fadeAt + 160).alpha).toBeCloseTo(0.5);
     expect(advance(step.run, fadeAt + 320)).toBeNull();
   });
+
+  it('fades out a failed load at once, where it is', () => {
+    const failed = run(0.8, { shown: 0.3, shownAt: 0, last: 1000, done: true, failed: true });
+    const first = frame(failed, 1016);
+    expect(first.run.fadeAt).toBe(1016);
+    expect(first.run.shown).toBe(0.3);
+    expect(frames(first.run, 1176, 1032).run.shown).toBe(0.3);
+    expect(advance(first.run, 1016 + 320)).toBeNull();
+  });
 });
 
 describe('LoadProgress', () => {
@@ -104,10 +122,10 @@ describe('LoadProgress', () => {
   });
 
   const frames = (ms: number) => act(() => jest.advanceTimersByTime(ms));
-  const setup = (progress: number | null, look: LoadProgressLook = 'fill') => {
+  const setup = (progress: LoadShare, look: LoadProgressLook = 'fill') => {
     const result = render(<LoadProgress progress={progress} look={look} color='#3498db' />);
     const canvas = result.container.querySelector('canvas');
-    const update = (next: number | null) =>
+    const update = (next: LoadShare) =>
       result.rerender(<LoadProgress progress={next} look={look} color='#3498db' />);
     return { canvas, update };
   };
@@ -152,6 +170,26 @@ describe('LoadProgress', () => {
     expect(barWidth(canvas)).toBeLessThan(20);
     frames(1000);
     expect(barWidth(canvas)).toBeCloseTo(20, 0);
+  });
+
+  it('fades out a failed load where it is, never to the end, and stops its frames', () => {
+    const { canvas, update } = setup(0.4);
+    frames(1000);
+    expect(barWidth(canvas)).toBeCloseTo(80, 0);
+    update('failed');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    frames(160);
+    expect(barWidth(canvas)).toBeCloseTo(80, 0);
+    frames(240);
+    expect(drawn(canvas)).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("draws nothing for a failed load it didn't show", () => {
+    const { canvas } = setup('failed');
+    frames(100);
+    expect(drawn(canvas)).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('draws a gradient alone to the share loaded', () => {

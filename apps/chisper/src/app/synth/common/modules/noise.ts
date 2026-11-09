@@ -173,7 +173,7 @@ export const noise = ({
             sampleLoad.end(!!loaded);
           }),
         $sampleState.pipe(filter((state) => state === 'stored')).subscribe(() => $playedSample.next(sent)),
-        sampleLoad.clearOnPlayed(),
+        sampleLoad.followStore(),
       ];
     })
     .plugins(
