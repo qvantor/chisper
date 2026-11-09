@@ -94,3 +94,62 @@ export const TrackIcon = () => (
     </g>
   </Icon>
 );
+
+// selecting: the four corners of a frame
+export const SelectIcon = () => (
+  <Icon>
+    <g {...LINE}>
+      <path d='M2 5.6V2h3.6' />
+      <path d='M10.4 2H14v3.6' />
+      <path d='M14 10.4V14h-3.6' />
+      <path d='M5.6 14H2v-3.6' />
+    </g>
+  </Icon>
+);
+
+// snapping to the grid: a magnet, its poles up
+export const SnapIcon = () => (
+  <Icon>
+    <g {...LINE}>
+      <path d='M2 2v6.5a6 6 0 0 0 12 0V2h-4v6.5a2 2 0 0 1-4 0V2z' />
+      <path d='M2 5h4M10 5h4' />
+    </g>
+  </Icon>
+);
+
+// quantizing: notes on the lines of a grid
+export const QuantizeIcon = () => (
+  <Icon>
+    <path
+      d='M2.5 1.5v13M8 1.5v13M13.5 1.5v13'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={1}
+      opacity={0.55}
+    />
+    <rect x={2.5} y={3.6} width={4.4} height={2.8} rx={0.8} />
+    <rect x={8} y={9.6} width={4.4} height={2.8} rx={0.8} />
+  </Icon>
+);
+
+// legato: notes each up to the next one, a slur under them
+export const LegatoIcon = () => (
+  <Icon>
+    <rect x={1.5} y={8.2} width={4.6} height={2.6} rx={0.8} />
+    <rect x={6.1} y={5.4} width={4.4} height={2.6} rx={0.8} />
+    <rect x={10.5} y={2.6} width={4} height={2.6} rx={0.8} />
+    <path d='M2.2 12.6Q8 16 13.8 12.6' {...LINE} />
+  </Icon>
+);
+
+// following the playhead: its line with its head, an arrow on with it
+export const FollowIcon = () => (
+  <Icon>
+    <path d='M2.6 1.8h4.8L5 4.6z' />
+    <g {...LINE}>
+      <path d='M5 4.4v9.8' />
+      <path d='M8.4 9.2h5.6' />
+      <path d='M11.8 7l2.2 2.2-2.2 2.2' />
+    </g>
+  </Icon>
+);

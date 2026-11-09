@@ -1,5 +1,6 @@
 import { registrar } from 'standardized-audio-context-mock';
-import { createSynth, immediateSoundSwitch, initModel } from '../../test-utils/models';
+import { CLIP_BAR, CLIP_PPQ, Clip } from '@chisper/preset-schema';
+import { createSynth, createTrack, immediateSoundSwitch, initModel } from '../../test-utils/models';
 import { withoutAudioWorklet } from '../../test-utils/no-audio-worklet';
 import { WorkerStub } from '../../test-utils/worker-stub';
 import { getSnapshot } from '../app';
@@ -69,7 +70,12 @@ const setup = async ({ ready = true } = {}) => {
     'fx',
     undefined
   );
-  const presetsModule = initModel(presets({ soundSwitch: immediateSoundSwitch() }), 'presets', undefined);
+  const { track, clock } = createTrack(modules);
+  const presetsModule = initModel(
+    presets({ soundSwitch: immediateSoundSwitch(), track }),
+    'presets',
+    undefined
+  );
   const models = {
     synthCore: modules.synthCore,
     inputController: modules.inputController,
@@ -82,6 +88,7 @@ const setup = async ({ ready = true } = {}) => {
     fx: fxModule,
     synth: modules.synth,
     presets: presetsModule,
+    track,
   } as unknown as PerfModels;
   const api = createPerfApi(models);
   if (ready) await sleep(0);
@@ -118,7 +125,19 @@ const setup = async ({ ready = true } = {}) => {
     preGain,
     output,
     filterModule: modules.filter,
+    track,
+    clock,
   };
+};
+
+// a clip of a bar at 90 BPM: C4 on beat 0, E4 on beat 2
+const CLIP: Clip = {
+  bpm: 90,
+  length: CLIP_BAR,
+  notes: [
+    [0, CLIP_PPQ, 60, 100],
+    [2 * CLIP_PPQ, CLIP_PPQ, 64, 90],
+  ],
 };
 
 describe('perf test hook api', () => {
@@ -186,7 +205,7 @@ describe('perf test hook api', () => {
       const events: string[] = [];
       const [{ $onPress, $onRelease }] = modules.inputController;
       $onPress.subscribe(({ note }) => events.push(`on ${noteToString(note)}`));
-      $onRelease.subscribe((note) => events.push(`off ${noteToString(note)}`));
+      $onRelease.subscribe(({ note }) => events.push(`off ${noteToString(note)}`));
       await api.run([
         { at: 40, note: 'C4', on: false },
         { at: 0, note: 'C4', on: true },
@@ -212,6 +231,34 @@ describe('perf test hook api', () => {
       api.stopRuns();
       await running;
       expect(modules.synth[0].$voicesCount.value).toBe(1);
+    });
+  });
+
+  describe('track', () => {
+    it('plays a clip from beat 0 at its tempo, the roll open or not; stop stops it, its notes released', async () => {
+      const { api, modules, track, clock, audioCtx } = await setup();
+      const [model] = track;
+      const played: string[] = [];
+      const [{ $onPress, $onRelease }] = modules.inputController;
+      $onPress.subscribe(({ note, source }) => played.push(`on ${source} ${noteToString(note)}`));
+      $onRelease.subscribe(({ note, source }) => played.push(`off ${source} ${noteToString(note)}`));
+      api.track.play(CLIP, { roll: true });
+      expect(model.$clip.value).toEqual(CLIP);
+      expect(modules.transport[0].$bpm.value).toBe(90);
+      expect(model.$rollOpen.value).toBe(true);
+      expect(model.$playing.value).toBe(true);
+      // its notes are sent TRACK_LEAD ahead: C4 at the first tick
+      await registrar.getDeLorean(audioCtx as never)?.travel(0.01);
+      clock.tick();
+      expect(played).toEqual(['on track C4']);
+
+      api.track.stop();
+      expect(model.$playing.value).toBe(false);
+      expect(played).toEqual(['on track C4', 'off track C4']);
+      // again without the roll: it closes
+      api.track.play(CLIP);
+      expect(model.$rollOpen.value).toBe(false);
+      expect(model.$playing.value).toBe(true);
     });
   });
 
@@ -288,6 +335,24 @@ describe('perf test hook api', () => {
       modules.inputController[1].onPress([4, 'C']);
       const { notes } = api.trace.stop();
       expect(notes[0]).toMatchObject({ note: 'C4', lost: true, event: null, started: null });
+    });
+
+    it('gives the starts of every voice traced: a note of the track, scheduled ahead, matches no press', async () => {
+      const { api, modules, answerLikeTheWorklet, resolveTables, audioCtx, clock } = await setup();
+      answerLikeTheWorklet();
+      resolveTables();
+      await api.ready();
+      api.trace.start();
+      api.track.play(CLIP);
+      await registrar.getDeLorean(audioCtx as never)?.travel(0.01);
+      clock.tick();
+      const [{ audioCtx: context, wavetables }] = modules.synthCore;
+      const { voices, started } = voiceEvents(context, wavetables);
+      // it started after its frame (its note on came late)
+      started(voices()[0], 4000, 2400);
+      const { notes, starts } = api.trace.stop();
+      expect(starts).toEqual([{ note: 'C4', scheduled: 2400, started: 4000 }]);
+      expect(notes).toEqual([expect.objectContaining({ note: 'C4', started: null })]);
     });
 
     it('records the releases', async () => {

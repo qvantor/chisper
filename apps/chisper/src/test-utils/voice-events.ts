@@ -42,7 +42,7 @@ export interface VoiceView {
   messages: (
     | { routes: VoiceRoute[] }
     | { filter: VoiceFilterOptions | null }
-    | { velocity: VoiceVelocity }
+    | { velocity: VoiceVelocity; time?: number }
     | { noise: VoiceNoiseKnobs }
   )[];
   // the node it plays in
@@ -126,7 +126,7 @@ export const voiceEvents = (context: BaseAudioContext, engine: { flush: () => vo
             ? { filter: event.filter }
             : event.kind === 'knobs'
               ? { [event.module]: event.values }
-              : { velocity: event.velocity };
+              : { velocity: event.velocity, ...(event.time !== undefined && { time: event.time }) };
       event.voices.forEach((id) => byId.get(id)?.messages.push(message));
       return;
     }

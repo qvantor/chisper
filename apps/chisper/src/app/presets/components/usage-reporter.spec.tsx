@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { sendUsage } from '../services';
+import { CAPTCHA_TIMEOUT_MS, sendUsage } from '../services';
 import { UsageEvent } from '../hooks/use-preset-usage-tracker';
-import { CAPTCHA_TIMEOUT_MS, UsageReporter } from './usage-reporter';
+import { UsageReporter } from './usage-reporter';
 
 let mockReport: (usage: UsageEvent) => void = () => undefined;
 jest.mock('../hooks/use-preset-usage-tracker', () => ({

@@ -3,16 +3,16 @@ import { styled } from 'styled-components';
 import cls from 'classnames';
 import { MdKeyboard, MdTune } from 'react-icons/md';
 import { PanelButton, TapeSwitch, theme } from '@chisper/ui-kit';
-import { AboutLink, HeaderSection } from '../../common/components';
+import { ABOUT_PATH, ABOUT_TITLE, HeaderSection } from '../../common/components';
 import { PresetSection } from '../../presets';
 import { MidiInput, SettingsButton } from '../settings';
 import { MasterHandle } from '../synth/components';
-import { SYNTH_SCREENS, SynthScreen } from '../screens';
+import { CLIP_SCREEN, MOBILE_SCREENS, SYNTH_SCREENS, SynthScreen } from '../screens';
 
 export type MobileMode = 'synth' | 'keys';
 
 // full-height sections like on desktop: logo | tabs | preset | mode | master;
-// portrait: logo and mode on top, tabs and preset below, master through both rows
+// portrait: logo, CLIP and mode on top, OSC/FX and preset below, master through both rows
 const Root = styled.div`
   border-bottom: 1px solid ${theme.colors.primaryLowContrast};
   display: grid;
@@ -22,11 +22,12 @@ const Root = styled.div`
   grid-template-areas: 'logo tabs presets mode master';
 
   &.portrait {
-    // the logo spans tabs and the second column, mode takes the rest of the top row
+    // CLIP right of the logo, where the top row has room: three keys under it would leave the name of the
+    // preset a letter; mode takes the rest of the top row
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     grid-template-rows: 40px 50px;
     grid-template-areas:
-      'logo logo mode master'
+      'logo clip mode master'
       'tabs presets presets master';
   }
 `;
@@ -54,6 +55,14 @@ const Tabs = styled.div`
     --tape-key-padding: 7px 0 9px;
     border-top: 1px solid ${theme.colors.primaryLowContrast};
   }
+`;
+
+// the key of the clip on its own in the portrait top row, lower: a slot of its own
+const ClipTab = styled.div`
+  grid-area: clip;
+  display: flex;
+  --tape-key-width: 52px;
+  --tape-key-padding: 5px 0 6px;
 `;
 
 // the tape switch's dark groove already separates it from the tabs
@@ -93,14 +102,23 @@ interface Props {
 
 export const MobileHeader = ({ portrait, mode, onModeChange, screen, onScreenChange }: Props) => (
   <Root className={cls({ portrait })}>
-    <Logo href='https://github.com/qvantor/chisper' target='_blank' referrerPolicy='no-referrer'>
+    <Logo href={ABOUT_PATH} target='_blank' rel='noopener' title={ABOUT_TITLE}>
       CHISPER
     </Logo>
+    {portrait && (
+      <ClipTab>
+        <TapeSwitch options={[CLIP_SCREEN]} value={screen} onChange={onScreenChange} switchOnDrag />
+      </ClipTab>
+    )}
     <Tabs>
-      <TapeSwitch options={SYNTH_SCREENS} value={screen} onChange={onScreenChange} switchOnDrag />
+      <TapeSwitch
+        options={portrait ? SYNTH_SCREENS : MOBILE_SCREENS}
+        value={screen}
+        onChange={onScreenChange}
+        switchOnDrag
+      />
     </Tabs>
     <Presets
-      leading={<AboutLink />}
       actions={
         <>
           <MidiInput />

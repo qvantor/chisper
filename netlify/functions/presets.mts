@@ -1,4 +1,3 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Config, Context } from '@netlify/functions';
 import type postgres from 'postgres';
 import type { z } from 'zod';
@@ -14,6 +13,7 @@ import {
   updatePresetRequestSchema,
 } from '../../libs/preset-schema/src';
 import type {
+  Clip,
   NameAvailableResponse,
   Preset,
   PresetListItem,
@@ -23,8 +23,10 @@ import type {
   UpdatePresetResponse,
 } from '../../libs/preset-schema/src';
 import { db } from '../utils/db';
+import { matchesEditToken, newEditToken } from '../utils/edit-token';
 import { envNumber } from '../utils/env';
 import { empty, errorResponse, getIpHash, HttpError, json, readJson, sha256 } from '../utils/http';
+import { clipOfRow, countLastHour, isForeignKeyViolation, isUniqueViolation } from '../utils/queries';
 import { verifyTurnstile } from '../utils/turnstile';
 
 const MAX_BODY_BYTES = 20 * 1024;
@@ -34,27 +36,19 @@ const TOP_SIZE = 50;
 const PAGE_SIZE = 30;
 const UPDATE_INTERVAL_SECONDS = 5;
 
-const isUniqueViolation = (error: unknown, constraint: string) => {
-  const { code, constraint_name } = error as { code?: string; constraint_name?: string };
-  return code === '23505' && constraint_name === constraint;
-};
-
 const nameTakenError = (name: string) => new HttpError(409, `Name “${name}” is already taken`);
+// the clip a preset is saved with is gone (deleted by the cleanup) or never was
+const clipNotFoundError = () => new HttpError(400, 'Clip not found');
 
 // names are unique case-insensitively, hidden presets keep their names too
 const isNameTaken = async (name: string) =>
   (await db()`SELECT 1 FROM presets WHERE lower(name) = lower(${name})`).length > 0;
 
 const findByHash = async (hash: string) =>
-  (await db()<{ id: string; name: string }[]>`SELECT id, name FROM presets WHERE hash = ${hash}`)[0];
-
-const countLastHour = async (table: 'presets' | 'reports', ipHash: string) => {
-  const sql = db();
-  const [{ count }] = await sql<{ count: number }[]>`
-    SELECT count(*)::int AS count FROM ${sql(table)}
-    WHERE ip_hash = ${ipHash} AND created_at > now() - interval '1 hour'`;
-  return count;
-};
+  (
+    await db()<{ id: string; name: string; clipId: string | null }[]>`
+      SELECT id, name, clip_id AS "clipId" FROM presets WHERE hash = ${hash}`
+  )[0];
 
 const parsePresetBody = async <T extends { name: string; data: unknown }>(
   req: Request,
@@ -74,7 +68,13 @@ const parseId = (id: string) => {
 };
 
 const savePreset = async (req: Request, context: Context) => {
-  const { name, turnstileToken, data, hash } = await parsePresetBody(req, savePresetRequestSchema);
+  const {
+    name,
+    turnstileToken,
+    data,
+    hash,
+    clipId = null,
+  } = await parsePresetBody(req, savePresetRequestSchema);
 
   const sql = db();
   const ipHash = getIpHash(context);
@@ -83,7 +83,7 @@ const savePreset = async (req: Request, context: Context) => {
     isNameTaken(name),
     countLastHour('presets', ipHash),
   ]);
-  // the same sound is returned without spending the captcha, its name is kept
+  // the same sound is returned without spending the captcha, its name and its clip are kept
   if (existing) return json({ ...existing, existed: true } as SavePresetResponse);
   if (nameTaken) throw nameTakenError(name);
   if (count >= SAVES_PER_HOUR) throw new HttpError(429, 'Too many presets saved, try again later');
@@ -92,29 +92,28 @@ const savePreset = async (req: Request, context: Context) => {
     throw new HttpError(403, 'Captcha check failed, try again');
 
   // the author gets the token once, only its hash is stored
-  const editToken = randomBytes(32).toString('base64url');
+  const { token: editToken, hash: editTokenHash } = newEditToken();
   try {
-    const [inserted] = await sql<{ id: string; name: string }[]>`
-      INSERT INTO presets (hash, name, data, ip_hash, edit_token_hash)
-      VALUES (${hash}, ${name}, ${sql.json(data)}, ${ipHash}, ${sha256(editToken)})
+    const [inserted] = await sql<{ id: string; name: string; clipId: string | null }[]>`
+      INSERT INTO presets (hash, name, data, ip_hash, edit_token_hash, clip_id)
+      VALUES (${hash}, ${name}, ${sql.json(data)}, ${ipHash}, ${editTokenHash}, ${clipId})
       ON CONFLICT (hash) DO NOTHING
-      RETURNING id, name`;
+      RETURNING id, name, clip_id AS "clipId"`;
     if (inserted) return json({ ...inserted, existed: false, editToken } as SavePresetResponse, 201);
   } catch (error) {
     // checks above can race with a concurrent save
     if (isUniqueViolation(error, 'presets_name_key')) throw nameTakenError(name);
+    if (isForeignKeyViolation(error, 'presets_clip_id_fkey')) throw clipNotFoundError();
     throw error;
   }
   return json({ ...(await findByHash(hash)), existed: true } as SavePresetResponse);
 };
 
-const isSameHash = (a: string, b: string) =>
-  a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-
-// overwrites sound and name, links to the preset play the updated sound
+// overwrites sound and name (and the clip it opens with, when the request names one or null), links to the preset
+// play the updated sound
 const updatePreset = async (id: string, req: Request) => {
   const presetId = parseId(id);
-  const { name, editToken, data, hash } = await parsePresetBody(req, updatePresetRequestSchema);
+  const { name, editToken, data, hash, clipId } = await parsePresetBody(req, updatePresetRequestSchema);
 
   const sql = db();
   const [preset] = await sql<{ editTokenHash: string | null; hidden: boolean; throttled: boolean }[]>`
@@ -122,22 +121,25 @@ const updatePreset = async (id: string, req: Request) => {
       COALESCE(updated_at > now() - make_interval(secs => ${UPDATE_INTERVAL_SECONDS}), false) AS throttled
     FROM presets WHERE id = ${presetId}`;
   if (!preset || preset.hidden) throw new HttpError(404, 'Preset not found');
-  if (!preset.editTokenHash || !isSameHash(preset.editTokenHash, sha256(editToken)))
+  if (!matchesEditToken(preset.editTokenHash, editToken))
     throw new HttpError(403, 'You can only edit presets saved from this browser');
   if (preset.throttled) throw new HttpError(429, 'Too many updates, try again in a few seconds');
 
   try {
-    await sql`
+    const [updated] = await sql<{ clipId: string | null }[]>`
       UPDATE presets SET name = ${name}, data = ${sql.json(data)}, hash = ${hash}, updated_at = now()
-      WHERE id = ${presetId}`;
+        ${clipId === undefined ? sql`` : sql`, clip_id = ${clipId}`}
+      WHERE id = ${presetId}
+      RETURNING clip_id AS "clipId"`;
+    return json({ id: presetId, name, clipId: updated?.clipId ?? null } as UpdatePresetResponse);
   } catch (error) {
     // renaming own preset (e.g. changing case) is the same row, so it never conflicts
     if (isUniqueViolation(error, 'presets_name_key')) throw nameTakenError(name);
+    if (isForeignKeyViolation(error, 'presets_clip_id_fkey')) throw clipNotFoundError();
     if (!isUniqueViolation(error, 'presets_hash_key')) throw error;
     const existing = await findByHash(hash);
     return json({ error: `This sound is already saved as “${existing?.name}”`, ...existing }, 409);
   }
-  return json({ id: presetId, name } as UpdatePresetResponse);
 };
 
 // the author opened the preset (the client sends the edit token it keeps): cleanup counts the 90 days of an
@@ -159,13 +161,25 @@ const getNameAvailable = async (url: URL) => {
   return json({ available: !(await isNameTaken(parsed.data)) } as NameAvailableResponse);
 };
 
+interface PresetRow extends Omit<Preset, 'clip'> {
+  clipId: string | null;
+  clipName: string | null;
+  clipData: Omit<Clip, 'name'> | null;
+}
+
+// with the clip it opens with (its name in it, as GET /api/clips/:id gives it)
 const getPreset = async (id: string) => {
-  const [preset] = await db()<Preset[]>`
-    SELECT id, name, data, created_at AS "createdAt" FROM presets
-    WHERE id = ${parseId(id)} AND NOT hidden`;
-  if (!preset) throw new HttpError(404, 'Preset not found');
+  const [row] = await db()<PresetRow[]>`
+    SELECT p.id, p.name, p.data, p.created_at AS "createdAt",
+      c.id AS "clipId", c.name AS "clipName", c.data AS "clipData"
+    FROM presets p LEFT JOIN clips c ON c.id = p.clip_id
+    WHERE p.id = ${parseId(id)} AND NOT p.hidden`;
+  if (!row) throw new HttpError(404, 'Preset not found');
+  const { clipId, clipName, clipData, ...preset } = row;
+  const clip =
+    clipId !== null && clipData !== null ? { id: clipId, clip: clipOfRow(clipName, clipData) } : null;
   // not cached: the author can overwrite the preset
-  return json(preset);
+  return json({ ...preset, clip } as Preset);
 };
 
 // every featured preset (curated) comes first, whatever its score, the rest are popular presets by score

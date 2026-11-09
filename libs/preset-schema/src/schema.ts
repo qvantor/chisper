@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ClipResponse } from './clip';
 import {
   DIVISION_MAX,
   DIVISION_OFF,
@@ -593,7 +594,8 @@ export const NOISE_DEFAULTS: PresetData['noise'] = PRESET_DEFAULTS.noise;
 
 export const PRESET_NAME_MAX_LENGTH = 40;
 
-const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+// trimmed, whitespace collapsed (the names of presets and clips)
+export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
 
 // trimmed, whitespace collapsed; names are unique case-insensitively (see nameKey)
 export const presetNameSchema = z
@@ -605,23 +607,31 @@ export const nameKey = (name: string) => normalizeName(name).toLowerCase();
 
 export const presetIdSchema = z.string().uuid();
 
+// the id of a saved clip of the track (here, not in ./clip: that module imports this one)
+export const clipIdSchema = z.string().uuid();
+
+// the clip a preset opens with; null: none. Missing in an update: the clip stays as it is
+const presetClipIdSchema = clipIdSchema.nullable().optional();
+
 // a Cloudflare Turnstile response, single use
-const turnstileTokenSchema = z.string().min(1).max(4096);
+export const turnstileTokenSchema = z.string().min(1).max(4096);
 
 export const savePresetRequestSchema = z.object({
   name: presetNameSchema,
   data: presetDataSchema,
   turnstileToken: turnstileTokenSchema,
+  clipId: presetClipIdSchema,
 });
 export type SavePresetRequest = z.input<typeof savePresetRequestSchema>;
 
-// the secret of the author (SavePresetResponse.editToken)
-const editTokenSchema = z.string().min(20).max(128);
+// the secret of the author (SavePresetResponse.editToken, SaveClipResponse.editToken)
+export const editTokenSchema = z.string().min(20).max(128);
 
 export const updatePresetRequestSchema = z.object({
   name: presetNameSchema,
   data: presetDataSchema,
   editToken: editTokenSchema,
+  clipId: presetClipIdSchema,
 });
 export type UpdatePresetRequest = z.input<typeof updatePresetRequestSchema>;
 
@@ -660,11 +670,16 @@ export interface PresetListItem {
   uniqueUsers: number;
 }
 
+// the clip a preset opens with: a saved clip (its name in it)
+export type PresetClip = Omit<ClipResponse, 'createdAt'>;
+
 export interface Preset {
   id: string;
   name: string;
   data: PresetData;
   createdAt: string;
+  // the clip it opens with, chosen by its author; null: none
+  clip: PresetClip | null;
 }
 
 export interface PresetsPage {
@@ -678,6 +693,8 @@ export interface SavePresetResponse {
   existed: boolean;
   // secret for editing the preset later, only returned when the preset was created
   editToken?: string;
+  // the clip the preset opens with (of the one saved before when it existed); null: none
+  clipId: string | null;
 }
 
 export interface NameAvailableResponse {
@@ -687,6 +704,8 @@ export interface NameAvailableResponse {
 export interface UpdatePresetResponse {
   id: string;
   name: string;
+  // the clip the preset opens with now; null: none
+  clipId: string | null;
 }
 
 export interface ApiError {

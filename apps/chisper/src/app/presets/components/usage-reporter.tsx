@@ -2,10 +2,7 @@ import React from 'react';
 import { styled } from 'styled-components';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { usePresetUsageTracker, UsageEvent } from '../hooks/use-preset-usage-tracker';
-import { sendUsage, TURNSTILE_SITE_KEY } from '../services';
-
-// a token not given by then (the script didn't load) drops the event
-export const CAPTCHA_TIMEOUT_MS = 30 * 1000;
+import { CAPTCHA_TIMEOUT_MS, sendUsage, TURNSTILE_SITE_KEY } from '../services';
 
 // out of the layout of the section, it is never shown
 const Captcha = styled(Turnstile)`

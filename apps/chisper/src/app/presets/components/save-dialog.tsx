@@ -1,17 +1,23 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { Button, Input, Modal, Tooltip, Typography } from 'antd';
+import { Button, Checkbox, Input, Modal, Tooltip, Typography } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Turnstile, TurnstileInstance } from '@marsidev/react-turnstile';
 import toast from 'react-hot-toast';
+import { distinctUntilChanged, map } from 'rxjs';
+import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import {
+  Clip,
   nameKey,
   PRESET_NAME_MAX_LENGTH,
   presetNameSchema,
+  SavePresetRequest,
   UpdatePresetRequest,
 } from '@chisper/preset-schema';
 import { getSnapshot } from '../../app';
-import { usePresets } from '../modules/presets';
+import { useTrack } from '../../synth/track/modules/track';
+import { usePersistClip } from '../../synth/track/components/use-clip-saving';
+import { CurrentPreset, usePresets } from '../modules/presets';
 import { useDebounced } from '../hooks/use-debounced';
 import {
   ApiRequestError,
@@ -52,6 +58,10 @@ interface SavedResult {
   message: string;
 }
 
+// the clip of the track as the dialog names it; null: no notes (a preset isn't saved with it)
+const clipLabel = ({ notes, name }: Clip) =>
+  notes.length === 0 ? null : name ? `“${name}”` : 'the clip of the track';
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -59,14 +69,21 @@ interface Props {
 
 export const SaveDialog = ({ open, onClose }: Props) => {
   const [{ $current }, { setSaved }] = usePresets();
+  const [{ $clip, $id: $clipId, $dirty: $clipDirty }] = useTrack();
+  // (the dialog stays mounted while closed: not rendered again by every edit of the notes)
+  const $clipLabel = React.useMemo(() => $clip.pipe(map(clipLabel), distinctUntilChanged()), [$clip]);
+  const label = useObservable($clipLabel, clipLabel($clip.value));
+  const clipId = useBehaviorSubject($clipId);
+  const clipDirty = useBehaviorSubject($clipDirty);
+  const clipSaving = usePersistClip();
   const [name, setName] = React.useState('');
   const [token, setToken] = React.useState<string | null>(null);
   const [captchaError, setCaptchaError] = React.useState<string | null>(null);
   const [saved, setSavedResult] = React.useState<SavedResult | null>(null);
   // the current preset was created from this browser, so it can be overwritten
-  const [editable, setEditable] = React.useState<{ id: string; name: string; editToken: string } | null>(
-    null
-  );
+  const [editable, setEditable] = React.useState<(CurrentPreset & { editToken: string }) | null>(null);
+  // the preset is saved with the clip of the track: it opens with it
+  const [withClip, setWithClip] = React.useState(false);
   const turnstile = React.useRef<TurnstileInstance | undefined>(undefined);
   const queryClient = useQueryClient();
 
@@ -78,7 +95,11 @@ export const SaveDialog = ({ open, onClose }: Props) => {
     setSavedResult(null);
     setCaptchaError(null);
     setEditable(current && editToken ? { ...current, editToken } : null);
+    // as the preset was: with a clip when it has one
+    setWithClip(current?.clipId !== undefined);
   }, [open, $current]);
+
+  const attach = withClip && label !== null;
 
   // names are unique, check while typing so the captcha isn't spent on a taken name
   const validName = presetNameSchema.safeParse(name).success;
@@ -101,16 +122,18 @@ export const SaveDialog = ({ open, onClose }: Props) => {
 
   const { mutate, isPending } = useMutation({
     // the body alone: the mutation function of react-query 5 gets its context too
-    mutationFn: (body: Parameters<typeof savePreset>[0]) => savePreset(body),
-    onSuccess: (result) => {
+    mutationFn: (body: SavePresetRequest) => savePreset(body),
+    onSuccess: (result, body) => {
       if (result.editToken) setEditToken(result.id, result.editToken);
+      // the sound saved before keeps its clip
+      const clipKept = body.clipId && result.clipId !== body.clipId ? ' Its clip is unchanged.' : '';
       setSavedResult({
         id: result.id,
         message: result.existed
-          ? `This sound is already saved as “${result.name}”.`
+          ? `This sound is already saved as “${result.name}”.${clipKept}`
           : `“${result.name}” has been saved.`,
       });
-      setSaved({ id: result.id, name: result.name });
+      setSaved(result);
     },
     onError: onSaveError,
     // the token is single use
@@ -130,21 +153,32 @@ export const SaveDialog = ({ open, onClose }: Props) => {
     onError: onSaveError,
   });
 
-  const busy = isPending || overwriteMutation.isPending;
+  const busy = isPending || overwriteMutation.isPending || clipSaving.busy;
   const canSave = validName && !nameTaken && !isOwnName && token !== null;
   const canOverwrite = validName && !nameTaken && editable !== null;
   const secondaryType = editable ? 'default' : 'primary';
+  // the preset sent with the clip it opens with (null: none): the clip of the track, saved first unless it is so
+  // already; its save failed (a toast told why): the preset isn't sent
+  const withClipId = async (send: (presetClipId: string | null) => void) => {
+    if (!attach) return send(null);
+    const saved = await clipSaving.persist();
+    if (saved) send(saved.id);
+  };
   const save = () => {
     if (!canSave || busy) return;
-    mutate({ name, data: getSnapshot(), turnstileToken: token });
+    withClipId((presetClipId) =>
+      mutate({ name, data: getSnapshot(), turnstileToken: token, clipId: presetClipId })
+    );
   };
   const overwrite = () => {
     if (!canOverwrite || busy) return;
-    overwriteMutation.mutate({
-      id: editable.id,
-      body: { name, data: getSnapshot(), editToken: editable.editToken },
-    });
+    const { id, editToken } = editable;
+    withClipId((presetClipId) =>
+      overwriteMutation.mutate({ id, body: { name, data: getSnapshot(), editToken, clipId: presetClipId } })
+    );
   };
+  // the preset (of this browser) opens with a clip: what Save does to it
+  const hadClip = editable?.clipId !== undefined;
 
   return (
     <Modal
@@ -176,7 +210,7 @@ export const SaveDialog = ({ open, onClose }: Props) => {
                   type={secondaryType}
                   onClick={save}
                   disabled={!canSave || overwriteMutation.isPending}
-                  loading={isPending}
+                  loading={isPending || (!editable && clipSaving.busy)}
                 >
                   {token ? (editable ? 'Save as new' : 'Save') : 'Checking...'}
                 </Button>
@@ -187,7 +221,7 @@ export const SaveDialog = ({ open, onClose }: Props) => {
                 type='primary'
                 onClick={overwrite}
                 disabled={!canOverwrite || isPending}
-                loading={overwriteMutation.isPending}
+                loading={overwriteMutation.isPending || clipSaving.busy}
               >
                 Save
               </Button>
@@ -222,6 +256,23 @@ export const SaveDialog = ({ open, onClose }: Props) => {
             status={nameTaken ? 'error' : undefined}
           />
           {nameTaken && <Typography.Text type='danger'>Name is already taken</Typography.Text>}
+          {label !== null && (
+            <Checkbox checked={withClip} onChange={(e) => setWithClip(e.target.checked)}>
+              Default clip: {label}
+            </Checkbox>
+          )}
+          {attach && (clipId === null || clipDirty) && (
+            <Typography.Text type='secondary'>
+              The clip is saved too, the preset opens with it.
+            </Typography.Text>
+          )}
+          {hadClip && !attach && (
+            <Typography.Text type='secondary'>Save leaves the preset without a clip.</Typography.Text>
+          )}
+          {hadClip && attach && clipId !== editable?.clipId && (
+            <Typography.Text type='secondary'>Save replaces the clip the preset opens with.</Typography.Text>
+          )}
+          {clipSaving.captcha}
           <Turnstile
             ref={turnstile}
             siteKey={TURNSTILE_SITE_KEY}

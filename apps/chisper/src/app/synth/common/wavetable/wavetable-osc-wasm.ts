@@ -86,7 +86,7 @@ export interface OscExports extends CoreExports {
   osc_voice_start_frame: (voice: number) => number;
   osc_scope_new: (sampleRate: number) => number;
   osc_scope_free: (scope: number, store: number, shared: number) => void;
-  osc_scope_on: (scope: number, store: number, shared: number, id: number, report: number) => void;
+  osc_scope_on: (scope: number, store: number, shared: number, id: number, flags: number) => void;
   osc_scope_events: (scope: number, store: number, shared: number, count: number) => void;
   osc_scope_routes: (scope: number, id: number) => void;
   osc_scope_filter: (scope: number, id: number) => void;
@@ -618,9 +618,10 @@ export const createVoiceWasm = (
       writeFilter(scope.command(), 0, filter);
       exports.osc_voice_set_filter(handle);
     },
-    setVelocity: (velocity: VoiceVelocity) => {
+    setVelocity: (velocity: VoiceVelocity, time = 0) => {
       if (ended) return;
-      writeVelocity(scope.command(), 0, velocity);
+      const command = scope.command();
+      command[writeVelocity(command, 0, velocity)] = time;
       exports.osc_voice_set_velocity(handle);
     },
     // new knobs of a module (those no param carries: the noise's); a voice that doesn't play it takes nothing
@@ -668,7 +669,7 @@ export interface TappedVoice {
 // options as createVoiceWasm takes them, the values of its params at the note on), apply() takes the events of the
 // main thread in their order (a new voice, the automation of its params, its routes and its filter), process()
 // renders a block of every voice in the order they were made, by the same Voice::process, into the sum of their
-// outputs; reports() tells the voices that started (late, of mono, traced) and ended since. A voice that traps ends
+// outputs; reports() tells the voices that started (each once, on time too) and ended since. A voice that traps ends
 // (it is told ended, its output is not in the sum: `onError` hears why), the others play on; a note on that
 // traps is told ended too. params() gives the params of a voice directly from the next block on, past its
 // timelines (the specs: params that are functions of the frame); tap() keeps the output of every voice apart
@@ -703,8 +704,10 @@ export const createVoiceScopeWasm = (
       DESCRIPTORS.forEach((descriptor, k) => {
         command[at + k] = params[VOICE_PARAM_ORDER[k]] ?? descriptor?.defaultValue ?? 0;
       });
-      const report = (__PERF__ && !!options.trace) || !!options.mono;
-      exports.osc_scope_on(handle, store.handle, shared.handle, id, report ? 1 : 0);
+      // the flags of osc_scope_on: it tells its start on time too (every voice: a note may take it over, the main
+      // thread keeps its starts again until then), it lives on after its release (mono: 2)
+      const flags = 1 | (options.mono ? 2 : 0);
+      exports.osc_scope_on(handle, store.handle, shared.handle, id, flags);
     } catch (error) {
       onError(error);
       failed.push(id);
@@ -749,7 +752,8 @@ export const createVoiceScopeWasm = (
       } else if (event.kind === 'velocity') {
         flush();
         guard(() => {
-          writeVelocity(scope.command(), 0, event.velocity);
+          const command = scope.command();
+          command[writeVelocity(command, 0, event.velocity)] = event.time ?? 0;
           event.voices.forEach((id) => guard(() => exports.osc_scope_velocity(handle, id)));
         });
       } else if (event.kind === 'knobs') {
@@ -853,8 +857,8 @@ export const createVoiceScopeWasm = (
     setRoutes: (id: number, routes: VoiceRoute[]) => apply([{ kind: 'routes', voices: [id], routes }]),
     setFilter: (id: number, filter: VoiceFilterOptions | null) =>
       apply([{ kind: 'filter', voices: [id], filter }]),
-    setVelocity: (id: number, velocity: VoiceVelocity) =>
-      apply([{ kind: 'velocity', voices: [id], velocity }]),
+    setVelocity: (id: number, velocity: VoiceVelocity, time?: number) =>
+      apply([{ kind: 'velocity', voices: [id], velocity, ...(time !== undefined && { time }) }]),
     setKnobs: <M extends KnobsModule>(id: number, module: M, values: VoiceModuleKnobs[M]) =>
       apply([{ kind: 'knobs', voices: [id], module, values } as VoiceEvent]),
     // the pitch bend of every voice (cents): it glides there in 10 ms

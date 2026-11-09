@@ -3,7 +3,7 @@ import { sha256 } from '../utils/http';
 import { verifyTurnstile } from '../utils/turnstile';
 import handler, { config } from '../functions/presets.mjs';
 import { createFakeSql, JsonValue, pgError } from './fake-sql';
-import { context, ID, IP_HASH, IP_SALT, OTHER_ID, request } from './helpers';
+import { caller, ID, IP_HASH, IP_SALT, OTHER_ID } from './helpers';
 
 const mockSql = createFakeSql();
 jest.mock('../utils/db', () => ({ db: () => mockSql.sql }));
@@ -16,9 +16,10 @@ const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0
 // unrounded number to check that the stored sound is normalized
 const data = { ...presetDataSchema.parse({}), filter: { a: true, cut: 1234.5678 } };
 const EDIT_TOKEN = 'e'.repeat(43);
+const CLIP_ID = uuid(77);
 
 const Q = {
-  findByHash: /^SELECT id, name FROM presets WHERE hash =/,
+  findByHash: /^SELECT id, name, clip_id AS "clipId" FROM presets WHERE hash =/,
   nameTaken: /WHERE lower\(name\) = lower/,
   countPresets: /FROM "presets" WHERE ip_hash/,
   countReports: /FROM "reports" WHERE ip_hash/,
@@ -26,7 +27,7 @@ const Q = {
   editable: /^SELECT edit_token_hash/,
   update: /^UPDATE presets SET name/,
   opened: /^UPDATE presets SET author_opened_at/,
-  get: /^SELECT id, name, data, created_at/,
+  get: /^SELECT p\.id, p\.name, p\.data, p\.created_at/,
   top: /WHERE \(p\.featured OR s\.popular\)/,
   list: /AS "cursorKey" FROM presets p LEFT JOIN preset_scores/,
   exists: /^SELECT id FROM presets WHERE id/,
@@ -34,11 +35,7 @@ const Q = {
   hide: /^UPDATE presets SET hidden/,
 };
 
-const call = async (method: string, path: string, body?: unknown) => {
-  const response = await handler(request(method, path, body), context);
-  const text = await response.text();
-  return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
-};
+const call = caller(handler);
 
 const decodeCursor = (cursor: string) => JSON.parse(Buffer.from(cursor, 'base64url').toString());
 const encodeCursor = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -106,23 +103,47 @@ describe('POST /api/presets', () => {
     call('POST', '/api/presets', body);
 
   it('creates a preset and returns the edit token once', async () => {
-    mockSql.respond(Q.insert, [{ id: ID, name: 'My Pad' }]);
+    mockSql.respond(Q.insert, [{ id: ID, name: 'My Pad', clipId: null }]);
     const { status, body } = await save({ name: '  My   Pad ', data, turnstileToken: 'turnstile' });
 
     expect(status).toBe(201);
-    expect(body).toEqual({ id: ID, name: 'My Pad', existed: false, editToken: expect.any(String) });
+    expect(body).toEqual({
+      id: ID,
+      name: 'My Pad',
+      existed: false,
+      editToken: expect.any(String),
+      clipId: null,
+    });
     expect(body.editToken.length).toBeGreaterThanOrEqual(40);
     expect(verifyTurnstileMock).toHaveBeenCalledWith('turnstile', '1.2.3.4');
 
     const [insert] = mockSql.find(Q.insert);
-    const [hash, name, stored, ipHash, editTokenHash] = insert.values;
+    const [hash, name, stored, ipHash, editTokenHash, clipId] = insert.values;
     expect(hash).toBe(presetHash(data));
     expect(name).toBe('My Pad');
     expect((stored as JsonValue).json).toMatchObject({ filter: { a: true, cut: 1235, t: 'lowpass' } });
     expect(ipHash).toBe(IP_HASH);
     expect(editTokenHash).toBe(sha256(body.editToken));
+    // no clip: it opens without one
+    expect(clipId).toBeNull();
     expect(insert.values).not.toContain(body.editToken);
     expect(insert.values).not.toContain('1.2.3.4');
+  });
+
+  it('saves the clip the preset opens with', async () => {
+    mockSql.respond(Q.insert, [{ id: ID, name: 'My Pad', clipId: CLIP_ID }]);
+    const { status, body } = await save({ name: 'My Pad', data, turnstileToken: 't', clipId: CLIP_ID });
+    expect(status).toBe(201);
+    expect(body.clipId).toBe(CLIP_ID);
+    expect(mockSql.find(Q.insert)[0].values[5]).toBe(CLIP_ID);
+    expect(mockSql.find(Q.insert)[0].text).toContain('RETURNING id, name, clip_id AS "clipId"');
+  });
+
+  it('rejects a clip that is not saved with 400', async () => {
+    mockSql.respond(Q.insert, pgError('23503', 'presets_clip_id_fkey'));
+    const { status, body } = await save({ name: 'My Pad', data, turnstileToken: 't', clipId: CLIP_ID });
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: 'Clip not found' });
   });
 
   it('gives every preset a new edit token', async () => {
@@ -132,11 +153,11 @@ describe('POST /api/presets', () => {
     expect(first.body.editToken).not.toBe(second.body.editToken);
   });
 
-  it('returns an existing preset with the same sound without the captcha', async () => {
-    mockSql.respond(Q.findByHash, [{ id: OTHER_ID, name: 'Old name' }]);
-    const { status, body } = await save();
+  it('returns an existing preset with the same sound without the captcha, its clip kept', async () => {
+    mockSql.respond(Q.findByHash, [{ id: OTHER_ID, name: 'Old name', clipId: CLIP_ID }]);
+    const { status, body } = await save({ name: 'My Pad', data, turnstileToken: 'turnstile', clipId: null });
     expect(status).toBe(200);
-    expect(body).toEqual({ id: OTHER_ID, name: 'Old name', existed: true });
+    expect(body).toEqual({ id: OTHER_ID, name: 'Old name', existed: true, clipId: CLIP_ID });
     expect(mockSql.find(Q.findByHash)[0].values).toEqual([presetHash(data)]);
     expect(verifyTurnstileMock).not.toHaveBeenCalled();
     expect(mockSql.find(Q.insert)).toHaveLength(0);
@@ -180,10 +201,12 @@ describe('POST /api/presets', () => {
 
   it('returns the preset saved by a concurrent request with the same sound', async () => {
     let lookups = 0;
-    mockSql.respond(Q.findByHash, () => (lookups++ === 0 ? [] : [{ id: OTHER_ID, name: 'Concurrent' }]));
+    mockSql.respond(Q.findByHash, () =>
+      lookups++ === 0 ? [] : [{ id: OTHER_ID, name: 'Concurrent', clipId: null }]
+    );
     const { status, body } = await save();
     expect(status).toBe(200);
-    expect(body).toEqual({ id: OTHER_ID, name: 'Concurrent', existed: true });
+    expect(body).toEqual({ id: OTHER_ID, name: 'Concurrent', existed: true, clipId: null });
     expect(body.editToken).toBeUndefined();
   });
 
@@ -205,6 +228,7 @@ describe('POST /api/presets', () => {
     ['an empty name', { name: '   ', data, turnstileToken: 't' }],
     ['a too long name', { name: 'x'.repeat(PRESET_NAME_MAX_LENGTH + 1), data, turnstileToken: 't' }],
     ['out of range data', { name: 'My Pad', data: { ...data, v: { max: 100 } }, turnstileToken: 't' }],
+    ['a clip id that is not a uuid', { name: 'My Pad', data, turnstileToken: 't', clipId: 'clip' }],
   ])('rejects %s with 400', async (_, body) => {
     const { status } = await save(body);
     expect(status).toBe(400);
@@ -231,11 +255,12 @@ describe('PUT /api/presets/:id', () => {
       { editTokenHash: sha256(EDIT_TOKEN), hidden: false, throttled: false, ...row },
     ]);
 
-  it('overwrites the name and the sound', async () => {
+  it('overwrites the name and the sound, the clip kept without a clip in the request', async () => {
     editable({});
+    mockSql.respond(Q.update, [{ clipId: CLIP_ID }]);
     const { status, body } = await update({ name: ' New   name ', data, editToken: EDIT_TOKEN });
     expect(status).toBe(200);
-    expect(body).toEqual({ id: ID, name: 'New name' });
+    expect(body).toEqual({ id: ID, name: 'New name', clipId: CLIP_ID });
 
     expect(mockSql.find(Q.editable)[0].values).toEqual([5, ID]);
     const [query] = mockSql.find(Q.update);
@@ -245,6 +270,30 @@ describe('PUT /api/presets/:id', () => {
     expect(hash).toBe(presetHash(data));
     expect(id).toBe(ID);
     expect(query.text).toContain('updated_at = now()');
+    expect(query.text).not.toContain('clip_id =');
+    expect(query.text).toContain('RETURNING clip_id AS "clipId"');
+  });
+
+  it.each([
+    ['sets the clip the preset opens with', CLIP_ID],
+    ['takes the clip away with null', null],
+  ])('%s', async (_, clipId) => {
+    editable({});
+    mockSql.respond(Q.update, [{ clipId }]);
+    const { status, body } = await update({ name: 'New name', data, editToken: EDIT_TOKEN, clipId });
+    expect(status).toBe(200);
+    expect(body).toEqual({ id: ID, name: 'New name', clipId });
+    const [query] = mockSql.find(Q.update);
+    expect(query.text).toContain('updated_at = now() , clip_id = $4 WHERE id = $5');
+    expect(query.values.slice(3)).toEqual([clipId, ID]);
+  });
+
+  it('rejects a clip that is not saved with 400', async () => {
+    editable({});
+    mockSql.respond(Q.update, pgError('23503', 'presets_clip_id_fkey'));
+    const { status, body } = await update({ name: 'New name', data, editToken: EDIT_TOKEN, clipId: CLIP_ID });
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: 'Clip not found' });
   });
 
   it('returns 404 for an invalid id without a query', async () => {
@@ -289,10 +338,15 @@ describe('PUT /api/presets/:id', () => {
   it('rejects a sound of another preset with 409 and returns that preset', async () => {
     editable({});
     mockSql.respond(Q.update, pgError('23505', 'presets_hash_key'));
-    mockSql.respond(Q.findByHash, [{ id: OTHER_ID, name: 'Other' }]);
+    mockSql.respond(Q.findByHash, [{ id: OTHER_ID, name: 'Other', clipId: null }]);
     const { status, body } = await update();
     expect(status).toBe(409);
-    expect(body).toEqual({ error: 'This sound is already saved as “Other”', id: OTHER_ID, name: 'Other' });
+    expect(body).toEqual({
+      error: 'This sound is already saved as “Other”',
+      id: OTHER_ID,
+      name: 'Other',
+      clipId: null,
+    });
     expect(mockSql.find(Q.findByHash)[0].values).toEqual([presetHash(data)]);
   });
 
@@ -307,6 +361,7 @@ describe('PUT /api/presets/:id', () => {
     ['a missing token', { name: 'New name', data }],
     ['a short token', { name: 'New name', data, editToken: 'short' }],
     ['a profane name', { name: 'fuck', data, editToken: EDIT_TOKEN }],
+    ['a clip id that is not a uuid', { name: 'New name', data, editToken: EDIT_TOKEN, clipId: 'clip' }],
   ])('rejects %s with 400', async (_, body) => {
     editable({});
     expect((await update(body)).status).toBe(400);
@@ -354,17 +409,30 @@ describe('POST /api/presets/:id/opened', () => {
 });
 
 describe('GET /api/presets/:id', () => {
+  const row = { id: ID, name: 'Pad', data, createdAt: '2026-01-01T00:00:00Z' };
+  const noClip = { clipId: null, clipName: null, clipData: null };
+  const clipData = { bpm: 128, length: 3840, notes: [[0, 480, 60, 100]] };
+
   it('returns a visible preset without caching', async () => {
-    const preset = { id: ID, name: 'Pad', data, createdAt: '2026-01-01T00:00:00Z' };
-    mockSql.respond(Q.get, [preset]);
+    mockSql.respond(Q.get, [{ ...row, ...noClip }]);
     const { status, body, headers } = await call('GET', `/api/presets/${ID}`);
     expect(status).toBe(200);
-    expect(body).toEqual(preset);
+    expect(body).toEqual({ ...row, clip: null });
     expect(headers.get('Cache-Control')).toBe('no-store');
 
     const [query] = mockSql.find(Q.get);
     expect(query.values).toEqual([ID]);
-    expect(query.text).toContain('AND NOT hidden');
+    expect(query.text).toContain('LEFT JOIN clips c ON c.id = p.clip_id');
+    expect(query.text).toContain('AND NOT p.hidden');
+  });
+
+  it('returns the clip it opens with, its name in it', async () => {
+    mockSql.respond(Q.get, [{ ...row, clipId: CLIP_ID, clipName: 'Riff', clipData }]);
+    const { body } = await call('GET', `/api/presets/${ID}`);
+    expect(body).toEqual({ ...row, clip: { id: CLIP_ID, clip: { ...clipData, name: 'Riff' } } });
+
+    mockSql.respond(Q.get, [{ ...row, clipId: CLIP_ID, clipName: null, clipData }]);
+    expect((await call('GET', `/api/presets/${ID}`)).body.clip).toEqual({ id: CLIP_ID, clip: clipData });
   });
 
   it('returns 404 for a missing preset', async () => {

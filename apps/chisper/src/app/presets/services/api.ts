@@ -22,7 +22,8 @@ export class ApiRequestError extends Error {
   }
 }
 
-const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+// a request of our API: JSON in and out, the message of an error as an ApiRequestError (clips use it too)
+export const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(path, {
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,

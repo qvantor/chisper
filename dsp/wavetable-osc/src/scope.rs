@@ -1,7 +1,7 @@
 //! the voices of one node (the voices processor of a context): each with its params as AudioParams would give them
 //! (a timeline of the events of the main thread per param, timeline.rs), rendered one after another in the order
 //! they were created by the same Voice::process, their outputs summed in f32 in that order. A block also tells the
-//! voices that started late (or of mono, or traced) and those that ended. A voice that traps is ended by the
+//! voices that started late (or on time too: `report`) and those that ended. A voice that traps is ended by the
 //! wrapper (fail), the others render on; the params of a voice may also come as the arrays of a block (direct:
 //! the specs), and a tap keeps the output of every voice apart (the specs, the parity of the browsers). The pitch
 //! bend is the node's: on top of the detune of every voice, gliding to each new value
@@ -134,21 +134,28 @@ impl Scope {
         self.voices.iter_mut().find(|voice| voice.id == id)
     }
 
-    /// a voice of a note: its options and the values of its params at the note on. Made, with the room of its place,
-    /// before it holds its versions and its phrase: a trap of an allocation pins nothing
+    /// a voice of a note: its options and the values of its params at the note on; `report`: it tells its start on
+    /// time too, `linger`: it lives on after its release (a voice of mono: Voice::linger). Made, with the room of
+    /// its place, before it holds its versions and its phrase: a trap of an allocation pins nothing
+    #[allow(clippy::too_many_arguments)]
     pub fn on(
         &mut self,
         id: f64,
         options: VoiceOptions,
         values: [f64; PARAMS],
         report: bool,
+        linger: bool,
         store: &mut Store,
         shared: &mut Shared,
     ) {
         let (rate, ranges) = (self.rate, self.ranges);
+        let mut created = Voice::new(rate, options, shared);
+        if linger {
+            created.linger();
+        }
         let mut voice = ScopeVoice {
             id,
-            voice: Voice::new(rate, options, shared),
+            voice: created,
             timelines: core::array::from_fn(|k| Timeline::new(rate, values[k], ranges[k].0, ranges[k].1)),
             direct: Vec::new(),
             report,
@@ -216,9 +223,10 @@ impl Scope {
         }
     }
 
-    pub fn set_velocity(&mut self, id: f64, velocity: crate::velocity::VoiceVelocity) {
+    /// voice `id` glides to `velocity` from `time` (seconds of the context; 0: now)
+    pub fn set_velocity(&mut self, id: f64, velocity: crate::velocity::VoiceVelocity, time: f64) {
         if let Some(voice) = self.voice(id) {
-            voice.voice.set_velocity(velocity);
+            voice.voice.set_velocity(velocity, time);
         }
     }
 

@@ -670,6 +670,24 @@ describe('requests', () => {
     expect(updatePresetRequestSchema.safeParse({ name: 'Pad', data: preset }).success).toBe(false);
   });
 
+  it('takes the clip a preset opens with: a uuid, null for none, missing in an update keeps it', () => {
+    const clipId = '5b6a2f2e-4f7c-4c2a-9a39-6f1f3f0b2a11';
+    const save = { name: 'Pad', data: preset, turnstileToken: 't' };
+    const update = { name: 'Pad', data: preset, editToken: 'x'.repeat(43) };
+    (
+      [
+        [savePresetRequestSchema, save],
+        [updatePresetRequestSchema, update],
+      ] as const
+    ).forEach(([schema, base]) => {
+      expect(schema.parse({ ...base, clipId }).clipId).toBe(clipId);
+      expect(schema.parse({ ...base, clipId: null }).clipId).toBeNull();
+      expect(schema.parse(base).clipId).toBeUndefined();
+      expect(schema.safeParse({ ...base, clipId: 'clip' }).success).toBe(false);
+      expect(schema.safeParse({ ...base, clipId: 42 }).success).toBe(false);
+    });
+  });
+
   it('validates opened request', () => {
     expect(presetOpenedRequestSchema.parse({ editToken: 'x'.repeat(43), extra: 1 })).toEqual({
       editToken: 'x'.repeat(43),

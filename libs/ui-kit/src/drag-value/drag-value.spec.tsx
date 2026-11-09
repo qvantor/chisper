@@ -68,6 +68,16 @@ describe('DragValue', () => {
     expect(slider.classList.contains('editable')).toBe(true);
   });
 
+  it('takes its accessible name from name, a short label or none shown', () => {
+    const { slider, rerender } = setup({ label: 'LEN', name: 'Bars' });
+    expect(screen.getByRole('slider', { name: 'Bars' })).toBe(slider);
+    expect(slider.textContent).toBe('LEN50%');
+    rerender(
+      <DragValue label='' name='Beats' value={2} precision={1} min={0} max={3} onChange={jest.fn()} />
+    );
+    expect(screen.getByRole('slider', { name: 'Beats' }).textContent).toBe('2');
+  });
+
   it('shows the arrows of a value stepping by whole numbers after it with arrows, none without', () => {
     const { slider, rerender } = setup({ value: 3, min: 1, max: 8, precision: 1, formatValue: undefined });
     expect(slider.querySelectorAll('[role="img"]')).toHaveLength(0);

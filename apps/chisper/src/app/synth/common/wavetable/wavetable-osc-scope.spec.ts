@@ -5,7 +5,13 @@ import { expectSameBits } from '../../../../test-utils/parity';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import { LfosState, lfoTable, LfoWire, RETRIG } from '../lfo/lfo-curve';
 import type { VoiceEvent, VoiceOptions, VoiceOscOptions } from './voice-options';
-import { HELD_AGAIN_GATE, RELEASE_GATE, VOICE_PARAMETERS, VoiceParam } from './wavetable-osc-params';
+import {
+  HELD_AGAIN_GATE,
+  RELEASE_GATE,
+  RELEASE_LEAD,
+  VOICE_PARAMETERS,
+  VoiceParam,
+} from './wavetable-osc-params';
 import { createVoiceScopeWasm, createVoiceSharedWasm, VOICE_PARAM_ORDER } from './wavetable-osc-wasm';
 
 // the voices of one node in the core (scope.rs): their params from the events of the main thread (a timeline
@@ -166,17 +172,22 @@ describe('the voices of one node', () => {
     voices.free();
   });
 
-  it('tells the starts and the ends of a block in one report: late, of mono, ended', () => {
+  it('tells the starts and the ends of a block in one report: on time, late, ended', () => {
     const { voices } = node();
     const events: VoiceEvent[] = [
-      // on time: told only for mono
+      // on time: told for every voice
       { kind: 'on', voice: 1, options: note({ start: 10 / RATE, phrase: 1 }), params: {} },
       { kind: 'on', voice: 2, options: note({ start: 10 / RATE, phrase: 2, mono: true }), params: {} },
       // its node came late: told
       { kind: 'on', voice: 3, options: note({ start: 64 / RATE, phrase: 3 }), params: {} },
     ];
     voices.apply(events.slice(0, 2));
-    expect(render(voices, 0).report).toEqual({ started: [[2, 10, 10]] });
+    expect(render(voices, 0).report).toEqual({
+      started: [
+        [1, 10, 10],
+        [2, 10, 10],
+      ],
+    });
     voices.apply(events.slice(2));
     expect(render(voices, 128).report).toEqual({ started: [[3, 128, 64]] });
     // a quiet block says nothing
@@ -209,6 +220,47 @@ describe('the voices of one node', () => {
     expect(held[7].some((value) => value !== 0)).toBe(true);
     expect(again[19].some((value) => value !== 0)).toBe(true);
     expect(voices.stats()).toEqual({ voices: 1, events: 2 });
+    voices.free();
+  });
+
+  it('a voice of mono lives on RELEASE_LEAD after its release, silent: a held gate meanwhile starts it again', () => {
+    const { voices } = node();
+    const lead = Math.round(RELEASE_LEAD * RATE);
+    // ENV 1 released over 10 ms at frame 1000: over at 1480
+    const envelopes = [{ ...FLAT, release: 0.01 }, FLAT, FLAT];
+    voices.apply(
+      [1, 2, 3].map((id) => ({
+        kind: 'on' as const,
+        voice: id,
+        options: note({ envelopes, phrase: id, ...(id > 1 && { mono: true }) }),
+        params: {},
+      }))
+    );
+    voices.apply(
+      [1, 2, 3].map((id) => ({ kind: 'set' as const, voice: id, param: 'gate', value: 0, time: 1000 / RATE }))
+    );
+    // 3 held again after the end of its release, within RELEASE_LEAD of it
+    const again = 1480 + lead / 2;
+    voices.apply([{ kind: 'set', voice: 3, param: 'gate', value: HELD_AGAIN_GATE, time: again / RATE }]);
+    const ends: [number, number][] = [];
+    const sound: Record<number, boolean[]> = { 2: [], 3: [] };
+    for (let frame = 0; frame < 1480 + 2 * lead; frame += BLOCK) {
+      const { report, taps } = render(voices, frame);
+      report?.ended?.forEach((id) => ends.push([id, frame]));
+      // the blocks after the end of the release
+      if (frame >= 1536)
+        taps.forEach(({ voice, left }) => sound[voice]?.push(left.some((value) => value !== 0)));
+    }
+    const block = (frame: number) => Math.floor(frame / BLOCK) * BLOCK;
+    // 1 in the block of the end of its release, 2 RELEASE_LEAD later, silent meanwhile; 3 plays again
+    expect(ends).toEqual([
+      [1, block(1480)],
+      [2, block(1480 + lead)],
+    ]);
+    expect(sound[2].length).toBeGreaterThan(0);
+    expect(sound[2].every((sounds) => !sounds)).toBe(true);
+    expect(sound[3].at(-1)).toBe(true);
+    expect(voices.stats().voices).toBe(1);
     voices.free();
   });
 
@@ -263,6 +315,8 @@ describe('the voices of one node', () => {
   });
 
   it('loses only the call that traps or the event it can not read: the events after them are applied', () => {
+    // a start at frame 0, on time (its frame from a start of 0: -0)
+    const onTime = (id: number) => [id, 0, expect.closeTo(0)];
     const errors: unknown[] = [];
     const { voices } = node((error) => errors.push(error));
     voices.apply([
@@ -288,7 +342,7 @@ describe('the voices of one node', () => {
     expect(voices.stats()).toEqual({ voices: 3, events: 1 });
     // voice 2 renders its block, released where its gate dropped
     const { report, taps } = render(voices, 0);
-    expect(report).toEqual({ ended: [2, 3] });
+    expect(report).toEqual({ started: [1, 2, 4].map(onTime), ended: [2, 3] });
     expect(taps.map(({ voice }) => voice)).toEqual([1, 2, 4]);
     voices.free();
   });

@@ -6,6 +6,9 @@ const mockMidiInputs = new BehaviorSubject<MIDIInput[]>([]);
 const mockSelectedInputId = new BehaviorSubject<string | null>(null);
 const mockSelectedChannel = new BehaviorSubject<number | null>(null);
 const mockSelectMidiChannel = jest.fn();
+const mockMidiAccess = new BehaviorSubject<unknown>({});
+const mockClockSync = new BehaviorSubject(true);
+const mockSetClockSync = jest.fn();
 
 jest.mock('../common/modules', () => ({
   useMidiController: () => [
@@ -13,8 +16,10 @@ jest.mock('../common/modules', () => ({
       $midiInputs: mockMidiInputs,
       $selectedInputId: mockSelectedInputId,
       $selectedChannel: mockSelectedChannel,
+      $midiAccess: mockMidiAccess,
+      $clockSync: mockClockSync,
     },
-    { selectMidiInput: jest.fn(), selectMidiChannel: mockSelectMidiChannel },
+    { selectMidiInput: jest.fn(), selectMidiChannel: mockSelectMidiChannel, setClockSync: mockSetClockSync },
   ],
 }));
 
@@ -26,9 +31,17 @@ const openChannelSelect = async () => {
   return screen.getAllByRole('combobox')[1] as HTMLSelectElement;
 };
 
+const open = async () => {
+  render(<MidiInput />);
+  fireEvent.click(screen.getByRole('button', { name: 'Midi' }));
+  expect(await screen.findByText('Midi source')).toBeInTheDocument();
+};
+
 beforeEach(() => {
   mockSelectedInputId.next(null);
   mockSelectedChannel.next(null);
+  mockMidiAccess.next({});
+  mockClockSync.next(true);
 });
 
 describe('MidiInput', () => {
@@ -79,5 +92,35 @@ describe('MidiInput', () => {
     fireEvent.change(select, { target: { value: 'all' } });
     expect(mockSelectMidiChannel).toHaveBeenLastCalledWith(null);
     expect(mockSelectMidiChannel).toHaveBeenCalledTimes(2);
+  });
+
+  it('lights the lamp of the MIDI Clock while the tempo follows it', async () => {
+    await open();
+    const lamp = screen.getByRole('button', { name: 'Sync to MIDI Clock' });
+    expect(lamp).toHaveAttribute('aria-pressed', 'true');
+
+    act(() => mockClockSync.next(false));
+    expect(lamp).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('switches the MIDI Clock by its lamp or its name, once a press', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Sync to MIDI Clock' }));
+    expect(mockSetClockSync).toHaveBeenLastCalledWith(false);
+
+    act(() => mockClockSync.next(false));
+    // the name: the lamp's row
+    fireEvent.click(screen.getByText('Sync to MIDI Clock'));
+    expect(mockSetClockSync).toHaveBeenLastCalledWith(true);
+    expect(mockSetClockSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('has no MIDI Clock to follow without WebMIDI', async () => {
+    mockMidiAccess.next(null);
+    await open();
+    expect(screen.queryByText('Sync to MIDI Clock')).not.toBeInTheDocument();
+
+    act(() => mockMidiAccess.next({}));
+    expect(screen.getByRole('button', { name: 'Sync to MIDI Clock' })).toBeInTheDocument();
   });
 });

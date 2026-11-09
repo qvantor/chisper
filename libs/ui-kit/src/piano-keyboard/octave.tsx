@@ -24,6 +24,11 @@ const KeyWhite = styled.div`
     background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(236, 240, 241, 1) 100%);
     box-shadow: inset 0px -2px 6px 2px rgb(127 140 141 / 20%);
   }
+
+  // a note of the track (not pressed by a key)
+  &.played:not(.pressed) {
+    background: linear-gradient(180deg, ${theme.colors.white} 0%, #aed6f1 100%);
+  }
 `;
 
 // octave label on the C key, scales with the key width (narrow keys on mobile)
@@ -60,20 +65,28 @@ const KeyBlack = styled.div`
       0 1px 2px rgb(0 0 0 / 50%);
     background: linear-gradient(to right, #444 0%, #222 100%);
   }
+
+  &.played:not(.pressed) {
+    background: linear-gradient(45deg, #1b4f72 0%, ${theme.colors.secondAccent} 100%);
+  }
 `;
 
 interface Props {
   octave: number;
   pressed: Notes[];
+  // the notes of the octave the track plays (another color)
+  played?: Notes[];
   keyWidth: number;
   keyHeight: number;
 }
 
-export const Octave = React.memo(({ octave, pressed, keyWidth, keyHeight }: Props) => {
+const NONE: Notes[] = [];
+
+export const Octave = React.memo(({ octave, pressed, played = NONE, keyWidth, keyHeight }: Props) => {
   const keyProps = (note: Notes) => ({
     'data-octave': octave,
     'data-note': note,
-    className: cls({ pressed: pressed.includes(note) }),
+    className: cls({ pressed: pressed.includes(note), played: played.includes(note) }),
   });
 
   return (

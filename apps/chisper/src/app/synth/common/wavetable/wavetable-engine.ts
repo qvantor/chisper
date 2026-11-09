@@ -1,5 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
-import { isWorkletSupported, loadWorklet, WORKLETS_PATH } from '../../fx/effects/load-worklet';
+import { isWorkletSupported, loadWorklet, workletUrl } from '../../fx/effects/load-worklet';
 import type { StopMessage } from '../../fx/effects/stereo-processor';
 import { createLfoFeed, LfosState } from '../lfo/lfo-curve';
 import { isLfoSource } from '../../fx/effects/fx-modulation';
@@ -60,8 +60,8 @@ export interface ParamAutomation {
   cancelScheduledValues: (time: number) => void;
 }
 
-// a voice of the voices node: its params; the node tells its start (late, of mono or traced: the frames it
-// started and was scheduled at, once) and its end (released to 0, stolen, failed, or the node failed)
+// a voice of the voices node: its params; the node tells its start (the frames it started and was scheduled at,
+// once) and its end (released to 0, stolen, failed, or the node failed)
 export interface VoiceHandle {
   readonly id: number;
   readonly params: Record<VoiceParam, ParamAutomation>;
@@ -292,9 +292,7 @@ export const createWavetableEngine = (
             answer(data.stored, data.version, 'stored');
           }
         };
-        const created = createWorker(
-          new URL(`${WORKLETS_PATH}${WAVETABLE_WORKER}.js`, document.baseURI).href
-        );
+        const created = createWorker(workletUrl(WAVETABLE_WORKER));
         // an error of the worker itself (its script) fails the engine; a version that failed to build only its
         // table: it plays the version before, the engine stays ready
         created.onerror = (event) => {
@@ -417,8 +415,10 @@ export const createWavetableEngine = (
     setFilter: (ids: number[], filter: VoiceFilterOptions | null) => {
       if (ids.length > 0) enqueue({ kind: 'filter', voices: ids, filter });
     },
-    setVelocity: (ids: number[], velocity: VoiceVelocity) => {
-      if (ids.length > 0) enqueue({ kind: 'velocity', voices: ids, velocity });
+    // (from `time`, seconds of the context: a note of the track is sent ahead of its time; none: now)
+    setVelocity: (ids: number[], velocity: VoiceVelocity, time?: number) => {
+      if (ids.length > 0)
+        enqueue({ kind: 'velocity', voices: ids, velocity, ...(time !== undefined && { time }) });
     },
     // new knobs of a module of playing voices (those no param carries: the noise's)
     setKnobs: <M extends KnobsModule>(ids: number[], module: M, values: VoiceModuleKnobs[M]) => {

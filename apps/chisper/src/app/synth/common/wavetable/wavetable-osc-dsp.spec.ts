@@ -70,7 +70,7 @@ interface CoreVoice {
   ): boolean;
   setRoutes(routes: VoiceRoute[]): void;
   setFilter(filter: VoiceFilterOptions | null): void;
-  setVelocity(velocity: VoiceVelocity): void;
+  setVelocity(velocity: VoiceVelocity, time?: number): void;
   end(): void;
   readonly ended: boolean;
   startFrame: number;
@@ -2589,6 +2589,67 @@ describe('the wavetable voice', () => {
         expect(left[1024 + 480]).toBeCloseTo(0.25, 4);
         expect(left[4095]).toBeCloseTo(0.25, 4);
         expect(maxStep(left)).toBeLessThan(0.003);
+      });
+
+      it('glides to a velocity sent ahead of its time from the first block at its time (a note of the track)', () => {
+        const glide = (time?: number) =>
+          peak(4096, {
+            envelopes: [FLAT, FLAT],
+            routes: [route('gain1', -1, 0, 1, VELO)],
+            velocity: { level: 0, amp: 1 },
+            before: (frame, dsp) => {
+              if (frame === 512) dsp.setVelocity({ level: 0.5, amp: 0.5 }, time);
+            },
+          }).left;
+        // sent at 512 for 1024: as if sent at 1024; for 1000: the block at 1024 too, not the one at 896
+        const now = peak(4096, {
+          envelopes: [FLAT, FLAT],
+          routes: [route('gain1', -1, 0, 1, VELO)],
+          velocity: { level: 0, amp: 1 },
+          before: (frame, dsp) => {
+            if (frame === 1024) dsp.setVelocity({ level: 0.5, amp: 0.5 });
+          },
+        }).left;
+        expect(glide(1024 / RATE)).toEqual(now);
+        expect(glide(1000 / RATE)).toEqual(now);
+        // none, or a time past: the next block
+        expect(glide()[640]).toBeLessThan(1);
+        expect(glide(0)[640]).toBeLessThan(1);
+      });
+
+      it('glides to each of several velocities sent ahead from its own block; one sent replaces those after it', () => {
+        const play = (before: (frame: number, dsp: CoreVoice) => void) =>
+          peak(4096, {
+            envelopes: [FLAT, FLAT],
+            routes: [route('gain1', -1, 0, 1, VELO)],
+            velocity: { level: 0, amp: 1 },
+            before,
+          }).left;
+        const first = { level: 0.5, amp: 0.5 };
+        const second = { level: 1, amp: 0.25 };
+        // two notes of the track sent at 512 for 1024 and 2048: as if each was sent at its block
+        const ahead = play((frame, dsp) => {
+          if (frame !== 512) return;
+          dsp.setVelocity(first, 1024 / RATE);
+          dsp.setVelocity(second, 2048 / RATE);
+        });
+        const atTheirBlocks = play((frame, dsp) => {
+          if (frame === 1024) dsp.setVelocity(first);
+          if (frame === 2048) dsp.setVelocity(second);
+        });
+        expect(ahead).toEqual(atTheirBlocks);
+        expect(ahead[2047]).toBeCloseTo(0.25, 4);
+        expect(ahead[4095]).toBeCloseTo(0, 4);
+        // one for 2048, then one now (a note of the keys): the one now from the next block, the other one goes
+        const replaced = play((frame, dsp) => {
+          if (frame !== 512) return;
+          dsp.setVelocity(second, 2048 / RATE);
+          dsp.setVelocity(first);
+        });
+        const once = play((frame, dsp) => {
+          if (frame === 512) dsp.setVelocity(first);
+        });
+        expect(replaced).toEqual(once);
       });
     });
   });

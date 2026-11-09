@@ -99,8 +99,19 @@ describe('the synth played for a long time', () => {
     expect(engine.store.stats()).toEqual({ tables: 0, versions: 0, bytes: 0 });
   });
 
-  it('a chord of 12 at Poly 8: the 4 voices stolen as they start fade out and end, 8 play on', async () => {
-    const { engine, onPress, audioCtx } = await setup();
+  it('a chord of 12 at Poly 8: the 4 voices stolen as they start play its last notes, 8 play on', async () => {
+    const { engine, onPress } = await setup();
+    Array.from({ length: 12 }, (_, i) => note(i)).forEach((n) => onPress(n));
+    engine.render();
+    expect(engine.made()).toBe(8);
+    expect(engine.alive()).toBe(8);
+    engine.render(100);
+    expect(engine.alive()).toBe(8);
+  });
+
+  it('a chord of 12 at Poly 8 in legato: the 4 voices stolen as they start fade out and end, 8 play on', async () => {
+    const { engine, onPress, audioCtx, synth } = await setup();
+    synth[1].setLegato(true);
     Array.from({ length: 12 }, (_, i) => note(i)).forEach((n) => onPress(n));
     engine.render();
     expect(engine.alive()).toBe(12);

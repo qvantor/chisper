@@ -7,7 +7,19 @@ import { text10 } from '../common/styles';
 import { theme } from '../common/constants';
 import { keepFocus } from '../common/utils';
 
-export { AnchorIcon, DottedIcon, LoopIcon, OneShotIcon, TrackIcon, TripletIcon } from './icons';
+export {
+  AnchorIcon,
+  DottedIcon,
+  FollowIcon,
+  LegatoIcon,
+  LoopIcon,
+  OneShotIcon,
+  QuantizeIcon,
+  SelectIcon,
+  SnapIcon,
+  TrackIcon,
+  TripletIcon,
+} from './icons';
 
 interface Props {
   on: boolean;
@@ -23,6 +35,8 @@ interface Props {
   // why it can't be switched, in the tooltip while it is disabled
   disabledHint?: string;
   disabled?: boolean;
+  // the color it is lit in while on (a hex; the accent: green)
+  lit?: string;
   className?: string;
 }
 
@@ -46,8 +60,9 @@ const Content = styled.span`
   }
 `;
 
-// a key of a plate (SwitchKeys): transparent on it, lit green while it is on, a disabled one only its label dimmed
-const Key = styled.button`
+// a key of a plate (SwitchKeys): transparent on it, lit while it is on (green, or `$lit`), a disabled one only its
+// label dimmed
+const Key = styled.button<{ $lit: string }>`
   ${text10};
   display: flex;
   align-items: center;
@@ -72,16 +87,16 @@ const Key = styled.button`
   }
 
   &.on {
-    color: ${theme.colors.accent};
-    background: ${hexToRgba(theme.colors.accent, 0.12)};
+    color: ${({ $lit }) => $lit};
+    background: ${({ $lit }) => hexToRgba($lit, 0.12)};
   }
 
   &.on:hover {
-    background: ${hexToRgba(theme.colors.accent, 0.18)};
+    background: ${({ $lit }) => hexToRgba($lit, 0.18)};
   }
 
   &.on ${Content} {
-    filter: drop-shadow(0 0 3px ${hexToRgba(theme.colors.accent, 0.6)});
+    filter: drop-shadow(0 0 3px ${({ $lit }) => hexToRgba($lit, 0.6)});
   }
 
   &:disabled {
@@ -123,44 +138,52 @@ interface PlateOff {
 }
 const PlateContext = React.createContext<PlateOff>({ disabled: false });
 
-// a switch of a mode (BPM, the triplets of a rate): a key that lights its label while it is on; hovered a while, a
-// tooltip tells its name, what it does and, disabled, why (its plate's reason first)
-export const SwitchKey = ({
-  on,
-  onChange,
+// the tooltip of a key: its name, what it does and, disabled, why
+const keyTip = (name: string, hint: string | undefined, why: string | undefined) => (
+  <>
+    <TipName>{name}</TipName>
+    {hint && <TipText>{hint}</TipText>}
+    {why && <TipWhy>{why}</TipWhy>}
+  </>
+);
+
+type KeyProps = Omit<Props, 'on' | 'onChange'> & {
+  // lit and pressed (a switch on); none: a key that acts once
+  pressed?: boolean;
+  onClick?: () => void;
+};
+
+// a key of a plate: its label (lit while pressed); hovered a while, a tooltip tells its name, what it does and,
+// disabled, why (its plate's reason first)
+const PlateKey = ({
+  pressed,
+  onClick,
   name,
   label,
   icon,
   hint,
   disabledHint,
   disabled = false,
+  lit = theme.colors.accent,
   className,
-}: Props) => {
+}: KeyProps) => {
   const plate = React.useContext(PlateContext);
   const off = plate.disabled || disabled;
   const why = plate.disabled ? plate.disabledHint : disabledHint;
   return (
-    <Tooltip
-      mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000}
-      title={
-        <>
-          <TipName>{name}</TipName>
-          {hint && <TipText>{hint}</TipText>}
-          {off && why && <TipWhy>{why}</TipWhy>}
-        </>
-      }
-    >
+    <Tooltip mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000} title={keyTip(name, hint, off ? why : undefined)}>
       <Wrap>
         <Key
           type='button'
-          className={cls(className, { on })}
-          aria-pressed={on}
+          className={cls(className, { on: pressed })}
+          $lit={lit}
+          aria-pressed={pressed}
           aria-label={name}
           disabled={off}
           // no focus, nor does a press move it: Space would switch a focused key
           tabIndex={-1}
           onMouseDown={keepFocus}
-          onClick={() => onChange?.(!on)}
+          onClick={onClick}
         >
           <Content>{icon ?? label ?? name}</Content>
         </Key>
@@ -168,6 +191,17 @@ export const SwitchKey = ({
     </Tooltip>
   );
 };
+
+// a switch of a mode (BPM, the triplets of a rate): a key that lights its label while it is on
+export const SwitchKey = ({ on, onChange, ...props }: Props) => (
+  <PlateKey {...props} pressed={on} onClick={() => onChange?.(!on)} />
+);
+
+// a key of a plate that does something once (Undo, Quantize) rather than switch a mode: the look and the tooltip of
+// SwitchKey, never lit, no pressed state
+export const ActionKey = (props: Omit<Props, 'on' | 'onChange' | 'lit'> & { onClick?: () => void }) => (
+  <PlateKey {...props} />
+);
 
 const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
 

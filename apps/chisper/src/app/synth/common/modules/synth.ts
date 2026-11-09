@@ -19,7 +19,7 @@ import {
   PITCH_BEND_DEFAULT,
   PITCH_BEND_MAX,
 } from '@chisper/preset-schema';
-import { getFq, stringToNote, noteToString } from '../../services';
+import { getFq, noteToString } from '../../services';
 import { urlSnapshotPlugin } from '../../../app';
 import type {
   KnobsModule,
@@ -59,7 +59,13 @@ import {
 } from '../wavetable/wavetable-osc-params';
 import { noteLfosOf } from '../../modulation/note-lfos';
 import { Glide, glideFrom, scheduleGlide, steady } from './glide';
-import { DEFAULT_VELOCITY, InputControllerModule } from './input-controller';
+import {
+  DEFAULT_VELOCITY,
+  InputControllerModule,
+  NoteSource,
+  noteOfKey,
+  sourceKey,
+} from './input-controller';
 import { Envelopes, envelopeSeconds, EnvelopesModule, VelocityKnobs } from './envelopes';
 import type { LfoModule, LfoRanges } from './lfos';
 import { ModRoute, ModulationModule } from './modulation';
@@ -262,6 +268,32 @@ interface Stopped {
   held: number;
 }
 
+// a key is pressed: performance.now() then (the time it is held: currentTime moves by device buffers) and, for a note
+// of a time (the track: `at`), the seconds of the context it plays at (null: now). The ms of a note ahead of its
+// time are those of its time
+interface Pressed {
+  ms: number;
+  at: number | null;
+}
+
+// the seconds of the context a note of `at` plays at (none, or one past: now)
+const timeOf = (audioCtx: AudioContext, at: number | undefined) =>
+  at === undefined ? audioCtx.currentTime : Math.max(at, audioCtx.currentTime);
+
+const pressedAt = (audioCtx: AudioContext, at: number | undefined): Pressed => {
+  const time = timeOf(audioCtx, at);
+  return { ms: performance.now() + (time - audioCtx.currentTime) * 1000, at: at === undefined ? null : time };
+};
+
+// the seconds a key was held, released at `at` (none: now): from one time to the other for notes of a time (the
+// track: exact), else by performance.now(); never below 0 (a note of the track stopped before it started)
+const heldSeconds = (audioCtx: AudioContext, pressed: Pressed, at: number | undefined) => {
+  const time = timeOf(audioCtx, at);
+  if (pressed.at !== null && at !== undefined) return Math.max(0, time - pressed.at);
+  const ms = performance.now() + (time - audioCtx.currentTime) * 1000;
+  return Math.max(0, (ms - pressed.ms) / 1000);
+};
+
 // the seconds of the context the release of a voice starts at, as its processor starts it (null while the key
 // is held): as long after its first sample (or its last start again: `startedAt`) as the key was held, not
 // before it sees the gate (now, or its first sample if later), at most RELEASE_LEAD after it
@@ -314,8 +346,13 @@ interface VoiceConfig {
   audioCtx: AudioContext;
   createVoice: SynthCoreModule[0]['wavetables']['createVoice'];
   note: Note;
-  // the seconds of the context time of the note on (read once: out of legato envStart is the same)
+  // the key it is held under (sourceKey)
+  key: string;
+  // the seconds of the context time of the note on (read once: out of legato envStart is the same); of a note of
+  // the track its time ahead (`at`)
   start: number;
+  // the note has a time (`at`): its release is timed from it
+  at?: number;
   oscillators: VoiceOscillator[];
   noise: VoiceNoise;
   // the frequency of the note, with portamento a glide to it from the note before
@@ -334,10 +371,9 @@ interface VoiceConfig {
   // the voices node started it later than scheduled, at `startedAt` (seconds of the context): its note on came
   // after that block began
   onLate: (startedAt: number) => void;
-  // traces the voice: the voices node tells the frames of its start
+  // traces the voice: the frames of its start, as the voices node tells them (the perf test hook)
   onStarted?: (message: VoiceStartedMessage) => void;
-  // a voice of mono (Poly 1): the notes it takes over may start its envelopes again, the voices node tells the
-  // frames of its start (on time too: the voice keeps its starts again until then)
+  // a voice of mono (Poly 1): it lives on RELEASE_LEAD after its release, a note sent before then takes it over
   mono: boolean;
 }
 
@@ -363,7 +399,6 @@ const createVoiceHandle = ({
   routes: modRoutes,
   filter,
   lfoRanges,
-  onStarted,
   mono,
 }: VoiceConfig): CreatedVoice | null => {
   const values: Partial<Record<VoiceParam, number>> = { frequency: pitch.from };
@@ -392,7 +427,6 @@ const createVoiceHandle = ({
       routes,
       filter,
       velocity: { level, amp },
-      ...(onStarted && { trace: true }),
       ...(mono && { mono: true }),
     },
     values
@@ -415,21 +449,24 @@ class Voice {
   // (SOURCE_KEYS)
   private sources: NoteSources;
   private keys: Record<string, unknown>;
-  // the milliseconds of the note on (performance.now): the time its key is held, currentTime moves by device
-  // buffers
-  private pressedAt = performance.now();
+  // the note on: the time its key is held (Pressed)
+  private pressed: Pressed;
   // the seconds of the context its first sample is at: its start, later once its processor tells it started
   // late
   private startedAt: number;
   // the key was released (null while it is held)
   private stopped: Stopped | null = null;
-  // its starts again (mono) until its processor tells where it started (null from then on): when, and whether
-  // its key was released then; processed late, they are worked out again from its first sample
+  // its starts again (a note took it over) until its processor tells where it started (null from then on, it tells
+  // every voice once): when, and whether its key was released then; processed late, they are worked out again from
+  // its first sample
   private restarts: { at: number; stopped: Stopped | null }[] | null = [];
   // the routes its voice has (JSON): a change of the routes of other knobs sends nothing
   private routes: string;
-  // the note it plays (the key it is held under; in mono the top of the stack) and the glide of its pitch to it
+  // the note it plays (the key it is held under; in mono the top of the stack), the seconds of the context it plays
+  // from (its start; of a note that took it over its time) and the glide of its pitch to it
   note: Note;
+  key: string;
+  private noteAt: number;
   private pitch: Glide;
   // its envelopes: those of its note, in legato of its phrase, in mono from where a note started them again
   private current: Phrase;
@@ -445,7 +482,10 @@ class Voice {
     this.config = config;
     this.handle = handle;
     this.startedAt = config.start;
+    this.pressed = pressedAt(config.audioCtx, config.at);
     this.note = config.note;
+    this.key = config.key;
+    this.noteAt = config.start;
     this.pitch = config.pitch;
     this.current = config.phrase;
     this.sources = sources;
@@ -463,6 +503,17 @@ class Voice {
   // its number in the voices node
   get id() {
     return this.handle.id;
+  }
+
+  // the seconds of the context it was scheduled to start at (a note of the track: ahead of now)
+  get scheduled() {
+    return this.config.start;
+  }
+
+  // the seconds of the context the note it plays starts at: its start, the time of a note that took it over (a note
+  // of the track: ahead of now)
+  get noteTime() {
+    return this.noteAt;
   }
 
   private get gate() {
@@ -502,19 +553,22 @@ class Voice {
     return this.sources[kind] !== null;
   }
 
-  // mono: the voice plays `note` instead, its pitch glides there in `seconds` along the curve from where it is
-  // (a glide the note interrupts goes on from its value now); 0: at once
-  glide = (note: Note, seconds: number) => {
+  // a note takes the voice over: it plays `note` (held under `key`) instead from `time` (seconds of the context), its
+  // pitch glides there in `seconds` along the curve from where it is then (a glide the note interrupts goes on from
+  // its value there); 0: at once
+  glide = (note: Note, key: string, seconds: number, time: number) => {
     const param = this.handle.params.frequency;
     this.note = note;
-    this.pitch = glideFrom(param, this.pitch, getFq(note), this.config.audioCtx.currentTime, seconds);
+    this.key = key;
+    this.noteAt = time;
+    this.pitch = glideFrom(param, this.pitch, getFq(note), time, seconds);
   };
 
-  // mono: a new note on the voice starts its envelopes again (out of legato, or from its release), now, each
-  // from the level it has reached (no step); its release is off, the time its key is held counts from now.
-  // The gate held at its other value tells its voice (automation: exact to the sample)
-  retrigger = () => {
-    const now = this.config.audioCtx.currentTime;
+  // mono: a new note on the voice starts its envelopes again (out of legato, or from its release), at its time
+  // (`at`, none: now), each from the level it has reached (no step); its release is off, the time its key is held
+  // counts from then. The gate held at its other value tells its voice (automation: exact to the sample)
+  retrigger = (at?: number) => {
+    const now = timeOf(this.config.audioCtx, at);
     this.restarts?.push({ at: now, stopped: this.stopped });
     this.startAgain(now, this.stopped);
     // at another value than its voice has seen: one set at this same time (two notes within a device buffer)
@@ -522,7 +576,7 @@ class Voice {
     if (now !== this.heldAt) this.heldGate = this.heldGate === HELD_GATE ? HELD_AGAIN_GATE : HELD_GATE;
     this.heldAt = now;
     setParam(this.gate, this.heldGate, now);
-    this.pressedAt = performance.now();
+    this.pressed = pressedAt(this.config.audioCtx, at);
     this.stopped = null;
   };
 
@@ -542,6 +596,13 @@ class Voice {
     return this.level(at) > 0 ? at + this.current.envelopes[0].release : at;
   }
 
+  // a note at `time` (seconds of the context) can take it over: it sounds then and its processor sees the gate
+  // before it ends (an event comes at most RELEASE_LEAD late). Held, it never ends by itself; a voice of mono
+  // lives on RELEASE_LEAD after its release, another one has to sound that much longer
+  outlives(time: number) {
+    return this.releaseEnd > time + (this.config.mono ? 0 : RELEASE_LEAD);
+  }
+
   // the level of an envelope (ENV 1: the volume) at `now` (seconds of the context) as its processor renders
   // it: from the start of its phrase (its own, in legato the first note's; where they started, once processed
   // late; in mono where a note started them again, from their levels then), released at releaseAt
@@ -559,18 +620,21 @@ class Voice {
   // at its start, silent). The gate tells the voice how long (from its first sample: it may be processed late),
   // in f32 as its timeline keeps it; the fx release at that time (releaseAt). A sample after a gate held at this
   // same time (a note that started the envelopes again within this device buffer): at the same time it would
-  // replace it before the voice sees it, which would release the voice from its last release (and end it sooner)
-  stop = () => {
-    const now = this.config.audioCtx.currentTime;
-    const held = (performance.now() - this.pressedAt) / 1000;
-    const at = this.heldAt === now ? now + 1 / this.config.audioCtx.sampleRate : now;
-    setParam(this.gate, RELEASE_GATE + held, at);
-    this.stopped = { now: at, held };
+  // replace it before the voice sees it, which would release the voice from its last release (and end it sooner).
+  // A note of the track is released at its time (`at`), held from the time of its note on
+  stop = (at?: number) => {
+    const { audioCtx } = this.config;
+    const now = timeOf(audioCtx, at);
+    const held = heldSeconds(audioCtx, this.pressed, at);
+    const time = this.heldAt === now ? now + 1 / audioCtx.sampleRate : now;
+    setParam(this.gate, RELEASE_GATE + held, time);
+    this.stopped = { now: time, held };
   };
 
-  // a stolen voice: it fades out (20 ms, a raised cosine) instead of being cut
-  immediatelyStop() {
-    setParam(this.gate, -1, this.config.audioCtx.currentTime);
+  // a stolen voice: it fades out (20 ms, a raised cosine) instead of being cut, from `at` (a note of the track
+  // steals at its time; none: now)
+  immediatelyStop(at?: number) {
+    setParam(this.gate, -1, timeOf(this.config.audioCtx, at));
   }
 
   // the routes of the modulation, the type of the filter or a knob of the pitch changed: the routes of its params,
@@ -632,9 +696,24 @@ interface VoicingContext {
   onCount: () => void;
 }
 
+// the fx switch to a note of the track at its time, not as it is sent ahead of it: up to this many seconds early
+// (a timer is late by the main thread's tasks, currentTime moves by device buffers); their worklets take it at the
+// first block from its start (noteDue of fx-modulation.ts), one note at a time: the notes of the track sent together
+// (TRACK_LEAD ahead) wait in the synth, each until its time (sendFx)
+const FX_EARLY = 0.005;
+
+// the fx follow the same note: its envelopes from the same start, released at the same time, the same velocity
+const sameFxNote = (a: FxNote | null, b: FxNote) =>
+  a?.envelopes === b.envelopes &&
+  a.start === b.start &&
+  a.release === b.release &&
+  a.from === b.from &&
+  a.velo === b.velo &&
+  a.velocity === b.velocity;
+
 class Voicing {
   private config: VoicingContext;
-  // the voices of the held notes
+  // the voices of the held notes, by the key of their source (sourceKey)
   private voices: Record<string, Voice>;
   // every voice until it has ended, the released ones too: they follow the knobs
   private sounding = new Set<Voice>();
@@ -647,6 +726,10 @@ class Voicing {
   // started; released with the release of `fxRelease` (the last note, in legato the last key of its phrase)
   private last: Voice | null = null;
   private fxRelease: Voice | null = null;
+  // the notes for the fx waiting for their time (notes of the track sent ahead of it), by their time; the timer of
+  // the first one
+  private fxWaiting: { at: number; note: FxNote }[] = [];
+  private fxTimer: ReturnType<typeof setTimeout> | null = null;
   // Poly 1 (mono): its voice and the keys held, the last one pressed on top. A note pressed while another key
   // is held takes the voice over (it glides there; in legato its envelopes go on), the key on top released
   // hands it back to the key below, the last key releases it. Null until a note in mono, after the voice ended
@@ -667,14 +750,15 @@ class Voicing {
   private velocityOf = (key: string) =>
     noteVelocity(this.velocities.get(key) ?? DEFAULT_VELOCITY, this.config.$velocity.value);
 
-  // the voice of a note, null if the oscillator isn't ready (a note played meanwhile is not played later); with
-  // portamento it glides from `from` (the last key held). In mono a note starts a phrase of its own: its voice
-  // takes the next notes over, no other voice joins it
-  private getVoice = (note: Note, from: Note | undefined): Voice | null => {
+  // the voice of a note (held under `key`) from `at` (seconds of the context: a note of the track; none: now),
+  // null if the oscillator isn't ready (a note played meanwhile is not played later); with portamento it glides
+  // from `from` (the last key held). In mono a note starts a phrase of its own: its voice takes the next notes
+  // over, no other voice joins it
+  private getVoice = (note: Note, key: string, from: Note | undefined, at?: number): Voice | null => {
     const { audioCtx, createVoice, $legato, $portamento, $envelopes, $routes, oscillators, noise } =
       this.config;
     const { voiceFilter, lfoRanges, tempo, $voiceStarts, $maxVoices } = this.config;
-    const now = audioCtx.currentTime;
+    const now = timeOf(audioCtx, at);
     const own: Phrase = {
       id: ++phrases,
       // the knobs and the curves of their stages (in BPM the seconds of their divisions at the tempo now)
@@ -690,14 +774,16 @@ class Voicing {
       audioCtx,
       createVoice,
       note,
+      key,
       start: now,
+      ...(at !== undefined && { at }),
       oscillators,
       noise,
       pitch:
         from && $portamento.value > 0
           ? { from: getFq(from), to: frequency, start: now, seconds: $portamento.value / 1000 }
           : steady(frequency, now),
-      velocity: this.velocityOf(noteToString(note)),
+      velocity: this.velocityOf(key),
       phrase,
       routes: $routes.value,
       filter: voiceFilter(),
@@ -711,9 +797,8 @@ class Voicing {
         this.sounding.delete(voice);
         // the voice of mono ended by itself (its processor failed): the next note starts one
         if (this.mono?.voice === voice) this.mono = null;
-        const key = noteToString(voice.note);
         // a held voice ended by itself: its key holds nothing (Poly doesn't count it, no glide from it)
-        if (this.voices[key] === voice) this.letGo(key, voice);
+        if (this.voices[voice.key] === voice) this.letGo(voice.key, voice);
         else if (!this.forget(voice)) return;
         this.config.onCount();
       },
@@ -729,25 +814,49 @@ class Voicing {
   };
 
   // the envelopes the fx follow: those of the phrase of the last note from where they started, released with
-  // fxRelease; the velocity of the last note
-  private followFx() {
-    if (!this.last) return;
-    const { envelopes, started, from } = this.last.phrase;
-    const { level: velo, share: velocity } = this.last.velocity;
-    const release = this.fxRelease?.releaseAt ?? null;
-    // a note of the phrase, or a late voice that didn't move its start, changes nothing; a note that started
-    // the envelopes again does (also at the same time), a note of another velocity too
-    const note = this.config.$fxNote.value;
-    if (
-      note?.envelopes === envelopes &&
-      note.start === started &&
-      note.release === release &&
-      note.from === from &&
-      note.velo === velo &&
-      note.velocity === velocity
-    )
-      return;
-    this.config.$fxNote.next({ envelopes, start: started, release, from, velo, velocity });
+  // fxRelease; the velocity of the last note. From the time of its note (noteTime): a note of the track sent ahead of
+  // it waits, those sent after it wait behind it (sendFx). A note of a time replaces those waiting from that time on
+  // (a key of now all of them: the fx follow the last note pressed)
+  followFx = () => {
+    if (this.last) {
+      const { envelopes, started, from } = this.last.phrase;
+      const { level: velo, share: velocity } = this.last.velocity;
+      const note: FxNote = {
+        envelopes,
+        start: started,
+        release: this.fxRelease?.releaseAt ?? null,
+        from,
+        velo,
+        velocity,
+      };
+      // a note of the phrase, or a late voice that didn't move its start, changes nothing; a note that started
+      // the envelopes again does (also at the same time), a note of another velocity too
+      if (!sameFxNote(this.fxWaiting.at(-1)?.note ?? this.config.$fxNote.value, note)) {
+        const at = this.last.noteTime;
+        this.fxWaiting = this.fxWaiting.filter((waiting) => waiting.at < at);
+        this.fxWaiting.push({ at, note });
+      }
+    }
+    this.sendFx();
+  };
+
+  // the fx take the last of the notes whose time has come (FX_EARLY ahead), the others wait for theirs: a timer for
+  // the first one, and every tick of the track (a timer of a hidden page waits a second)
+  private sendFx() {
+    const now = this.config.audioCtx.currentTime;
+    let due: FxNote | null = null;
+    while (this.fxWaiting.length > 0 && this.fxWaiting[0].at - now <= FX_EARLY)
+      due = (this.fxWaiting.shift() as { note: FxNote }).note;
+    if (due) this.config.$fxNote.next(due);
+    this.stopTimers();
+    if (this.fxWaiting.length === 0) return;
+    this.fxTimer = setTimeout(
+      () => {
+        this.fxTimer = null;
+        this.sendFx();
+      },
+      (this.fxWaiting[0].at - now) * 1000
+    );
   }
 
   // a released voice is no longer counted: it has ended or it is stolen; true if it was
@@ -757,38 +866,82 @@ class Voicing {
     return index >= 0;
   }
 
-  // a voice above Poly is stolen (it fades out): the quietest released one at `now` (ENV 1 × the amp of its
-  // velocity: the smallest step; the oldest of equal ones), else the oldest held one
-  private steal(now: number) {
-    if (this.released.length) {
-      let quietest = 0;
+  // the voice above Poly to steal at `now`: the quietest released one then (ENV 1 × the amp of its velocity: the
+  // smallest step; the oldest of equal ones), else the oldest held one. Not one that hasn't started by then (a
+  // note of the track ahead of its time: silent until it starts, it would be the quietest), unless every one is
+  // such
+  private victim(now: number): Voice | undefined {
+    const started = (voice: Voice) => voice.scheduled <= now;
+    const released = this.released.some(started) ? this.released.filter(started) : this.released;
+    if (released.length) {
+      let quietest: Voice = released[0];
       let level = Infinity;
-      this.released.forEach((voice, index) => {
+      released.forEach((voice) => {
         const value = voice.volume(now);
         if (value < level) {
           level = value;
-          quietest = index;
+          quietest = voice;
         }
       });
-      const [released] = this.released.splice(quietest, 1);
-      released.immediatelyStop();
-      return;
+      return quietest;
     }
-    const [key] = Object.keys(this.voices);
-    this.voices[key]?.immediatelyStop();
-    delete this.voices[key];
+    const keys = Object.keys(this.voices);
+    const key = keys.find((item) => started(this.voices[item])) ?? keys[0];
+    return this.voices[key];
   }
 
-  // a new voice for a note, gliding from the last key held (with `glide`); the voices above Poly are stolen
-  // first (all of them when Poly went down)
-  private startVoice(note: Note, glide = true) {
+  // `voice` no longer counts: released, it is forgotten; held, its key holds nothing
+  private uncount(voice: Voice) {
+    if (this.forget(voice)) return;
+    const key = Object.keys(this.voices).find((item) => this.voices[item] === voice);
+    if (key !== undefined) delete this.voices[key];
+  }
+
+  // a stolen voice fades out from `at` (none: now; 20 ms, a raised cosine), no longer counted
+  private kill(voice: Voice, at?: number) {
+    this.uncount(voice);
+    voice.immediatelyStop(at);
+  }
+
+  // a stolen voice plays the new note at `now` instead of fading out (its phases go on: no second voice under the
+  // new note, no click at its start): above Poly 1 out of legato (in legato a new note joins the phrase of the
+  // held ones; a voice of Poly doesn't live on as one of mono has to), started by then, sounding until its gate
+  // comes, its envelopes and sources those of the knobs
+  private canTake(voice: Voice, now: number) {
+    return (
+      this.config.$maxVoices.value > 1 &&
+      !this.config.$legato.value &&
+      voice.scheduled <= now &&
+      voice.outlives(now) &&
+      this.canRetrigger(voice)
+    );
+  }
+
+  // a new voice for a note (held under `key`) from `at` (none: now), gliding from the last key held (with `glide`).
+  // At Poly a voice is stolen first (all those above it when Poly went down): the last one plays the note if it
+  // can (canTake), the others fade out. The released voices whose release ends before a steal could take effect
+  // no longer count: they end by themselves, sooner than its fade
+  private startVoice(note: Note, key: string, glide = true, at?: number) {
     const keys = Object.keys(this.voices);
-    const from = glide && keys.length > 0 ? stringToNote(keys[keys.length - 1]) : undefined;
-    const now = this.config.audioCtx.currentTime;
-    while (this.voicesCount > 0 && this.voicesCount >= this.config.$maxVoices.value) this.steal(now);
-    const voice = this.getVoice(note, from);
+    const from = glide && keys.length > 0 ? this.voices[keys[keys.length - 1]].note : undefined;
+    const now = timeOf(this.config.audioCtx, at);
+    const max = this.config.$maxVoices.value;
+    if (this.voicesCount >= max)
+      this.released = this.released.filter((voice) => voice.releaseEnd > now + RELEASE_LEAD);
+    while (this.voicesCount > 0 && this.voicesCount >= max) {
+      const victim = this.victim(now);
+      if (!victim) break;
+      if (this.voicesCount === max && this.canTake(victim, now)) {
+        const { $portamento } = this.config;
+        const seconds = from && $portamento.value > 0 ? $portamento.value / 1000 : 0;
+        this.handOver(victim, note, key, seconds, true, at);
+        return victim;
+      }
+      this.kill(victim, at);
+    }
+    const voice = this.getVoice(note, key, from, at);
     if (!voice) return null;
-    this.voices[noteToString(note)] = voice;
+    this.voices[key] = voice;
     this.sounding.add(voice);
     this.followNote(voice);
     return voice;
@@ -801,88 +954,100 @@ class Voicing {
     this.followFx();
   }
 
-  // mono: the voice takes over `note`, the key on top of the stack. While another key was held (`held`) it
-  // glides there from where it is, in legato its envelopes go on, else they start again; from its release it
-  // plays it at once (Always is off) and they start again. False when a new voice plays it: its release ends
-  // before its processor would see the gate (it would have ended), or its envelopes would start again as
-  // others than the knobs' or with other oscillators (on/off, the unison and its shape; its processor reads them
-  // at its note on; a glide in legato keeps it)
-  private takeOver(note: Note, held: boolean) {
+  // `voice` can start its envelopes again as a new note: they are those of the knobs, it plays their sources (on/off,
+  // the unison and its shape: its processor reads them at its note on)
+  private canRetrigger(voice: Voice) {
+    const { $envelopes, tempo } = this.config;
+    return sameEnvelopes(voice.phrase.envelopes, $envelopes.value, tempo()) && voice.playsKnobs();
+  }
+
+  // `voice` plays `note` (held under `key`) from `at` (none: now): it leaves the key it played (held or released),
+  // glides there in `seconds` from where it is (0: a step), takes the velocity of `key`; `again`: its envelopes
+  // start again from their levels (its phases go on), else they go on (legato)
+  private handOver(voice: Voice, note: Note, key: string, seconds: number, again: boolean, at?: number) {
+    this.uncount(voice);
+    this.voices[key] = voice;
+    voice.glide(note, key, seconds, timeOf(this.config.audioCtx, at));
+    this.takeVelocity(voice, key, at);
+    if (!again) {
+      // in legato a note for the fx only by its velocity
+      this.followFx();
+      return;
+    }
+    // a new note for the fx: from its time, from the levels of the envelopes
+    voice.retrigger(at);
+    this.followNote(voice);
+  }
+
+  // mono: the voice takes over `note` (held under `key`), the key on top of the stack, from `at` (none: now). While
+  // another key was held (`held`) it glides there from where it is, in legato its envelopes go on, else they start
+  // again; in its release (back-to-back notes too: a key released at the time of the next one) it plays it at once
+  // (Always is off) and they start again. False when a new voice plays it: its release is over by then (the note
+  // starts from silence, from the Phase of each oscillator), or its envelopes would start again as others than the
+  // knobs' or with other sources (a glide in legato keeps it)
+  private takeOver(note: Note, key: string, held: boolean, at?: number) {
     const { mono } = this;
     if (!mono) return false;
     const { voice } = mono;
     const again = !held || !this.config.$legato.value;
-    if (voice.releaseEnd <= this.config.audioCtx.currentTime + RELEASE_LEAD) return false;
-    const { $envelopes, tempo } = this.config;
-    if (again && !(sameEnvelopes(voice.phrase.envelopes, $envelopes.value, tempo()) && voice.playsKnobs()))
-      return false;
-    delete this.voices[noteToString(voice.note)];
-    this.voices[noteToString(note)] = voice;
-    this.forget(voice);
-    voice.glide(note, held ? this.config.$portamento.value / 1000 : 0);
-    this.takeVelocity(voice, noteToString(note));
-    if (!again) {
-      // in legato a note for the fx only by its velocity
-      this.followFx();
-      return true;
-    }
-    // a new note for the fx: from now, from the levels of the envelopes
-    voice.retrigger();
-    this.followNote(voice);
+    if (!voice.outlives(timeOf(this.config.audioCtx, at))) return false;
+    if (again && !this.canRetrigger(voice)) return false;
+    this.handOver(voice, note, key, held ? this.config.$portamento.value / 1000 : 0, again, at);
     return true;
   }
 
-  // mono: the voice plays the velocity of `key` now (VELO and its amp glide there in 10 ms)
-  private takeVelocity(voice: Voice, key: string) {
+  // the voice plays the velocity of `key` from `at` (none: now; VELO and its amp glide there in 10 ms)
+  private takeVelocity(voice: Voice, key: string, at?: number) {
     const velocity = this.velocityOf(key);
     const { level, amp } = velocity;
     const same = level === voice.velocity.level && amp === voice.velocity.amp;
     voice.velocity = velocity;
-    if (!same) this.config.setVelocity([voice.id], { level, amp });
+    if (!same) this.config.setVelocity([voice.id], { level, amp }, at);
   }
 
-  // mono: `note` on top of `stack`, its voice takes it over, else a new voice plays it
-  private playMono(note: Note, held: boolean, stack: string[]) {
-    if (this.takeOver(note, held)) return;
-    const voice = this.startVoice(note);
+  // mono: `note` (held under `key`) on top of `stack` from `at`, its voice takes it over, else a new voice plays it
+  private playMono(note: Note, key: string, held: boolean, stack: string[], at?: number) {
+    if (this.takeOver(note, key, held, at)) return;
+    const voice = this.startVoice(note, key, true, at);
     this.mono = voice && { voice, stack };
   }
 
-  // a note played before the oscillator is ready is not played (nor later); paused, it waits for resume (at its
-  // velocity)
-  onPress = (note: Note, velocity = DEFAULT_VELOCITY) => {
-    this.velocities.set(noteToString(note), velocity);
+  // a note of `source` from `at` (seconds of the context: the track sends its notes ahead of their time; none:
+  // now). One played before the oscillator is ready is not played (nor later); paused, it waits for resume (at
+  // its velocity)
+  onPress = (note: Note, velocity = DEFAULT_VELOCITY, source: NoteSource = 'keys', at?: number) => {
+    const key = sourceKey(source, note);
+    this.velocities.set(key, velocity);
     if (this.waiting) {
-      const key = noteToString(note);
       if (!this.waiting.includes(key)) this.waiting.push(key);
       return;
     }
     if (!this.config.isReady()) return;
     // the released voices whose release is over are not counted (their ended message is on its way)
-    const now = this.config.audioCtx.currentTime;
+    const now = timeOf(this.config.audioCtx, at);
     this.released = this.released.filter((voice) => voice.releaseEnd > now);
     if (this.config.$maxVoices.value !== 1) {
-      this.startVoice(note);
+      this.startVoice(note, key, true, at);
       return;
     }
     // mono: the key goes on top of the stack (pressed again, from where it was)
-    const key = noteToString(note);
     const stack = this.mono?.stack.filter((item) => item !== key) ?? [];
     const held = stack.length > 0;
     stack.push(key);
     if (this.mono) this.mono.stack = stack;
-    this.playMono(note, held, stack);
+    this.playMono(note, key, held, stack, at);
   };
 
-  onRelease = (note: Note) => {
-    const stringNote = noteToString(note);
-    this.velocities.delete(stringNote);
+  // a note of `source` released at `at` (none: now)
+  onRelease = (note: Note, source: NoteSource = 'keys', at?: number) => {
+    const key = sourceKey(source, note);
+    this.velocities.delete(key);
     if (this.waiting) {
-      this.waiting = this.waiting.filter((key) => key !== stringNote);
+      this.waiting = this.waiting.filter((item) => item !== key);
       return;
     }
     const { mono } = this;
-    const index = mono ? mono.stack.indexOf(stringNote) : -1;
+    const index = mono ? mono.stack.indexOf(key) : -1;
     if (mono && index >= 0) {
       mono.stack.splice(index, 1);
       // a key below the top: the voice plays on
@@ -890,21 +1055,21 @@ class Voicing {
       // the key on top: the voice goes back to the key below as if it were pressed, the last key releases it
       const top = mono.stack[mono.stack.length - 1];
       if (top !== undefined) {
-        this.playMono(stringToNote(top), true, mono.stack);
+        this.playMono(noteOfKey(top), top, true, mono.stack, at);
         return;
       }
     }
-    const voice = this.voices[stringNote];
+    const voice = this.voices[key];
     // the voice of a stolen note has already stopped (or it ended by itself), the held ones keep playing
     if (!voice) return;
-    this.letGo(stringNote, voice);
+    this.letGo(key, voice, at);
     this.released.push(voice);
   };
 
-  // the voice of a held key no longer plays it: its key is released, or it ended by itself (its node is off, the
-  // release only tells the fx when)
-  private letGo(key: string, voice: Voice) {
-    voice.stop();
+  // the voice of a held key no longer plays it: its key is released (at `at`, none: now), or it ended by itself (its
+  // node is off, the release only tells the fx when)
+  private letGo(key: string, voice: Voice, at?: number) {
+    voice.stop(at);
     delete this.voices[key];
     const held = Object.keys(this.voices).length;
     // the fx release their envelopes with the last note (at its release), in legato with the last key of the
@@ -936,6 +1101,8 @@ class Voicing {
     this.phrase = undefined;
     this.last = null;
     this.fxRelease = null;
+    this.fxWaiting = [];
+    this.stopTimers();
     this.config.$fxNote.next(null);
     this.config.onCount();
   }
@@ -946,9 +1113,19 @@ class Voicing {
     const keys = this.waiting;
     this.waiting = null;
     if (!keys?.length || !this.config.isReady()) return;
-    if (this.config.$maxVoices.value !== 1) keys.forEach((key) => this.startVoice(stringToNote(key), false));
-    else this.playMono(stringToNote(keys[keys.length - 1]), false, keys);
+    if (this.config.$maxVoices.value !== 1)
+      keys.forEach((key) => this.startVoice(noteOfKey(key), key, false));
+    else {
+      const top = keys[keys.length - 1];
+      this.playMono(noteOfKey(top), top, false, keys);
+    }
     this.config.onCount();
+  }
+
+  // the fx wait for no timer (another one comes, the synth paused or destroyed)
+  stopTimers() {
+    if (this.fxTimer !== null) clearTimeout(this.fxTimer);
+    this.fxTimer = null;
   }
 
   // every voice has ended (its processor posted it): a preset switch waits for those it faded out
@@ -1068,16 +1245,18 @@ export const synth = ({
       // a preset switch (soundSwitch): silence, the keys wait for the next preset; it is ready: they start on it
       pause: () => voicing.pause(),
       resume: () => voicing.resume(),
+      // the fx follow a note of the track whose time has come (the track ticks while it plays: the timer of a
+      // hidden page waits a second)
+      followFx: () => voicing.followFx(),
     }))
     .subscriptions(({ voicing, $maxVoices, $bendDown, $bendUp, followNoteLfos }, { setVoicesCount }) => [
       ...followNoteLfos(),
-      $onRelease.subscribe((note) => {
-        voicing.onRelease(note);
-
+      $onRelease.subscribe(({ note, source, at }) => {
+        voicing.onRelease(note, source, at);
         setVoicesCount(voicing.voicesCount);
       }),
-      $onPress.subscribe(({ note, velocity }) => {
-        voicing.onPress(note, velocity);
+      $onPress.subscribe(({ note, velocity, source, at }) => {
+        voicing.onPress(note, velocity, source, at);
         setVoicesCount(voicing.voicesCount);
       }),
       // Poly comes to 1 or leaves it while notes play
@@ -1164,7 +1343,8 @@ export const synth = ({
           snap.bu !== undefined && $bendUp.next(bendRangeFrom(snap.bu));
         },
       })
-    );
+    )
+    .destroy(({ voicing }) => voicing.stopTimers());
 
 export const {
   ModelProvider: SynthProvider,

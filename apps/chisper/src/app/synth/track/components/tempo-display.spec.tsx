@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { createTransport } from '../../../test-utils/models';
-import { TransportContext } from '../common/modules/transport';
+import { createTransport } from '../../../../test-utils/models';
+import { TransportContext } from '../../common/modules/transport';
 import { TempoDisplay } from './tempo-display';
 
 // jsdom has no PointerEvent: a mouse event with the pointer type name and a pointerId works for React and the

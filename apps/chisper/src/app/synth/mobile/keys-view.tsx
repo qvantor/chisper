@@ -8,6 +8,7 @@ import { pianoStarts } from '../common/piano-octaves';
 import { FxScreen } from '../fx';
 import { PitchBend } from '../pitch-bend';
 import { SynthScreen } from '../screens';
+import { ClipPreview } from '../track';
 import { TierKeys } from './keyboard-tier';
 import { Scaled } from './scaled';
 import { SynthSections } from './synth-sections';
@@ -40,6 +41,13 @@ const MiniSynth = styled(Scaled)`
 // like the mini synth: every effect on one or two lines, the delay on one (its keys of the tempo beside Time)
 const MiniFx = styled(Scaled)`
   flex: 0 0 40%;
+  ${miniPanel}
+`;
+
+// the clip of the track over the keys: Play and Stop, its notes and where the output plays
+const MiniClip = styled.div`
+  flex: 0 0 28%;
+  padding: 4px;
   ${miniPanel}
 `;
 
@@ -106,6 +114,10 @@ export const KeysView = ({ portrait, screen }: { portrait: boolean; screen: Synt
         <MiniFx className={panelClassName} width={portrait ? 780 : 1400}>
           <FxScreen layout={portrait ? 'column' : 'row'} />
         </MiniFx>
+      ) : screen === 'clip' ? (
+        <MiniClip className={panelClassName}>
+          <ClipPreview passive />
+        </MiniClip>
       ) : (
         <MiniSynth
           className={panelClassName}

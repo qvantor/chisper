@@ -7,7 +7,7 @@ import { WorkerStub } from '../../../../test-utils/worker-stub';
 import { withCurves, played } from '../../../../test-utils/envelopes';
 import { eventsOf, voiceEvents, VoiceView, voicesNodes } from '../../../../test-utils/voice-events';
 import { getFq, LoadNoiseSample } from '../../services';
-import { RELEASE_GATE, VoiceParam } from '../wavetable/wavetable-osc-params';
+import { HELD_AGAIN_GATE, RELEASE_GATE, VoiceParam } from '../wavetable/wavetable-osc-params';
 import { curveShape, envelopeValue } from '../envelope/envelope-curve';
 import { UNISON_SHAPE } from '../wavetable/voice-options';
 import type { TableState } from '../wavetable/wavetable-engine';
@@ -404,8 +404,12 @@ describe('synth', () => {
     expect(synthModel.$voicesCount.value).toBe(0);
   });
 
-  it('steals the oldest voice above max voices: it fades out in its processor', async () => {
-    const { onPress, voices, param, synthModel, synthActions, travel } = await setup();
+  // A stolen voice takes the new note out of legato: its phases go on (no reset at the note on, no click), no
+  // second voice under it. Before, it faded out over 20 ms under a new voice: two notes at once and the click
+  // of the new one. It still fades out when it can't take the note (legato, other envelopes or sources than
+  // the knobs, Poly gone down, not started yet)
+  it('steals the oldest voice above max voices: it plays the new note, its phases go on (no fade, no second voice)', async () => {
+    const { onPress, onRelease, voices, param, synthModel, synthActions, travel } = await setup();
     synthActions.setMaxVoices(2);
 
     onPress([4, 'C']);
@@ -416,10 +420,74 @@ describe('synth', () => {
     onPress([4, 'G']);
 
     expect(synthModel.$voicesCount.value).toBe(2);
-    const [c, e, g] = voices();
-    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)).toEqual([-1, 2]);
+    expect(voices()).toHaveLength(2);
+    const [c, e] = voices();
+    // C steps to G and starts its envelopes again from their levels, a new note for the fx
+    expect(calls(param(c, 'frequency'), 'setValueAtTime').at(-1)).toEqual([f32(getFq([4, 'G'])), 2]);
+    expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[HELD_AGAIN_GATE, 2]]);
     expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([]);
-    expect(calls(param(g, 'gate'), 'setValueAtTime')).toEqual([]);
+    expect(synthModel.$fxNote.value).toMatchObject({ start: 2, release: null });
+    // the key of C no longer holds it, that of G releases it
+    onRelease([4, 'C']);
+    expect(calls(param(c, 'gate'), 'setValueAtTime')).toHaveLength(1);
+    await travel(1);
+    onRelease([4, 'G']);
+    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)).toEqual([RELEASE_GATE, 3]);
+    expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([]);
+  });
+
+  it('a stolen voice with other envelopes than the knobs fades out: a new voice plays the note', async () => {
+    const { onPress, voices, param, synthActions, envelopeModel } = await setup();
+    synthActions.setMaxVoices(2);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0.2);
+    onPress([4, 'G']);
+    expect(voices()).toHaveLength(3);
+    const [c, , g] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+    expect(g.options.envelopes[0].attack).toBe(0.2);
+  });
+
+  it('a stolen voice that plays other sources than the knobs (its unison) fades out: a new voice plays the note', async () => {
+    const { onPress, voices, param, synthActions, osc1 } = await setup();
+    synthActions.setMaxVoices(2);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    osc1[1].setOscValue('unison', 4);
+    onPress([4, 'G']);
+    expect(voices()).toHaveLength(3);
+    const [c, , g] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+    expect(g.options.osc[0]).toMatchObject({ unison: 4 });
+  });
+
+  it('in legato a stolen voice fades out: the new note joins the phrase of the held ones', async () => {
+    const { onPress, voices, param, synthActions } = await setup();
+    synthActions.setLegato(true);
+    synthActions.setMaxVoices(2);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    onPress([4, 'G']);
+    const [c, e, g] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+    expect(g.options.phrase).toBe(e.options.phrase);
+  });
+
+  it('with portamento a stolen voice glides to the note from where it is while a key is held', async () => {
+    const { onPress, voices, param, synthActions, travel } = await setup();
+    synthActions.setMaxVoices(2);
+    synthActions.setPortamento(100);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    await travel(1);
+    onPress([4, 'G']);
+    const frequency = param(voices()[0], 'frequency');
+    expect(calls(frequency, 'setValueAtTime').at(-1)).toEqual([f32(getFq([4, 'C'])), 1]);
+    expect(calls(frequency, 'exponentialRampToValueAtTime').at(-1)).toEqual([
+      f32(getFq([4, 'G'])),
+      expect.closeTo(1.1, 9),
+    ]);
   });
 
   describe('poly', () => {
@@ -434,7 +502,7 @@ describe('synth', () => {
       expect(synthModel.$voicesCount.value).toBe(1);
     });
 
-    it('a release of 32 s gives no more sounding voices than Poly: the oldest released one is stolen', async () => {
+    it('a release of 32 s gives no more sounding voices than Poly: the oldest released one plays the new note', async () => {
       const { onPress, onRelease, voices, param, synthModel, synthActions, envelopeModel } = await setup();
       // released at their start at full level (with an attack at 0: they would end there)
       envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
@@ -446,9 +514,12 @@ describe('synth', () => {
         onRelease([4, note]);
         expect(synthModel.$voicesCount.value).toBeLessThanOrEqual(3);
       });
-      // C, D and E fade out (gate below 0), F, G and A release on
-      const stolen = voices().map((voice) => calls(param(voice, 'gate'), 'setValueAtTime').at(-1)?.[0]);
-      expect(stolen).toEqual([-1, -1, -1, RELEASE_GATE, RELEASE_GATE, RELEASE_GATE]);
+      // C, D and E play F, G and A and release on: none fades out, no voice more
+      expect(voices()).toHaveLength(3);
+      const played = voices().map((voice) => calls(param(voice, 'frequency'), 'setValueAtTime').at(-1)?.[0]);
+      expect(played).toEqual((['F', 'G', 'A'] as const).map((name) => f32(getFq([4, name]))));
+      const gates = voices().map((voice) => calls(param(voice, 'gate'), 'setValueAtTime').at(-1)?.[0]);
+      expect(gates).toEqual([RELEASE_GATE, RELEASE_GATE, RELEASE_GATE]);
       expect(synthModel.$voicesCount.value).toBe(3);
     });
 
@@ -463,10 +534,13 @@ describe('synth', () => {
       onRelease([4, 'E']);
       onPress([4, 'F']);
       const gate = (index: number) => calls(param(voices()[index], 'gate'), 'setValueAtTime').at(-1)?.[0];
-      // E, released, is stolen, C and D are held on
-      expect([gate(0), gate(1), gate(2)]).toEqual([undefined, undefined, -1]);
+      // E, released, plays F; C and D are held on
+      expect(voices()).toHaveLength(3);
+      expect([gate(0), gate(1), gate(2)]).toEqual([undefined, undefined, HELD_AGAIN_GATE]);
+      // none released: C, the oldest held one, plays G
       onPress([4, 'G']);
-      expect(gate(0)).toBe(-1);
+      expect(voices()).toHaveLength(3);
+      expect(gate(0)).toBe(HELD_AGAIN_GATE);
       expect(gate(1)).toBeUndefined();
     });
 
@@ -484,11 +558,15 @@ describe('synth', () => {
       await travel(0.2);
       wall.mockReturnValue(1200);
       onRelease([4, 'D']);
-      // at 1.3 C is at 0.85, D at 0.19
+      // at 1.3 C is at 0.85, D at 0.19: D plays E
       await travel(0.1);
       onPress([4, 'E']);
+      expect(voices()).toHaveLength(2);
       const [c, d] = voices();
-      expect(calls(param(d, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+      expect(calls(param(d, 'gate'), 'setValueAtTime').at(-1)).toEqual([
+        HELD_AGAIN_GATE,
+        expect.closeTo(1.3, 9),
+      ]);
       expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[RELEASE_GATE + 1, 1]]);
     });
 
@@ -545,17 +623,49 @@ describe('synth', () => {
       started(voices()[0], Math.round(0.04 * audioCtx.sampleRate), 0);
       onRelease([4, 'C']);
       onPress([4, 'D']);
-      await travel(1.02);
+      // (from its note on it would be over at 1, within RELEASE_LEAD of now: not counted)
+      await travel(0.98);
       onPress([4, 'E']);
+      expect(voices()).toHaveLength(2);
       const [c, d] = voices();
-      // C still sounds: stolen for E
-      expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+      // C still sounds: stolen for E, it plays it
+      expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(HELD_AGAIN_GATE);
       expect(calls(param(d, 'gate'), 'setValueAtTime')).toEqual([]);
+    });
+
+    it('does not steal a released voice whose release ends within RELEASE_LEAD: it ends by itself, sooner than a fade', async () => {
+      const { onPress, onRelease, voices, param, synthActions, synthModel, travel, wall } = await setup();
+      synthActions.setMaxVoices(2);
+      // the default release: 5 ms
+      onPress([4, 'C']);
+      onPress([4, 'D']);
+      await travel(1);
+      wall.mockReturnValue(1000);
+      onRelease([4, 'C']);
+      onPress([4, 'E']);
+      const [c, d, e] = voices();
+      expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[RELEASE_GATE + 1, 1]]);
+      expect(calls(param(d, 'gate'), 'setValueAtTime')).toEqual([]);
+      expect(e).toBeDefined();
+      expect(synthModel.$voicesCount.value).toBe(2);
+    });
+
+    it('Poly gone down: the voices above it fade out at the next note, the last one stolen plays it', async () => {
+      const { onPress, voices, param, synthActions, synthModel } = await setup();
+      synthActions.setMaxVoices(4);
+      (['C', 'D', 'E', 'F'] as const).forEach((name) => onPress([4, name]));
+      synthActions.setMaxVoices(2);
+      onPress([4, 'G']);
+      const gates = voices().map((voice) => calls(param(voice, 'gate'), 'setValueAtTime').at(-1)?.[0]);
+      expect(gates).toEqual([-1, -1, HELD_AGAIN_GATE, undefined]);
+      expect(synthModel.$voicesCount.value).toBe(2);
     });
   });
 
   it('takes a stolen voice off once it has ended: a preset switch waits for it', async () => {
     const { onPress, voices, end, synthActions, synthModel } = await setup();
+    // (in legato a stolen voice fades out)
+    synthActions.setLegato(true);
     synthActions.setMaxVoices(2);
     onPress([4, 'C']);
     onPress([4, 'E']);
@@ -874,19 +984,107 @@ describe('synth', () => {
       expect(synthModel.$fxNote.value).toMatchObject({ start: 1, release: expect.closeTo(1.3, 9) });
     });
 
-    it('a new voice for a note when the release of the voice ends before its processor would see the gate', async () => {
-      const { onPress, onRelease, voices, param, envelopeModel, travel, wall } = await mono(100, false);
+    // A note on the voice while it sounds (held or in its release) takes it over, its pitch moves there:
+    // never a second voice under it. Before, a key released at the time of the next note (back-to-back notes
+    // of the track or of MIDI) with a release under RELEASE_LEAD (the default 5 ms) started a new voice and
+    // stole the old one: it faded out over 20 ms under the next note, two pitches at once and a click at its
+    // start. The voice of mono lives on RELEASE_LEAD after its release (its core), so a note sent before the
+    // end of the release reaches it
+    it('a note takes the voice over until the end of its release: it lives on after it as long as its gate may be late', async () => {
+      const { onPress, onRelease, voices, param, synthModel, envelopeModel, travel, wall } = await mono(
+        100,
+        false
+      );
       envelopeModel[1].setEnvelopeValue('env1', 'release', 0.1);
       onPress([4, 'A']);
       await travel(1);
       wall.mockReturnValue(1000);
       onRelease([4, 'A']);
-      // its release ends at 1.1, within 50 ms of now
+      // its release ends at 1.1, within RELEASE_LEAD of now: its processor keeps it RELEASE_LEAD longer
       await travel(0.07);
       onPress([4, 'B']);
-      const [a, b] = voices();
-      expect(calls(param(a, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
-      expect(b).toBeDefined();
+      expect(voices()).toHaveLength(1);
+      const [voice] = voices();
+      expect(calls(param(voice, 'gate'), 'setValueAtTime')).toEqual([
+        [RELEASE_GATE + 1, 1],
+        [HELD_AGAIN_GATE, expect.closeTo(1.07, 9)],
+      ]);
+      expect(calls(param(voice, 'frequency'), 'setValueAtTime')).toEqual([
+        [fq('B'), expect.closeTo(1.07, 9)],
+      ]);
+      expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    it('a key released and the next one pressed at one time (MIDI, the default release): the voice takes it over', async () => {
+      const { onPress, onRelease, voices, param, synthModel, travel, wall } = await mono(0, false);
+      onPress([4, 'A']);
+      await travel(0.5);
+      wall.mockReturnValue(500);
+      onRelease([4, 'A']);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(1);
+      const gate = param(voices()[0], 'gate');
+      // its release (5 ms) cancelled before the voice sees it: no second voice, no fade
+      expect(calls(gate, 'setValueAtTime')).toEqual([
+        [RELEASE_GATE + 0.5, 0.5],
+        [HELD_AGAIN_GATE, 0.5],
+      ]);
+      expect(calls(gate, 'cancelScheduledValues').at(-1)).toEqual([0.5]);
+      expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    it('a key released a device buffer before the next note (MIDI: separate events), the default release: the voice takes it over', async () => {
+      const { onPress, onRelease, voices, param, synthModel, travel, wall } = await mono(0, false);
+      onPress([4, 'A']);
+      await travel(0.5);
+      wall.mockReturnValue(500);
+      onRelease([4, 'A']);
+      // the note on 3 ms later, within the release (5 ms): its voice still sounds, no second voice, no fade
+      await travel(0.003);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(1);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([
+        [RELEASE_GATE + 0.5, 0.5],
+        [HELD_AGAIN_GATE, expect.closeTo(0.503, 9)],
+      ]);
+      expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    it('a note after the release of the voice is over: a new voice from the Phase, the silent one is neither stolen nor counted', async () => {
+      const { onPress, onRelease, voices, param, synthModel, travel, wall } = await mono(0, false);
+      onPress([4, 'A']);
+      await travel(0.5);
+      wall.mockReturnValue(500);
+      onRelease([4, 'A']);
+      // over at 0.505
+      await travel(0.1);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(2);
+      const [a] = voices();
+      expect(calls(param(a, 'gate'), 'setValueAtTime')).toEqual([[RELEASE_GATE + 0.5, 0.5]]);
+      expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    it('a new voice for a note with other envelopes: the voice in its release ends by it if it ends before a fade would', async () => {
+      const { onPress, onRelease, voices, param, envelopeModel, travel, wall } = await mono(0, false);
+      const gate = (index: number) => calls(param(voices()[index], 'gate'), 'setValueAtTime').at(-1)?.[0];
+      onPress([4, 'A']);
+      await travel(0.5);
+      wall.mockReturnValue(500);
+      onRelease([4, 'A']);
+      // its release (5 ms) ends sooner than a fade: not stolen
+      envelopeModel[1].setEnvelopeValue('env1', 'release', 1);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(2);
+      expect(gate(0)).toBe(RELEASE_GATE + 0.5);
+      await travel(0.5);
+      wall.mockReturnValue(1000);
+      onRelease([4, 'B']);
+      // released over 1 s: it fades out
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0.2);
+      onPress([4, 'C']);
+      expect(voices()).toHaveLength(3);
+      expect(gate(1)).toBe(-1);
     });
 
     it('a new voice for a note that would start envelopes other than those of its voice, a glide keeps it', async () => {
@@ -1957,8 +2155,10 @@ describe('synth', () => {
       onRelease([4, 'E']);
       onRelease([4, 'C']);
       onPress([4, 'G']);
+      expect(voices()).toHaveLength(2);
       const [loud, soft] = voices();
-      expect(calls(param(soft, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(-1);
+      // the soft one plays G
+      expect(calls(param(soft, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(HELD_AGAIN_GATE);
       expect(calls(param(loud, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBeGreaterThanOrEqual(RELEASE_GATE);
     });
   });
@@ -2104,11 +2304,16 @@ describe('synth', () => {
 
   describe('voice starts', () => {
     it('traces no voice unless its starts are observed', async () => {
-      const { onPress, voices } = await setup();
+      const { onPress, voices, synthModel, started } = await setup();
       onPress([4, 'A']);
-      expect(voices()[0].options).not.toHaveProperty('trace');
-      // out of mono it tells its start only when late
+      // (out of mono it doesn't live on after its release)
       expect(voices()[0].options).not.toHaveProperty('mono');
+      const starts: unknown[] = [];
+      const subscription = synthModel.$voiceStarts.subscribe((start) => starts.push(start));
+      // the node tells the start of every voice: one made while not observed isn't traced
+      started(voices()[0], 0, 0);
+      expect(starts).toEqual([]);
+      subscription.unsubscribe();
     });
 
     it('traces the voices while observed: their starts come with their note', async () => {
@@ -2117,7 +2322,6 @@ describe('synth', () => {
       const subscription = synthModel.$voiceStarts.subscribe((start) => starts.push(start));
       onPress([4, 'A']);
       const [voice] = voices();
-      expect(voice.options).toMatchObject({ trace: true });
       started(voice, 140, 0);
       expect(starts).toEqual([{ note: 'A4', scheduled: 0, started: 140 }]);
       // a start doesn't end the voice, the end still does
@@ -2127,7 +2331,236 @@ describe('synth', () => {
 
       subscription.unsubscribe();
       onPress([4, 'C']);
-      expect(voices()[1].options).not.toHaveProperty('trace');
+      started(voices()[1], 300, 300);
+      expect(starts).toHaveLength(1);
+    });
+  });
+
+  describe('notes of a time (the track) and of their sources', () => {
+    const TRACK = { source: 'track' as const };
+
+    it('starts a voice at the time of its note, releases it as long after as it was held', async () => {
+      const { onPress, onRelease, voices, param, wall } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      const [voice] = voices();
+      expect(voice.options).toMatchObject({ start: 0.5, envStart: 0.5 });
+      // the time a key of the track is held is the time between its notes, not performance.now()
+      wall.mockReturnValue(5);
+      onRelease([4, 'A'], { ...TRACK, at: 0.75 });
+      expect(calls(param(voice, 'gate'), 'setValueAtTime')).toEqual([[f32(RELEASE_GATE + 0.25), 0.75]]);
+    });
+
+    it('plays a note of the track the keyboard holds too as a voice of its own, each released by its source', async () => {
+      const { onPress, onRelease, voices, param, synthModel } = await setup();
+      onPress([4, 'A']);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0 });
+      expect(voices()).toHaveLength(2);
+      expect(synthModel.$voicesCount.value).toBe(2);
+      const [keys, track] = voices();
+
+      onRelease([4, 'A'], { ...TRACK, at: 0 });
+      expect(calls(param(track, 'gate'), 'setValueAtTime')).toHaveLength(1);
+      expect(calls(param(keys, 'gate'), 'setValueAtTime')).toEqual([]);
+      onRelease([4, 'A']);
+      expect(calls(param(keys, 'gate'), 'setValueAtTime')).toHaveLength(1);
+    });
+
+    it('takes a note of a time already past as a note of now', async () => {
+      const { onPress, voices, travel } = await setup();
+      await travel(1);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      expect(voices()[0].options).toMatchObject({ start: 1 });
+    });
+
+    it('steals no voice that has not started by the time of the note: it would be the quietest', async () => {
+      const { onPress, onRelease, voices, param, synthActions, envelopeModel, travel } = await setup();
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0.01);
+      envelopeModel[1].setEnvelopeValue('env1', 'release', 10);
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      await travel(0.2);
+      onRelease([4, 'C']);
+      // ahead of its time, released before it: silent until 0.5
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onRelease([4, 'A'], { ...TRACK, at: 0.6 });
+
+      onPress([4, 'D']);
+      expect(voices()).toHaveLength(2);
+      const [c, a] = voices();
+      // C plays D
+      expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)).toEqual([HELD_AGAIN_GATE, 0.2]);
+      expect(calls(param(a, 'gate'), 'setValueAtTime').map(([value]) => value)).toEqual([
+        f32(RELEASE_GATE + 0.1),
+      ]);
+    });
+
+    it('steals a voice that has not started by the time of the note when every one is such: it fades out', async () => {
+      const { onPress, voices, param, synthActions } = await setup();
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'D'], 100, { ...TRACK, at: 0.6 });
+      onPress([4, 'E']);
+      expect(voices()).toHaveLength(3);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([[-1, 0]]);
+    });
+
+    it('steals at the time of the note of the track that needs the voice: it plays the note from then', async () => {
+      const { onPress, voices, param, synthActions } = await setup();
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'D']);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.3 });
+      expect(voices()).toHaveLength(2);
+      const [c] = voices();
+      expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[HELD_AGAIN_GATE, 0.3]]);
+      expect(calls(param(c, 'frequency'), 'setValueAtTime').at(-1)).toEqual([f32(getFq([4, 'A'])), 0.3]);
+    });
+
+    it('in mono the voice takes the next note of the track over when its key is released at that time (back to back)', async () => {
+      const { onPress, onRelease, voices, param, synthActions, synthModel } = await setup();
+      synthActions.setMaxVoices(1);
+      synthActions.setPortamento(0);
+      // the default release (5 ms): released at 1 the voice would be over at 1.005
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      // the track sends the offs of a tick before its ons
+      onRelease([4, 'A'], { ...TRACK, at: 1 });
+      onPress([4, 'B'], 100, { ...TRACK, at: 1 });
+      expect(voices()).toHaveLength(1);
+      const [voice] = voices();
+      const gate = param(voice, 'gate');
+      // held again at the time of its release: its release cancelled before the voice sees it, no fade
+      expect(calls(gate, 'setValueAtTime')).toEqual([
+        [f32(RELEASE_GATE + 0.5), 1],
+        [HELD_AGAIN_GATE, 1],
+      ]);
+      expect(calls(gate, 'cancelScheduledValues').at(-1)).toEqual([1]);
+      expect(order(gate, 'setValueAtTime', 0)).toBeLessThan(order(gate, 'cancelScheduledValues', 1));
+      expect(calls(param(voice, 'frequency'), 'setValueAtTime')).toEqual([[f32(getFq([4, 'B'])), 1]]);
+      expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    it('in mono takes the voice over at the time of the next note: its pitch, envelopes and velocity from then', async () => {
+      const { onPress, voices, param, synthActions } = await setup();
+      synthActions.setMaxVoices(1);
+      synthActions.setPortamento(0);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 50, { ...TRACK, at: 1 });
+
+      expect(voices()).toHaveLength(1);
+      const [voice] = voices();
+      expect(calls(param(voice, 'frequency'), 'setValueAtTime')).toEqual([[f32(getFq([4, 'B'])), 1]]);
+      // started again at its time (out of legato)
+      expect(calls(param(voice, 'gate'), 'setValueAtTime')).toEqual([[HELD_AGAIN_GATE, 1]]);
+      // its velocity glides from its time on
+      expect(voice.messages).toEqual([{ velocity: { level: 50 / 127, amp: 50 / 127 }, time: 1 }]);
+    });
+
+    it('a mono note of now sends its velocity without a time', async () => {
+      const { onPress, voices, synthActions } = await setup();
+      synthActions.setMaxVoices(1);
+      onPress([4, 'A']);
+      onPress([4, 'B'], 50);
+      expect(voices()[0].messages).toEqual([{ velocity: { level: 50 / 127, amp: 50 / 127 } }]);
+    });
+
+    it('in legato a note of the track pressed over another one joins its phrase', async () => {
+      const { onPress, voices, synthActions } = await setup();
+      synthActions.setLegato(true);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 100, { ...TRACK, at: 0.7 });
+      const [a, b] = voices();
+      expect(a.options).toMatchObject({ start: 0.5, envStart: 0.5 });
+      expect(b.options).toMatchObject({ start: 0.7, envStart: 0.5, phrase: a.options.phrase });
+    });
+
+    it('the fx follow a note of the track from its time, not as it is sent ahead of it', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      onPress([4, 'A']);
+      const first = synthModel.$fxNote.value;
+      expect(first?.start).toBe(0);
+      onPress([4, 'B'], 100, { ...TRACK, at: 0.5 });
+      expect(synthModel.$fxNote.value).toBe(first);
+      // (the tick of the track, or the timer)
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBe(first);
+      await travel(0.5);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value?.start).toBe(0.5);
+      stopModels();
+    });
+
+    it('the fx follow every note of the track at its time, also those sent together (closer than its lead)', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 60, { ...TRACK, at: 0.53 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
+      await travel(0.5);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.5, velocity: 100 / 127 });
+      await travel(0.03);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.53, velocity: 60 / 127 });
+      stopModels();
+    });
+
+    it('in mono the fx follow a note of the track that takes the voice over from its time, not as it is sent', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      synthActions.setMaxVoices(1);
+      synthActions.setPortamento(0);
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.5 });
+      onPress([4, 'B'], 60, { ...TRACK, at: 0.53 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
+      await travel(0.5);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 0.5, velocity: 100 / 127 });
+      expect(synthModel.$fxNote.value?.from).toBeUndefined();
+      await travel(0.03);
+      synthActions.followFx();
+      // its envelopes start again there, from their levels
+      expect(synthModel.$fxNote.value).toMatchObject({
+        start: 0.53,
+        velocity: 60 / 127,
+        from: expect.any(Array),
+      });
+      stopModels();
+    });
+
+    it('the fx follow a voice of Poly a note of the track takes over from the time of that note', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'D']);
+      const held = synthModel.$fxNote.value;
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.3 });
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBe(held);
+      await travel(0.3);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value?.start).toBe(0.3);
+      stopModels();
+    });
+
+    it('a preset switch drops the notes of the track the fx wait for', async () => {
+      const { onPress, synthModel, synthActions, travel } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.2 });
+      synthActions.pause();
+      await travel(0.2);
+      synthActions.followFx();
+      expect(synthModel.$fxNote.value).toBeNull();
+      stopModels();
+    });
+
+    it('a note of the track waits through a preset switch as a key does, its note off takes it off', async () => {
+      const { onPress, onRelease, voices, synthActions } = await setup();
+      onPress([4, 'A'], 100, { ...TRACK, at: 0.1 });
+      onPress([4, 'B'], 100, { ...TRACK, at: 0.1 });
+      synthActions.pause();
+      onRelease([4, 'A'], { ...TRACK, at: 0.2 });
+      synthActions.resume();
+      expect(voices()).toHaveLength(3);
+      expect(voices()[2].options).toMatchObject({ start: 0 });
     });
   });
 

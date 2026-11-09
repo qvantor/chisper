@@ -1,5 +1,6 @@
 import type { LfosState } from '../../common/lfo/lfo-curve';
 import {
+  createDueNote,
   createNoteLfos,
   FxNote,
   FxRoute,
@@ -15,7 +16,9 @@ import { FX_MOD_LINES, FxModLine, FxModOptions, mapKnob } from './fx-mod-params'
 // move a param by from its knob (fx-mod-params.ts), worked out at points every 32 samples of a block and its last
 // sample, linear between them; the envelopes and VELO of the last note, the LFOs of the note on their clocks (also
 // without a note). A change (a route, a knob, a new note) glides from where the line was to where it goes in
-// FX_MOD_GLIDE: no step; a line gone goes to 0 so, then it is idle (its output 0, the main thread disconnects it)
+// FX_MOD_GLIDE: no step; a line gone goes to 0 so, then it is idle (its output 0, the main thread disconnects it).
+// A note sent ahead of its time (the track's) is taken at the first block at or after its start (noteDue): the
+// note before goes on until then, the glide starts there
 
 // seconds a change glides in
 export const FX_MOD_GLIDE = 0.01;
@@ -38,6 +41,8 @@ export const createFxModLines = (sampleRate: number, options?: FxModOptions) => 
   const glide = Math.max(1, Math.round(FX_MOD_GLIDE * sampleRate));
   const lfos = createNoteLfos(sampleRate);
   let note: FxNote | null = null;
+  // the note of the last message until its block
+  const due = createDueNote(sampleRate);
   const lines = Array.from({ length: FX_MOD_LINES }, (): Line => ({
     line: null,
     last: 0,
@@ -57,9 +62,11 @@ export const createFxModLines = (sampleRate: number, options?: FxModOptions) => 
     entry.idle = false;
     start(entry);
   };
-  const setNote = (next: FxNote | null) => {
-    note = next;
-    lfos.follow(next);
+  const takeNote = (frame: number) => {
+    const taken = due.take(frame);
+    if (taken === undefined) return;
+    note = taken;
+    lfos.follow(note);
     lines.forEach((line) => !line.idle && start(line));
   };
   if (options) {
@@ -99,7 +106,8 @@ export const createFxModLines = (sampleRate: number, options?: FxModOptions) => 
 
   return {
     setLine,
-    setNote,
+    // the note waits for its block
+    setNote: due.set,
     setKnobRoutes: (routes: FxRoute[]) => lfos.setRoutes(routes),
     setLfos: (state: LfosState) => lfos.setLfos(state),
     // a block of the length of the outputs at `frame` into them (one channel each); while every line is idle only
@@ -108,6 +116,7 @@ export const createFxModLines = (sampleRate: number, options?: FxModOptions) => 
     process: (frame: number, outputs: Float32Array[]) => {
       const n = outputs[0]?.length ?? 0;
       if (n === 0) return;
+      takeNote(frame);
       let idle = true;
       for (let k = 0; k < lines.length; k++) if (!lines[k].idle) idle = false;
       if (idle) {

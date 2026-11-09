@@ -22,6 +22,7 @@ jest.mock('../synth/common/modules', () => ({
 jest.mock('../synth/filter/modules', () => ({ useFilter: mockTuple('filter') }));
 jest.mock('../synth/fx/modules', () => ({ useFx: mockTuple('fx') }));
 jest.mock('../presets/modules/presets', () => ({ usePresets: mockTuple('presets') }));
+jest.mock('../synth/track', () => ({ useTrack: mockTuple('track') }));
 jest.mock('./perf-api', () => ({ createPerfApi: jest.fn(() => ({ destroy: jest.fn() })) }));
 
 describe('perf hook of the perf build', () => {
@@ -41,6 +42,7 @@ describe('perf hook of the perf build', () => {
       'fx',
       'synth',
       'presets',
+      'track',
     ]);
     expect(models.fx).toEqual([{ name: 'fx' }, { name: 'fx' }]);
     const api = jest.mocked(createPerfApi).mock.results[0].value;

@@ -15,3 +15,12 @@ export const request = (method: string, path: string, body?: unknown) =>
     method,
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
   });
+
+// a request to a function's handler: its status, headers and JSON body (none when empty)
+export const caller =
+  (handler: (req: Request, context: Context) => Promise<Response>) =>
+  async (method: string, path: string, body?: unknown) => {
+    const response = await handler(request(method, path, body), context);
+    const text = await response.text();
+    return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : undefined };
+  };

@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider } from '../app/app';
 import { SynthCoreProvider, InputControllerProvider } from '../app/synth/common/modules';
 import { PresetsProvider, usePresets } from '../app/presets/modules/presets';
-import { immediateSoundSwitch } from './models';
+import { TrackContext } from '../app/synth/track/modules/track';
+import type { TrackModule } from '../app/synth/track/modules/track';
+import { fakeTrack, immediateSoundSwitch } from './models';
 
 type PresetsModule = ReturnType<typeof usePresets>;
 
@@ -24,8 +26,12 @@ const Capture = ({ onModel }: { onModel: (module: PresetsModule) => void }) => {
   return null;
 };
 
-// renders the ui inside the providers the preset components need, returns the presets model to drive it
-export const renderWithPresets = (ui: React.ReactElement) => {
+// renders the ui inside the providers the preset components need, returns the presets model to drive it; the track
+// (its clip goes with a preset) a fake one with an empty clip unless given
+export const renderWithPresets = (
+  ui: React.ReactElement,
+  { track = fakeTrack() }: { track?: TrackModule } = {}
+) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -37,10 +43,12 @@ export const renderWithPresets = (ui: React.ReactElement) => {
       <AppProvider initial={{}}>
         <SynthCoreProvider initial={undefined}>
           <InputControllerProvider initial={undefined}>
-            <PresetsProvider initial={undefined} soundSwitch={soundSwitch}>
-              <Capture onModel={(module) => (presets = module)} />
-              {children}
-            </PresetsProvider>
+            <TrackContext.Provider value={track}>
+              <PresetsProvider initial={undefined} soundSwitch={soundSwitch} track={track}>
+                <Capture onModel={(module) => (presets = module)} />
+                {children}
+              </PresetsProvider>
+            </TrackContext.Provider>
           </InputControllerProvider>
         </SynthCoreProvider>
       </AppProvider>

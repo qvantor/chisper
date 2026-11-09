@@ -1,5 +1,15 @@
 import toast from 'react-hot-toast';
-import { clearUrlPresetId, getUrlPresetId, presetUrl, setUrlPresetId, sharePreset } from './url';
+import {
+  clearUrlPresetId,
+  clipUrl,
+  getUrlClipId,
+  getUrlPresetId,
+  presetUrl,
+  setUrlClipId,
+  setUrlPresetId,
+  shareClip,
+  sharePreset,
+} from './url';
 
 describe('url', () => {
   it('reads the preset id from the search params', () => {
@@ -30,6 +40,26 @@ describe('url', () => {
     expect(window.history.length).toBe(length);
   });
 
+  it('keeps the clip of the track beside the preset', () => {
+    window.history.replaceState(null, '', '/?clip=c1&osc1-u=3');
+    setUrlPresetId('p1');
+    expect(window.location.search).toBe('?preset=p1&clip=c1');
+    expect(getUrlClipId()).toBe('c1');
+    clearUrlPresetId();
+    expect(window.location.search).toBe('?clip=c1');
+    setUrlPresetId('p2');
+    setUrlClipId('c2');
+    expect(window.location.search).toBe('?preset=p2&clip=c2');
+    setUrlClipId(null);
+    expect(window.location.search).toBe('?preset=p2');
+  });
+
+  it('builds a link to a clip with a preset or without one', () => {
+    window.history.replaceState(null, '', '/?preset=x');
+    expect(clipUrl('c1', 'p1')).toBe(`${window.location.origin}/?preset=p1&clip=c1`);
+    expect(clipUrl('c1', null)).toBe(`${window.location.origin}/?clip=c1`);
+  });
+
   describe('sharePreset', () => {
     const writeText = jest.fn();
     beforeEach(() => {
@@ -41,6 +71,12 @@ describe('url', () => {
       await sharePreset('id1');
       expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/?preset=id1`);
       expect(toast.success).toHaveBeenCalled();
+    });
+
+    it('copies the link to a clip', async () => {
+      writeText.mockResolvedValue(undefined);
+      await shareClip('c1', 'p1');
+      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/?preset=p1&clip=c1`);
     });
 
     it('shows an error when the clipboard is unavailable', async () => {

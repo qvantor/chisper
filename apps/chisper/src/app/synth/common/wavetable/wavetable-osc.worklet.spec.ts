@@ -189,7 +189,7 @@ describe('wavetable oscillator wasm worklet', () => {
     // the node plays on, its voice ended
     expect(alive).toBe(true);
     expect(left.subarray(10).every((value) => value === 0)).toBe(true);
-    expect(reports(processor)).toEqual([{ ended: [1] }]);
+    expect(reports(processor)).toEqual([{ started: [[1, 200, 200]] }, { ended: [1] }]);
   });
 
   it('ends a voice whose note on traps: it tells the main thread, its version goes back', () => {
@@ -242,7 +242,7 @@ describe('wavetable oscillator wasm worklet', () => {
     expect(reports(processor)).toEqual([{ started: [[1, 1280, 100]] }]);
   });
 
-  it('tells a start on time once for a voice of mono (it may start its envelopes again), for another none', () => {
+  it('tells a start on time once for every voice: a note may take it over (its envelopes start again)', () => {
     const mono = track(voice('none', { start: 200 / RATE, mono: true }));
     const poly = track(voice('none', { start: 200 / RATE }));
     for (const processor of [mono, poly]) {
@@ -250,7 +250,7 @@ describe('wavetable oscillator wasm worklet', () => {
       render(processor, 256);
     }
     expect(reports(mono)).toEqual([{ started: [[1, 200, 200]] }]);
-    expect(reports(poly)).toEqual([]);
+    expect(reports(poly)).toEqual([{ started: [[1, 200, 200]] }]);
   });
 
   it('takes the routes of a playing note from its port: the amounts glide', () => {
@@ -304,6 +304,8 @@ describe('wavetable oscillator wasm worklet', () => {
     };
     const reports = (processor: WorkletProcessorStub) =>
       processor.port.postMessage.mock.calls.map(([message]) => message);
+    // a voice of a start of 0 told on time at frame 0 (its frame from it: -0)
+    const onTime = (id: number) => [id, 0, expect.closeTo(0)];
 
     it('plays the voices of the events posted to it, their sum into its output', () => {
       const store = new processors[STORE_PROCESSOR]({});
@@ -317,7 +319,7 @@ describe('wavetable oscillator wasm worklet', () => {
       // two voices of a quarter at phase 0.25
       expect(channels[0][0]).toBeCloseTo(0.5, 4);
       expect(channels[1][0]).toBeCloseTo(0.5, 4);
-      expect(reports(node)).toEqual([]);
+      expect(reports(node)).toEqual([{ started: [onTime(1), onTime(2)] }]);
     });
 
     it('takes the events of its options before its first block, a tap renders each voice into its channels', () => {
@@ -337,7 +339,7 @@ describe('wavetable oscillator wasm worklet', () => {
       expect(channels[2][63]).toBe(0);
       expect(channels[2][64]).toBeCloseTo(1, 4);
       // voice 1 ended where its gate dropped
-      expect(reports(node)).toEqual([{ ended: [1] }]);
+      expect(reports(node)).toEqual([{ started: [onTime(1), [2, 64, 64]], ended: [1] }]);
       const next = renderNode(node, 128, 4).channels;
       expect(next[0].every((value) => value === 0)).toBe(true);
       expect(next[2][0]).not.toBe(0);
@@ -404,7 +406,7 @@ describe('wavetable oscillator wasm worklet', () => {
       expect(late[0]).not.toEqual(play(state(0.5, 0, true))[0]);
     });
 
-    it('tells the starts later than scheduled and the ends of a block in one message', () => {
+    it('tells the starts (on time, later than scheduled) and the ends of a block in one message', () => {
       const node = new processors[VOICES_PROCESSOR]({});
       renderNode(node, 0);
       node.port.onmessage({
@@ -423,6 +425,7 @@ describe('wavetable oscillator wasm worklet', () => {
           started: [
             [1, 1280, 100],
             [2, 1300, 1300],
+            [3, 1300, 1300],
           ],
           ended: [3],
         },

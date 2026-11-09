@@ -93,9 +93,12 @@ export const createOfflineEngine = (random = seeded(1)) => {
       builder.receive({ stats: true });
       return (replies[0] as { stats: { pooled: number; pool: number } }).stats;
     },
-    render: (blocks = 1) => {
+    // `blocks` blocks of the voices; their left channel (of every node, summed) back
+    render: (blocks = 1, beforeBlock?: () => void) => {
       const context = audioCtx as BaseAudioContext;
+      const left = new Float32Array(blocks * BLOCK);
       for (let i = 0; i < blocks; i++) {
+        beforeBlock?.();
         flushEvents();
         discover(context);
         const frame = Math.round(context.currentTime * context.sampleRate);
@@ -107,11 +110,13 @@ export const createOfflineEngine = (random = seeded(1)) => {
           });
           entry.read = messages.length;
           entry.voices.process(frame, outL, outR);
+          for (let k = 0; k < BLOCK; k++) left[i * BLOCK + k] += outL[k];
           const report = entry.voices.reports();
           if (report) node.port.onmessage?.({ data: report });
         });
         registrar.getDeLorean(context as never)?.travel(BLOCK / context.sampleRate);
       }
+      return left;
     },
     // the voices playing, and those made so far
     alive: () => [...nodes.values()].reduce((sum, { voices }) => sum + voices.stats().voices, 0),

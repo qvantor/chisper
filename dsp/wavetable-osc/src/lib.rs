@@ -232,8 +232,13 @@ pub unsafe extern "C" fn osc_scope_free(scope: *mut Scope, store: *mut Store, sh
     scope.end(&mut *store, &mut *shared);
 }
 
+// the bits of `flags` of osc_scope_on: the voice tells its start on time too (mono, traced); it lives on
+// RELEASE_LEAD after its release (mono: a note the main thread sends before the end of the release takes it over)
+const SCOPE_ON_REPORT: i32 = 1;
+const SCOPE_ON_LINGER: i32 = 2;
+
 /// a voice `id` of a note, its options in the command buffer followed by the values of its params at the note on;
-/// `report`: it tells its start on time too (mono, traced)
+/// `flags`: SCOPE_ON_REPORT, SCOPE_ON_LINGER
 ///
 /// # Safety
 /// `scope`, `store` and `shared` come from their constructors and were not freed
@@ -243,7 +248,7 @@ pub unsafe extern "C" fn osc_scope_on(
     store: *mut Store,
     shared: *mut Shared,
     id: f64,
-    report: i32,
+    flags: i32,
 ) {
     let mut reader = Reader {
         values: command(),
@@ -251,7 +256,8 @@ pub unsafe extern "C" fn osc_scope_on(
     };
     let options = read_voice_options(&mut reader);
     let values = core::array::from_fn(|_| reader.next());
-    (*scope).on(id, options, values, report != 0, &mut *store, &mut *shared);
+    let (report, linger) = (flags & SCOPE_ON_REPORT != 0, flags & SCOPE_ON_LINGER != 0);
+    (*scope).on(id, options, values, report, linger, &mut *store, &mut *shared);
 }
 
 /// `count` automation events in the command buffer, in order: kind, voice, param, value, time, time constant each
@@ -327,17 +333,20 @@ pub unsafe extern "C" fn osc_scope_bend(scope: *mut Scope, cents: f64, instantly
     (*scope).set_bend(cents, instantly != 0);
 }
 
-/// a note took voice `id` over (mono): its velocity glides to the one in the command buffer (VELO, amp)
+/// a note took voice `id` over (mono): its velocity glides to the one in the command buffer (VELO, amp) from the
+/// time after it (seconds of the context; 0: now)
 ///
 /// # Safety
 /// `scope` comes from osc_scope_new and was not freed
 #[no_mangle]
 pub unsafe extern "C" fn osc_scope_velocity(scope: *mut Scope, id: f64) {
-    let velocity = read_velocity(&mut Reader {
+    let mut reader = Reader {
         values: command(),
         at: 0,
-    });
-    (*scope).set_velocity(id, velocity);
+    };
+    let velocity = read_velocity(&mut reader);
+    let time = reader.next();
+    (*scope).set_velocity(id, velocity, time);
 }
 
 /// the params of voice `id` given directly from now on, for blocks of `frames`: their lengths (1: one value), then
@@ -796,17 +805,20 @@ pub unsafe extern "C" fn osc_voice_set_knobs(voice: *mut Voice, module: usize, c
     (*voice).set_knobs(module, &command()[..count.min(COMMAND_SIZE)]);
 }
 
-/// a note took the voice over (mono): its velocity glides to the one in the command buffer (VELO, amp)
+/// a note took the voice over (mono): its velocity glides to the one in the command buffer (VELO, amp) from the
+/// time after it (seconds of the context; 0: now)
 ///
 /// # Safety
 /// `voice` comes from osc_voice_new and was not freed
 #[no_mangle]
 pub unsafe extern "C" fn osc_voice_set_velocity(voice: *mut Voice) {
-    let velocity = read_velocity(&mut Reader {
+    let mut reader = Reader {
         values: command(),
         at: 0,
-    });
-    (*voice).set_velocity(velocity);
+    };
+    let velocity = read_velocity(&mut reader);
+    let time = reader.next();
+    (*voice).set_velocity(velocity, time);
 }
 
 /// ends the voice at once (its process threw): its versions and mixes are given back

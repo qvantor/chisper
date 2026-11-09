@@ -2,10 +2,10 @@ import React from 'react';
 import { styled } from 'styled-components';
 import { distinctUntilChanged, map } from 'rxjs';
 import { VolumeAnalyser, FqAnalyser, QUIET_MS, TapeSwitch, theme, useIsMobile } from '@chisper/ui-kit';
-import { useObservable } from '@chisper/rxjs-react';
+import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import { DEFAULT_WAVETABLE_PATH } from '@chisper/preset-schema';
 import { useApp } from '../app';
-import { AboutLink, Header, HeaderSection } from '../common/components';
+import { Header, HeaderSection } from '../common/components';
 import { PresetSection, PresetsProvider } from '../presets';
 import { PerfHook } from '../perf/perf-hook';
 import {
@@ -43,8 +43,9 @@ import { LfoSection } from './lfo';
 import { NoiseSection } from './noise';
 import { MobileLayout } from './mobile';
 import { FxScreen, FxProvider, useFx } from './fx';
-import { SYNTH_SCREENS, SynthScreen } from './screens';
+import { desktopScreen, SYNTH_SCREENS, SynthScreen } from './screens';
 import { DesktopPiano, KEY_HEIGHT } from './piano';
+import { ClipPreview, RollWindow, TrackProvider, useLinkPreset, useTrack } from './track';
 
 // the row of the modulation (and the voicing) lower than the one of the sound: it stays under the fx too
 const Root = styled.div`
@@ -133,18 +134,49 @@ interface ScreenProps {
   onScreenChange: (screen: SynthScreen) => void;
 }
 
-const DesktopLayout = ({ screen, onScreenChange }: ScreenProps) => (
-  <>
-    <HeaderInternal screen={screen} onScreenChange={onScreenChange} />
-    <Root>
-      {/* the fx in the row of the oscillators, scrolled there */}
-      {screen === 'osc' ? <SynthRowInternal /> : <FxScreen />}
-      {/* the same element on both screens: the tabs, the charts and the dots of a note go on */}
-      <ModRowInternal />
-      <DesktopPiano />
-    </Root>
-  </>
-);
+// the clip of the track right of the keys, as wide as an octave and a half: its screen fills it, square
+const ClipSection = styled.div`
+  flex: none;
+  width: 240px;
+  background: ${theme.colors.primary};
+`;
+
+const SectionPreview = styled(ClipPreview)`
+  border-radius: 0;
+`;
+
+// the piano roll over the synth while it is open (its preview right of the keys opens and closes it): the keys and
+// the preview stay under it; a link it shares opens the preset too while its sound is unchanged
+const TrackRoll = () => {
+  const [{ $rollOpen }] = useTrack();
+  const open = useBehaviorSubject($rollOpen);
+  const presetId = useLinkPreset();
+  return open ? <RollWindow bottom={KEY_HEIGHT + 1} presetId={presetId} /> : null;
+};
+
+const DesktopLayout = ({ screen, onScreenChange }: ScreenProps) => {
+  const [{ $sounding }] = useTrack();
+  return (
+    <>
+      <HeaderInternal screen={screen} onScreenChange={onScreenChange} />
+      <Root>
+        {/* the fx in the row of the oscillators, scrolled there */}
+        {desktopScreen(screen) === 'osc' ? <SynthRowInternal /> : <FxScreen />}
+        {/* the same element on both screens: the tabs, the charts and the dots of a note go on */}
+        <ModRowInternal />
+        <DesktopPiano
+          $played={$sounding}
+          aside={
+            <ClipSection>
+              <SectionPreview />
+            </ClipSection>
+          }
+        />
+      </Root>
+      <TrackRoll />
+    </>
+  );
+};
 
 // a preset switch silences the voices, the fx and the output until the next preset can play
 const SoundSwitchInternal = ({ children }: React.PropsWithChildren) => {
@@ -189,11 +221,12 @@ const FxInternal = ({ children }: React.PropsWithChildren) => {
   );
 };
 
-// a preset is applied through the sound switch
+// a preset is applied through the sound switch, the track opens its clip
 const PresetsInternal = ({ children }: React.PropsWithChildren) => {
   const soundSwitch = useSoundSwitch();
+  const track = useTrack();
   return (
-    <PresetsProvider initial={{}} soundSwitch={soundSwitch}>
+    <PresetsProvider initial={{}} soundSwitch={soundSwitch} track={track}>
       {children}
     </PresetsProvider>
   );
@@ -229,6 +262,27 @@ const VoicesInternal = ({ children }: React.PropsWithChildren) => {
   );
 };
 
+// the track plays its clip into the synth at the tempo of the transport (Space plays and stops it)
+const TrackInternal = ({ children }: React.PropsWithChildren) => {
+  const app = useApp();
+  const synthCore = useSynthCore();
+  const transport = useTransport();
+  const inputController = useInputController();
+  const synth = useSynth();
+  return (
+    <TrackProvider
+      initial={undefined}
+      app={app}
+      synthCore={synthCore}
+      transport={transport}
+      inputController={inputController}
+      synth={synth}
+    >
+      {children}
+    </TrackProvider>
+  );
+};
+
 const Internal = () => {
   const isMobile = useIsMobile();
   // lives above the layout switch, so the selected screen survives crossing the mobile breakpoint
@@ -242,19 +296,21 @@ const Internal = () => {
     <MidiControllerProvider initial={{}} inputController={inputController} transport={transport}>
       <FilterProvider initial={{}} synthCore={synthCore}>
         <VoicesInternal>
-          <KeyboardControllerProvider initial={{}} app={app} inputController={inputController}>
-            <PresetsInternal>
-              {/* nothing but in the perf build (scripts/bench-perf): above the layout switch, never remounted */}
-              <PerfHook />
-              {/* a failed master limiter, on every screen: above the layout switch too */}
-              <LimiterStatus />
-              {isMobile ? (
-                <MobileLayout screen={screen} onScreenChange={setScreen} />
-              ) : (
-                <DesktopLayout screen={screen} onScreenChange={setScreen} />
-              )}
-            </PresetsInternal>
-          </KeyboardControllerProvider>
+          <TrackInternal>
+            <KeyboardControllerProvider initial={{}} app={app} inputController={inputController}>
+              <PresetsInternal>
+                {/* nothing but in the perf build (scripts/bench-perf): above the layout switch, never remounted */}
+                <PerfHook />
+                {/* a failed master limiter, on every screen: above the layout switch too */}
+                <LimiterStatus />
+                {isMobile ? (
+                  <MobileLayout screen={screen} onScreenChange={setScreen} />
+                ) : (
+                  <DesktopLayout screen={screen} onScreenChange={setScreen} />
+                )}
+              </PresetsInternal>
+            </KeyboardControllerProvider>
+          </TrackInternal>
         </VoicesInternal>
       </FilterProvider>
     </MidiControllerProvider>
@@ -317,9 +373,13 @@ const HeaderInternal = ({ screen, onScreenChange }: ScreenProps) => (
   <Header>
     <OutputSpectrum />
     <HeaderRight>
-      <TapeSwitch options={SYNTH_SCREENS} value={screen} onChange={onScreenChange} switchOnDrag />
+      <TapeSwitch
+        options={SYNTH_SCREENS}
+        value={desktopScreen(screen)}
+        onChange={onScreenChange}
+        switchOnDrag
+      />
       <PresetSection
-        leading={<AboutLink />}
         actions={
           <>
             <MidiInput />
