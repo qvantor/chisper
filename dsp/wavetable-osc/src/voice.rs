@@ -10,6 +10,7 @@ use crate::noise::{Noise, NoiseOptions};
 use crate::shared::{Bus, Scratch, Shared, DIRECT_SAMPLES, MIX_SAMPLES, PARAMS, UNISON, VOICES};
 use crate::source::{each_source, RenderCx, Slots, Source, StartCx, ZERO};
 use crate::store::{EntryRef, Levels, Store, FRAME_GUARD};
+use crate::sub::{Sub, SubOptions};
 use crate::targets::{
     self, mask, BLEND, CUTOFF, FILTER, FILTER_GAIN, FINE, GAIN, LFO_KNOBS, OSC, PITCH, POSITION, RESONANCE,
     SPREAD,
@@ -255,6 +256,7 @@ fn detune_share(detune: u32, v: usize, n: usize) -> f64 {
 pub struct VoiceOptions {
     pub osc: [Option<OscOptions>; 2],
     pub noise: Option<NoiseOptions>,
+    pub sub: Option<SubOptions>,
     pub start: f64,
     pub envelopes: Vec<EnvelopeParams>,
     pub env_start: f64,
@@ -269,7 +271,7 @@ fn release_start(seen: f64, held: f64, lead: f64) -> f64 {
 }
 
 // levelBase: the power of two above the harmonics
-fn level_base(harmonics: i32) -> f64 {
+pub(crate) fn level_base(harmonics: i32) -> f64 {
     pow(2.0, ceil(log2(harmonics as f64 + 1.0)))
 }
 
@@ -281,7 +283,7 @@ pub(crate) fn is_constant(values: &[f32]) -> bool {
 }
 
 #[inline(always)]
-fn read(values: &[f32], s: usize) -> f32 {
+pub(crate) fn read(values: &[f32], s: usize) -> f32 {
     if values.len() > 1 {
         values[s]
     } else {
@@ -312,32 +314,41 @@ macro_rules! phase_loop {
     }};
 }
 
+pub(crate) use phase_loop;
+
 #[cold]
 #[inline(never)]
-fn wrap(ph: f64) -> f64 {
+pub(crate) fn wrap(ph: f64) -> f64 {
     ph - 1.0
+}
+
+// the phase after `length` silent samples from step inc0 on, the step moving by d_inc a sample
+#[inline(always)]
+pub(crate) fn advance(ph: f64, inc0: f64, d_inc: f64, length: f64) -> f64 {
+    let ph = ph + (inc0 * length + (d_inc * length * (length - 1.0)) / 2.0);
+    ph - floor(ph)
 }
 
 // sample 0 of frame `frame` of `level` in the data of the levels, after the sample before the cycle (frameStart
 // of wavetable-levels.ts + 1)
 #[inline(always)]
-fn frame_start(levels: &Levels, level: usize, frame: usize) -> usize {
+pub(crate) fn frame_start(levels: &Levels, level: usize, frame: usize) -> usize {
     levels.offsets[level] as usize + frame * (levels.lengths[level] as usize + FRAME_GUARD) + 1
 }
 
 #[inline(always)]
-fn window(t: &[f32], o: usize, len: usize) -> &[f32] {
+pub(crate) fn window(t: &[f32], o: usize, len: usize) -> &[f32] {
     &t[o - 1..o + len + 2]
 }
 
 #[inline(always)]
-fn split(x: f64, last: i32) -> (usize, f64) {
+pub(crate) fn split(x: f64, last: i32) -> (usize, f64) {
     let xi = (x as i32).clamp(-1, last);
     ((xi + 1) as usize, x - xi as f64)
 }
 
 #[inline(always)]
-fn lerp(w: &[f32], i: usize, f: f64) -> f64 {
+pub(crate) fn lerp(w: &[f32], i: usize, f: f64) -> f64 {
     // SAFETY: i = xi + 1 with xi in [-1, len - 1] and w of len + 3 samples: i + 1 < w.len()
     let (a, b) = unsafe { (*w.get_unchecked(i) as f64, *w.get_unchecked(i + 1) as f64) };
     a + (b - a) * f
@@ -345,7 +356,7 @@ fn lerp(w: &[f32], i: usize, f: f64) -> f64 {
 
 // (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
 #[inline(never)]
-fn render11(
+pub(crate) fn render11(
     t: &[f32],
     o: usize,
     len: f64,
@@ -472,7 +483,7 @@ fn pair_loop<const STEP: bool>(
 // (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
 // two windows of one length, the second at the share w: two levels of a frame, or two frames of a level (a fade)
 #[inline(never)]
-fn render21_same(
+pub(crate) fn render21_same(
     t: &[f32],
     o1: usize,
     len1: f64,
@@ -1039,7 +1050,7 @@ pub(crate) fn level_x(x: f64) -> f64 {
 
 // the level the pitches x0..x1 (x of `segment`) read, the one of the lower, and the weight of the next at each
 #[inline(always)]
-fn level_weights(x0: f64, x1: f64) -> (f64, f64, f64) {
+pub(crate) fn level_weights(x0: f64, x1: f64) -> (f64, f64, f64) {
     let level = max(0.0, floor(min(x0, x1)));
     (
         level,
@@ -1526,6 +1537,7 @@ impl Voice {
         let mut slots = Slots {
             oscs: [None, None],
             noise: options.noise.map(|noise| Noise::new(sample_rate, noise)),
+            sub: options.sub.map(|sub| Sub::new(sample_rate, sub)),
         };
         for (index, config) in options.osc.iter().enumerate() {
             if let Some(config) = config {
@@ -1638,6 +1650,8 @@ impl Voice {
                 .map_or(0.0, |osc| osc.random[0]),
             fade: if self.in_phrase { self.fade_length } else { 0 },
             fade_length: self.fade_length,
+            frame: self.started_at,
+            shared,
         };
         each_source!(self.slots, source => self.unison += source.start(&cx) as f64);
         if cfg!(feature = "perf") {
@@ -1964,14 +1978,32 @@ impl Voice {
 // what the render functions of an oscillator read of its voice
 pub(crate) struct Ctx {
     points_length: usize,
-    log2_nyquist: f64,
+    pub(crate) log2_nyquist: f64,
     // the step of a voice at the nyquist (pow(2, log2_nyquist) / the rate: as a step of a pitch at it is worked out)
-    nyquist_inc: f64,
+    pub(crate) nyquist_inc: f64,
     pub(crate) sample_rate: f64,
-    block_frame: f64,
+    pub(crate) block_frame: f64,
     fade_length: i32,
     crossfade_length: f64,
     frame_fade_limit: f64,
+}
+
+#[cfg(test)]
+impl Ctx {
+    /// the context of a block at `frame` of a voice at `sample_rate` (the specs of a source)
+    pub(crate) fn at(sample_rate: f64, frame: f64) -> Ctx {
+        let log2_nyquist = log2(sample_rate / 2.0);
+        Ctx {
+            points_length: 0,
+            log2_nyquist,
+            nyquist_inc: pow(2.0, log2_nyquist) / sample_rate,
+            sample_rate,
+            block_frame: frame,
+            fade_length: max(1.0, round(FADE_IN * sample_rate)) as i32,
+            crossfade_length: max(1.0, round(CROSSFADE * sample_rate)),
+            frame_fade_limit: FRAME_FADE * sample_rate,
+        }
+    }
 }
 
 // the pitch at the points of the block for every voice: the phase step and log2 of the frequency. While it
@@ -2122,7 +2154,7 @@ fn source<'a>(osc: &'a Osc, levels: &'a Levels, v: usize) -> (&'a [f32], usize, 
 
 // the level of a span: the one of w alone (w = 0), the next alone (w = 1, a constant w) or both (None)
 #[inline(always)]
-fn span_level(level: usize, w: f64, dw: f64) -> Option<usize> {
+pub(crate) fn span_level(level: usize, w: f64, dw: f64) -> Option<usize> {
     if w == 0.0 && dw == 0.0 {
         Some(level)
     } else if w == 1.0 && dw == 0.0 {
@@ -2751,8 +2783,7 @@ fn render_voices(
             };
             let Some((level, w0, dw)) = segment(x0, x1, length) else {
                 // above the fundamental's nyquist: silent, the phase goes on
-                ph += inc0 * length + (d_inc * length * (length - 1.0)) / 2.0;
-                ph -= floor(ph);
+                ph = advance(ph, inc0, d_inc, length);
                 continue;
             };
             let k = osc.frame_fades[slot][v].frame as usize;

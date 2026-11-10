@@ -12,6 +12,7 @@ import {
   FINE_MAX,
   NOISE_PITCH_MAX,
   SEMI_MAX,
+  SUB_COARSE_MAX,
 } from '@chisper/preset-schema';
 import { rangesOf } from '../../filter/constants';
 import { FX_REGISTRY, MIX_PARAMS } from '../../fx/effects';
@@ -98,7 +99,19 @@ interface NoiseTarget {
   knob?: PitchKnob;
 }
 
-export type ModTarget = OscTarget | FilterTarget | FxTarget | LfoTarget | NoiseTarget;
+// a knob of the sub in the voice node of each note (sub.rs): its level (0..1, the amplitude its square), its pan
+// (-1..1), Coarse (an offset of base 0 in cents within the range of the knob from its value, smoothly)
+interface SubTarget {
+  kind: 'sub';
+  param: 'level' | 'pan' | 'crs';
+  route: string;
+  label: string;
+  scale: ModScale;
+  range: [number, number];
+  knob?: PitchKnob;
+}
+
+export type ModTarget = OscTarget | FilterTarget | FxTarget | LfoTarget | NoiseTarget | SubTarget;
 
 const fxTargets = Object.fromEntries(
   FX_TYPES.flatMap((fx) =>
@@ -178,6 +191,23 @@ const noiseTargets: Record<string, NoiseTarget> = withRoutes<Omit<NoiseTarget, '
   (param) => routeParam('noise', 0, param)
 );
 
+const subTargets: Record<string, SubTarget> = withRoutes<Omit<SubTarget, 'route'>>(
+  {
+    'sub.level': { kind: 'sub', param: 'level', label: 'Gain', scale: 'linear', range: [0, 1] },
+    'sub.pan': { kind: 'sub', param: 'pan', label: 'Pan', scale: 'linear', range: [-1, 1] },
+    // an amount of 1 its whole range: 128 semitones
+    'sub.crs': {
+      kind: 'sub',
+      param: 'crs',
+      label: 'Crs',
+      scale: 'linear',
+      range: pitchRange('semi', SUB_COARSE_MAX),
+      knob: 'semi',
+    },
+  },
+  (param) => routeParam('sub', 0, param)
+);
+
 const filterTargets: Record<string, FilterTarget> = withRoutes<Omit<FilterTarget, 'route'>>(
   {
     'filter.cutoff': { kind: 'filter', param: 'cutoff', label: 'Cutoff' },
@@ -208,6 +238,7 @@ export const MOD_TARGETS: Record<string, ModTarget> = {
   ...oscTargets(0),
   ...oscTargets(1),
   ...noiseTargets,
+  ...subTargets,
   ...filterTargets,
   ...fxTargets,
   ...lfoTargets,

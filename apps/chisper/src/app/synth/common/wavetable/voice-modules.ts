@@ -29,6 +29,12 @@ export const VOICE_MODULES = [
     knobs: ['rate', 'delay', 'rise', 'smooth', 'phase'],
     name: (knob: string, instance: number) => `lfo${instance + 1}.${knob}`,
   },
+  {
+    module: 'sub',
+    instances: 1,
+    knobs: ['level', 'pan', 'crs'],
+    name: (knob: string) => `sub.${knob}`,
+  },
 ] as const;
 
 export type VoiceModule = (typeof VOICE_MODULES)[number]['module'];
@@ -60,4 +66,5 @@ export const ROUTE_IDS: Readonly<Record<string, number>> = Object.fromEntries(
 // knobs no param of the voice carries
 export const KNOB_ORDER: { [M in KnobsModule]: readonly (keyof VoiceModuleKnobs[M])[] } = {
   noise: ['level', 'pan', 'cents'],
+  sub: ['level', 'pan', 'cents'],
 };

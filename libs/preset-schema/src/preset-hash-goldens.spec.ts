@@ -48,6 +48,7 @@ const FULL = {
     pn: -0.25,
     g: 0.7071,
   },
+  sub: { a: true, sh: 'pulse', o: -2, c: 3.25, ph: 0.375, ct: true, pn: 0.5, g: 0.6 },
   filter: { a: true, t: 'bandpass', cut: 1234.5678, res: 2, gain: -3 },
   env: {
     e1: {
@@ -150,6 +151,7 @@ const PRESETS: Record<string, unknown> = {
   partial: {
     osc2: { a: true },
     noise: { a: true, g: 0.5 },
+    sub: { a: true, o: -1 },
     env: { e2: { decay: 1 } },
     lfo: { l4: { shape: 'triangle' } },
     fx: { o: ['delay'], delay: { a: true } },
@@ -159,11 +161,11 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: 'f184e30cd25676e9030b63aa2a1dc92a1c2a50205c23f10085c34926681aff38',
-  full: '981be29ea782998ecda097e327bd9f5f7dedd864d693d52b45396b73552bb59d',
-  legacy: 'c5aa6a84d3b39b616386c7eeaee4ecc5c6ff467cb8ca89fdd247522eaba70a3b',
-  partial: '2f9fea314f97428d3b2b9b52e0a48225f19ba3efb408438313c4b8f8b73ff029',
-  'fx order without a type': '46ef44df21021b7158f930c66444f0f5e80af58f320603c688ff2207463fcb06',
+  empty: 'a4be13cd44c58862ef4dd5a4738f8d66e4cce5c479b096078c57e0442d1a9679',
+  full: '959ccf81725e306d9e49840ecb1ddd321fba1bdc95a6aae3cb2317187bf3e01d',
+  legacy: '653aecc644d0171379be9808ce1b16789bc90192f74591cc301ebb0ca9fc1738',
+  partial: '68246cd3382bdf4aa184e36c7c2b66069963efa68f1536f375b3f7ae84e00aae',
+  'fx order without a type': 'eb91ce005467e20136d2b0aa4f5fc966c761d4046543bfa403aaf2f13942e944',
 };
 
 // not presets: the schema rejects them
@@ -176,6 +178,11 @@ const INVALID: Record<string, unknown> = {
   'a fractional noise pitch': { noise: { s: 0.5 } },
   'a noise pan past the right': { noise: { pn: 1.5 } },
   'no noise path': { noise: { p: [] } },
+  'an unknown sub shape': { sub: { sh: 'ramp' } },
+  'a sub octave past 4': { sub: { o: 5 } },
+  'a fractional sub octave': { sub: { o: -0.5 } },
+  'a sub coarse past 64 semitones': { sub: { c: -64.5 } },
+  'a sub phase past a cycle': { sub: { ph: 1.25 } },
   'an unknown filter type': { filter: { t: 'comb' } },
   'an LFO on the knob of an LFO': { mod: { 'lfo1:lfo2.rate': 0.5 } },
   'a route object without a flag': { mod: { 'env1:osc1.wave': { a: 0.5 } } },

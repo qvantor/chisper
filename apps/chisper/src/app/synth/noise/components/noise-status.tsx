@@ -1,54 +1,9 @@
 import React from 'react';
-import { styled } from 'styled-components';
-import { MdWarningAmber } from 'react-icons/md';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
-import { text12, theme } from '@chisper/ui-kit';
+import { SourceAlert } from '../../../common/components';
 import { useNoise, useSynthCore } from '../../common/modules';
 import type { TableState } from '../../common/wavetable/wavetable-engine';
 import { oscillatorStatusMessage } from '../../oscillator/components/oscillator-status';
-
-const Root = styled.div`
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 6px;
-  ${text12};
-  line-height: 16px;
-  text-align: center;
-  color: ${theme.colors.primaryDarkHighContrast};
-  background: ${theme.colors.primaryDark}cc;
-
-  svg {
-    flex: 0 0 auto;
-    font-size: 12px;
-    color: ${theme.colors.red};
-  }
-`;
-
-const Retry = styled.button`
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-weight: bold;
-  color: ${theme.colors.secondAccent};
-  text-decoration: underline;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-  }
-
-  &:focus-visible {
-    outline: 1px solid ${theme.colors.secondAccent};
-    outline-offset: 2px;
-  }
-`;
 
 // why the sample of the noise doesn't play (the one before it does); none: it plays, or it is on its way
 export const sampleStateMessage = (state: TableState | null) => {
@@ -74,16 +29,9 @@ export const NoiseStatus = () => {
   const message = oscillatorStatusMessage(status);
   const sampleMessage = sampleStateMessage(sampleState);
   if (!message && !sampleMessage) return null;
-  const retry = message ? status === 'failed' && retryAudio : retrySample;
   return (
-    <Root role='alert'>
-      <MdWarningAmber aria-hidden />
-      <span>{message ? <>Noise can&apos;t play: {message}</> : sampleMessage}</span>
-      {retry && (
-        <Retry type='button' onClick={retry}>
-          Retry
-        </Retry>
-      )}
-    </Root>
+    <SourceAlert onRetry={message ? status === 'failed' && retryAudio : retrySample}>
+      {message ? <>Noise can&apos;t play: {message}</> : sampleMessage}
+    </SourceAlert>
   );
 };

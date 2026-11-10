@@ -48,7 +48,9 @@ const scope = createOscScope(instantiateCore<OscExports>(new WebAssembly.Module(
 // ramps: the curves of the timelines), its velocity gliding to another one, bent (the pitch bend of the node,
 // gliding), stolen at its end. Its noise: a stereo loop of silence of two levels and the pair under Pitch Track, its
 // pitch moved by ENV 2 (the steps at the points, a change of kernel and of level crossfading), then in the scope a
-// mono one-shot an octave down (the pair), its knobs changed (up: into the bank, crossfading)
+// mono one-shot an octave down (the pair), its knobs changed (up: into the bank, crossfading). Its sub: frame 0 of
+// the table of the oscillators, panned, its Coarse moved by ENV 2 (its levels read alone and blended, of one length
+// and of two), then in the scope in the centre (its steady loop), Contiguous, its knobs changed (the level glides)
 const WARM_ENVELOPE = { attack: 0.001, hold: 0, decay: 0.01, sustain: 0.5, release: 0.01 };
 const WARM_VOICE: VoiceOptions = {
   osc: [
@@ -65,6 +67,7 @@ const WARM_VOICE: VoiceOptions = {
     pan: 0.3,
     cents: 1500,
   },
+  sub: { table: 'warm', phase: 0.25, contiguous: false, level: 0.5, pan: 0.3, cents: -1200 },
   start: 0,
   envelopes: [WARM_ENVELOPE, WARM_ENVELOPE, WARM_ENVELOPE],
   envStart: 0,
@@ -82,6 +85,7 @@ const WARM_VOICE: VoiceOptions = {
     { source: 1, param: 'lfo1.phase', amount: 0.25, min: 0, max: 1 },
     { source: 1, param: 'noise.pitch', amount: 600, min: -4800, max: 4800 },
     { source: 3, param: 'noise.level', amount: 0.25, min: 0, max: 1 },
+    { source: 1, param: 'sub.crs', amount: 700, min: -6400, max: 6400 },
   ],
   filter: { type: 'lowpass', cutoff: 4000, resonance: 3, gain: 0 },
   velocity: { level: 0.5, amp: 0.75 },
@@ -102,6 +106,7 @@ const warmLfos = (at: number, phase: number, shape: 'square' | 'triangle', insta
   })),
 });
 const WARM_NOISE = WARM_VOICE.noise as NonNullable<VoiceOptions['noise']>;
+const WARM_SUB = WARM_VOICE.sub as NonNullable<VoiceOptions['sub']>;
 // (the kernels of the noise the warm store built go to `store`: built as the module loads, not with its first
 // sample on the audio thread)
 const prewarm = (store: TableStoreWasm) => {
@@ -146,6 +151,7 @@ const prewarm = (store: TableStoreWasm) => {
         options: {
           ...WARM_VOICE,
           noise: { ...WARM_NOISE, sample: 'warm-mono', loop: false, keytrack: false, cents: -1200 },
+          sub: { ...WARM_SUB, pan: 0, contiguous: true },
         },
         params: { spread1: 20, spread2: 10 },
       },
@@ -164,6 +170,7 @@ const prewarm = (store: TableStoreWasm) => {
       if (block === 2)
         voices.apply([
           { kind: 'knobs', voices: [0], module: 'noise', values: { level: 0.7, pan: -0.2, cents: 300 } },
+          { kind: 'knobs', voices: [0], module: 'sub', values: { level: 0.7, pan: 0, cents: 0 } },
         ]);
       voices.process(block * 128, outL, outR);
       voices.reports();

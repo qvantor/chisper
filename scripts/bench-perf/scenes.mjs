@@ -62,6 +62,12 @@ const BOTH_U8 = {
 // the heavy patch (measured on the iPhone): 2 oscillators × u8 on two tables of 256 frames, the filter, every
 // effect, Poly 12
 const HEAVY = patch({ ...BOTH_U8, filter: FILTER, fx: fx(['distortion', 'delay', 'reverb']) });
+// the sub of the sub cases: the Sine an octave under the note (the sine of the store: no table of its own). A tree
+// without the sub (the reference of an A/B run) drops it from the snapshot (the schema strips the key): there S5s
+// plays S5 and SUB voices with no source on, the shift is the cost of the sub
+const SUB = { a: true, o: -1 };
+// the notes the CPU cases hold
+const HELD = ['C3', 'D3', 'E3', 'G3', 'A3', 'C4', 'D4', 'E4', 'G4', 'A4', 'B4', 'C5'];
 
 // --- the clip of the track cases (libs/preset-schema/src/clip.ts) ---
 
@@ -110,7 +116,21 @@ export const CPU_CASES = [
     group: 'cpu',
     title: 'the heavy patch, 12 notes',
     snapshot: HEAVY,
-    notes: ['C3', 'D3', 'E3', 'G3', 'A3', 'C4', 'D4', 'E4', 'G4', 'A4', 'B4', 'C5'],
+    notes: HELD,
+  },
+  {
+    id: 'S5s',
+    group: 'cpu',
+    title: 'the heavy patch and the sub, 12 notes',
+    snapshot: { ...HEAVY, sub: SUB },
+    notes: HELD,
+  },
+  {
+    id: 'SUB',
+    group: 'cpu',
+    title: 'the sub alone, 12 notes',
+    snapshot: patch({ osc1: OFF, sub: SUB }),
+    notes: HELD,
   },
   {
     id: 'T1',

@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { rxModel } from '../services/rx-model';
 import { useBehaviorSubject } from './use-behavior-subject';
+import { useBehaviorSubjectField } from './use-behavior-subject-field';
 import { useNullableContext } from './use-nullable-context';
 import { useObservable } from './use-observable';
 import { useRxModel } from './use-rx-model';
@@ -47,6 +48,37 @@ describe('useBehaviorSubject', () => {
 
     act(() => subject.next('b'));
     expect(result.current).toBe('b');
+  });
+});
+
+describe('useBehaviorSubjectField', () => {
+  it('returns the field and renders only when that field changes', () => {
+    const subject = new BehaviorSubject({ a: 1, b: false });
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders++;
+      return useBehaviorSubjectField(subject, 'b');
+    });
+    expect(result.current).toBe(false);
+    const rendered = renders;
+
+    act(() => subject.next({ ...subject.value, a: 2 }));
+    expect(renders).toBe(rendered);
+
+    act(() => subject.next({ ...subject.value, b: true }));
+    expect(result.current).toBe(true);
+  });
+
+  it('follows another field when the field changes', () => {
+    const subject = new BehaviorSubject({ a: 1, b: 2 });
+    const { result, rerender } = renderHook(({ field }) => useBehaviorSubjectField(subject, field), {
+      initialProps: { field: 'a' as 'a' | 'b' },
+    });
+    expect(result.current).toBe(1);
+
+    rerender({ field: 'b' });
+    act(() => subject.next({ a: 1, b: 3 }));
+    expect(result.current).toBe(3);
   });
 });
 

@@ -699,6 +699,146 @@
       0.011288468725979328
     ]
   },
+  "sub: Contiguous notes apart, overlapping and of other pitches, a legato note fading in": {
+    "sha256": "d2fda3befc4834bfd4c6ada33613312aadf1a4be3ccead7ac0969ffefc09286e",
+    "at": 1,
+    "head": [
+      -0.00002964765917568002,
+      -0.00011973560322076082,
+      -0.0002688858367037028,
+      -0.00047834328142926097,
+      -0.0007496876060031354,
+      -0.0010798521107062697,
+      -0.001468052389100194,
+      -0.0019192169420421124
+    ]
+  },
+  "sub: Contiguous notes apart, overlapping and of other pitches, a legato note fading in: the sum of one node": {
+    "sha256": "b0111ec8280cf644c724ffdb3567ba5b37b3bc00f0661a54e678fa7658bf0f94",
+    "at": 1,
+    "head": [
+      -0.00002964765917568002,
+      -0.00011973560322076082,
+      -0.0002688858367037028,
+      -0.00047834328142926097,
+      -0.0007496876060031354,
+      -0.0010798521107062697,
+      -0.001468052389100194,
+      -0.0019192169420421124
+    ]
+  },
+  "sub: a glide and a bend, Coarse moved by ENV 2 and LFO 1, its level by VELO, high up to the nyquist": {
+    "sha256": "81f405cf7ea1896147669d74d933f06bec3b4c2d0861d92e6db2a35e264937f3",
+    "at": 0,
+    "head": [
+      1.1718280617512068e-17,
+      -0.21824708580970764,
+      -0.17156463861465454,
+      -0.1961204707622528,
+      -0.18054282665252686,
+      -0.18881922960281372,
+      -0.18390975892543793,
+      -0.18496176600456238
+    ]
+  },
+  "sub: a glide and a bend, Coarse moved by ENV 2 and LFO 1, its level by VELO, high up to the nyquist: the sum of one node": {
+    "sha256": "81f405cf7ea1896147669d74d933f06bec3b4c2d0861d92e6db2a35e264937f3",
+    "at": 0,
+    "head": [
+      1.1718280617512068e-17,
+      -0.21824708580970764,
+      -0.17156463861465454,
+      -0.1961204707622528,
+      -0.18054282665252686,
+      -0.18881922960281372,
+      -0.18390975892543793,
+      -0.18496176600456238
+    ]
+  },
+  "sub: a shape whose table comes late (silent until then), then replaced, under a mono start again": {
+    "sha256": "1a152ff129626e3104d376fc61580ab05e64076de0364ef91ce0bfbb2034e8a6",
+    "at": 1280,
+    "head": [
+      0.17863212525844574,
+      0.15366940200328827,
+      0.19110579788684845,
+      0.14679081737995148,
+      0.18857261538505554,
+      0.16306377947330475,
+      -0.2887014150619507,
+      -0.5112546682357788
+    ]
+  },
+  "sub: a shape whose table comes late (silent until then), then replaced, under a mono start again: the sum of one node": {
+    "sha256": "1a152ff129626e3104d376fc61580ab05e64076de0364ef91ce0bfbb2034e8a6",
+    "at": 1280,
+    "head": [
+      0.17863212525844574,
+      0.15366940200328827,
+      0.19110579788684845,
+      0.14679081737995148,
+      0.18857261538505554,
+      0.16306377947330475,
+      -0.2887014150619507,
+      -0.5112546682357788
+    ]
+  },
+  "sub: every shape a note, panned, an octave and a coarse apart, released": {
+    "sha256": "7b0d136f2b68ec95f0d753d32d1de841aafe1a20a2fca0696265f13560eb3de5",
+    "at": 1,
+    "head": [
+      -0.000012621250789379701,
+      -0.000050480510253692046,
+      -0.0001135617058025673,
+      -0.00020183429296594113,
+      -0.0003152850840706378,
+      -0.00045381157542578876,
+      -0.0006174377631396055,
+      -0.000806005613412708
+    ]
+  },
+  "sub: every shape a note, panned, an octave and a coarse apart, released: the sum of one node": {
+    "sha256": "9c3210040f459ac726f0bc019964b83a77f7ab639b52acccfe813fe76b5d3d89",
+    "at": 1,
+    "head": [
+      -0.000012621250789379701,
+      -0.000050480510253692046,
+      -0.0001135617058025673,
+      -0.00020183429296594113,
+      -0.0003152850840706378,
+      -0.00045381157542578876,
+      -0.0006174377631396055,
+      -0.000806005613412708
+    ]
+  },
+  "sub: its knobs on a playing note (the level and the pan glide), a route of its pan, through a lowpass with osc 1": {
+    "sha256": "98f310d7e7fbfc979df9718943b98d94190928e26df6ed50b44798b06bd3edff",
+    "at": 0,
+    "head": [
+      -3.585421396146305e-18,
+      0.009121214970946312,
+      0.0414903461933136,
+      0.09731471538543701,
+      0.16855336725711823,
+      0.24810904264450073,
+      0.3291781544685364,
+      0.40602239966392517
+    ]
+  },
+  "sub: its knobs on a playing note (the level and the pan glide), a route of its pan, through a lowpass with osc 1: the sum of one node": {
+    "sha256": "98f310d7e7fbfc979df9718943b98d94190928e26df6ed50b44798b06bd3edff",
+    "at": 0,
+    "head": [
+      -3.585421396146305e-18,
+      0.009121214970946312,
+      0.0414903461933136,
+      0.09731471538543701,
+      0.16855336725711823,
+      0.24810904264450073,
+      0.3291781544685364,
+      0.40602239966392517
+    ]
+  },
   "the allpass filter with its cutoff moved by ENV 2": {
     "sha256": "21abbc372053e526629bfdb385eb4ebf2ab40737fc6c4e24fcb51bdb3899f579",
     "at": 0,

@@ -1,9 +1,10 @@
 import { AudioContext as AudioContextMock, registrar } from 'standardized-audio-context-mock';
 import type {
+  KnobsModule,
   VoiceEvent,
   VoiceEventsMessage,
   VoiceFilterOptions,
-  VoiceNoiseKnobs,
+  VoiceModuleKnobs,
   VoicesLfos,
   VoiceOptions,
   VoiceRoute,
@@ -31,6 +32,9 @@ export interface VoicesNodeStub extends AudioWorkletNode {
   };
 }
 
+// the knobs of a module sent to a voice ({ noise: … }, { sub: … })
+type KnobsMessage = { [M in KnobsModule]: Record<M, VoiceModuleKnobs[M]> }[KnobsModule];
+
 export interface VoiceView {
   id: number;
   // the options of its note on, and the values of its params then
@@ -38,12 +42,12 @@ export interface VoiceView {
   values: Partial<Record<VoiceParam, number>>;
   // its params, the events of each played into a mock
   params: Record<VoiceParam, AudioParam>;
-  // the routes, the filters, the velocities and the knobs of its noise sent to it, in order
+  // the routes, the filters, the velocities and the knobs of its noise and its sub sent to it, in order
   messages: (
     | { routes: VoiceRoute[] }
     | { filter: VoiceFilterOptions | null }
     | { velocity: VoiceVelocity; time?: number }
-    | { noise: VoiceNoiseKnobs }
+    | KnobsMessage
   )[];
   // the node it plays in
   node: VoicesNodeStub;
@@ -125,7 +129,7 @@ export const voiceEvents = (context: BaseAudioContext, engine: { flush: () => vo
           : event.kind === 'filter'
             ? { filter: event.filter }
             : event.kind === 'knobs'
-              ? { [event.module]: event.values }
+              ? ({ [event.module]: event.values } as KnobsMessage)
               : { velocity: event.velocity, ...(event.time !== undefined && { time: event.time }) };
       event.voices.forEach((id) => byId.get(id)?.messages.push(message));
       return;

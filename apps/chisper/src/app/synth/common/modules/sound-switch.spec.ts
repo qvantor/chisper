@@ -40,6 +40,7 @@ const setup = async ({ running = true } = {}) => {
       fx,
       oscillator: [modules.osc1, modules.osc2],
       noise: modules.noise,
+      sub: modules.sub,
     }),
     'soundSwitch',
     undefined
@@ -66,6 +67,7 @@ const setup = async ({ running = true } = {}) => {
     osc1,
     osc2,
     noise: modules.noise,
+    sub: modules.sub,
     wavetables,
     gain,
     last,
@@ -228,6 +230,30 @@ describe('soundSwitch', () => {
     expect(opened()).toBe(false);
     wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
     render(1.08);
+    expect(opened()).toBe(true);
+  });
+
+  it('waits for the table of the shape of the sub on, not for the sine nor for a sub that is off', async () => {
+    const { switchSound, sub, wavetables, render, opened } = await setup();
+    const [, actions] = sub;
+    // off: its shape is not sent, not waited for
+    switchSound(() => actions.setShape('saw'));
+    render(1.02);
+    render(1.03);
+    expect(opened()).toBe(true);
+    // on: the shape sent, waited for until it is stored
+    switchSound(() => actions.toggleActive());
+    wavetables.$tables.next({ ...wavetables.$tables.value, 'sub:saw': 'sending' });
+    render(1.05);
+    render(1.06);
+    expect(opened()).toBe(false);
+    wavetables.$tables.next({ ...wavetables.$tables.value, 'sub:saw': 'stored' });
+    render(1.07);
+    expect(opened()).toBe(true);
+    // the sine: at once
+    switchSound(() => actions.setShape('sine'));
+    render(1.09);
+    render(1.1);
     expect(opened()).toBe(true);
   });
 

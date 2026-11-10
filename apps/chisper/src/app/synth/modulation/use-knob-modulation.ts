@@ -108,9 +108,10 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
     const units: KnobScale | undefined =
       scale && min !== undefined && max !== undefined
         ? { scale, range: [min, max] }
-        : definition.kind === 'osc' || definition.kind === 'lfo' || definition.kind === 'noise'
-          ? definition
-          : undefined;
+        : // the knobs of the voice and of the LFOs carry their own (those of the filter and the fx: none here)
+          definition.kind === 'filter' || definition.kind === 'fx'
+          ? undefined
+          : definition;
     // in the order of the sources: each has its section of the dot in the same place
     const modulations = routes
       .filter((route) => route.target === target)

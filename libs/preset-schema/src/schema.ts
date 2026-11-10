@@ -230,6 +230,29 @@ const noiseSchema = z
   })
   .prefault({});
 
+// the shapes of the sub (its tables: sub-shapes.ts of the app), by name in the presets, in the order of their keys
+export const SUB_SHAPES = ['sine', 'round-rect', 'triangle', 'saw', 'square', 'pulse'] as const;
+export type SubShape = (typeof SUB_SHAPES)[number];
+// the octaves the sub moves by, down and up, and the most Coarse (semitones, not whole) moves it by
+export const SUB_OCTAVE_MAX = 4;
+export const SUB_COARSE_MAX = 64;
+
+// the sub oscillator (off by default): its shape, Octave and Coarse (semitones) over the note, the share of a cycle a
+// note starts at (Phase; Contiguous: at the phase of the note before), the pan (-1..1) and the level (its square the
+// amplitude: 0.75 is -5 dB, as the init patch of the renders)
+const subSchema = z
+  .object({
+    a: z.boolean().default(false),
+    sh: z.enum(SUB_SHAPES).default('sine'),
+    o: intRange(-SUB_OCTAVE_MAX, SUB_OCTAVE_MAX).default(0),
+    c: range(-SUB_COARSE_MAX, SUB_COARSE_MAX).default(0),
+    ph: range(0, 1).default(0),
+    ct: z.boolean().default(false),
+    pn: range(-1, 1).default(0),
+    g: range(0, 1).default(0.75),
+  })
+  .prefault({});
+
 const filterSchema = z
   .object({
     a: z.boolean().default(false),
@@ -575,6 +598,7 @@ export const presetDataSchema = z.object({
   osc1: oscillatorSchema(true),
   osc2: oscillatorSchema(false),
   noise: noiseSchema,
+  sub: subSchema,
   filter: filterSchema,
   env: envSchema,
   lfo: lfoSectionSchema,
@@ -591,6 +615,8 @@ export const PRESET_DEFAULTS: PresetData = presetDataSchema.parse({});
 export const OSC_DEFAULTS: Omit<PresetData['osc1'], 'a'> = PRESET_DEFAULTS.osc1;
 // the knobs of the noise in it
 export const NOISE_DEFAULTS: PresetData['noise'] = PRESET_DEFAULTS.noise;
+// the knobs of the sub in it
+export const SUB_DEFAULTS: PresetData['sub'] = PRESET_DEFAULTS.sub;
 
 export const PRESET_NAME_MAX_LENGTH = 40;
 

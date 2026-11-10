@@ -1,15 +1,18 @@
-//! The sources of sound of a voice (its oscillators, its noise): each a slot of Slots, rendered in the order of the
-//! sum of the voice (osc 1, osc 2, the noise: their f32 sums in that order, the goldens hold it) into its bus
+//! The sources of sound of a voice (its oscillators, its noise, its sub): each a slot of Slots, rendered in the order
+//! of the sum of the voice (osc 1, osc 2, the noise, the sub: their f32 sums in that order, the goldens hold it) into
+//! its bus
 //! (Scratch::bus), which the filter and ENV 1 of the voice take into its outputs. A source off for the note has no
 //! slot: nothing of it is allocated, held, worked out or rendered. Static dispatch only (each_source! writes the call
 //! for every type of slot): a call through a vtable would be a call_indirect, past the inlining of wasm-opt. A new
 //! source is a type of its own, a slot here, a line in each_source! and its module in targets.rs
 
+use crate::glided::{glide_length, Glided};
 use crate::modulation::Modulation;
 use crate::noise::Noise;
 use crate::shared::Shared;
 use crate::store::Store;
-use crate::targets::{NOISE, OSC};
+use crate::sub::Sub;
+use crate::targets::{LEVEL, NOISE, OSC, PAN, SUB};
 use crate::voice::{Ctx, Osc, Params};
 use alloc::boxed::Box;
 
@@ -29,6 +32,10 @@ pub(crate) struct StartCx<'a> {
     // the samples a note of a legato phrase fades in over (0: it starts at once), of `fade_length`
     pub fade: i32,
     pub fade_length: i32,
+    // its first sample in the frames of the node
+    pub frame: f64,
+    // what the sources of the node share (the sub: the phase of the one started last)
+    pub shared: &'a Shared,
 }
 
 /// what a source reads of its voice in a block: a..b of it
@@ -77,11 +84,79 @@ pub(crate) trait Source {
     }
 }
 
+/// the level and the pan of a source of one channel (the noise, the sub): a `knobs` event glides them in
+/// ROUTE_GLIDE, the routes read their bases in a block (one value while they don't glide)
+pub(crate) struct LevelPan {
+    level: Glided,
+    pan: Glided,
+    glide: f64,
+    level_one: [f32; 1],
+    pan_one: [f32; 1],
+}
+
+impl LevelPan {
+    pub fn new(sample_rate: f64, level: f64, pan: f64) -> LevelPan {
+        LevelPan {
+            level: Glided::new(level),
+            pan: Glided::new(pan),
+            glide: glide_length(sample_rate),
+            level_one: [level as f32],
+            pan_one: [pan as f32],
+        }
+    }
+
+    /// they glide to `level` and `pan`
+    pub fn set(&mut self, level: f64, pan: f64) {
+        self.level.glide(level, self.glide);
+        self.pan.glide(pan, self.glide);
+    }
+
+    /// their values over a..b of the block
+    pub fn render(&mut self, a: usize, b: usize) {
+        self.level.render(a, b);
+        self.pan.render(a, b);
+        if self.level.constant {
+            self.level_one[0] = self.level.values[a];
+        }
+        if self.pan.constant {
+            self.pan_one[0] = self.pan.values[a];
+        }
+    }
+
+    /// the bases of the routes of the level and the pan in the block of `n`
+    pub fn level(&self, n: usize) -> &[f32] {
+        base_of(&self.level, &self.level_one, n)
+    }
+
+    pub fn pan(&self, n: usize) -> &[f32] {
+        base_of(&self.pan, &self.pan_one, n)
+    }
+
+    /// the base of `knob` of the source (LEVEL, PAN; the offsets of its pitch: 0)
+    pub fn base(&self, knob: usize, n: usize) -> &[f32] {
+        match knob {
+            LEVEL => self.level(n),
+            PAN => self.pan(n),
+            _ => ZERO,
+        }
+    }
+}
+
+// the base of a knob that glides in the block of `n`: its one value while it doesn't
+fn base_of<'a>(glided: &'a Glided, one: &'a [f32; 1], n: usize) -> &'a [f32] {
+    if glided.constant {
+        one
+    } else {
+        &glided.values[..n.min(glided.values.len())]
+    }
+}
+
 /// the sources of a voice, None: off for its note
 pub(crate) struct Slots {
     // the oscillators by their index in VoiceOptions.osc
     pub oscs: [Option<Box<Osc>>; 2],
     pub noise: Option<Noise>,
+    pub sub: Option<Sub>,
 }
 
 impl Slots {
@@ -105,13 +180,14 @@ impl Slots {
                 .noise
                 .as_ref()
                 .map_or(ZERO, |noise| noise.base(knob, params, n)),
+            SUB => self.sub.as_ref().map_or(ZERO, |sub| sub.base(knob, params, n)),
             _ => ZERO,
         }
     }
 }
 
 /// `$body` for every source on in `$slots`, `$source` bound to it (`&mut`), in the order of the sum of the voice:
-/// osc 1, osc 2, the noise
+/// osc 1, osc 2, the noise, the sub
 macro_rules! each_source {
     ($slots:expr, $source:ident => $body:expr) => {{
         let slots = &mut $slots;
@@ -119,6 +195,9 @@ macro_rules! each_source {
             $body;
         }
         if let Some($source) = slots.noise.as_mut() {
+            $body;
+        }
+        if let Some($source) = slots.sub.as_mut() {
             $body;
         }
     }};

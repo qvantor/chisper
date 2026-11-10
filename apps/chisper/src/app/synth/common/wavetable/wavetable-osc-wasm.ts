@@ -28,6 +28,7 @@ import {
   VoiceRoute,
   VoicesReportMessage,
   VoiceStats,
+  VoiceSubOptions,
   VoiceVelocity,
 } from './voice-options';
 import type { WavetableLevels } from './wavetable-levels';
@@ -491,6 +492,20 @@ const writeNoise = (
   return at;
 };
 
+// the sub of a voice (read_sub of the core): on, the sine of the store (no table), its table, its cents, its phase,
+// Contiguous, its level and pan (it draws nothing: the draws of every voice stay those of before)
+const writeSub = (scope: OscScope, command: Float64Array, at: number, sub: VoiceSubOptions | null) => {
+  command[at++] = sub ? 1 : 0;
+  command[at++] = sub && sub.table === null ? 1 : 0;
+  command[at++] = sub?.table ? scope.id(sub.table) : 0;
+  command[at++] = sub?.cents ?? 0;
+  command[at++] = sub?.phase ?? 0;
+  command[at++] = sub?.contiguous ? 1 : 0;
+  command[at++] = sub?.level ?? 0;
+  command[at++] = sub?.pan ?? 0;
+  return at;
+};
+
 // the options of a voice into the command buffer of the core (its reader, read_voice_options): the start, then its
 // sources in the order of their slots, each a block whose first value says whether it is on (random() draws in
 // their order: the start phases of the unison voices of each oscillator on, as the TS voice drew them, and the shares
@@ -510,6 +525,7 @@ const writeVoiceOptions = (
   for (let index = 0; index < 2; index++)
     at = writeOsc(scope, command, at, options.osc[index] ?? null, random);
   at = writeNoise(scope, command, at, options.noise ?? null, random);
+  at = writeSub(scope, command, at, options.sub ?? null);
   at = writeEnvelopes(command, at, options.envelopes);
   at = writeVelocity(command, at, options.velocity);
   at = writeFilter(command, at, options.filter);

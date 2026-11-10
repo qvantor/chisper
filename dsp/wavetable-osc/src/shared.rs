@@ -4,6 +4,7 @@
 
 use crate::lfo::{frac, Anchor, LfoGlobal, LfoState, KNOBS, LFOS, TABLE};
 use crate::store::{FRAME_GUARD, MAX_LEVEL_LENGTH};
+use crate::sub::SubPhase;
 use alloc::{vec, vec::Vec};
 use jsmath::{ceil, max};
 
@@ -100,6 +101,9 @@ pub struct Shared {
     // out again
     pub lfos: [LfoGlobal; LFOS],
     pub lfo_epoch: u32,
+    // the phase of the sub of the note started last (a note of Contiguous starts at it) and the serials of the subs
+    pub sub: SubPhase,
+    pub sub_serial: u64,
 }
 
 impl Default for Shared {
@@ -119,6 +123,8 @@ impl Default for Shared {
             upsamplers: Vec::new(),
             lfos: Default::default(),
             lfo_epoch: 0,
+            sub: SubPhase::default(),
+            sub_serial: 0,
         }
     }
 }

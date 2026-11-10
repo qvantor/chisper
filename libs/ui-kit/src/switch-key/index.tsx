@@ -9,15 +9,22 @@ import { keepFocus } from '../common/utils';
 
 export {
   AnchorIcon,
+  ContiguousIcon,
   DottedIcon,
   FollowIcon,
   LegatoIcon,
   LoopIcon,
   OneShotIcon,
+  PulseIcon,
   QuantizeIcon,
+  RoundRectIcon,
+  SawIcon,
   SelectIcon,
+  SineIcon,
   SnapIcon,
+  SquareIcon,
   TrackIcon,
+  TriangleIcon,
   TripletIcon,
 } from './icons';
 
@@ -128,8 +135,12 @@ const TipWhy = styled(TipText)`
   color: ${theme.colors.thirdAccent};
 `;
 
-// ms a key is hovered before its tooltip shows: passing over the keys shows none
-export const SWITCH_KEY_TIP_DELAY = 700;
+// ms a key is hovered before its tooltip shows: passing over the keys (along a column of them) shows none
+export const SWITCH_KEY_TIP_DELAY = 1200;
+
+// the tooltip takes no pointer: moved onto it, the pointer leaves the key (the tooltip hides) and reaches the key
+// under it (in a column the tooltip covers the key above)
+const TIP_STYLES = { root: { pointerEvents: 'none' } } as const;
 
 // the keys of a plate all off (a bypassed effect), why
 interface PlateOff {
@@ -153,8 +164,8 @@ type KeyProps = Omit<Props, 'on' | 'onChange'> & {
   onClick?: () => void;
 };
 
-// a key of a plate: its label (lit while pressed); hovered a while, a tooltip tells its name, what it does and,
-// disabled, why (its plate's reason first)
+// a key of a plate: its label (lit while pressed); hovered a while, a tooltip the pointer passes through tells its
+// name, what it does and, disabled, why (its plate's reason first)
 const PlateKey = ({
   pressed,
   onClick,
@@ -171,7 +182,11 @@ const PlateKey = ({
   const off = plate.disabled || disabled;
   const why = plate.disabled ? plate.disabledHint : disabledHint;
   return (
-    <Tooltip mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000} title={keyTip(name, hint, off ? why : undefined)}>
+    <Tooltip
+      mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000}
+      styles={TIP_STYLES}
+      title={keyTip(name, hint, off ? why : undefined)}
+    >
       <Wrap>
         <Key
           type='button'
@@ -270,6 +285,39 @@ const Plate = styled.div`
     flex: 1 1 0;
   }
 
+  /* one key over another (the shapes of the sub), every one as high, as wide as the plate, a line between them */
+  &.column {
+    flex-direction: column;
+  }
+
+  &.column > ${Wrap} {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+  }
+
+  &.column > ${Wrap} + ${Wrap} {
+    border-left: none;
+    border-top: ${LINE};
+  }
+
+  &.column ${Key} {
+    flex: 1 1;
+    min-width: 0;
+    padding: 0;
+  }
+
+  /* its icons as large as its keys let them (up to 26 px) */
+  &.column ${Content} {
+    height: 100%;
+  }
+
+  &.column ${Content} svg {
+    width: auto;
+    height: min(64%, 26px);
+    aspect-ratio: 1;
+  }
+
   /* all of it off (a bypassed effect): faded as a whole, as the switch of a mode is */
   &[aria-disabled='true'] {
     opacity: 0.5;
@@ -291,6 +339,8 @@ interface KeysProps {
   stack?: boolean;
   // in a strip (the window of the noise): the plates of the row share its width by their keys, every key as wide
   fill?: boolean;
+  // one key over another, every one as high (the shapes of the sub): its height is the one given
+  column?: boolean;
   className?: string;
 }
 
@@ -298,6 +348,7 @@ interface KeysProps {
 export const SwitchKeys = ({
   stack = false,
   fill = false,
+  column = false,
   disabled = false,
   disabledHint,
   className,
@@ -309,7 +360,7 @@ export const SwitchKeys = ({
     <Plate
       role='group'
       aria-disabled={disabled || undefined}
-      className={cls(className, { stack, fill })}
+      className={cls(className, { stack, fill, column })}
       style={fill ? { flex: `${React.Children.toArray(children).length} 1 0` } : undefined}
       {...props}
     >

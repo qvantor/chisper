@@ -142,7 +142,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `[model, actions]`. Components read observables with `useBehaviorSubject($x)` / `useObservable`. Helpers:
   `PrimitiveBS`, `ArrayBS`, `ObjectBS`; observables are `$`-prefixed.
 - Provider order is dependency order (`apps/chisper/src/app/synth/index.tsx`): InputController → SynthCore →
-  Transport → Envelopes → Lfo → Modulation → Oscillator1/2 → Noise → MidiController → Filter → Synth → Fx →
+  Transport → Envelopes → Lfo → Modulation → Oscillator1/2 → Noise → Sub → MidiController → Filter → Synth → Fx →
   SoundSwitch → Track → KeyboardController → Presets.
 
 ### Audio graph (`synth/common/modules`)
@@ -177,12 +177,16 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - `createVoice(options, values)` gives a `VoiceHandle` whose params mimic AudioParam calls; each call is an event
   of the voices node, a task's events go in one message (by a microtask). The node reports `started`/`ended`.
   A trap in a voice ends only that voice.
-- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node), `voice.rs`, `source.rs` (oscillators and
-  noise as slots of the trait `Source`), `timeline.rs` (AudioParam semantics), `envelope.rs`, `lfo.rs`,
-  `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `store.rs`, `shared.rs` (phrases, LFOs),
-  `targets.rs` (knob ids). Options/messages: `voice-options.ts`, params: `wavetable-osc-params.ts`.
+- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node), `voice.rs`, `source.rs` (oscillators,
+  noise and sub as slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
+  `envelope.rs`, `lfo.rs`, `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `sub.rs`, `store.rs`,
+  `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids). Options/messages:
+  `voice-options.ts`, params: `wavetable-osc-params.ts`.
+- The sub (`sub.rs`): one voice, its own loop (the levels read as an oscillator reads them, `render11`/
+  `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
+  tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub). Aliasing −70 dB, spurs −80 dB.
 - Worklet modules prewarm their core on load (lazy wasm compilation would hit the first note).
 
 ### Synth, input, transport (`synth/common/modules`, `synth/common/*`)
@@ -190,6 +194,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - `oscillator.ts` — the table (`$waveTable`, morph tables expand to 256 frames), position, pitch (oct/semi/fine),
   unison, phases, gain; sends its table to the engine.
 - `noise.ts` (+ `synth/noise/`) — a sample player in every voice; samples from the noise bucket.
+- `sub.ts` (+ `synth/sub/`, left of OSC 1) — the sub oscillator in every voice; sends the table of a shape the first
+  time it is on.
 - `synth.ts` + `synth/voicing/` — voices per note: poly with stealing (quietest released first; out of legato the
   stolen voice takes the new note, its phases go on, else it fades out), legato, portamento (`glide.ts`), mono
   (Poly 1: one voice, a stack of held keys; a note takes it over while it sounds, its core keeps it `RELEASE_LEAD`
@@ -223,7 +229,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 ### Snapshots
 
 `apps/chisper/src/app/app/plugins/snapshot.ts` creates one `searchParamsSnapshotPlugin`; models `osc1`, `osc2`,
-`noise`, `filter`, `env`, `mod`, `fx`, `lfo` and the synth as `v` expose `{ [modelName]: { key: value } }`.
+`noise`, `sub`, `filter`, `env`, `mod`, `fx`, `lfo` and the synth as `v` expose `{ [modelName]: { key: value } }`.
 `getSnapshot()` / `applySnapshot(obj)` are used by presets; legacy URL params `<modelName>-<key>=<json>` are still
 applied on init. Short keys and their ranges are in the schema (`libs/preset-schema`); legacy-only keys (e.g. `r` of
 an oscillator) are read, never written.

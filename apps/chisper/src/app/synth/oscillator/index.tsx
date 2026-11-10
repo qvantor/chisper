@@ -1,8 +1,7 @@
 import React from 'react';
-import { distinctUntilChanged, map } from 'rxjs';
 import { styled } from 'styled-components';
 import { Handle, HandleProps } from '@chisper/ui-kit';
-import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
+import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
 import { OSC_DEFAULTS } from '@chisper/preset-schema';
 import { OscillatorActions, OscillatorModel, useOscillator1 } from '../common/modules';
@@ -42,18 +41,9 @@ const OscKnob = ({
   $osc,
   field,
   ...props
-}: Omit<HandleProps, 'value'> & { $osc: OscillatorModel['$osc']; field: 'detune' | 'blend' }) => {
-  const $value = React.useMemo(
-    () =>
-      $osc.pipe(
-        map((osc) => osc[field]),
-        distinctUntilChanged()
-      ),
-    [$osc, field]
-  );
-  const value = useObservable($value, $osc.value[field]);
-  return <Handle {...props} value={value} />;
-};
+}: Omit<HandleProps, 'value'> & { $osc: OscillatorModel['$osc']; field: 'detune' | 'blend' }) => (
+  <Handle {...props} value={useBehaviorSubjectField($osc, field)} />
+);
 
 type Props = OscillatorModel &
   OscillatorActions & {

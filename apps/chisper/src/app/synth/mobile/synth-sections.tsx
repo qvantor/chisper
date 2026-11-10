@@ -8,9 +8,10 @@ import { LfoSection } from '../lfo';
 import { FilterSection } from '../filter';
 import { VoicingSection } from '../voicing';
 import { NoiseSection } from '../noise';
+import { SubSection } from '../sub';
 
 // column: portrait phone, grid: landscape phone (and the portrait mini view), row: landscape mini view; the order
-// of the desktop: the oscillators, the noise and the filter, then ENV, the LFOs, VELO and the voicing
+// of the desktop: the sub, the oscillators, the noise and the filter, then ENV, the LFOs, VELO and the voicing
 export type SectionsLayout = 'column' | 'grid' | 'row';
 
 const Root = styled.div`
@@ -20,24 +21,27 @@ const Root = styled.div`
 
   &.column {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 280px 280px 260px 230px 230px 260px 200px 200px;
-    grid-template-areas: 'osc1' 'osc2' 'noise' 'filter' 'env' 'lfo' 'velo' 'voicing';
+    grid-template-rows: 260px 280px 280px 260px 230px 230px 260px 200px 200px;
+    grid-template-areas: 'sub' 'osc1' 'osc2' 'noise' 'filter' 'env' 'lfo' 'velo' 'voicing';
   }
 
   &.grid {
-    /* the oscillators half each, then the noise, the filter and ENV, the LFOs half */
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr) minmax(0, 7fr) minmax(0, 5fr);
+    /* the sub (wide enough for its knobs beside its shapes: 160 px at least, narrower they would go under them, with
+       no room for them in its row), the oscillators half of the rest each, then the noise, the filter and ENV, the
+       LFOs */
+    grid-template-columns: minmax(160px, 6fr) minmax(0, 5fr) minmax(0, 7fr) minmax(0, 7fr) minmax(0, 5fr);
     grid-template-rows: 270px 300px 230px;
     grid-template-areas:
-      'osc1 osc1 osc2 osc2'
-      'noise filter env env'
-      'lfo lfo velo voicing';
+      'sub osc1 osc1 osc2 osc2'
+      'noise noise filter env env'
+      'lfo lfo lfo velo voicing';
   }
 
+  /* the sub wide enough for its knobs beside its shapes */
   &.row {
-    grid-template-columns: 3fr 3fr 1.5fr 3fr 3fr 3fr 1.5fr 2fr;
+    grid-template-columns: 2fr 3fr 3fr 1.5fr 3fr 3fr 3fr 1.5fr 2fr;
     grid-template-rows: 270px;
-    grid-template-areas: 'osc1 osc2 noise filter env lfo velo voicing';
+    grid-template-areas: 'sub osc1 osc2 noise filter env lfo velo voicing';
   }
 `;
 
@@ -47,6 +51,7 @@ const Cell = styled.div`
 `;
 
 const sections: [string, React.ComponentType][] = [
+  ['sub', SubSection],
   ['osc1', Oscillator1],
   ['osc2', Oscillator2],
   ['noise', NoiseSection],

@@ -77,11 +77,11 @@ describe('SwitchKey', () => {
     expect(key.querySelector('svg')?.querySelectorAll('path')).toHaveLength(2);
   });
 
-  it('hovered 700 ms tells its name and what it does, no title of the browser', () => {
+  it('hovered 1200 ms tells its name and what it does, no title of the browser', () => {
     render(<SwitchKey on={false} label='BPM' name='Tempo sync' hint='Time in note values' />);
     const key = screen.getByRole('button', { name: 'Tempo sync' });
     expect(key.hasAttribute('title')).toBe(false);
-    expect(SWITCH_KEY_TIP_DELAY).toBe(700);
+    expect(SWITCH_KEY_TIP_DELAY).toBe(1200);
     fireEvent.mouseEnter(key.parentElement as HTMLElement);
     act(() => {
       jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY - 1);
@@ -91,6 +91,13 @@ describe('SwitchKey', () => {
       jest.advanceTimersByTime(1);
     });
     expect(screen.getByRole('tooltip').textContent).toBe('Tempo syncTime in note values');
+  });
+
+  it('its tooltip takes no pointer: the pointer moved onto it reaches what is under it', () => {
+    render(<SwitchKey on={false} label='BPM' name='Tempo sync' hint='Time in note values' />);
+    hoverSwitchKey(screen.getByRole('button', { name: 'Tempo sync' }));
+    const popup = screen.getByRole('tooltip').closest<HTMLElement>('.ant-tooltip');
+    expect(popup?.style.pointerEvents).toBe('none');
   });
 
   it('passed over shows no tooltip', () => {
@@ -158,6 +165,7 @@ describe('SwitchKeys', () => {
     expect(keys.map((key) => key.getAttribute('aria-label'))).toEqual(['Tempo sync', 'Triplets']);
     expect(group.classList.contains('stack')).toBe(false);
     expect(group.classList.contains('fill')).toBe(false);
+    expect(group.classList.contains('column')).toBe(false);
     expect(group.style.flexGrow).toBe('');
     expect(group.hasAttribute('aria-disabled')).toBe(false);
   });
@@ -179,6 +187,27 @@ describe('SwitchKeys', () => {
     expect(groups.map((group) => group.classList.contains('fill'))).toEqual([true, true]);
     // a key not rendered takes no share
     expect(groups.map((group) => group.style.flexGrow)).toEqual(['2', '1']);
+  });
+
+  it('puts its keys one over another in a column, every one as high, a line over every one but the first', () => {
+    render(
+      <SwitchKeys aria-label='Shape' column>
+        <SwitchKey on icon={<TripletIcon />} name='Sine' />
+        <SwitchKey on={false} icon={<TripletIcon />} name='Saw' />
+        <SwitchKey on={false} icon={<TripletIcon />} name='Square' />
+      </SwitchKeys>
+    );
+    const group = screen.getByRole('group', { name: 'Shape' });
+    expect(group.classList.contains('column')).toBe(true);
+    expect(getComputedStyle(group).flexDirection).toBe('column');
+    const wraps = within(group)
+      .getAllByRole('button')
+      .map((key) => key.parentElement as HTMLElement);
+    expect(wraps.map((wrap) => getComputedStyle(wrap).flexGrow)).toEqual(['1', '1', '1']);
+    expect(wraps.map((wrap) => getComputedStyle(wrap).borderTopStyle)).toEqual(['', 'solid', 'solid']);
+    expect(wraps.map((wrap) => getComputedStyle(wrap).borderLeftStyle)).not.toContain('solid');
+    // (a column takes no share of a strip)
+    expect(group.style.flexGrow).toBe('');
   });
 
   it('stacks the first key over the others; all of it off: faded as a whole, every key disabled, its reason', () => {

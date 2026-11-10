@@ -1,6 +1,7 @@
 // first: the Math of JS as jsmath (test-utils/js-math.ts): the inputs and the levels the TS builds the same on every
 // machine (Node's own Math differs in the last bits on arm64), so are the goldens
 import '../../../../test-utils/js-math';
+import type { SubShape } from '@chisper/preset-schema';
 import { EnvelopeParams } from '../envelope/envelope-curve';
 import { FREE, LfoPoints, LfosState, lfoTable, LfoWire, nextAnchor, RETRIG } from '../lfo/lfo-curve';
 import { withCurves } from '../../../../test-utils/envelopes';
@@ -15,6 +16,7 @@ import {
 import { seeded } from '../../../../test-utils/seeded';
 import { wasmCore } from '../../../../test-utils/wasm';
 import { buildNoiseLevels } from './noise-levels';
+import { subShapeFrame } from './sub-shapes';
 import { expandFrames } from './wavetable-frames';
 import { buildLevels } from './wavetable-mipmap';
 import {
@@ -27,6 +29,8 @@ import {
   VoiceOptions,
   VoiceOscOptions,
   VoiceRoute,
+  VoiceSubKnobs,
+  VoiceSubOptions,
   VoiceVelocity,
 } from './voice-options';
 import { HELD_AGAIN_GATE, RELEASE_GATE, VoiceParam } from './wavetable-osc-params';
@@ -59,11 +63,12 @@ interface ScenarioVoice {
   at: number;
   options: VoiceOptions;
   params: Params;
-  // the messages before a block: routes, filter, velocity, the knobs of its noise (undefined: none)
+  // the messages before a block: routes, filter, velocity, the knobs of its noise and of its sub (undefined: none)
   routes?: Record<number, VoiceRoute[]>;
   filters?: Record<number, VoiceFilterOptions | null>;
   velocities?: Record<number, VoiceVelocity>;
   noises?: Record<number, VoiceNoiseKnobs>;
+  subs?: Record<number, VoiceSubKnobs>;
 }
 
 interface Scenario {
@@ -156,6 +161,15 @@ const production = (options: VoiceOptions): VoiceOptions => ({
   envelopes: options.envelopes.map(withCurves),
 });
 
+// the levels of the frames of a table: built once for frames every scenario shares (the shapes of the sub; the store
+// copies them)
+const builtLevels = new WeakMap<number[][], ReturnType<typeof buildLevels>>();
+const levelsOf = (frames: number[][]) => {
+  const levels = builtLevels.get(frames) ?? buildLevels(frames);
+  builtLevels.set(frames, levels);
+  return levels;
+};
+
 // a scope of voices on a store with the tables of a scenario (its new versions set by `before`)
 const scopeOf = ({ tables, samples = {}, versions = {} }: Scenario) => {
   const scope = createOscScope(core);
@@ -167,7 +181,7 @@ const scopeOf = ({ tables, samples = {}, versions = {} }: Scenario) => {
   const setTable = (table: string, frames: number[][] | null) => {
     version[table] = (version[table] ?? 0) + 1;
     if (frames) {
-      store.set(table, version[table], buildLevels(frames));
+      store.set(table, version[table], levelsOf(frames));
       live.add(table);
     } else {
       store.remove(table);
@@ -234,6 +248,8 @@ const run = (name: string, scenario: Scenario) => {
       if (velocity) wasm.setVelocity(velocity);
       const noise = voice.noises?.[block];
       if (noise) wasm.setKnobs('noise', noise);
+      const sub = voice.subs?.[block];
+      if (sub) wasm.setKnobs('sub', sub);
       const [outL, outR] = [new Float32Array(n), new Float32Array(n)];
       // (the bend on the detunes, and as it is for the noise of Pitch Track)
       const row = typeof bendOfBlock === 'number' ? Float32Array.of(bendOfBlock) : bendOfBlock;
@@ -287,6 +303,8 @@ const runScope = (name: string, scenario: Scenario, trap?: { block: number; voic
       if (velocity) node.setVelocity(id, velocity);
       const noise = voice.noises?.[block];
       if (noise) node.setKnobs(id, 'noise', noise);
+      const sub = voice.subs?.[block];
+      if (sub) node.setKnobs(id, 'sub', sub);
       const params = blockParams(voice, frame, n);
       if (trap?.block !== block || trap.voice !== id) node.params(id, params, n);
       else {
@@ -1167,13 +1185,52 @@ const randomNoise = (random: Random): VoiceNoiseOptions => ({
   ...randomNoiseKnobs(random),
 });
 
+// the knobs of a sub (Octave and Coarse together)
+const randomSubKnobs = (random: Random): VoiceSubKnobs => ({
+  level: random(),
+  pan: random() < 0.4 ? 0 : between(random, -1, 1),
+  cents: random() < 0.3 ? 0 : between(random, -11200, 11200),
+});
+// a sub of a voice: a shape of the scope, the sine of the store, or a table the store hasn't (silent); its routes
+const randomSub = (random: Random): { sub: VoiceSubOptions; routes: VoiceRoute[] } => ({
+  sub: {
+    table: pick(random, [null, 'sub:saw', 'sub:pulse', 'sub:triangle', 'sub:none']),
+    phase: random(),
+    contiguous: random() < 0.4,
+    ...randomSubKnobs(random),
+  },
+  // each knob in a route now and then: [its param, the range of its amount, its bounds]
+  routes: (
+    [
+      ['sub.crs', 2400, -6400, 6400],
+      ['sub.pan', 1, -1, 1],
+      ['sub.level', 1, 0, 1],
+    ] as const
+  ).flatMap(([param, amount, min, max]) =>
+    random() < 0.3
+      ? [{ source: Math.floor(random() * 8), param, amount: between(random, -amount, amount), min, max }]
+      : []
+  ),
+});
+// the tables of shapes of the sub (`sub:<shape>`)
+const subShapes = (...shapes: Exclude<SubShape, 'sine'>[]): Record<string, number[][]> =>
+  Object.fromEntries(shapes.map((shape) => [`sub:${shape}`, [Array.from(subShapeFrame(shape))]]));
+// the shapes of the sub a scenario may play
+const SUB_TABLES = subShapes('saw', 'pulse', 'triangle');
+
 const randomScenario = (random: Random, seed: number): Scenario => {
+  // (the subs from a stream of their own: the scenarios of before draw as they did)
+  const subRandom = seeded(seed * 6151 + 1);
   const rate = pick(random, [44100, 48000, 48000, 96000]);
   const blocks = Array.from({ length: 8 + Math.floor(random() * 40) }, () =>
     random() < 0.95 ? 128 : pick(random, [64, 256, 512])
   );
   const frames = blocks.reduce((a, b) => a + b, 0);
-  const tables: Record<string, number[][]> = { a: randomFrames(random), b: randomFrames(random) };
+  const tables: Record<string, number[][]> = {
+    a: randomFrames(random),
+    b: randomFrames(random),
+    ...SUB_TABLES,
+  };
   // a sample of noise, mono or stereo, from a few frames (a level or two) to 0.3 s
   const length = random() < 0.2 ? 1 + Math.floor(random() * 300) : 300 + Math.floor(random() * 13000);
   const samples = {
@@ -1223,16 +1280,20 @@ const randomScenario = (random: Random, seed: number): Scenario => {
     const noise = random() < 0.4 ? randomNoise(random) : null;
     const noises: Record<number, VoiceNoiseKnobs> = {};
     if (noise && random() < 0.4) noises[at + Math.floor(random() * 10)] = randomNoiseKnobs(random);
+    const sub = subRandom() < 0.4 ? randomSub(subRandom) : null;
+    const subs: Record<number, VoiceSubKnobs> = {};
+    if (sub && subRandom() < 0.4) subs[at + Math.floor(subRandom() * 10)] = randomSubKnobs(subRandom);
     return {
       at,
       options: {
         osc: [oscOf(), oscOf()],
         noise,
+        sub: sub?.sub ?? null,
         start,
         envelopes: [randomEnvelope(random), randomEnvelope(random), randomEnvelope(random)],
         envStart: legato ? Math.max(0, start - random() * 0.05) : start,
         phrase: legato ? 0 : index,
-        routes,
+        routes: [...routes, ...(sub?.routes ?? [])],
         filter: randomFilter(random),
         ...(velocity && { velocity }),
       },
@@ -1254,6 +1315,7 @@ const randomScenario = (random: Random, seed: number): Scenario => {
       filters,
       velocities,
       noises,
+      subs,
     };
   });
   return {
@@ -1396,8 +1458,155 @@ const NOISE_GOLDEN: [string, Scenario][] = [
   ],
 ];
 
+// --- sub ---
+
+const SUB: VoiceSubOptions = { table: null, phase: 0, contiguous: false, level: 0.8, pan: 0, cents: 0 };
+const subbed = (sub: Partial<VoiceSubOptions>, options: Partial<VoiceOptions> = {}) =>
+  note({ osc: [null, null], sub: { ...SUB, ...sub }, ...options });
+
+const SUB_GOLDEN: [string, Scenario][] = [
+  [
+    'sub: every shape a note, panned, an octave and a coarse apart, released',
+    {
+      rate: RATE,
+      blocks: quanta(0.3),
+      tables: subShapes('round-rect', 'triangle', 'saw', 'square', 'pulse'),
+      voices: (
+        [
+          [null, 0, 0],
+          ['sub:round-rect', -1200, 0.3],
+          ['sub:triangle', 700, -0.5],
+          ['sub:saw', -2400, 0],
+          ['sub:square', 1250, 1],
+          ['sub:pulse', -500, -1],
+        ] as const
+      ).map(([table, cents, pan], k) => ({
+        at: 4 * k,
+        options: subbed(
+          { table, cents, pan, phase: k / 6 },
+          { start: (4 * k * 128) / RATE, envelopes: [ENV, FLAT, FLAT], phrase: k }
+        ),
+        params: { frequency: constant(110 * (k + 1)), gate: gateAt(4 * k * 128 + 6000) },
+      })),
+      seed: 31,
+    },
+  ],
+  [
+    'sub: a glide and a bend, Coarse moved by ENV 2 and LFO 1, its level by VELO, high up to the nyquist',
+    {
+      rate: 44100,
+      blocks: quanta(0.4, 44100),
+      tables: subShapes('saw'),
+      voices: [
+        {
+          at: 0,
+          options: subbed(
+            { table: 'sub:saw' },
+            {
+              envelopes: [FLAT, { attack: 0.1, hold: 0, decay: 0.1, sustain: 0.3, release: 0 }, FLAT],
+              velocity: { level: 0.6, amp: 1 },
+              routes: [
+                { source: 1, param: 'sub.crs', amount: 1900, min: -6400, max: 6400 },
+                lfoRoute(4, 'sub.crs', 300, { min: -6400, max: 6400, bipolar: true }),
+                { source: 3, param: 'sub.level', amount: -0.5, min: 0, max: 1 },
+              ],
+            }
+          ),
+          params: { frequency: perSample((frame) => 55 * 2 ** Math.min(7.5, frame / 2000)) },
+        },
+      ],
+      bends: { 20: 700, 60: -1200 },
+      lfos: { 0: lfosAtOnce([]) },
+      seed: 32,
+    },
+  ],
+  [
+    'sub: its knobs on a playing note (the level and the pan glide), a route of its pan, through a lowpass with osc 1',
+    {
+      rate: RATE,
+      blocks: quanta(0.3),
+      tables: { a: [SAW], ...subShapes('square') },
+      voices: [
+        {
+          at: 0,
+          options: subbed(
+            { table: 'sub:square', cents: -1200 },
+            {
+              osc: [osc(), null],
+              filter: { type: 'lowpass', cutoff: 2000, resonance: 4, gain: 0 },
+            }
+          ),
+          params: { frequency: constant(220) },
+          subs: { 15: { level: 0.4, pan: -0.7, cents: 700 }, 50: { level: 1, pan: 0, cents: -2400 } },
+          routes: { 30: [lfoRoute(4, 'sub.pan', 0.8, { min: -1, max: 1, bipolar: true })] },
+        },
+      ],
+      lfos: { 0: lfosAtOnce([]) },
+      seed: 33,
+    },
+  ],
+  [
+    'sub: Contiguous notes apart, overlapping and of other pitches, a legato note fading in',
+    {
+      rate: RATE,
+      blocks: quanta(0.5),
+      tables: subShapes('triangle'),
+      voices: [
+        {
+          at: 0,
+          options: subbed(
+            { table: 'sub:triangle', contiguous: true, phase: 0.3 },
+            { envelopes: [ENV, FLAT, FLAT] }
+          ),
+          params: { frequency: constant(330), gate: gateAt(5000) },
+        },
+        {
+          at: 50,
+          options: subbed(
+            { contiguous: true },
+            { start: (50 * 128) / RATE, envelopes: [ENV, FLAT, FLAT], phrase: 1 }
+          ),
+          params: { frequency: constant(440), gate: gateAt(50 * 128 + 6000) },
+        },
+        {
+          at: 70,
+          options: subbed(
+            { table: 'sub:triangle', contiguous: true, pan: 0.5 },
+            { start: (70 * 128 + 37) / RATE, envStart: (50 * 128) / RATE, phrase: 1 }
+          ),
+          params: { frequency: constant(550) },
+        },
+      ],
+      seed: 34,
+    },
+  ],
+  [
+    'sub: a shape whose table comes late (silent until then), then replaced, under a mono start again',
+    {
+      rate: RATE,
+      blocks: quanta(0.25),
+      tables: {},
+      versions: {
+        10: [['sub:pulse', subShapes('pulse')['sub:pulse']]],
+        40: [['sub:pulse', subShapes('saw')['sub:saw']]],
+      },
+      voices: [
+        {
+          at: 0,
+          options: subbed({ table: 'sub:pulse', phase: 0.75 }, { mono: true }),
+          params: {
+            frequency: (frame) => (frame < 4000 ? 196 : 262),
+            gate: (frame, n) => (frame + n <= 4000 ? 1 : (i: number) => (i < 4000 ? 1 : HELD_AGAIN_GATE)),
+          },
+        },
+      ],
+      seed: 35,
+    },
+  ],
+];
+
 describe('wavetable oscillator wasm core', () => {
-  it.each([...GOLDEN, ...LFO_GOLDEN, ...NOISE_GOLDEN])('%s: its golden', (name, scenario) => {
+  it.each([...GOLDEN, ...LFO_GOLDEN, ...NOISE_GOLDEN, ...SUB_GOLDEN])('%s: its golden', (name, scenario) => {
     const golden = run(name, scenario);
     goldens.check(name, golden);
     // the voices of one node: the same bits, and the golden of their sum
