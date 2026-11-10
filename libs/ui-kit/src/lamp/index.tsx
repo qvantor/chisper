@@ -70,6 +70,11 @@ const Root = styled.button<{ $color: string }>`
     pointer-events: none;
   }
 
+  /* a light alone (LampLight): nothing to press */
+  &.light {
+    cursor: default;
+  }
+
   &:focus {
     outline: none;
   }
@@ -107,3 +112,12 @@ export const Lamp = ({
     onClick={() => onChange?.(!on)}
   />
 );
+
+// the glass of a Lamp that only shows (the MIDI IN of a popover): not a key, off; its ref lets a flash switch its on
+// class without a render
+export const LampLight = React.forwardRef<HTMLSpanElement, { color?: string }>(
+  ({ color = theme.colors.secondAccent }, ref) => (
+    <Root as='span' ref={ref} className='light' $color={color} aria-hidden />
+  )
+);
+LampLight.displayName = 'LampLight';

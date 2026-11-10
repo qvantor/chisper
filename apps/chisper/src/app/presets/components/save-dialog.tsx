@@ -1,10 +1,13 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { Button, Checkbox, Input, Modal, Tooltip, Typography } from 'antd';
+import { Checkbox, Input, Tooltip } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
+import { AiOutlineSave } from 'react-icons/ai';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Turnstile, TurnstileInstance } from '@marsidev/react-turnstile';
 import toast from 'react-hot-toast';
 import { distinctUntilChanged, map } from 'rxjs';
+import { text12, textBold12, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import {
   Clip,
@@ -15,6 +18,16 @@ import {
   UpdatePresetRequest,
 } from '@chisper/preset-schema';
 import { getSnapshot } from '../../app';
+import {
+  Bar,
+  Dialog,
+  DialogIntro,
+  DialogScreen,
+  Key,
+  ScreenHead,
+  screenCheckStyle,
+  Spacer,
+} from '../../common/components';
 import { useTrack } from '../../synth/track/modules/track';
 import { usePersistClip } from '../../synth/track/components/use-clip-saving';
 import { CurrentPreset, usePresets } from '../modules/presets';
@@ -42,15 +55,51 @@ const captchaErrorMessage = (code: string) => {
   return `Captcha check failed (error ${code}).`;
 };
 
-const Content = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+const { colors } = theme;
+
+// the field of the name (or the link) on the screen, as All over the parts of a .mid; red under a taken name
+const Field = styled(ScreenHead)`
+  gap: 2px;
+  padding: 2px 3px 2px 0;
+
+  &.error {
+    border-bottom-color: ${colors.red};
+  }
 `;
 
-const Link = styled.div`
+// the clip of the track: its box on the line of its name, what Save does to it under it
+const ClipRow = styled.div`
+  ${screenCheckStyle};
+  margin: 3px;
+`;
+
+const ClipName = styled.span`
+  ${textBold12};
+  line-height: 16px;
+  color: ${colors.white};
+  overflow-wrap: anywhere;
+`;
+
+const Details = styled.div`
+  ${text12};
+  line-height: 16px;
+  color: ${colors.primaryDarkHighContrast};
+`;
+
+// a note without the clip row (the preset loses its clip): under the field
+const Note = styled(Details)`
+  padding: 6px 11px;
+`;
+
+const ErrorText = styled.div`
+  ${text12};
+  padding: 0 2px;
+  color: ${colors.red};
+`;
+
+// a disabled key gets no mouse events: its tooltip is on this
+const TipWrap = styled.span`
   display: flex;
-  gap: 8px;
 `;
 
 interface SavedResult {
@@ -156,7 +205,6 @@ export const SaveDialog = ({ open, onClose }: Props) => {
   const busy = isPending || overwriteMutation.isPending || clipSaving.busy;
   const canSave = validName && !nameTaken && !isOwnName && token !== null;
   const canOverwrite = validName && !nameTaken && editable !== null;
-  const secondaryType = editable ? 'default' : 'primary';
   // the preset sent with the clip it opens with (null: none): the clip of the track, saved first unless it is so
   // already; its save failed (a toast told why): the preset isn't sent
   const withClipId = async (send: (presetClipId: string | null) => void) => {
@@ -180,98 +228,67 @@ export const SaveDialog = ({ open, onClose }: Props) => {
   // the preset (of this browser) opens with a clip: what Save does to it
   const hadClip = editable?.clipId !== undefined;
 
+  // the key of a save: its icon on the main one (Save), a spinner in its place while it saves
+  const saveIcon = (main: boolean, loading: boolean) =>
+    loading ? <LoadingOutlined /> : main ? <AiOutlineSave /> : null;
+  const newMain = !editable;
+  const newLoading = isPending || (!editable && clipSaving.busy);
+
   return (
-    <Modal
-      title='Save preset'
-      open={open}
-      onCancel={onClose}
-      destroyOnHidden
-      footer={
-        saved ? (
-          <Button type='primary' onClick={onClose}>
-            Done
-          </Button>
-        ) : (
-          <>
-            <Button onClick={onClose}>Cancel</Button>
-            {captchaError ? (
-              <Button
-                type={secondaryType}
-                onClick={() => {
-                  setCaptchaError(null);
-                  turnstile.current?.reset();
-                }}
-              >
-                Retry
-              </Button>
-            ) : (
-              <Tooltip title={isOwnName ? 'Choose a new name' : undefined}>
-                <Button
-                  type={secondaryType}
-                  onClick={save}
-                  disabled={!canSave || overwriteMutation.isPending}
-                  loading={isPending || (!editable && clipSaving.busy)}
-                >
-                  {token ? (editable ? 'Save as new' : 'Save') : 'Checking...'}
-                </Button>
-              </Tooltip>
-            )}
-            {editable && (
-              <Button
-                type='primary'
-                onClick={overwrite}
-                disabled={!canOverwrite || isPending}
-                loading={overwriteMutation.isPending || clipSaving.busy}
-              >
-                Save
-              </Button>
-            )}
-          </>
-        )
-      }
-    >
+    <Dialog title='Save preset' open={open} onCancel={onClose} width={440} destroyOnHidden>
       {saved ? (
-        <Content>
-          <Typography.Text>{saved.message}</Typography.Text>
-          <Link>
-            <Input value={presetUrl(saved.id)} readOnly />
-            <Button onClick={() => sharePreset(saved.id)}>Copy link</Button>
-          </Link>
-        </Content>
+        <>
+          <DialogIntro>{saved.message}</DialogIntro>
+          <DialogScreen>
+            <Field>
+              <Input variant='borderless' value={presetUrl(saved.id)} readOnly aria-label='Preset link' />
+              <Key onClick={() => sharePreset(saved.id)}>Copy link</Key>
+            </Field>
+          </DialogScreen>
+          <Bar>
+            <Spacer />
+            <Key onClick={onClose}>Done</Key>
+          </Bar>
+        </>
       ) : (
-        <Content>
-          <Typography.Text type='secondary'>
+        <>
+          <DialogIntro>
             {editable
               ? `Save overwrites “${editable.name}”, its links will play the updated sound. Save as new keeps it unchanged.`
               : 'A new preset will be created. You can overwrite it later from this browser.'}
-          </Typography.Text>
-          <Input
-            autoFocus
-            placeholder='Preset name'
-            maxLength={PRESET_NAME_MAX_LENGTH}
-            showCount
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onPressEnter={editable ? overwrite : save}
-            status={nameTaken ? 'error' : undefined}
-          />
-          {nameTaken && <Typography.Text type='danger'>Name is already taken</Typography.Text>}
-          {label !== null && (
-            <Checkbox checked={withClip} onChange={(e) => setWithClip(e.target.checked)}>
-              Default clip: {label}
-            </Checkbox>
-          )}
-          {attach && (clipId === null || clipDirty) && (
-            <Typography.Text type='secondary'>
-              The clip is saved too, the preset opens with it.
-            </Typography.Text>
-          )}
-          {hadClip && !attach && (
-            <Typography.Text type='secondary'>Save leaves the preset without a clip.</Typography.Text>
-          )}
-          {hadClip && attach && clipId !== editable?.clipId && (
-            <Typography.Text type='secondary'>Save replaces the clip the preset opens with.</Typography.Text>
-          )}
+          </DialogIntro>
+          <DialogScreen>
+            <Field className={nameTaken ? 'error' : undefined}>
+              <Input
+                variant='borderless'
+                autoFocus
+                placeholder='Preset name'
+                maxLength={PRESET_NAME_MAX_LENGTH}
+                showCount
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onPressEnter={editable ? overwrite : save}
+                status={nameTaken ? 'error' : undefined}
+              />
+            </Field>
+            {label !== null && (
+              <ClipRow>
+                <Checkbox checked={withClip} onChange={(e) => setWithClip(e.target.checked)}>
+                  <ClipName>Default clip: {label}</ClipName>
+                </Checkbox>
+                {attach && (clipId === null || clipDirty) && (
+                  <Details>The clip is saved too, the preset opens with it.</Details>
+                )}
+                {hadClip && !attach && <Details>Save leaves the preset without a clip.</Details>}
+                {hadClip && attach && clipId !== editable?.clipId && (
+                  <Details>Save replaces the clip the preset opens with.</Details>
+                )}
+              </ClipRow>
+            )}
+            {label === null && hadClip && <Note>Save leaves the preset without a clip.</Note>}
+          </DialogScreen>
+          {nameTaken && <ErrorText>Name is already taken</ErrorText>}
+          {captchaError && <ErrorText>{captchaError}</ErrorText>}
           {clipSaving.captcha}
           <Turnstile
             ref={turnstile}
@@ -289,9 +306,37 @@ export const SaveDialog = ({ open, onClose }: Props) => {
             }}
             onUnsupported={() => setCaptchaError('Captcha is not supported by this browser.')}
           />
-          {captchaError && <Typography.Text type='danger'>{captchaError}</Typography.Text>}
-        </Content>
+          <Bar>
+            <Spacer />
+            <Key onClick={onClose}>Cancel</Key>
+            {captchaError ? (
+              <Key
+                onClick={() => {
+                  setCaptchaError(null);
+                  turnstile.current?.reset();
+                }}
+              >
+                Retry
+              </Key>
+            ) : (
+              <Tooltip title={isOwnName ? 'Choose a new name' : undefined}>
+                <TipWrap>
+                  <Key onClick={save} disabled={!canSave || overwriteMutation.isPending}>
+                    {saveIcon(newMain, newLoading)}
+                    {token ? (editable ? 'Save as new' : 'Save') : 'Checking...'}
+                  </Key>
+                </TipWrap>
+              </Tooltip>
+            )}
+            {editable && (
+              <Key onClick={overwrite} disabled={!canOverwrite || isPending}>
+                {saveIcon(true, overwriteMutation.isPending || clipSaving.busy)}
+                Save
+              </Key>
+            )}
+          </Bar>
+        </>
       )}
-    </Modal>
+    </Dialog>
   );
 };

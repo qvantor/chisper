@@ -13,11 +13,19 @@ describe('the clips', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
     // a bass, a lead and keys
     expect(demosOf('listen').map((demo) => [demo.slug, demo.category])).toEqual([
-      ['zesty-drive-bass', 'bass'],
+      ['acid-bass', 'bass'],
       ['warehouse-lead', 'lead'],
       ['biting-brass-keys', 'keys'],
     ]);
-    expect(DEMOS).toHaveLength(13);
+    expect(DEMOS).toHaveLength(14);
+  });
+
+  it('put the melodies of a section first, its FX after them', () => {
+    for (const section of SECTIONS) {
+      const fx = demosOf(section).map((demo) => demo.category === 'fx');
+      expect(fx).toEqual([...fx].sort((a, b) => Number(a) - Number(b)));
+    }
+    expect(demosOf('wavetables').map((demo) => demo.slug)).toEqual(['harp-pluck', 'ufo-drone']);
   });
 
   it('give every feature with sound a clip', () => {

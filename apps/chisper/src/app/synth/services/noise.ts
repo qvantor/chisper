@@ -1,5 +1,5 @@
 import { NOISES_ORIGIN, NOISES_PROXY } from './buckets';
-import { bucketLoader } from './fetch';
+import { bucketLoader, ReportProgress } from './fetch';
 import { sharedLoads } from './shared-loads';
 import { parseWavChannels } from './wav';
 
@@ -10,13 +10,17 @@ export interface NoiseSample {
   sampleRate: number;
 }
 
-// (`signal`: the caller gives it up, sharedLoads)
-export type LoadNoiseSample = (id: string, signal?: AbortSignal) => Promise<NoiseSample>;
+// (`signal`: the caller gives it up; `onProgress`: the share of it downloaded; sharedLoads)
+export type LoadNoiseSample = (
+  id: string,
+  signal?: AbortSignal,
+  onProgress?: ReportProgress
+) => Promise<NoiseSample>;
 
 const loadFile = bucketLoader(NOISES_ORIGIN, NOISES_PROXY);
 
 // the file from the domain of the bucket (else through the site), as stored (no resampling)
-const fetchNoiseSample = (id: string, signal: AbortSignal) =>
+const fetchNoiseSample = (id: string, signal: AbortSignal, onProgress: ReportProgress) =>
   loadFile(
     id,
     (bytes): NoiseSample => {
@@ -24,7 +28,8 @@ const fetchNoiseSample = (id: string, signal: AbortSignal) =>
       if (channels.length === 0 || channels[0].length === 0) throw new Error(`${id} has no samples`);
       return { channels: channels.slice(0, 2), sampleRate };
     },
-    signal
+    signal,
+    onProgress
   );
 
 // for the whole session

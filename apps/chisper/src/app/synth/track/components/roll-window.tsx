@@ -3,11 +3,11 @@ import { styled } from 'styled-components';
 import cls from 'classnames';
 import hexToRgba from 'hex-to-rgba';
 import { theme } from '@chisper/ui-kit';
+import { screenStyle, SECTION_SHADOW } from '../../../common/components';
 import { useTrack } from '../modules/track';
 import { MidiImportDialog } from './midi-import-dialog';
 import { PianoRoll } from './piano-roll';
 import { readMidiFile, RollHeader } from './roll-header';
-import { screenStyle } from './roll-section';
 import { RollStrip } from './roll-strip';
 import { useClipSaving } from './use-clip-saving';
 import { useRollEditor } from './use-roll-editor';
@@ -29,7 +29,7 @@ const Root = styled.div<{ $bottom: number }>`
   gap: 6px;
   padding: 6px;
   background: ${theme.colors.primary};
-  box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+  box-shadow: ${SECTION_SHADOW};
   outline: none;
 `;
 

@@ -17,7 +17,8 @@ describe('isMain', () => {
     dir = mkdtempSync(join(tmpdir(), 'site-main-'));
     writeFileSync(
       join(dir, 'script.mjs'),
-      `import { isMain } from ${JSON.stringify(MAIN)};\nconsole.log(isMain(import.meta));\n`
+      // a string: under FORCE_COLOR (node --test in a terminal) console.log colors a boolean
+      `import { isMain } from ${JSON.stringify(MAIN)};\nconsole.log(String(isMain(import.meta)));\n`
     );
   });
 

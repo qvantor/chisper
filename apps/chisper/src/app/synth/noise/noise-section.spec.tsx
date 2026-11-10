@@ -6,6 +6,7 @@ import { createModulation, createSynthCore } from '../../../test-utils/models';
 import { ModulationContext } from '../common/modules/modulation';
 import { SynthCoreContext } from '../common/modules/synth-core';
 import { NoiseProvider, useNoise } from '../common/modules';
+import { fileRow } from '../../../test-utils/file-rows';
 import { samplePeaks, startSpan } from './components/noise-overview';
 import { pathLabel } from './components/noise-selector';
 import { sampleStateMessage } from './components/noise-status';
@@ -30,7 +31,10 @@ jest.mock('@chisper/ui-kit', () => {
 });
 jest.mock('./hooks/use-noise-samples', () => {
   const actual = jest.requireActual('./hooks/use-noise-samples');
-  return { ...actual, useNoiseSamples: () => actual.samplesToOptions(LIST) };
+  return {
+    ...actual,
+    useNoiseSamples: () => ({ options: actual.samplesToOptions(LIST), status: 'success' }),
+  };
 });
 
 const setup = () => {
@@ -84,6 +88,19 @@ describe('NoiseSection', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /next/i })[0]);
     expect(model.$samplePath.value).toEqual(['Textures', 'Textures/Rain.v2.wav']);
     expect(screen.getByText('Rain.v2')).toBeInTheDocument();
+  });
+
+  it('chooses its sample in a browser of the samples by category', async () => {
+    const { model } = setup();
+    fireEvent.click(screen.getByText('White'), { detail: 1 });
+    const header = await screen.findByText('Noise', { selector: 'span' });
+    const browser = header.parentElement?.nextElementSibling as HTMLElement;
+    const row = (name: string) => fileRow(name, browser);
+    expect(row('Analog')).toHaveAttribute('aria-expanded', 'true');
+    expect(row('White')).toHaveAttribute('aria-current', 'true');
+    fireEvent.click(row('Textures'));
+    fireEvent.click(row('Rain.v2'));
+    expect(model.$samplePath.value).toEqual(['Textures', 'Textures/Rain.v2.wav']);
   });
 
   it('plays its sample looped or once, Pitch Track on and off', () => {

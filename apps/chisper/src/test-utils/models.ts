@@ -152,9 +152,12 @@ export const createTrack = (
   return { track: module, clock };
 };
 
-// a sound switch that applies a preset at once: the presets without the synth
+// a sound switch that applies a preset at once (no progress): the presets without the synth
 export const immediateSoundSwitch = () =>
-  [{}, { switchSound: (apply: () => void) => apply() }] as unknown as SoundSwitchModule;
+  [
+    { $progress: new BehaviorSubject<number | null>(null) },
+    { switchSound: (apply: () => void) => apply() },
+  ] as unknown as SoundSwitchModule;
 
 // a track for the presets without the synth: an empty clip not saved (a spec puts its clip in); a save of it takes
 // its id and hash and it tells a change as the track does, the clips of presets it is given are recorded

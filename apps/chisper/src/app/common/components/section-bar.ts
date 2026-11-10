@@ -4,7 +4,18 @@ import { keepFocus, textBold12, theme } from '@chisper/ui-kit';
 
 const WHITE = theme.colors.white;
 
-// the roll as a section of the synth (its header, the dark screen under it), shared by the roll and its dialogs
+// a section of the synth over the page (its header, the dark screen under it): the roll, the dialogs, the popovers
+
+// the shadow it casts on the page
+export const SECTION_SHADOW = '0 4px 12px rgb(0 0 0 / 25%)';
+
+// its plate: the light around its header and its content
+export const sectionStyle = css`
+  padding: 6px;
+  border-radius: 3px;
+  background: ${theme.colors.primary};
+  box-shadow: ${SECTION_SHADOW};
+`;
 
 // the header of a section of the synth: its grey, its white bold label
 export const barStyle = css`
@@ -87,4 +98,19 @@ export const screenStyle = css`
   border-radius: 3px;
   background: ${theme.colors.primaryDark};
   box-shadow: inset 0 1px 3px rgb(0 0 0 / 50%);
+`;
+
+// the room between the keys of a bar on the left and those on the right
+export const Spacer = styled.div`
+  flex: 1 1 0;
+`;
+
+// a dot of the blue of the synth after a name: what it names is not saved (a clip, the preset playing)
+export const DirtyDot = styled.span`
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: ${theme.colors.secondAccent};
 `;

@@ -7,6 +7,7 @@ export const SECTIONS = [
   'listen',
   'wavetables',
   'unison',
+  'noise',
   'filter',
   'modulation',
   'effects',
@@ -30,11 +31,11 @@ export type Demo = {
 
 export const DEMOS: Demo[] = [
   {
-    slug: 'zesty-drive-bass',
+    slug: 'acid-bass',
     section: 'listen',
     category: 'bass',
-    presetId: '8895354c-0cc9-4a1b-9be9-17f632c71819',
-    name: 'Zesty Drive Bass',
+    presetId: 'cabb4a5d-7140-431d-b6d2-c7cafc8c2c73',
+    name: 'Outrun Bass',
   },
   {
     slug: 'warehouse-lead',
@@ -51,18 +52,18 @@ export const DEMOS: Demo[] = [
     name: 'Biting Brass Keys',
   },
   {
-    slug: 'ufo-drone',
-    section: 'wavetables',
-    category: 'fx',
-    presetId: '780f0d22-5cf6-4e6e-bf05-29cd8989614a',
-    name: 'UFO Drone',
-  },
-  {
     slug: 'harp-pluck',
     section: 'wavetables',
     category: 'pluck',
     presetId: '9bb5dec5-ba2e-4be2-ba3a-95afbcacf88a',
     name: 'Harp Pluck',
+  },
+  {
+    slug: 'ufo-drone',
+    section: 'wavetables',
+    category: 'fx',
+    presetId: '780f0d22-5cf6-4e6e-bf05-29cd8989614a',
+    name: 'UFO Drone',
   },
   {
     slug: 'noise-riser',
@@ -72,18 +73,18 @@ export const DEMOS: Demo[] = [
     name: 'Noise Riser',
   },
   {
-    slug: 'acid-bass',
-    section: 'filter',
-    category: 'bass',
-    presetId: 'ad4c9b3c-15aa-47b4-9513-186cf5053e70',
-    name: 'Acid Bass',
+    slug: 'wind-storm',
+    section: 'noise',
+    category: 'fx',
+    presetId: 'dc8c7bc7-ce2d-4d6e-ad93-87887f833d34',
+    name: 'Wind Storm',
   },
   {
-    slug: 'helicopter',
-    section: 'modulation',
-    category: 'fx',
-    presetId: '74137fe5-0255-4739-ac80-c80e1055faca',
-    name: 'Helicopter',
+    slug: 'zesty-drive-bass',
+    section: 'filter',
+    category: 'bass',
+    presetId: '8895354c-0cc9-4a1b-9be9-17f632c71819',
+    name: 'Zesty Drive Bass',
   },
   {
     slug: 'rhodes-keys',
@@ -93,11 +94,11 @@ export const DEMOS: Demo[] = [
     name: 'Rhodes Keys',
   },
   {
-    slug: 'sonar-ping',
-    section: 'effects',
+    slug: 'helicopter',
+    section: 'modulation',
     category: 'fx',
-    presetId: '554a8aca-2457-4779-9ff6-188e63354160',
-    name: 'Sonar Ping',
+    presetId: '74137fe5-0255-4739-ac80-c80e1055faca',
+    name: 'Helicopter',
   },
   {
     slug: 'lo-fi-tape-keys',
@@ -105,6 +106,13 @@ export const DEMOS: Demo[] = [
     category: 'keys',
     presetId: 'd767bca7-5a2b-4f79-9620-098cac99a743',
     name: 'Lo-Fi Tape Keys',
+  },
+  {
+    slug: 'sonar-ping',
+    section: 'effects',
+    category: 'fx',
+    presetId: '554a8aca-2457-4779-9ff6-188e63354160',
+    name: 'Sonar Ping',
   },
   {
     slug: 'theremin',

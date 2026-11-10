@@ -1,7 +1,9 @@
 import { firstValueFrom } from 'rxjs';
 import { applySnapshot, getSnapshot } from '../../../app';
 import { createOscillator, createSynthCore, stopModels } from '../../../../test-utils/models';
+import { WorkerStub } from '../../../../test-utils/worker-stub';
 import type { Wavetable } from '../../services';
+import { STORE_WAIT_MS } from './load-share';
 
 const saw = [-1, -0.5, 0, 0.5];
 const square = [1, 1, -1, -1];
@@ -11,19 +13,26 @@ const placeholder = [0, 1, 0, -1];
 const flush = () => new Promise((resolve) => setTimeout(resolve));
 
 // an oscillator whose wavetable loads stay pending until the test settles them, the latest one per id (with the
-// signal it got: aborted, no one waits for it)
+// signal it got: aborted, no one waits for it; and the function its progress goes to)
 const createLoading = (initialWavePath = ['folder', 'a.wav']) => {
   const loads = new Map<
     string,
-    { resolve: (table: Wavetable) => void; reject: (error: Error) => void; signal?: AbortSignal }
+    {
+      resolve: (table: Wavetable) => void;
+      reject: (error: Error) => void;
+      signal?: AbortSignal;
+      onProgress?: (share: number) => void;
+    }
   >();
   const load = jest.fn(
-    (id: string, signal?: AbortSignal) =>
-      new Promise<Wavetable>((resolve, reject) => loads.set(id, { resolve, reject, signal }))
+    (id: string, signal?: AbortSignal, onProgress?: (share: number) => void) =>
+      new Promise<Wavetable>((resolve, reject) => loads.set(id, { resolve, reject, signal, onProgress }))
   );
+  const report = (id: string, share: number) => loads.get(id)?.onProgress?.(share);
   const aborted = (id: string) => loads.get(id)?.signal?.aborted;
   const synthCore = createSynthCore();
   const [model, actions] = createOscillator(synthCore, 'osc1', { active: true, initialWavePath }, load);
+  const { wavetables } = synthCore[0];
   const resolve = async (id: string, table: number[][], morph = false) => {
     loads.get(id)?.resolve({ frames: table, morph });
     await flush();
@@ -40,7 +49,7 @@ const createLoading = (initialWavePath = ['folder', 'a.wav']) => {
     }
   };
   const table = () => model.$waveTable.value.map(({ value }) => value);
-  return { model, actions, load, resolve, reject, fail, table, aborted };
+  return { model, actions, load, resolve, reject, fail, table, aborted, report, wavetables };
 };
 
 describe('oscillator', () => {
@@ -244,7 +253,7 @@ describe('oscillator', () => {
 
     it('loads the table of the initial path', async () => {
       const { model, load, resolve, table, aborted } = createLoading(['folder', 'a.wav']);
-      expect(load).toHaveBeenCalledWith('a.wav', expect.any(AbortSignal));
+      expect(load).toHaveBeenCalledWith('a.wav', expect.any(AbortSignal), expect.any(Function));
       expect(model.$waveTableLoading.value).toBe(true);
 
       await resolve('a.wav', [saw, square]);
@@ -261,7 +270,7 @@ describe('oscillator', () => {
 
       applySnapshot({ osc1: { p: ['folder', 'b.wav'], w: 1 } });
 
-      expect(load).toHaveBeenLastCalledWith('b.wav', expect.any(AbortSignal));
+      expect(load).toHaveBeenLastCalledWith('b.wav', expect.any(AbortSignal), expect.any(Function));
       expect(model.$waveTableLoading.value).toBe(true);
       await resolve('b.wav', [saw, square]);
       expect(table()).toEqual([saw, square]);
@@ -273,7 +282,7 @@ describe('oscillator', () => {
     it('loads the table of a selected path', async () => {
       const { actions, load, resolve, table } = createLoading();
       actions.setWaveTablePath(['folder', 'b.wav']);
-      expect(load).toHaveBeenLastCalledWith('b.wav', expect.any(AbortSignal));
+      expect(load).toHaveBeenLastCalledWith('b.wav', expect.any(AbortSignal), expect.any(Function));
       await resolve('b.wav', [square]);
       expect(table()).toEqual([square]);
     });
@@ -343,6 +352,136 @@ describe('oscillator', () => {
       await resolve('b.wav', [square]);
       expect(table()).toEqual([square]);
       error.mockRestore();
+    });
+
+    describe('its progress', () => {
+      const progress = (model: ReturnType<typeof createLoading>['model']) => model.$tableProgress.value;
+
+      it('follows the download, then waits for the store: none once its table is played', async () => {
+        const { model, report, resolve, wavetables } = createLoading();
+        // (the wavetable oscillator gets ready)
+        await flush();
+        expect(wavetables.$status.value).toBe('ready');
+        expect(progress(model)).toBe(0);
+        report('a.wav', 0.5);
+        expect(progress(model)).toBeCloseTo(0.45);
+        report('a.wav', 1);
+        expect(progress(model)).toBeCloseTo(0.9);
+
+        await resolve('a.wav', [saw]);
+        expect(wavetables.$tables.value[model.id]).toBe('sending');
+        expect(progress(model)).toBe(0.95);
+        expect(model.tablePlayed()).toBe(false);
+
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
+        expect(progress(model)).toBeNull();
+        expect(model.tablePlayed()).toBe(true);
+      });
+
+      it('ends when the wavetable oscillator fails with its table on the way', async () => {
+        const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const { model, resolve, wavetables } = createLoading();
+        await flush();
+        await resolve('a.wav', [saw]);
+        expect(progress(model)).toBe(0.95);
+
+        // (its worker fails: the store is gone, no answer comes for the table)
+        WorkerStub.created.at(-1)?.onerror?.(new Event('error'));
+        expect(wavetables.$status.value).toBe('failed');
+        expect(progress(model)).toBeNull();
+        error.mockRestore();
+      });
+
+      it.each(['refused', 'failed'] as const)('fails with a table the store %s', async (state) => {
+        const { model, resolve, wavetables } = createLoading();
+        await flush();
+        await resolve('a.wav', [saw]);
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: state });
+        expect(progress(model)).toBe('failed');
+
+        // (sent again, Retry, and stored)
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'sending' });
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
+        expect(progress(model)).toBeNull();
+      });
+
+      it('fails without an answer of the store within STORE_WAIT_MS, its table played once it comes', async () => {
+        const { model, resolve, wavetables } = createLoading();
+        await flush();
+        await resolve('a.wav', [saw]);
+        jest.advanceTimersByTime(STORE_WAIT_MS - 1);
+        expect(progress(model)).toBe(0.95);
+        jest.advanceTimersByTime(1);
+        expect(progress(model)).toBe('failed');
+        expect(wavetables.$tables.value[model.id]).toBe('sending');
+        expect(model.tablePlayed()).toBe(false);
+
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
+        expect(progress(model)).toBeNull();
+        expect(model.tablePlayed()).toBe(true);
+      });
+
+      it('never goes back when its download starts again (the other route, a retry)', async () => {
+        const { model, report, reject } = createLoading();
+        await flush();
+        report('a.wav', 0.5);
+        expect(progress(model)).toBeCloseTo(0.45);
+        // (the other route from 0 again)
+        report('a.wav', 0);
+        expect(progress(model)).toBeCloseTo(0.45);
+        report('a.wav', 0.2);
+        expect(progress(model)).toBeCloseTo(0.9 * 0.6);
+
+        // a retry from 0 again
+        await reject('a.wav');
+        jest.advanceTimersByTime(1000);
+        report('a.wav', 0);
+        expect(progress(model)).toBeCloseTo(0.9 * 0.6);
+        report('a.wav', 0.5);
+        expect(progress(model)).toBeCloseTo(0.9 * 0.8);
+      });
+
+      it('has none for an edit sent to the store', async () => {
+        const { model, resolve, wavetables } = createLoading();
+        await flush();
+        await resolve('a.wav', [saw]);
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
+
+        // (past the throttle of the edits)
+        jest.advanceTimersByTime(100);
+        model.$waveTable.value[0].next(square);
+        expect(wavetables.$tables.value[model.id]).toBe('sending');
+        expect(progress(model)).toBeNull();
+      });
+
+      it('starts again for a newer path, the replaced one reports nothing', async () => {
+        const { model, actions, report, resolve, wavetables } = createLoading();
+        await flush();
+        report('a.wav', 0.5);
+        actions.setWaveTablePath(['folder', 'b.wav']);
+        expect(progress(model)).toBe(0);
+        report('a.wav', 1);
+        expect(progress(model)).toBe(0);
+
+        await resolve('b.wav', [square]);
+        wavetables.$tables.next({ ...wavetables.$tables.value, [model.id]: 'stored' });
+        expect(progress(model)).toBeNull();
+      });
+
+      it('fails when the load fails, a newer path starts from nothing', async () => {
+        const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        const { model, actions, report, fail } = createLoading();
+        await flush();
+        report('a.wav', 0.5);
+        await fail('a.wav');
+        expect(progress(model)).toBe('failed');
+
+        actions.setWaveTablePath(['folder', 'b.wav']);
+        expect(progress(model)).toBe(0);
+        report('b.wav', 0.5);
+        expect(progress(model)).toBeCloseTo(0.45);
+        error.mockRestore();
+      });
     });
 
     it('stops loading when the model stops, its load aborted', async () => {

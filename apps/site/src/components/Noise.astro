@@ -1,0 +1,130 @@
+---
+import Feature from './Feature.astro';
+import NoiseDiagram from './NoiseDiagram.astro';
+import Screen from './Screen.astro';
+import { CHART, NOISE_COLORS } from '../art/noise';
+import { demosOf } from '../data/demos';
+import type { Messages } from '../i18n';
+
+interface Props {
+  // the side of its drawing (the features alternate)
+  side: 'left' | 'right';
+  m: Messages;
+}
+
+// the noise oscillator, between the unison and the filter as in a voice: what it is (a lead, its sounds marked), its
+// samples, its clip; beside them, as high as they are, the colors of noise on a dark screen of the synth and what
+// noise does in a sound (a list a reader, a search or an assistant can take as it is), its grain behind it
+// (art/scenes.ts)
+const { side, m } = Astro.props;
+const n = m.features.noise;
+
+// the colors of noise the uses are marked with, in their order: risers of white noise, bright drum hits, warm lo-fi,
+// the air of pink noise
+const [, blue, white, pink, brown] = NOISE_COLORS;
+const USE_COLORS = [white, blue, brown, pink].map(({ color }) => color);
+---
+
+<Feature id='noise' label='Noise' title={n.h2} text={n.text} lead demos={demosOf('noise')} side={side} m={m}>
+  <Fragment slot='figure'>
+    <Screen ratio={CHART.width / CHART.height} padding='4% 2% 2% 1%'>
+      <NoiseDiagram label={n.figureAlt} />
+    </Screen>
+    <div class='uses'>
+      <h3>{n.uses.h3}</h3>
+      <ul>
+        {n.uses.items.map(({ term, text }, i) => (
+          <li style={`--dot: ${USE_COLORS[i % USE_COLORS.length]}`}>
+            <strong>
+              {term}
+              <span class='colon'>:</span>
+            </strong>{' '}
+            <span class='text'>{text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </Fragment>
+</Feature>
+
+<style>
+  /* the words of the lead under a stroke of the colors of noise */
+  :global(#noise) {
+    --mark: linear-gradient(90deg, rgb(236 240 241 / 34%), rgb(248 165 194 / 42%), rgb(197 139 92 / 42%));
+  }
+
+  /* the text as high as the drawing and the uses beside it: the title at its top, the clip at its bottom */
+  :global(#noise .main) {
+    justify-content: space-between;
+  }
+
+  .uses {
+    display: grid;
+    gap: 14px;
+  }
+
+  h3 {
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  /* the uses as tiles, two a row where they fit */
+  ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px 16px;
+    border-radius: 10px;
+    background: linear-gradient(160deg, var(--surface-high), var(--surface));
+    box-shadow: var(--raised);
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text-muted);
+  }
+
+  /* its name after a square of its color of noise */
+  li strong {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--text);
+  }
+
+  li strong::before {
+    content: '';
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: var(--radius-s);
+    background: var(--dot);
+    box-shadow: 0 0 8px 0 color-mix(in srgb, var(--dot) 60%, transparent);
+  }
+
+  /* its text on a line of its own, a sentence of its own there */
+  .text::first-letter {
+    text-transform: uppercase;
+  }
+
+  /* the colon is for a reader of the text alone (a search, an assistant): the tile shows the name on its own line */
+  .colon {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

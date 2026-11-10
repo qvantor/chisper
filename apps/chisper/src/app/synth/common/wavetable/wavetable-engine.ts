@@ -187,6 +187,9 @@ export const createWavetableEngine = (
     if (destroyed || $status.value === 'failed') return;
     console.error('The wavetable oscillator failed', error);
     teardown(true);
+    // the store is gone with every table in it: none has a state until the engine is ready again (load() sends
+    // them all), as before it first was (a table on its way would wait for an answer that never comes)
+    if (Object.keys($tables.value).length > 0) $tables.next({});
     $status.next('failed');
   };
 

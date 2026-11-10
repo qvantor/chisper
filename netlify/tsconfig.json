@@ -11,13 +11,6 @@
     "skipLibCheck": true
   },
   "include": ["**/*.ts", "**/*.mts"],
-  // legacy S3 functions were written without strict mode
-  "exclude": [
-    "functions/get-wavetables-list.ts",
-    "utils/index.ts",
-    // tests are checked by tsconfig.spec.json
-    "jest.config.ts",
-    "**/*.spec.ts",
-    "tests"
-  ]
+  // tests are checked by tsconfig.spec.json
+  "exclude": ["jest.config.ts", "**/*.spec.ts", "tests"]
 }

@@ -18,17 +18,18 @@ const PAGES = {
 };
 const LANGS = Object.keys(PAGES);
 const CLIPS = [
-  'zesty-drive-bass',
+  'acid-bass',
   'warehouse-lead',
   'biting-brass-keys',
-  'ufo-drone',
   'harp-pluck',
+  'ufo-drone',
   'noise-riser',
-  'acid-bass',
-  'helicopter',
+  'wind-storm',
+  'zesty-drive-bass',
   'rhodes-keys',
-  'sonar-ping',
+  'helicopter',
   'lo-fi-tape-keys',
+  'sonar-ping',
   'theremin',
   'sub-bass',
 ];
@@ -37,13 +38,23 @@ const TEXTS = {
   en: [
     'up to 256 frames',
     'Up to 8 voices per oscillator',
+    'Pick one of 90 samples, from white, pink and brown noise',
+    'What you can make with noise',
+    'Risers and sweeps: white noise that swells and opens up into the drop',
+    'Does Chisper have a noise oscillator?',
     'lowpass, highpass, bandpass',
     'up to 64 routes, 4 per knob',
     'algorithmic reverb of 16 lines',
     'Up to 12 notes in Poly',
+    'Online piano roll: record, edit and import MIDI',
+    'The clip, a loop of up to 32 bars',
+    'Export the clip as a .mid for your DAW',
+    'Does Chisper have a piano roll?',
+    'Can I import and export MIDI files?',
+    'To share a melody too, press Share in the piano roll',
     'WAV wavetables you already have from other synths',
     'Save a sound without signing up',
-    'A 303 saw table',
+    'A mono acid bass',
     'What is a wavetable synth?',
     'How wavetable synthesis works',
     'Drum and bass',
@@ -58,6 +69,14 @@ const TEXTS = {
   es: [
     'tablas de ondas',
     'Hasta 8 voces por oscilador',
+    'Oscilador de ruido: ruido blanco, rosa y marrón',
+    'Lo que puedes crear con ruido',
+    '¿Chisper tiene un oscilador de ruido?',
+    'Piano roll online: graba, edita e importa MIDI',
+    'hasta 32 compases',
+    '¿Chisper tiene piano roll?',
+    '¿Puedo importar y exportar archivos MIDI?',
+    'Para compartir también una melodía, pulsa Share en el piano roll',
     'paso bajo',
     'MIDI Clock',
     '¿Qué es un sintetizador wavetable?',
@@ -70,6 +89,14 @@ const TEXTS = {
   de: [
     'Tiefpass',
     'Bis zu 8 Stimmen pro Oszillator',
+    'Rausch-Oszillator: weißes, rosa und braunes Rauschen',
+    'Was du mit Rauschen machen kannst',
+    'Hat Chisper einen Rauschgenerator?',
+    'Piano Roll online: Loops aufnehmen, Noten bearbeiten, MIDI importieren',
+    'bis zu 32 Takten',
+    'Hat Chisper eine Piano Roll?',
+    'Kann ich MIDI-Dateien importieren und exportieren?',
+    'Um auch eine Melodie zu teilen, klick in der Piano Roll auf Share',
     'Hüllkurven',
     'Ist Chisper kostenlos?',
     'Was ist ein Wavetable-Synthesizer?',
@@ -267,6 +294,64 @@ describe('every version of the page', () => {
         assert.ok(document.querySelector('#synthesis canvas[data-scene="synthesis"]'));
       });
 
+      it('explains the noise between the unison and the filter: a lead, its clip; beside them the colors of noise and its uses; its grain', () => {
+        const section = document.querySelector('#noise');
+        assert.equal(section.previousElementSibling.id, 'unison');
+        assert.equal(section.nextElementSibling.id, 'filter');
+        assert.ok(section.querySelector('canvas[data-scene="noise"]'));
+        assert.equal(section.querySelectorAll('h2').length, 1);
+        const paragraphs = [...section.querySelectorAll('.main > p')];
+        assert.equal(paragraphs.length, 2);
+        // the sounds of the lead stand out, no mark left in the text
+        assert.ok(paragraphs[0].classList.contains('lead'));
+        assert.equal(paragraphs[0].querySelectorAll('strong').length, 3);
+        assert.ok(!section.textContent.includes('**'));
+        // a sound made of noise alone, under the text
+        assert.deepEqual(
+          [...section.querySelectorAll('.main [data-player] audio')].map((clip) => clip.getAttribute('src')),
+          ['/demos/wind-storm.mp3']
+        );
+        // beside the text: the drawing, the uses under it
+        const side = section.querySelector('.side');
+        const drawing = side.querySelector('figure svg.drawing');
+        assert.equal(drawing.getAttribute('role'), 'img');
+        assert.ok(drawing.getAttribute('aria-label').length > 40);
+        assert.equal(drawing.querySelectorAll('polyline.spectrum').length, 5);
+        assert.ok(drawing.compareDocumentPosition(side.querySelector('.uses')) & 4);
+        assert.ok(side.querySelector('.uses h3').textContent.length > 15);
+        const uses = [...side.querySelectorAll('.uses li')];
+        assert.equal(uses.length, 4);
+        for (const use of uses) {
+          // the name and its text apart, as a reader of the text alone takes them
+          assert.match(use.querySelector('strong').textContent.trim(), /\S:$/);
+          assert.match(use.textContent.replace(/\s+/g, ' ').trim(), /^[^:]*\S: \S/);
+          assert.match(use.getAttribute('style'), /--dot: #[0-9a-f]{6}/);
+        }
+      });
+
+      it('explains the piano roll after the keys: a lead, no clip; beside it the clip on the roll; its notes behind', () => {
+        const section = document.querySelector('#track');
+        assert.equal(section.previousElementSibling.id, 'playing');
+        assert.equal(section.nextElementSibling.id, 'editor');
+        assert.ok(section.querySelector('canvas[data-scene="track"]'));
+        assert.equal(section.querySelectorAll('h2').length, 1);
+        const paragraphs = [...section.querySelectorAll('.main > p')];
+        assert.equal(paragraphs.length, 2);
+        // the ways notes come in stand out, no mark left in the text
+        assert.ok(paragraphs[0].classList.contains('lead'));
+        assert.equal(paragraphs[0].querySelectorAll('strong').length, 3);
+        assert.ok(!section.textContent.includes('**'));
+        assert.equal(section.querySelectorAll('[data-player]').length, 0);
+        // the drawing on its screen beside the text, its notes and as many stems of their velocities
+        const drawing = section.querySelector('.side figure svg.drawing');
+        assert.equal(drawing.getAttribute('role'), 'img');
+        assert.ok(drawing.getAttribute('aria-label').length > 40);
+        const notes = drawing.querySelectorAll('rect.note');
+        assert.ok(notes.length > 40);
+        assert.equal(drawing.querySelectorAll('.stem').length, notes.length);
+        assert.ok(drawing.querySelectorAll('rect.note.playing').length > 0);
+      });
+
       it('has images of a known size and text alternatives', () => {
         for (const image of document.querySelectorAll('img')) {
           assert.ok(Number(image.getAttribute('width')) > 0);
@@ -305,7 +390,7 @@ describe('the build', () => {
 
 describe('the synth', () => {
   it('links the English version (About)', () => {
-    const source = readFileSync(join(ROOT, 'apps/chisper/src/app/common/components/about-link.tsx'), 'utf8');
+    const source = readFileSync(join(ROOT, 'apps/chisper/src/app/common/components/header.tsx'), 'utf8');
     assert.equal(source.match(/ABOUT_PATH = '([^']+)'/)?.[1], PAGES.en.path);
   });
 

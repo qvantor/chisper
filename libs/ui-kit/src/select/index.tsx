@@ -3,8 +3,7 @@ import { styled } from 'styled-components';
 import { theme } from '../common/constants';
 import { SelectDumb, ContentContainer } from './select-dumb';
 
-export { CascadeSelect } from './cascade-select';
-export type { CascadeOption } from './cascade-select';
+export { SelectDumb, ContentContainer } from './select-dumb';
 
 const Root = styled.select`
   ${ContentContainer}
@@ -30,8 +29,6 @@ interface Props<T> {
   value: T;
   options: Option<T>[];
   onChange: (value: T) => void;
-  // ◀ ▶ step through the options; false for a choice that costs (each step would be one)
-  arrows?: boolean;
 }
 
 // the options in runs of one group (or of none)
@@ -43,7 +40,7 @@ const groupRuns = <T,>(options: Option<T>[]) =>
     return runs;
   }, []);
 
-export const Select = <T extends string | number>({ value, options, onChange, arrows = true }: Props<T>) => {
+export const Select = <T extends string | number>({ value, options, onChange }: Props<T>) => {
   const onChangeInternal = (e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value as T);
   // around the options that can be chosen; from a value that is none of them next is the first, previous the last
   const step = (delta: number) => () => {
@@ -59,7 +56,7 @@ export const Select = <T extends string | number>({ value, options, onChange, ar
   );
 
   return (
-    <SelectDumb {...(arrows && { prev: step(-1), next: step(1) })}>
+    <SelectDumb prev={step(-1)} next={step(1)}>
       <Root value={value} onChange={onChangeInternal}>
         {groupRuns(options).map(({ group, options }) =>
           group === undefined ? (

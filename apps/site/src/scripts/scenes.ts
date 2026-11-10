@@ -1,14 +1,17 @@
 import { isScene, sceneAt, type Scene, type SceneLine } from '../art/scenes';
 import { reducedMotion, sizeCanvas } from './motion';
 
-// The waves behind the features (art/scenes.ts) on a canvas of each section: drawn about FPS times a second while
-// the section is on screen, one still frame where the reader asked for reduced motion; nothing without a 2D context.
-// A level of 1 is AMPLITUDE of the section's height from its middle, at most MAX_AMPLITUDE pixels; the canvas at
-// most 1.5 pixels a CSS pixel (faint lines need no more).
+// The waves (the noise grain, the notes of the track) behind the features (art/scenes.ts) on a canvas of each
+// section: drawn about FPS times a second while the section is on screen, one still frame where the reader asked for
+// reduced motion; nothing without a 2D context. A level of 1 is AMPLITUDE of the section's height from its middle, at
+// most MAX_AMPLITUDE pixels (a wave higher than that is too loud), the notes too; for the grain GRAIN_AMPLITUDE of it
+// at any height (dots fill a tall section as a wave does a short one). The canvas at most 1.5 pixels a CSS pixel
+// (faint lines need no more).
 
 const FPS = 30;
 const AMPLITUDE = 0.3;
 const MAX_AMPLITUDE = 220;
+const GRAIN_AMPLITUDE = 0.34;
 const MAX_RATIO = 1.5;
 
 type Item = {
@@ -26,6 +29,45 @@ const draw = ({ context, scene, width, height }: Item, time: number) => {
   context.clearRect(0, 0, width, height);
   const middle = height / 2;
   const amplitude = Math.min(height * AMPLITUDE, MAX_AMPLITUDE);
+  const grainAmplitude = height * GRAIN_AMPLITUDE;
+  // dots of grain: squares at the points, no glow (a blur a dot would cost too much)
+  const grain = ({ points, color, alpha, grain: size = 1 }: SceneLine) => {
+    context.globalAlpha = alpha;
+    context.fillStyle = color;
+    context.shadowBlur = 0;
+    for (let i = 0; i < points.length; i += 2) {
+      context.fillRect(
+        points[i] * width - size / 2,
+        middle - points[i + 1] * grainAmplitude - size / 2,
+        size,
+        size
+      );
+    }
+  };
+  // bars (the notes of the track): a box with round corners between each two corners of the points, all in one path,
+  // filled at a share of the alpha, then edged; the glow on both
+  const bars = ({ points, color, alpha, width: thickness, glow = 0, bars: fill = 0 }: SceneLine) => {
+    context.beginPath();
+    for (let i = 0; i < points.length; i += 4) {
+      const x = points[i] * width;
+      const y = middle - points[i + 1] * amplitude;
+      const w = (points[i + 2] - points[i]) * width;
+      const h = (points[i + 1] - points[i + 3]) * amplitude;
+      if (typeof context.roundRect === 'function')
+        context.roundRect(x, y, w, h, Math.max(0, Math.min(2, w / 2, h / 2)));
+      else context.rect(x, y, w, h);
+    }
+    context.shadowColor = color;
+    context.shadowBlur = glow;
+    context.fillStyle = color;
+    context.globalAlpha = alpha * fill;
+    context.fill();
+    context.globalAlpha = alpha;
+    context.strokeStyle = color;
+    context.lineWidth = thickness;
+    context.setLineDash([]);
+    context.stroke();
+  };
   const line = ({ points, color, alpha, width: thickness, glow = 0, dash, dot }: SceneLine) => {
     context.beginPath();
     for (let i = 0; i < points.length; i += 2) {
@@ -48,7 +90,11 @@ const draw = ({ context, scene, width, height }: Item, time: number) => {
       context.fill();
     }
   };
-  for (const part of sceneAt(scene, time)) line(part);
+  for (const part of sceneAt(scene, time)) {
+    if (part.grain) grain(part);
+    else if (part.bars !== undefined) bars(part);
+    else line(part);
+  }
   context.globalAlpha = 1;
   context.shadowBlur = 0;
   context.setLineDash([]);

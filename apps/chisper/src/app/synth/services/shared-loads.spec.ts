@@ -1,15 +1,17 @@
 import { sharedLoads } from './shared-loads';
 
-// loads that stay pending until the test settles them, in the order they started, each with the signal it got
+// loads that stay pending until the test settles them, in the order they started, each with the signal it got and
+// the function it reports its progress to
 const createLoads = () => {
   const started: {
     signal: AbortSignal;
+    report: (share: number) => void;
     resolve: (value: string) => void;
     reject: (error: unknown) => void;
   }[] = [];
   const start = jest.fn(
-    (_id: string, signal: AbortSignal) =>
-      new Promise<string>((resolve, reject) => started.push({ signal, resolve, reject }))
+    (_id: string, signal: AbortSignal, report: (share: number) => void) =>
+      new Promise<string>((resolve, reject) => started.push({ signal, report, resolve, reject }))
   );
   return { load: sharedLoads(start), start, started };
 };
@@ -20,7 +22,7 @@ describe('sharedLoads', () => {
     const first = load('a', new AbortController().signal);
     const second = load('a');
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start).toHaveBeenCalledWith('a', expect.any(AbortSignal));
+    expect(start).toHaveBeenCalledWith('a', expect.any(AbortSignal), expect.any(Function));
 
     started[0].resolve('table');
     await expect(first).resolves.toBe('table');
@@ -110,5 +112,69 @@ describe('sharedLoads', () => {
     const reason = new Error('gone');
     await expect(load('a', AbortSignal.abort(reason))).rejects.toBe(reason);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  describe('the progress of a load', () => {
+    it('goes to every caller that follows it, the last share at once to one that joins it', async () => {
+      const { load, started } = createLoads();
+      const first = jest.fn();
+      const second = jest.fn();
+      const loaded = load('a', new AbortController().signal, first);
+      // (a caller without it waits all the same)
+      load('a');
+      started[0].report(0);
+      started[0].report(0.25);
+      load('a', undefined, second);
+      started[0].report(0.5);
+
+      expect(first.mock.calls).toEqual([[0], [0.25], [0.5]]);
+      expect(second.mock.calls).toEqual([[0.25], [0.5]]);
+
+      started[0].resolve('table');
+      await loaded;
+      started[0].report(1);
+      expect(first).toHaveBeenCalledTimes(3);
+    });
+
+    it('stops for a caller that left, goes on for the others', () => {
+      const { load, started } = createLoads();
+      const gone = new AbortController();
+      const left = jest.fn();
+      const kept = jest.fn();
+      load('a', gone.signal, left).catch(() => undefined);
+      load('a', new AbortController().signal, kept);
+      started[0].report(0.1);
+
+      gone.abort();
+      started[0].report(0.2);
+      expect(left.mock.calls).toEqual([[0.1]]);
+      expect(kept.mock.calls).toEqual([[0.1], [0.2]]);
+    });
+
+    it('gives nothing to a caller of a load done: it is played at once', async () => {
+      const { load, started } = createLoads();
+      const loaded = load('a');
+      started[0].report(1);
+      started[0].resolve('table');
+      await loaded;
+
+      const progress = jest.fn();
+      await expect(load('a', undefined, progress)).resolves.toBe('table');
+      expect(progress).not.toHaveBeenCalled();
+    });
+
+    it('starts from nothing for a load started again after a failure', async () => {
+      const { load, started } = createLoads();
+      const failed = load('a');
+      started[0].report(0.5);
+      started[0].reject(new Error('404'));
+      await expect(failed).rejects.toThrow('404');
+
+      const progress = jest.fn();
+      load('a', undefined, progress);
+      expect(progress).not.toHaveBeenCalled();
+      started[1].report(0);
+      expect(progress.mock.calls).toEqual([[0]]);
+    });
   });
 });

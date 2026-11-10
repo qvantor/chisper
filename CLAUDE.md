@@ -240,6 +240,9 @@ an oscillator) are read, never written.
   `cleanup.mts` (daily).
 - Client: the `presets` model (current preset, dirty flag by hash, `?preset=<id>`, applied through the sound
   switch); a start without `?preset=` opens a random popular preset as `auto`; sessionStorage keeps an edited state.
+- Loading shows: a preset opening shows its name at once (`$opening`) over a bar (`$loadProgress`: its request,
+  then `$progress` of the sound switch — the fade, then the downloads of its tables/noise and their store,
+  `load-share.ts`); the table and noise selectors show their own loads. Both draw `LoadProgress` (ui-kit, a canvas).
 - A preset may name the clip it opens with (`presets.clip_id`, a checkbox of the Save dialog saves the clip of the
   track first if needed; GET returns the clip). The track opens it (`openPresetClip`) only over no notes or an
   unchanged clip a preset opened, never over a clip of the user or a `?clip=` link; cleanup keeps such clips.
@@ -248,7 +251,8 @@ an oscillator) are read, never written.
 
 - Wavetable files: mono 32-bit float WAV, 2048-sample frames, ≤256 frames, optional `clm ` chunk (a morph mark).
   Read by `synth/services/wav.ts` from the bytes, never with `decodeAudioData` (it resamples).
-- Lists come from Netlify functions (`get-wavetables-list.ts`, `get-noises-list.ts`) over R2; files are fetched
+- Lists come from Netlify functions (`get-wavetables-list.mts`, `get-noises-list.mts`) over R2, kept a day by the CDN
+  (`listResponse`; a deploy clears them: the free plan has 125k invocations a month); files are fetched
   from the public bucket domains (`synth/services/buckets.ts`), or through the site where a domain fails or stalls
   (`/files/*` rewrites of `netlify.toml`; `bucketLoader` of `synth/services/fetch.ts`). A load no model waits for
   any more is aborted with its download (`abortable`, `shared-loads.ts`).

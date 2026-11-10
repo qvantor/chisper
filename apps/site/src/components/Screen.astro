@@ -1,0 +1,47 @@
+---
+interface Props {
+  // its width over its height (those of the drawing on it)
+  ratio: number;
+  // the room around the drawing (CSS padding, shares of the width); none: the drawing fills the screen
+  padding?: string;
+}
+
+// a dark screen of the synth, raised, in the light of its section (--tint of Feature.astro): the drawing on it (a
+// `.drawing`) fills it but for the padding
+const { ratio, padding = '0' } = Astro.props;
+---
+
+<figure class='screen' style={`--ratio: ${ratio.toFixed(4)}; --padding: ${padding}`}>
+  <slot />
+</figure>
+
+<style>
+  .screen {
+    position: relative;
+    width: 100%;
+    aspect-ratio: var(--ratio);
+    margin: 0;
+    padding: var(--padding);
+    border-radius: 10px;
+    background:
+      radial-gradient(closest-side at 50% 50%, rgb(255 255 255 / 5%), transparent),
+      linear-gradient(180deg, #1a2733, #121b24);
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 12%),
+      0 26px 56px -20px rgb(0 0 0 / 75%);
+  }
+
+  .screen::before {
+    content: '';
+    position: absolute;
+    inset: -12% -10%;
+    z-index: -1;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--tint) 30%, transparent), transparent);
+    pointer-events: none;
+  }
+
+  .screen :global(.drawing) {
+    width: 100%;
+    height: 100%;
+  }
+</style>

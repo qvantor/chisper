@@ -1,4 +1,14 @@
-import { SCENES, isScene, sceneAt } from './scenes';
+import {
+  SCENES,
+  TRACK_PLAYHEAD,
+  isScene,
+  noiseDots,
+  noiseWave,
+  sceneAt,
+  trackNotes,
+  type SceneLine,
+} from './scenes';
+import { TRACK_CLIP } from './track';
 
 describe('the waves behind the features', () => {
   it.each(SCENES)('%s draws lines across its band, inside it', (scene) => {
@@ -57,6 +67,159 @@ describe('the waves behind the features', () => {
     }
     // from the blue of a sine to the green of a saw somewhere along it
     expect(new Set(parts.map((part) => part.color)).size).toBeGreaterThan(4);
+  });
+
+  it('draws the noise as a quiet cloud of dots and its waves lit in white, pink and brown', () => {
+    const [cloud, ...lit] = sceneAt('noise', 2);
+    expect(cloud.color).toBe('#bdc3c7');
+    expect(new Set(lit.map((layer) => layer.color))).toEqual(new Set(['#ecf0f1', '#f8a5c2', '#c58b5c']));
+    for (const layer of [cloud, ...lit]) {
+      expect(layer.grain).toBeGreaterThan(0);
+      expect(layer.glow ?? 0).toBe(0);
+    }
+    // a lit dot brighter and larger than the cloud
+    for (const layer of lit) {
+      expect(layer.alpha).toBeGreaterThan(cloud.alpha);
+      expect(layer.grain).toBeGreaterThan(cloud.grain ?? 0);
+    }
+    // every dot once at any time, most of them in the cloud
+    const count = (layers: SceneLine[]) => layers.reduce((sum, layer) => sum + layer.points.length / 2, 0);
+    for (const time of [0, 2, 30]) expect(count(sceneAt('noise', time))).toBe(noiseDots(0).length);
+    expect(count([cloud])).toBeGreaterThan(count(lit));
+    expect(count(lit)).toBeGreaterThan(300);
+  });
+
+  it('moves the dots of the noise smoothly, the same at the same time', () => {
+    expect(sceneAt('noise', 5)).toEqual(sceneAt('noise', 5));
+    const now = noiseDots(5);
+    const next = noiseDots(5 + 1 / 30);
+    now.forEach((dot, i) => {
+      // (a dot drifting out on the right comes back on the left)
+      const dx = Math.abs(next[i].x - dot.x);
+      expect(Math.min(dx, 1 - dx)).toBeLessThan(0.002);
+      expect(Math.abs(next[i].level - dot.level)).toBeLessThan(0.07);
+    });
+  });
+
+  it('lights the dots a wave passes, gathered onto it, all across the band, and moves the waves on', () => {
+    const time = 3;
+    const dots = noiseDots(time);
+    const lit = dots.filter((dot) => dot.light >= 0.25);
+    for (const dot of lit) expect(Math.abs(dot.level - noiseWave(dot.wave, dot.x, time))).toBeLessThan(0.12);
+    for (const wave of [0, 1, 2]) {
+      const xs = lit.filter((dot) => dot.wave === wave).map((dot) => dot.x);
+      expect(Math.min(...xs)).toBeLessThan(0.1);
+      expect(Math.max(...xs)).toBeGreaterThan(0.9);
+    }
+    // a second later the waves are elsewhere: other dots lit
+    expect(noiseWave(0, 0.5, time + 1)).not.toBeCloseTo(noiseWave(0, 0.5, time), 2);
+    const later = noiseDots(time + 1);
+    expect(later.filter((dot, i) => dot.light >= 0.25 !== dots[i].light >= 0.25).length).toBeGreaterThan(100);
+  });
+
+  it('keeps the waves and the dots of the noise within the band, the dots over all of it', () => {
+    for (const time of [0, 7, 100]) {
+      const dots = noiseDots(time);
+      for (const dot of dots) {
+        expect(Math.abs(dot.level)).toBeLessThanOrEqual(1);
+        expect(dot.x).toBeGreaterThanOrEqual(0);
+        expect(dot.x).toBeLessThan(1);
+      }
+      expect(Math.max(...dots.map((dot) => Math.abs(dot.level)))).toBeGreaterThan(0.9);
+      expect(dots.filter((dot) => Math.abs(dot.level) > 0.5).length).toBeGreaterThan(dots.length / 4);
+      for (let x = 0; x <= 1; x += 0.01)
+        for (const wave of [0, 1, 2]) expect(Math.abs(noiseWave(wave, x, time))).toBeLessThan(0.7);
+    }
+  });
+
+  it('flies the notes of the clip right to left, the loop over and over', () => {
+    // as fast as the playhead goes through the loop: 0.6 beats a second, 12 beats across
+    const step = 0.6 / 12;
+    const now = trackNotes(4);
+    const later = trackNotes(5);
+    const whole = (notes: ReturnType<typeof trackNotes>) =>
+      notes.filter(({ from, to }) => from > 0.1 && to < 0.9);
+    for (const note of whole(later)) {
+      const before = now.find(
+        ({ from, level }) => level === note.level && Math.abs(from - step - note.from) < 1e-9
+      );
+      expect(before).toBeDefined();
+      expect(before && before.to - step).toBeCloseTo(note.to, 9);
+    }
+    // a loop (16 beats) later, the same notes
+    const sort = (notes: ReturnType<typeof trackNotes>) =>
+      [...notes].sort((a, b) => a.from - b.from || a.level - b.level);
+    const again = sort(trackNotes(4 + 16 / 0.6));
+    sort(now).forEach((note, i) => {
+      expect(again[i].from).toBeCloseTo(note.from, 9);
+      expect(again[i].level).toBe(note.level);
+    });
+    // the band is never empty, its pitches those of the clip
+    for (const time of [0, 7, 19.5, 100]) {
+      const notes = trackNotes(time);
+      expect(notes.length).toBeGreaterThan(20);
+      expect(new Set(notes.map(({ level }) => level)).size).toBeGreaterThan(8);
+      for (const { from, to, level } of notes) {
+        expect(from).toBeGreaterThanOrEqual(0);
+        expect(to).toBeLessThanOrEqual(1);
+        expect(to).toBeGreaterThan(from);
+        expect(Math.abs(level)).toBeLessThanOrEqual(0.85 + 1e-9);
+      }
+    }
+    expect(new Set(TRACK_CLIP.map(([, , pitch]) => pitch)).size).toBeGreaterThan(8);
+  });
+
+  it('lights a note while the playhead plays it, dims it after, leaves those ahead unlit', () => {
+    for (const time of [0, 3.3, 12, 40]) {
+      const notes = trackNotes(time);
+      const playing = notes.filter(({ from, to }) => from <= TRACK_PLAYHEAD && to > TRACK_PLAYHEAD);
+      expect(playing.length).toBeGreaterThan(0);
+      for (const note of playing) expect(note.light).toBe(1);
+      for (const note of notes.filter(({ from }) => from > TRACK_PLAYHEAD)) expect(note.light).toBe(0);
+      // (a note that ends at the playhead has just been played)
+      const past = notes.filter(({ to }) => to < TRACK_PLAYHEAD - 1e-9);
+      for (const note of past) expect(note.light).toBeLessThan(1);
+      // a note just played brighter than one played long ago
+      const nearest = past.reduce((a, b) => (b.to > a.to ? b : a));
+      const farthest = past.reduce((a, b) => (b.to < a.to ? b : a));
+      expect(nearest.light).toBeGreaterThan(farthest.light);
+      expect(farthest.light).toBe(0);
+    }
+  });
+
+  it('draws the notes as bars, the unlit blue without a glow, the lit glowing to green, the playhead still', () => {
+    const scene = sceneAt('track', 3);
+    const bars = scene.filter((part) => part.bars !== undefined);
+    expect(bars.length).toBeGreaterThanOrEqual(2);
+    for (const { points, bars: fill } of bars) {
+      expect(points.length % 4).toBe(0);
+      expect(fill).toBeGreaterThan(0);
+      expect(fill).toBeLessThan(1);
+      // each a box: its top over its bottom, its left end before its right
+      for (let i = 0; i < points.length; i += 4) {
+        expect(points[i + 1]).toBeGreaterThan(points[i + 3]);
+        expect(points[i + 2]).toBeGreaterThan(points[i]);
+      }
+    }
+    const [unlit, ...lit] = bars;
+    expect(unlit.color).toBe('#3498db');
+    expect(unlit.glow).toBe(0);
+    for (const layer of lit) {
+      expect(layer.glow).toBeGreaterThan(0);
+      expect(layer.alpha).toBeGreaterThan(unlit.alpha);
+    }
+    expect(lit.at(-1)?.color).toBe('#2ecc71');
+    // every note on the band once
+    const count = bars.reduce((sum, { points }) => sum + points.length / 4, 0);
+    expect(count).toBe(trackNotes(3).length);
+    // the playhead, the same at any time
+    const playhead = (time: number) =>
+      sceneAt('track', time).find(
+        ({ points, bars: fill }) =>
+          fill === undefined && points[0] === TRACK_PLAYHEAD && points[2] === TRACK_PLAYHEAD
+      );
+    expect(playhead(3)).toBeDefined();
+    expect(playhead(17)).toEqual(playhead(3));
   });
 
   it('knows its scenes', () => {

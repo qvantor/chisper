@@ -1,5 +1,5 @@
 import { WAVETABLES_ORIGIN, WAVETABLES_PROXY } from './buckets';
-import { bucketLoader } from './fetch';
+import { bucketLoader, ReportProgress } from './fetch';
 import { sharedLoads } from './shared-loads';
 import { parseWav } from './wav';
 
@@ -11,10 +11,14 @@ export interface Wavetable {
   morph: boolean;
 }
 
-// (`signal`: the caller gives it up, sharedLoads)
-export type LoadWavetable = (id: string, signal?: AbortSignal) => Promise<Wavetable>;
+// (`signal`: the caller gives it up; `onProgress`: the share of it downloaded; sharedLoads)
+export type LoadWavetable = (
+  id: string,
+  signal?: AbortSignal,
+  onProgress?: ReportProgress
+) => Promise<Wavetable>;
 
-// the leaf of a wavetable path (the cascade value of a file) is its key in the bucket
+// the leaf of a wavetable path (the value of a file in its select) is its key in the bucket
 export const wavetableId = (path: (string | number)[]) =>
   path.length > 0 ? String(path[path.length - 1]) : '';
 
@@ -23,7 +27,7 @@ const loadFile = bucketLoader(WAVETABLES_ORIGIN, WAVETABLES_PROXY);
 // the file from the domain of the bucket (else through the site); every wave is one cycle of WAVE_SIZE samples in
 // it (or of the size of its mark), whatever its sample rate: the samples are read from the file, decodeAudioData
 // would resample them to the context rate (44.1 → 48 kHz: 1.09 cycles a wave)
-const fetchWavetable = (id: string, signal: AbortSignal) =>
+const fetchWavetable = (id: string, signal: AbortSignal, onProgress: ReportProgress) =>
   loadFile(
     id,
     (bytes): Wavetable => {
@@ -35,7 +39,8 @@ const fetchWavetable = (id: string, signal: AbortSignal) =>
       for (let i = 0; i < wavesCount; i++) frames.push([...samples.subarray(i * size, (i + 1) * size)]);
       return { frames, morph: mark?.morph ?? false };
     },
-    signal
+    signal,
+    onProgress
   );
 
 // shared by both oscillators for the whole session

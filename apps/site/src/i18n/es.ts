@@ -6,7 +6,7 @@ export const es: Messages = {
   meta: {
     title: 'Chisper: sintetizador wavetable online gratis',
     description:
-      'Sintetizador online gratis en el navegador: dos osciladores wavetable con unísono de 8 voces, filtro, envolventes y LFO en cualquier control, efectos y MIDI. Sin instalar.',
+      'Sintetizador online gratis en el navegador: dos osciladores wavetable con unísono de 8 voces, ruido, filtro, envolventes, LFO, efectos, piano roll y MIDI. Sin instalar.',
     ogImageAlt: 'Chisper, un sintetizador wavetable gratis',
   },
   openSynth: 'Abrir el sintetizador',
@@ -14,7 +14,7 @@ export const es: Messages = {
     h1: 'Chisper: sintetizador wavetable gratis',
     lead: 'Chisper es un **sintetizador wavetable gratis** (de tablas de ondas) que funciona en el navegador, en el ordenador, un Chromebook o el móvil: **sin descargas ni cuenta**.',
     details:
-      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, delay y reverb. Conecta un teclado MIDI o toca con el teclado del ordenador.',
+      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un **oscilador de ruido**, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, delay y reverb. Conecta un teclado MIDI o toca con el teclado del ordenador, y graba lo que tocas en el **piano roll**.',
     listen: 'Escúchalo',
     screenshotAlt:
       'El sintetizador Chisper tocando acordes: se mueven las ondas de los dos osciladores, los puntos de las envolventes y del LFO, el filtro y el espectro',
@@ -67,6 +67,30 @@ export const es: Messages = {
         'El supersaw ancho y denso de los leads de trance y EDM. Hasta 8 voces por oscilador: Detune las separa en afinación, Blend equilibra las voces centrales y las laterales (75 % por defecto) y las laterales se alternan a izquierda y derecha para un sonido estéreo amplio.',
       ],
     },
+    noise: {
+      h2: 'Oscilador de ruido: ruido blanco, rosa y marrón, 90 samples',
+      text: [
+        'Añade lo que una onda afinada no puede: **el siseo de un riser**, **el golpe de una batería**, **el aire de un pad**. El oscilador de ruido suena en cada voz junto a los dos osciladores wavetable y pasa por el mismo filtro y por ENV 1.',
+        'Elige entre 90 samples: ruido blanco, rosa y marrón, hi-hats, palmas, campanas, crepitar de vinilo, siseo de cinta y viento. Tócalo en Loop o en One-shot; con Pitch Track sigue las teclas.',
+      ],
+      uses: {
+        h3: 'Lo que puedes crear con ruido',
+        items: [
+          { term: 'Risers y barridos', text: 'ruido blanco que crece y se abre hasta el drop.' },
+          {
+            term: 'Golpes de batería',
+            text: 'el chasquido de un hi-hat o una palma da pegada a un bajo o un pluck.',
+          },
+          {
+            term: 'Textura lo-fi',
+            text: 'crepitar de vinilo y siseo de cinta para la calidez del lo-fi hip hop.',
+          },
+          { term: 'Aire', text: 'un toque de ruido rosa hace respirar pads y leads.' },
+        ],
+      },
+      figureAlt:
+        'Los colores del ruido: el espectro del ruido blanco (plano), rosa (−3 dB por octava), marrón (−6 dB por octava), azul (+3 dB) y violeta (+6 dB) de 20 Hz a 20 kHz',
+    },
     filter: {
       h2: 'Un filtro en cada voz: 8 tipos',
       text: [
@@ -91,6 +115,15 @@ export const es: Messages = {
       text: [
         'Tócalo como un instrumento: con un teclado MIDI (velocidad y pitch bend), con el teclado del ordenador (con cambio de octava) o con el piano en pantalla y su rueda de pitch, también en una pantalla táctil. Hasta 12 notas en Poly, o mono, con legato y portamento.',
       ],
+    },
+    track: {
+      h2: 'Piano roll online: graba, edita e importa MIDI',
+      text: [
+        'Convierte lo que tocas en un loop: **graba** desde un teclado MIDI, el teclado del ordenador o el piano en pantalla, **dibuja notas** en el piano roll o **arrastra un archivo MIDI**. El clip, un loop de hasta 32 compases, suena a su tempo a través del sintetizador.',
+        'Cuantiza a una rejilla de 1/4 a 1/64 con tresillos, ajusta la velocidad, copia, duplica y deshaz. Exporta el clip como .mid para tu DAW, o guárdalo sin registrarte y compártelo con un enlace; un preset puede abrirse con su clip.',
+      ],
+      figureAlt:
+        'El piano roll de Chisper: un loop de cuatro compases con acordes y una melodía sobre dos octavas de teclas, la velocidad de cada nota debajo y el cursor de reproducción en el tercer compás',
     },
     editor: {
       h2: 'Editor de wavetables: dibuja o importa tablas',
@@ -144,8 +177,10 @@ export const es: Messages = {
       'Tablas de instrumentos reales: un arpa y una guitarra de nailon una octava más arriba, cada una con su propio decay.',
     'noise-riser':
       'Unísono de 8 + 4 voces para los build-ups del EDM; la ENV 3 abre el detune a medida que crece el riser y el pitch bend lo sube dos semitonos al final.',
+    'wind-storm':
+      'Solo el oscilador de ruido: ruido blanco en cuatro notas que crecen por un paso bajo resonante; una forma de LFO dibujada sopla ráfagas en el cutoff y en el Gain del ruido.',
     'acid-bass':
-      'Una tabla de sierra 303 para acid house y techno; la ENV 2 abre de golpe el lowpass en cada nota, slides entre notas solapadas y un delay ping-pong.',
+      'Un bajo acid mono: una tabla one-shot percusiva y una sierra analógica desafinada una octava arriba; la ENV 1 abre de golpe un lowpass resonante en cada nota y el LFO 1 lo hace oscilar, con distorsión suave.',
     helicopter:
       'Una forma de LFO propia corta el volumen; la ENV 2 acelera el LFO como un rotor que arranca.',
     'warehouse-lead':
@@ -153,7 +188,7 @@ export const es: Messages = {
     'sonar-ping':
       'Tres pings a los que responden un delay largo y la reverb; la ENV 2 mueve la banda de los ecos.',
     'zesty-drive-bass':
-      'Distorsión y delay ping-pong en un bajo mono; las notas solapadas se deslizan sin un nuevo ataque.',
+      'Un bajo mono a través de un paso bajo resonante casi cerrado en 70 Hz: ENV 2 lo abre de golpe casi cuatro octavas en cada nota y luego se asienta; después, distorsión suave y un delay ping-pong, y las notas solapadas se deslizan.',
     theremin:
       'Mono legato: cada nota se desliza hacia la siguiente (portamento de 150 ms), con una pausa para respirar en medio.',
     'sub-bass':
@@ -184,12 +219,24 @@ export const es: Messages = {
         a: 'Sí. Chisper carga cualquier wavetable WAV con frames de 2048 muestras, de otros sintetizadores wavetable o de packs de wavetables (se lee su marca clm). También puedes crear una tabla a partir de un archivo de audio corto o dibujarla a mano.',
       },
       {
+        q: '¿Chisper tiene un oscilador de ruido?',
+        a: 'Sí. Junto a sus dos osciladores wavetable, cada voz de Chisper tiene un oscilador de ruido: 90 samples, desde ruido blanco, rosa y marrón hasta hi-hats, palmas, crepitar de vinilo y siseo de cinta, en bucle o una sola vez, a través del filtro de la voz.',
+      },
+      {
+        q: '¿Chisper tiene piano roll?',
+        a: 'Sí. Chisper tiene un piano roll para un clip en bucle de hasta 32 compases y 2048 notas. Graba desde un teclado MIDI, el teclado del ordenador o el piano en pantalla, dibuja y edita las notas y su velocidad, cuantízalas a la rejilla y comparte el clip con un enlace. En el móvil añades una nota con un toque.',
+      },
+      {
+        q: '¿Puedo importar y exportar archivos MIDI?',
+        a: 'Sí. Arrastra un archivo .mid (un Standard MIDI File de formato 0 o 1) al piano roll y elige sus pistas: su tempo y su nombre vienen con él. Exporta el clip como .mid para terminar la canción en cualquier DAW, como Ableton Live, FL Studio o Logic Pro.',
+      },
+      {
         q: '¿Puedo usar los sonidos en mis canciones?',
         a: 'Sí. Los sonidos que tocas en Chisper son tuyos para usarlos en tus canciones, también en lanzamientos comerciales.',
       },
       {
         q: '¿Cómo comparto un sonido?',
-        a: 'Guárdalo como preset en Chisper y copia su enlace: quien lo abra oirá el mismo sonido.',
+        a: 'Guárdalo como preset y copia su enlace: quien lo abra oirá el mismo sonido, con cada control, modulación y efecto como los dejaste. Para compartir también una melodía, pulsa Share en el piano roll: el enlace abre el clip con sus notas y su tempo; si elegiste o guardaste un preset y no lo has cambiado desde entonces, abre también ese preset (el preset aleatorio con el que arranca Chisper no cuenta). Marca Default clip al guardar un preset y el preset se abrirá con su clip.',
       },
       {
         q: '¿Está disponible el código fuente?',

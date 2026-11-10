@@ -124,6 +124,55 @@ describe('midiController', () => {
     expect(onRelease).not.toHaveBeenCalled();
   });
 
+  it('holds the bit of a channel while the input holds a note of it, of a channel not listened to too', async () => {
+    const input = createInput('a');
+    const { midi } = await setup(createAccess([input]));
+    const $held = midi[0].$heldChannels;
+    expect($held.value).toBe(0);
+
+    midi[1].selectMidiChannel(1);
+    message(input, 144, 60, 100);
+    expect($held.value).toBe(0b1);
+    message(input, 147, 62, 1);
+    expect($held.value).toBe(0b1001);
+
+    // two notes of a channel: its bit until the last one is released
+    message(input, 147, 64, 100);
+    message(input, 131, 62, 0);
+    expect($held.value).toBe(0b1001);
+    // a note on of velocity 0 releases
+    message(input, 147, 64, 0);
+    expect($held.value).toBe(0b1);
+    message(input, 128, 60, 0);
+    expect($held.value).toBe(0);
+
+    // a control change, a pitch bend, a clock, the note off of a note not held: nothing
+    const masks: number[] = [];
+    $held.subscribe((mask) => masks.push(mask));
+    message(input, 176, 1, 64);
+    message(input, 224, 0, 64);
+    message(input, 248);
+    message(input, 128, 70, 0);
+    expect(masks).toEqual([0]);
+  });
+
+  it('holds nothing of an input it no longer listens to', async () => {
+    const a = createInput('a');
+    const b = createInput('b');
+    const { midi } = await setup(createAccess([a, b]));
+    message(a, 144, 60, 100);
+    message(a, 149, 62, 100);
+    expect(midi[0].$heldChannels.value).toBe(0b100001);
+
+    midi[1].selectMidiInput('b');
+    expect(midi[0].$heldChannels.value).toBe(0);
+    // the note off of the note held before: still nothing held
+    message(b, 128, 60, 0);
+    message(b, 144, 61, 100);
+    message(b, 128, 60, 0);
+    expect(midi[0].$heldChannels.value).toBe(0b1);
+  });
+
   it('switches to another input on selectMidiInput', async () => {
     const a = createInput('a');
     const b = createInput('b');

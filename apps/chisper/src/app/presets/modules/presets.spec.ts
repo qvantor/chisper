@@ -1,3 +1,4 @@
+import { BehaviorSubject } from 'rxjs';
 import toast from 'react-hot-toast';
 import {
   CLIP_BAR,
@@ -29,7 +30,7 @@ import {
   markPresetOpened,
   setUrlPresetId,
 } from '../services';
-import { CurrentPreset, presets } from './presets';
+import { CurrentPreset, INIT_NAME, presets } from './presets';
 
 jest.mock('../services', () => ({
   clearUrlPresetId: jest.fn(),
@@ -81,14 +82,16 @@ const setup = (soundSwitch = immediateSoundSwitch()) => {
   return { env, model, track };
 };
 
-// a sound switch that applies once a test calls the next of `pending` (once the sound before has faded out)
+// a sound switch that applies once a test calls the next of `pending` (once the sound before has faded out), its
+// progress set by the test
 const deferredSwitch = () => {
   const pending: (() => void)[] = [];
+  const $progress = new BehaviorSubject<number | null>(null);
   const soundSwitch = [
-    {},
+    { $progress },
     { switchSound: (apply: () => void) => pending.push(apply) },
   ] as unknown as SoundSwitchModule;
-  return { pending, soundSwitch };
+  return { pending, soundSwitch, $progress };
 };
 
 // the popular list is still loading on start; resolveTop delivers ['a']
@@ -195,7 +198,7 @@ describe('presets model', () => {
     await loadById('p1');
     expect(toast.error).toHaveBeenCalledWith('Not found');
 
-    await loadById('p1', 'Custom message');
+    await loadById('p1', { errorMessage: 'Custom message' });
     expect(toast.error).toHaveBeenLastCalledWith('Custom message');
     expect($current.value).toBeNull();
   });
@@ -450,6 +453,28 @@ describe('presets model', () => {
     expect($current.value).toBeNull();
   });
 
+  it('a popular preset the schema refuses stays in Init without an error, its opening ends', async () => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const data = { osc1: { u: 1.5 } };
+    expect(() => normalizePreset(data)).toThrow();
+    getTopPresetsMock.mockResolvedValue(['a'].map(listItem));
+    getPresetMock.mockResolvedValue({ ...preset('a', 0.5), data } as unknown as Preset);
+    const {
+      model: [{ $current, $opening, $loadProgress }],
+    } = setup();
+    const before = getSnapshot();
+    await flush();
+
+    expect(getPresetMock).toHaveBeenCalledWith('a');
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith('The popular preset could not be applied', expect.any(Error));
+    expect($current.value).toBeNull();
+    expect($opening.value).toBeNull();
+    expect($loadProgress.value).toBe('failed');
+    expect(getSnapshot()).toEqual(before);
+    error.mockRestore();
+  });
+
   it('with a link opens only the preset of the link, even when it is not found', async () => {
     getUrlPresetIdMock.mockReturnValue('from-url');
     getTopPresetsMock.mockResolvedValue(['a'].map(listItem));
@@ -649,6 +674,251 @@ describe('presets model', () => {
   it('does not load anything without a preset in the url', () => {
     setup();
     expect(getPresetMock).not.toHaveBeenCalled();
+  });
+
+  describe('a preset opening', () => {
+    it('shows the name from the list at once, then the one of the preset until it is applied', async () => {
+      const { pending, soundSwitch } = deferredSwitch();
+      const {
+        model: [{ $opening, $current }, { loadById, setList }],
+      } = setup(soundSwitch);
+      await flush();
+      const loading = deferred<Preset>();
+      getPresetMock.mockReturnValue(loading.promise);
+
+      setList([{ id: 'p1', name: 'Listed name', uniqueUsers: 0 }]);
+      const load = loadById('p1');
+      expect($opening.value).toEqual({ name: 'Listed name', requested: true });
+      loading.resolve({ ...preset('p1', 0.5), name: 'Renamed' });
+      await load;
+      expect($opening.value).toEqual({ name: 'Renamed', requested: false });
+      expect($current.value).toBeNull();
+
+      pending.shift()?.();
+      expect($current.value?.name).toBe('Renamed');
+      expect($opening.value).toBeNull();
+    });
+
+    it('has no name before the response without a list (a link)', async () => {
+      const {
+        model: [{ $opening }, { loadById }],
+      } = setup();
+      await flush();
+      const loading = deferred<Preset>();
+      getPresetMock.mockReturnValue(loading.promise);
+      const load = loadById('p1');
+      expect($opening.value).toEqual({ name: null, requested: true });
+      loading.resolve(preset('p1', 0.5));
+      await load;
+      expect($opening.value).toBeNull();
+    });
+
+    it('ends with a failed request: the current preset again', async () => {
+      const {
+        model: [{ $opening }, { loadById, setSaved }],
+      } = setup();
+      await flush();
+      setSaved({ id: 's1', name: 'Saved' });
+      getPresetMock.mockRejectedValue(new Error('Not found'));
+      await loadById('p1');
+      expect($opening.value).toBeNull();
+    });
+
+    it('ends with a preset that throws as it is applied', async () => {
+      const {
+        model: [{ $opening, $current }, { loadById }],
+      } = setup();
+      await flush();
+      jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
+        throw new Error('broken');
+      });
+      getPresetMock.mockResolvedValue(preset('p1', 0.5));
+      await loadById('p1');
+      expect($opening.value).toBeNull();
+      expect($current.value).toBeNull();
+    });
+
+    it('belongs to the last click: an earlier preset applied or failing later changes it not', async () => {
+      const { pending, soundSwitch } = deferredSwitch();
+      const {
+        model: [{ $opening, $current }, { loadById, setList }],
+      } = setup(soundSwitch);
+      await flush();
+      setList(['a', 'b', 'c'].map((id) => ({ id, name: id.toUpperCase(), uniqueUsers: 0 })));
+      const failing = deferred<Preset>();
+      getPresetMock
+        .mockResolvedValueOnce(preset('a', 0.1))
+        .mockReturnValueOnce(failing.promise.then(() => Promise.reject(new Error('gone'))))
+        .mockReturnValueOnce(new Promise(() => undefined));
+
+      await loadById('a');
+      const b = loadById('b');
+      loadById('c');
+      expect($opening.value).toEqual({ name: 'C', requested: true });
+      // a fades out after the clicks: applied, c still opening
+      pending.shift()?.();
+      expect($current.value?.id).toBe('a');
+      expect($opening.value).toEqual({ name: 'C', requested: true });
+      failing.resolve(preset('b', 0.2));
+      await b;
+      expect($opening.value).toEqual({ name: 'C', requested: true });
+    });
+
+    it('steps ◀ ▶ with the names of the list', async () => {
+      const {
+        model: [{ $opening }, { next, setList }],
+      } = setup();
+      await flush();
+      getPresetMock.mockReturnValue(new Promise(() => undefined));
+      setList([listItem('x'), listItem('y')]);
+      next();
+      await flush();
+      expect($opening.value).toEqual({ name: 'x', requested: true });
+    });
+
+    it('shows Init at once on reset, until it is applied', () => {
+      const { pending, soundSwitch } = deferredSwitch();
+      const {
+        model: [{ $opening }, { reset }],
+      } = setup(soundSwitch);
+      reset();
+      expect($opening.value).toEqual({ name: INIT_NAME, requested: false });
+      pending.shift()?.();
+      expect($opening.value).toBeNull();
+    });
+
+    it('opens the popular preset on start: its request in the progress, its name once picked', async () => {
+      const top = deferred<PresetListItem[]>();
+      getTopPresetsMock.mockReturnValue(top.promise);
+      const loading = deferred<Preset>();
+      getPresetMock.mockReturnValue(loading.promise);
+      const {
+        env: [, { setEnvelopeValue }],
+        model: [{ $opening, $current, $loadProgress }],
+      } = setup();
+      // (the name stays Init: a preset saved meanwhile shows its own)
+      expect($opening.value).toBeNull();
+      expect($loadProgress.value).toBe(0.1);
+      top.resolve([listItem('a')]);
+      await flush();
+      expect($opening.value).toEqual({ name: 'a', requested: true });
+      expect($loadProgress.value).toBe(0.1);
+
+      // changed meanwhile: the popular one isn't applied over the change (its bar fades where it is)
+      setEnvelopeValue('env1', 'attack', 0.7);
+      loading.resolve(preset('a', 0.5));
+      await flush();
+      expect($current.value).toBeNull();
+      expect($opening.value).toBeNull();
+      expect($loadProgress.value).toBe('failed');
+    });
+
+    it('ends on start without popular presets', async () => {
+      const {
+        model: [{ $opening, $loadProgress }],
+      } = setup();
+      await flush();
+      expect($opening.value).toBeNull();
+      expect($loadProgress.value).toBeNull();
+    });
+
+    describe('its progress', () => {
+      it('is the request, then the switch: its fade and the loads of the sound, until they are played', async () => {
+        const { pending, soundSwitch, $progress } = deferredSwitch();
+        const {
+          model: [{ $loadProgress }, { loadById }],
+        } = setup(soundSwitch);
+        await flush();
+        expect($loadProgress.value).toBeNull();
+        const loading = deferred<Preset>();
+        getPresetMock.mockReturnValue(loading.promise);
+
+        const load = loadById('p1');
+        expect($loadProgress.value).toBe(0.1);
+        loading.resolve(preset('p1', 0.5));
+        await load;
+        // (the switch reports its fade)
+        expect($loadProgress.value).toBe(0.15);
+        $progress.next(0);
+        expect($loadProgress.value).toBe(0.15);
+        pending.shift()?.();
+        $progress.next(0.5);
+        expect($loadProgress.value).toBeCloseTo(0.575);
+        $progress.next(1);
+        expect($loadProgress.value).toBe(1);
+        $progress.next(null);
+        expect($loadProgress.value).toBeNull();
+      });
+
+      it('restarts with a click while the sound before still loads', async () => {
+        const { soundSwitch, $progress } = deferredSwitch();
+        const {
+          model: [{ $loadProgress }, { loadById }],
+        } = setup(soundSwitch);
+        await flush();
+        $progress.next(0.8);
+        getPresetMock.mockReturnValue(new Promise(() => undefined));
+        loadById('p2');
+        expect($loadProgress.value).toBe(0.1);
+      });
+
+      it('fails with a failed request, the next opening starts it again', async () => {
+        const {
+          model: [{ $loadProgress }, { loadById }],
+        } = setup();
+        await flush();
+        getPresetMock.mockRejectedValue(new Error('Not found'));
+        await loadById('p1');
+        expect($loadProgress.value).toBe('failed');
+
+        getPresetMock.mockReturnValue(new Promise(() => undefined));
+        loadById('p2');
+        expect($loadProgress.value).toBe(0.1);
+      });
+
+      it('fails with a preset that throws as it is applied', async () => {
+        const { pending, soundSwitch } = deferredSwitch();
+        const {
+          model: [{ $loadProgress, $current }, { loadById }],
+        } = setup(soundSwitch);
+        await flush();
+        getPresetMock.mockResolvedValue(preset('p1', 0.5));
+        await loadById('p1');
+        expect($loadProgress.value).toBe(0.15);
+        const apply = pending.shift();
+        jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
+          throw new Error('broken preset');
+        });
+        apply?.();
+        expect($current.value).toBeNull();
+        expect($loadProgress.value).toBe('failed');
+      });
+
+      it('follows an opening started while the popular presets are requested, the request no more', async () => {
+        const top = deferred<PresetListItem[]>();
+        getTopPresetsMock.mockReturnValue(top.promise);
+        const { pending, soundSwitch, $progress } = deferredSwitch();
+        const {
+          model: [{ $loadProgress }, { reset }],
+        } = setup(soundSwitch);
+        expect($loadProgress.value).toBe(0.1);
+
+        reset();
+        expect($loadProgress.value).toBe(0.15);
+        $progress.next(0);
+        pending.shift()?.();
+        $progress.next(0.5);
+        expect($loadProgress.value).toBeCloseTo(0.575);
+        $progress.next(null);
+        expect($loadProgress.value).toBeNull();
+
+        // (the popular one isn't opened over Init)
+        top.resolve([listItem('a')]);
+        await flush();
+        expect($loadProgress.value).toBeNull();
+        expect(getPresetMock).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('the state of the tab', () => {

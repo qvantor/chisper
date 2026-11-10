@@ -2,6 +2,8 @@ import { act, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import toast from 'react-hot-toast';
 import { Clip, CLIP_BAR, clipHash } from '@chisper/preset-schema';
+import { theme } from '@chisper/ui-kit';
+import { cssColor } from '@chisper/ui-kit/test-utils';
 import { fakeTrack } from '../../../test-utils/models';
 import { renderWithPresets } from '../../../test-utils/presets-wrapper';
 import { getClipEditToken, setClipEditToken } from '../../synth/track/services/clip-edit-tokens';
@@ -13,6 +15,7 @@ import {
   isNameAvailable,
   savePreset,
   setEditToken,
+  sharePreset,
   updatePreset,
 } from '../services';
 import { SaveDialog } from './save-dialog';
@@ -86,6 +89,9 @@ describe('SaveDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Pass captcha' }));
 
     expect(await screen.findByText('Name is already taken')).toBeInTheDocument();
+    expect(getComputedStyle(screen.getByText('Name is already taken')).color).toBe(
+      cssColor(theme.colors.red)
+    );
     // checked once, with the normalized name, not on every keystroke
     expect(isNameAvailableMock).toHaveBeenCalledTimes(1);
     expect(isNameAvailableMock).toHaveBeenCalledWith('taken name');
@@ -110,6 +116,35 @@ describe('SaveDialog', () => {
     expect(getEditToken('p1')).toBe('secret');
     expect(presets[0].$current.value).toEqual({ id: 'p1', name: 'Bright pad' });
     expect(screen.getByDisplayValue('http://localhost/?preset=p1')).toBeInTheDocument();
+  });
+
+  it('copies the link of the saved preset and closes with Done', async () => {
+    savePresetMock.mockResolvedValue({ id: 'p1', name: 'Bright pad', existed: false, clipId: null });
+    const { user, onClose } = setup();
+    await submit(user);
+
+    await user.click(await screen.findByRole('button', { name: 'Copy link' }));
+    expect(sharePreset).toHaveBeenCalledWith('p1');
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves with Enter in the name', async () => {
+    savePresetMock.mockResolvedValue({ id: 'p1', name: 'Bright pad', existed: false, clipId: null });
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: 'Pass captcha' }));
+    await user.type(nameInput(), 'Bright pad{Enter}');
+
+    expect(await screen.findByText('“Bright pad” has been saved.')).toBeInTheDocument();
+  });
+
+  it('closes with Cancel and the close key without saving', async () => {
+    const { user, onClose } = setup();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(savePresetMock).not.toHaveBeenCalled();
   });
 
   it('tells when the same sound is already saved', async () => {

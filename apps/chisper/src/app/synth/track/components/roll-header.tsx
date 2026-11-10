@@ -17,9 +17,9 @@ import {
 import { CLIP_NAME_MAX_LENGTH } from '@chisper/preset-schema';
 import { theme } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { Bar, BarTitle, DirtyDot, Key, Spacer } from '../../../common/components';
 import { useTrack } from '../modules/track';
 import { midiFileName, writeMidiFile } from '../midi-file';
-import { Bar, BarTitle, Key } from './roll-section';
 import { ShortcutsPopover } from './roll-shortcuts';
 import { SaveKind } from './use-clip-saving';
 import { RollEditor } from './use-roll-editor';
@@ -51,20 +51,6 @@ const Name = styled.input`
     outline: none;
     background: ${hexToRgba(theme.colors.primaryDark, 0.25)};
   }
-`;
-
-// not saved: the dot of the preset that is not, of its color
-const Dirty = styled.span`
-  flex: none;
-  width: 7px;
-  height: 7px;
-  margin: 0 4px;
-  border-radius: 50%;
-  background: ${theme.colors.secondAccent};
-`;
-
-const Spacer = styled.div`
-  flex: 1 1 0;
 `;
 
 const Divider = styled.span`
@@ -124,7 +110,7 @@ export const RollHeader = ({ editor, onSave, saving, onClose, compact = false }:
         spellCheck={false}
         size={Math.max(8, (clip.name ?? '').length + 1)}
       />
-      {dirty && <Dirty title='Not saved' role='img' aria-label='Not saved' />}
+      {dirty && <DirtyDot title='Not saved' role='img' aria-label='Not saved' />}
       <Spacer />
       {!compact && (
         <>

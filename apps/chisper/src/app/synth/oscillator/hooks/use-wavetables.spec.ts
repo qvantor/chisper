@@ -10,7 +10,7 @@ beforeEach(() => {
 });
 
 describe('wavetablesToOptions', () => {
-  it('maps the folder tree to cascade options with file names and sizes', () => {
+  it('maps the folder tree to file options: the names of the files, their sizes as notes', () => {
     expect(
       wavetablesToOptions([
         {
@@ -27,15 +27,15 @@ describe('wavetablesToOptions', () => {
         value: 'Basic',
         label: 'Basic',
         children: [
-          { value: 'Basic/Saw.wav', label: 'Saw (2.05 kB)' },
+          { value: 'Basic/Saw.wav', label: 'Saw', note: '2.05 kB' },
           {
             value: 'Deep',
             label: 'Deep',
-            children: [{ value: 'Basic/Deep/Square.v2.wav', label: 'Square (10 B)' }],
+            children: [{ value: 'Basic/Deep/Square.v2.wav', label: 'Square', note: '10 B' }],
           },
         ],
       },
-      { value: 'Sine.wav', label: 'Sine (1.5 MB)' },
+      { value: 'Sine.wav', label: 'Sine', note: '1.5 MB' },
     ]);
   });
 
@@ -45,21 +45,27 @@ describe('wavetablesToOptions', () => {
 });
 
 describe('useWavetables', () => {
-  it('gives the list of the function as options', async () => {
+  it('gives the list of the function as options, pending until it is loaded', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, [{ Key: 'Sine.wav', Size: 10 }]));
     const { result } = renderHook(useWavetables, queryWrapper());
-    await waitFor(() => expect(result.current).toEqual([{ value: 'Sine.wav', label: 'Sine (10 B)' }]));
+    expect(result.current).toEqual({ options: [], status: 'pending' });
+    await waitFor(() =>
+      expect(result.current).toEqual({
+        options: [{ value: 'Sine.wav', label: 'Sine', note: '10 B' }],
+        status: 'success',
+      })
+    );
     expect(fetchMock).toHaveBeenCalledWith('/.netlify/functions/get-wavetables-list');
   });
 
   it.each([
     ['a function that threw', 502, { errorType: 'Error', errorMessage: 'No bucket' }],
     ['an ok answer that is no list', 200, { error: 'Internal error' }],
-  ])('has no options after %s, and renders', async (_, status, body) => {
+  ])('has no options after %s, and renders its error', async (_, status, body) => {
     fetchMock.mockResolvedValueOnce(jsonResponse(status, body));
     const { client, wrapper } = queryWrapper();
     const { result } = renderHook(useWavetables, { wrapper });
     await waitFor(() => expect(client.getQueryState(['wavetables'])?.status).toBe('error'));
-    expect(result.current).toEqual([]);
+    expect(result.current).toEqual({ options: [], status: 'error' });
   });
 });

@@ -34,6 +34,21 @@ export const midiBend = (lsb: number, msb: number) => {
   return bend / (bend > 0 ? 8191 : 8192);
 };
 
+// a note of the input pressed or released: the bit of its channel set while the channel holds a note
+const holdNote = (
+  notes: Set<number>[],
+  $mask: BehaviorSubject<number>,
+  channel: number,
+  midi: number,
+  on: boolean
+) => {
+  if (on) notes[channel].add(midi);
+  else notes[channel].delete(midi);
+  const bit = 1 << channel;
+  const mask = notes[channel].size > 0 ? $mask.value | bit : $mask.value & ~bit;
+  if (mask !== $mask.value) $mask.next(mask);
+};
+
 // null means all channels
 const acceptsChannel = (selected: number | null, channel: number) =>
   selected === null || channel === selected;
@@ -86,6 +101,11 @@ export const midiController = ({
     const $midiAccess = new BehaviorSubject<MIDIAccess | null>(null);
     const $midiInputs = new BehaviorSubject<MIDIInput[]>([]);
     const $midiConnectionEvent = new Subject<MIDIConnectionEvent>();
+    // the channels the selected input holds notes on, of any channel (the one listened to or not): bit c for channel c
+    // (0..15); the lamps of the popover are lit by it
+    const $heldChannels = new BehaviorSubject<number>(0);
+    // the notes the input holds by channel, all of them (`held` has those this controller pressed)
+    const inputNotes = Array.from({ length: 16 }, () => new Set<number>());
     const saved = readStored<TabChoice>(
       'sessionStorage',
       TAB_CHOICE_KEY,
@@ -146,6 +166,8 @@ export const midiController = ({
       $midiAccess,
       $midiInputs,
       $midiConnectionEvent,
+      $heldChannels,
+      inputNotes,
       $midiSubscription,
       $chosenInputId,
       $selectedInputId,
@@ -174,6 +196,8 @@ export const midiController = ({
         $midiAccess,
         $midiInputs,
         $midiConnectionEvent,
+        $heldChannels,
+        inputNotes,
         $midiSubscription,
         $chosenInputId,
         $selectedInputId,
@@ -256,6 +280,10 @@ export const midiController = ({
                 .subscribe((e) => {
                   const [control, midi, velocity] = e.data;
                   const channel = control & 0b1111;
+                  const noteOn = control >= 144 && control <= 159;
+                  const noteOff = control >= 128 && control <= 143;
+                  if (noteOn || noteOff)
+                    holdNote(inputNotes, $heldChannels, channel, midi, noteOn && velocity > 0);
                   if (!acceptsChannel($selectedChannel.value, channel)) return;
                   // pitch bend: the bytes of a note are its low and high 7 bits
                   if (control >= 224 && control <= 239) {
@@ -269,14 +297,13 @@ export const midiController = ({
                     setBend(bend.value);
                     return;
                   }
-                  const noteOn = control >= 144 && control <= 159;
                   // many devices send note on with velocity 0 instead of note off
                   if (noteOn && velocity > 0) {
                     const channels = held.get(midi);
                     held.set(midi, (channels ?? new Set<number>()).add(channel));
                     // (held on another channel: one voice of the input)
                     if (!channels?.size) onPress(midiToNote(midi), velocity, MIDI_SOURCE);
-                  } else if (noteOn || (control >= 128 && control <= 143)) {
+                  } else if (noteOn || noteOff) {
                     const channels = held.get(midi);
                     // not pressed on this channel: filtered out then, or another source's note
                     if (!channels?.delete(channel)) return;
@@ -293,7 +320,7 @@ export const midiController = ({
     // the note off of a held note never comes once its channel or its input is no longer listened to, nor the
     // pitch bend back at rest: it goes back to 0 (a wheel left bent would hold the pitch; one the wheel on the
     // screen set since stays); those of a channel still listened to stay
-    .subscriptions(({ $selectedInputId, $selectedChannel, held, bend }) => {
+    .subscriptions(({ $selectedInputId, $selectedChannel, $heldChannels, inputNotes, held, bend }) => {
       const releaseHeld = (passes: (channel: number) => boolean) => {
         if (bend.value !== 0 && !passes(bend.channel)) {
           if ($bend.value === bend.value) setBend(0);
@@ -312,8 +339,12 @@ export const midiController = ({
       return [
         // all channels or the same one keep every held note
         $selectedChannel.subscribe((selected) => releaseHeld((channel) => acceptsChannel(selected, channel))),
-        // another input, or none: the selected one is gone, its clock too
-        $selectedInputId.pipe(distinctUntilChanged()).subscribe(() => releaseHeld(() => false)),
+        // another input, or none: the selected one is gone, its clock too; nothing of it is held any more
+        $selectedInputId.pipe(distinctUntilChanged()).subscribe(() => {
+          releaseHeld(() => false);
+          inputNotes.forEach((notes) => notes.clear());
+          if ($heldChannels.value !== 0) $heldChannels.next(0);
+        }),
       ];
     })
     .subscriptions(({ $selectedInputId, $clockSync, forgetClock }) => [

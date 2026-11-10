@@ -1,7 +1,7 @@
 import { ListObjectsCommand } from '@aws-sdk/client-s3';
-import type { HandlerResponse } from '@netlify/functions';
-import { client } from '../utils';
-import { handler } from '../functions/get-wavetables-list';
+import { client, LIST_BROWSER_CACHE, LIST_CDN_CACHE } from '../utils';
+import handler from '../functions/get-wavetables-list.mjs';
+import { caller } from './helpers';
 
 jest.mock('../utils', () => ({
   ...jest.requireActual('../utils'),
@@ -9,10 +9,11 @@ jest.mock('../utils', () => ({
 }));
 
 const send = client.send as jest.Mock;
+const call = caller(handler);
 
 const answer = async () => {
-  const response = (await handler({} as any, {} as any)) as HandlerResponse;
-  return { ...response, tree: JSON.parse(response.body as string) };
+  const { status, headers, body } = await call('GET', '/.netlify/functions/get-wavetables-list');
+  return { status, headers, tree: body };
 };
 
 const list = (keys: string[]) => {
@@ -34,13 +35,21 @@ it('lists the bucket', async () => {
   const [command] = send.mock.calls[0];
   expect(command).toBeInstanceOf(ListObjectsCommand);
   expect(command.input).toEqual({ Bucket: 'tables' });
-  expect(response.statusCode).toBe(200);
-  expect(response.headers).toEqual({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, OPTION',
+  expect(response.status).toBe(200);
+  expect(Object.fromEntries(response.headers)).toEqual({
+    'access-control-allow-origin': '*',
+    'access-control-allow-headers': 'Content-Type',
+    'access-control-allow-methods': 'GET, OPTION',
+    'content-type': 'application/json',
+    'cache-control': LIST_BROWSER_CACHE,
+    'netlify-cdn-cache-control': LIST_CDN_CACHE,
   });
   expect(response.tree).toEqual([]);
+});
+
+it('is kept a day in the shared cache of the CDN, a day stale still answered, the browser asks it every time', () => {
+  expect(LIST_CDN_CACHE).toBe('public, durable, s-maxage=86400, stale-while-revalidate=604800');
+  expect(LIST_BROWSER_CACHE).toBe('public, max-age=0, must-revalidate');
 });
 
 it('builds a folder tree from the keys', async () => {
@@ -84,9 +93,12 @@ it('answers 500 without the error when the bucket fails, and logs it', async () 
   const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   const failure = new Error('No bucket');
   send.mockRejectedValue(failure);
-  const { statusCode, headers, tree } = await answer();
-  expect(statusCode).toBe(500);
-  expect(headers?.['Access-Control-Allow-Origin']).toBe('*');
+  const { status, headers, tree } = await answer();
+  expect(status).toBe(500);
+  expect(headers.get('Access-Control-Allow-Origin')).toBe('*');
+  // a failure isn't cached: the next visit asks the bucket again
+  expect(headers.get('Cache-Control')).toBe('no-store');
+  expect(headers.get('Netlify-CDN-Cache-Control')).toBeNull();
   expect(tree).toEqual({ error: 'Internal error' });
   expect(error).toHaveBeenCalledWith(failure);
   error.mockRestore();

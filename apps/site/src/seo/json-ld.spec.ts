@@ -55,12 +55,12 @@ describe('jsonLd', () => {
     expect(clips.map((clip) => clip['name'])).toEqual(DEMOS.map((demo) => demo.name));
     expect(clips[0]).toEqual({
       '@type': 'AudioObject',
-      '@id': 'https://chisper.qvantor.org/wavetable-synth/#zesty-drive-bass',
-      name: 'Zesty Drive Bass',
-      description: MESSAGES.en.demos['zesty-drive-bass'],
-      contentUrl: 'https://chisper.qvantor.org/demos/zesty-drive-bass.mp3',
+      '@id': 'https://chisper.qvantor.org/wavetable-synth/#acid-bass',
+      name: 'Outrun Bass',
+      description: MESSAGES.en.demos['acid-bass'],
+      contentUrl: 'https://chisper.qvantor.org/demos/acid-bass.mp3',
       encodingFormat: 'audio/mpeg',
-      duration: 'PT9.7S',
+      duration: 'PT8.5S',
     });
   });
 });

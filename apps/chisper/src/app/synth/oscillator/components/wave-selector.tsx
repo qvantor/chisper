@@ -1,41 +1,40 @@
 import React from 'react';
-import { CascadeOption, CascadeSelect } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { FileOption, FileSelect, isFolder, SelectProgress } from '../../../common/components';
 import { useWavetables, useOscillatorContext } from '../hooks';
+
+const TableProgress = () => {
+  const [{ $tableProgress }] = useOscillatorContext();
+  return <SelectProgress progress={useBehaviorSubject($tableProgress)} />;
+};
 
 // the table of the oscillator, by pack and category; ◀ ▶ through all of them
 export const WaveSelector = () => {
-  const wavetables = useWavetables();
-  const [{ $waveTablePath, $waveTableLoading }, { setWaveTablePath }] = useOscillatorContext();
+  const { options: wavetables, status } = useWavetables();
+  const [{ $waveTablePath }, { setWaveTablePath }] = useOscillatorContext();
   const waveTablePath = useBehaviorSubject($waveTablePath);
-  const loading = useBehaviorSubject($waveTableLoading);
+  // the label of the last option found down the path (a key the list hasn't is passed over), until then Loading...
   const label = React.useMemo(() => {
-    const { values } = waveTablePath.reduce<{ options?: CascadeOption[]; values: CascadeOption[] }>(
-      (sum, key) => {
-        if (!sum.options) return sum;
-        const value = sum.options.find((option) => option.value === key);
-        if (!value) return sum;
-        return {
-          values: [...sum.values, value],
-          options: 'children' in value ? value.children : undefined,
-        };
-      },
-      {
-        options: wavetables,
-        values: [],
-      }
-    );
-    if (values.length === 0) return 'Loading...';
-    return values[values.length - 1].label;
+    let level: FileOption[] | undefined = wavetables;
+    let found = 'Loading...';
+    for (const key of waveTablePath) {
+      const option: FileOption | undefined = level?.find((other) => other.value === key);
+      if (!option) continue;
+      found = option.label;
+      level = isFolder(option) ? option.children : undefined;
+    }
+    return found;
   }, [waveTablePath, wavetables]);
 
   return (
-    <CascadeSelect
+    <FileSelect
       options={wavetables}
       value={waveTablePath}
       setValue={setWaveTablePath}
-      loading={loading}
+      progress={<TableProgress />}
       label={label}
+      title='Wavetable'
+      status={status}
     />
   );
 };

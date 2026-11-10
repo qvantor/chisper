@@ -10,7 +10,9 @@ import Head from './Head.astro';
 import Header from './Header.astro';
 import Hero from './Hero.astro';
 import Listen from './Listen.astro';
+import Noise from './Noise.astro';
 import Synthesis from './Synthesis.astro';
+import Track from './Track.astro';
 import editor from '../assets/editor.png';
 import filter from '../assets/filter.png';
 import fx from '../assets/fx.png';
@@ -31,20 +33,28 @@ const { lang } = Astro.props;
 const m = MESSAGES[lang];
 
 // the features with clips, in the order of the page: the label is the name the synth gives the part (its color
-// FEATURE_COLORS of art/scenes.ts), the image that part on the presets of the clips (screens.mjs); their pictures
-// alternate sides from the left (the phone of Playing on the right), the editor after them goes on
-const FEATURES: {
-  section: Exclude<Section, 'listen'>;
-  label: string;
-  image: ImageMetadata;
-  phone?: boolean;
-}[] = [
+// FEATURE_COLORS of art/scenes.ts), the image that part on the presets of the clips (screens.mjs); the noise between
+// them as in a voice (oscillators, noise, filter), a drawing beside it (Noise.astro); the piano roll after the keys
+// that play into it, no clip, a drawing beside it (Track.astro); their pictures alternate sides from the left (the
+// phone of Playing on the left), the editor after them goes on
+const FEATURES: (
+  | {
+      section: Exclude<Section, 'listen' | 'noise'>;
+      label: string;
+      image: ImageMetadata;
+      phone?: boolean;
+    }
+  | { section: 'noise' }
+  | { section: 'track' }
+)[] = [
   { section: 'wavetables', label: 'Osc 1 · Osc 2', image: osc },
   { section: 'unison', label: 'Unison', image: unison },
+  { section: 'noise' },
   { section: 'filter', label: 'Filter', image: filter },
   { section: 'modulation', label: 'ENV · LFO · VELO', image: modulation },
   { section: 'effects', label: 'FX', image: fx },
   { section: 'playing', label: 'Voicing · Keys', image: phone, phone: true },
+  { section: 'track' },
 ];
 
 // the screenshot of the synth for the structured data: one webp of the width of the column
@@ -63,20 +73,26 @@ const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
       <Hero m={m} />
       <Listen m={m} />
       <Synthesis m={m} />
-      {FEATURES.map(({ section, label, image, phone }, index) => (
-        <Feature
-          id={section}
-          label={label}
-          title={m.features[section].h2}
-          text={m.features[section].text}
-          demos={demosOf(section)}
-          image={image}
-          imageAlt={m.figures[section]}
-          phone={phone}
-          side={index % 2 ? 'right' : 'left'}
-          m={m}
-        />
-      ))}
+      {FEATURES.map((feature, index) => {
+        const side = index % 2 ? 'right' : 'left';
+        if (feature.section === 'noise') return <Noise side={side} m={m} />;
+        if (feature.section === 'track') return <Track side={side} m={m} />;
+        const { section, label, image, phone } = feature;
+        return (
+          <Feature
+            id={section}
+            label={label}
+            title={m.features[section].h2}
+            text={m.features[section].text}
+            demos={demosOf(section)}
+            image={image}
+            imageAlt={m.figures[section]}
+            phone={phone}
+            side={side}
+            m={m}
+          />
+        );
+      })}
       <Feature
         id='editor'
         label='Wavetable edit'
