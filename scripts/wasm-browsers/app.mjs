@@ -41,9 +41,11 @@ const withTables = (osc1, osc2) => ({
 });
 // the heavy patch with every LFO on: LFO 1 on the wave of both oscillators (ENV 2 on its Rate), LFO 2 free on the
 // cutoff (bipolar) and the drive of the distortion, LFO 3 on the size and the early reflections (a fader) of the
-// reverb (its worklet), LFO 4 on the time and the bandpass of the delay (the lines of fx-mod, its chart)
+// reverb (its worklet), LFO 4 on the time and the bandpass of the delay (the lines of fx-mod, its chart); the sub on
+// (a saw an octave down), LFO 2 on its Coarse, LFO 4 on its level (the marks of its knobs)
 const withLfos = {
   ...heavy.snapshot,
+  sub: { a: true, sh: 'saw', o: -1 },
   lfo: {
     l1: { rate: 0.25 },
     l2: { rate: 0.5, mode: 'free' },
@@ -61,6 +63,8 @@ const withLfos = {
     'lfo2:distortion.drive': 0.3,
     'lfo3:reverb.er': 0.3,
     'lfo4:delay.freq': 0.2,
+    'lfo2:sub.crs': { a: 0.05, bi: true },
+    'lfo4:sub.level': 0.3,
   },
 };
 const withoutEffects = {

@@ -14,6 +14,8 @@ import {
   presetOpenedRequestSchema,
   PRESET_DEFAULTS,
   savePresetRequestSchema,
+  SUB_DEFAULTS,
+  SUB_SHAPES,
   updatePresetRequestSchema,
   usageRequestSchema,
 } from './schema';
@@ -152,6 +154,7 @@ describe('normalizePreset', () => {
       'noise',
       'osc1',
       'osc2',
+      'sub',
       'v',
     ]);
     expect(Object.keys(normalized.osc1)).toEqual([
@@ -362,6 +365,41 @@ describe('normalizePreset', () => {
       noise({ g: 2 }),
     ]).toEqual([false, false, false, false, false]);
     expect(presetHash({ noise: { a: true } })).not.toBe(presetHash({}));
+  });
+
+  it('fills the sub: off, a sine at the note from its phase 0, not contiguous, at 75% in the centre', () => {
+    expect(normalizePreset({}).sub).toEqual({
+      a: false,
+      sh: 'sine',
+      o: 0,
+      c: 0,
+      ph: 0,
+      ct: false,
+      pn: 0,
+      g: 0.75,
+    });
+    expect(SUB_DEFAULTS).toEqual(PRESET_DEFAULTS.sub);
+  });
+
+  it('keeps the falsy values of the sub and its ranges: Octave whole within ±4, Coarse ±64, Phase a cycle', () => {
+    const falsy = { a: false, o: 0, c: 0, ph: 0, ct: false, pn: 0, g: 0 };
+    expect(normalizePreset({ sub: falsy }).sub).toMatchObject(falsy);
+    const edges = { a: true, sh: 'round-rect', o: -4, c: 63.75, ph: 1, ct: true, pn: -1, g: 1 };
+    expect(normalizePreset({ sub: edges }).sub).toEqual(edges);
+    expect(SUB_SHAPES.map((sh) => normalizePreset({ sub: { sh } }).sub.sh)).toEqual([...SUB_SHAPES]);
+    const sub = (value: object) => presetDataSchema.safeParse({ sub: value }).success;
+    expect([
+      sub({ o: 5 }),
+      sub({ o: 1.5 }),
+      sub({ c: 64.01 }),
+      sub({ ph: -0.1 }),
+      sub({ pn: 1.01 }),
+      sub({ g: 1.5 }),
+      sub({ sh: 'ramp' }),
+      sub({ ct: 1 }),
+    ]).toEqual([false, false, false, false, false, false, false, false]);
+    expect(presetHash({ sub: { a: true } })).not.toBe(presetHash({}));
+    expect(presetHash({ sub: { a: false, g: 0.75 } })).toBe(presetHash({}));
   });
 
   it('fills the range of the pitch bend with 2 semitones down and up, keeps 0..24', () => {

@@ -10,7 +10,7 @@ import {
   theme,
   TrackIcon,
 } from '@chisper/ui-kit';
-import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
 import { NOISE_DEFAULTS } from '@chisper/preset-schema';
 import { NoiseModel, useNoise } from '../common/modules';
@@ -20,7 +20,6 @@ import { Cell, Strip } from '../oscillator/components/wave/value-strip';
 import { NoiseOverview } from './components/noise-overview';
 import { NoiseSelector } from './components/noise-selector';
 import { NoiseStatus } from './components/noise-status';
-import { useNoiseField } from './hooks/use-noise-field';
 
 const Root = styled.div`
   height: 100%;
@@ -67,7 +66,7 @@ const Knobs = styled.div`
   }
 `;
 
-const signed = (value: number) => (value > 0 ? `+${value}` : `${value}`);
+export const signed = (value: number) => (value > 0 ? `+${value}` : `${value}`);
 // the pan as the renders show it: 0 in the centre, 50 at either side
 export const formatPan = (pan: number) => {
   const side = Math.round(Math.abs(pan) * 50);
@@ -80,14 +79,14 @@ const NoiseKnob = ({
   field,
   ...props
 }: Omit<HandleProps, 'value'> & { $noise: NoiseModel['$noise']; field: NoiseNumeric }) => (
-  <Handle {...props} value={useNoiseField($noise, field)} />
+  <Handle {...props} value={useBehaviorSubjectField($noise, field)} />
 );
 
 // Loop or One-shot and Pitch Track: they render on their own values
 const PlaybackKeys = () => {
   const [{ $noise }, { setLoop, setKeytrack }] = useNoise();
-  const loop = useNoiseField($noise, 'loop');
-  const keytrack = useNoiseField($noise, 'keytrack');
+  const loop = useBehaviorSubjectField($noise, 'loop');
+  const keytrack = useBehaviorSubjectField($noise, 'keytrack');
   return (
     <KeyStrip $edge='top'>
       <SwitchKeys fill aria-label='Playback'>
@@ -122,8 +121,8 @@ const PlaybackKeys = () => {
 // Start and Rand under the overview: they render on their own values
 const StartCells = () => {
   const [{ $noise, ranges }, { setNoiseValue }] = useNoise();
-  const start = useNoiseField($noise, 'start');
-  const rand = useNoiseField($noise, 'rand');
+  const start = useBehaviorSubjectField($noise, 'start');
+  const rand = useBehaviorSubjectField($noise, 'rand');
   return (
     <Strip $edge='bottom' className='compact'>
       <Cell

@@ -1500,6 +1500,129 @@ describe('synth', () => {
     });
   });
 
+  describe('sub', () => {
+    it('plays none while off, its shape, phase and knobs in the options of a note while on', async () => {
+      const { onPress, voices, sub } = await setup();
+      onPress([4, 'A']);
+      expect(voices()[0].options.sub).toBeUndefined();
+      const [, actions] = sub;
+      actions.toggleActive();
+      onPress([4, 'B']);
+      expect(voices()[1].options.sub).toEqual({
+        table: null,
+        phase: 0,
+        contiguous: false,
+        level: 0.75,
+        pan: 0,
+        cents: 0,
+      });
+      actions.setShape('saw');
+      actions.setSubValue('octave', -1);
+      actions.setSubValue('coarse', 2.5);
+      actions.setSubValue('phase', 0.25);
+      actions.setContiguous(true);
+      actions.setSubValue('pan', -0.5);
+      onPress([4, 'C']);
+      expect(voices()[2].options.sub).toEqual({
+        table: 'sub:saw',
+        phase: 0.25,
+        contiguous: true,
+        level: 0.75,
+        pan: -0.5,
+        cents: -950,
+      });
+    });
+
+    it('plays none in a note while the table of its shape is refused, its shape again once it is stored', async () => {
+      const { onPress, voices, sub, wavetables } = await setup();
+      const [, actions] = sub;
+      actions.setShape('saw');
+      actions.toggleActive();
+      wavetables.$tables.next({ ...wavetables.$tables.value, 'sub:saw': 'refused' });
+      onPress([4, 'A']);
+      expect(voices()[0].options.sub).toBeUndefined();
+      actions.retryShape();
+      expect(wavetables.$tables.value['sub:saw']).toBe('sending');
+      wavetables.$tables.next({ ...wavetables.$tables.value, 'sub:saw': 'stored' });
+      onPress([4, 'B']);
+      expect(voices()[1].options.sub).toMatchObject({ table: 'sub:saw' });
+    });
+
+    it('routes its knobs, Coarse within its range from its value; none without it', async () => {
+      const { onPress, voices, sub, modulation } = await setup();
+      const [, { addRoute }] = modulation;
+      addRoute('env2', 'sub.level', 0.5);
+      addRoute('lfo1', 'sub.crs', 0.25);
+      addRoute('env3', 'sub.pan', -0.5);
+      onPress([4, 'A']);
+      expect(voices()[0].options.routes).toEqual([]);
+      sub[1].toggleActive();
+      sub[1].setSubValue('coarse', 12);
+      onPress([4, 'B']);
+      expect(voices()[1].options.routes).toEqual([
+        { source: 1, param: 'sub.level', amount: 0.5, min: 0, max: 1 },
+        // (an amount of 1: 128 semitones; bounds the knob's range less its 12 semitones)
+        { source: 4, param: 'sub.crs', amount: 3200, min: -7600, max: 5200, bipolar: true },
+        { source: 2, param: 'sub.pan', amount: -1, min: -1, max: 1 },
+      ]);
+    });
+
+    it('sends new bounds to the notes routing its pitch when Coarse changes', async () => {
+      const { onPress, voices, sub, modulation } = await setup();
+      sub[1].toggleActive();
+      modulation[1].addRoute('env2', 'sub.crs', 0.25);
+      onPress([4, 'A']);
+      sub[1].setSubValue('coarse', -12);
+      voices();
+      expect(voices()[0].messages.at(-1)).toEqual({
+        routes: [{ source: 1, param: 'sub.crs', amount: 3200, min: -5200, max: 7600 }],
+      });
+    });
+
+    it('the notes that play it follow its level, pan and pitch, released ones too', async () => {
+      const { onPress, onRelease, voices, sub } = await setup();
+      onPress([4, 'A']);
+      sub[1].toggleActive();
+      onPress([4, 'B']);
+      onRelease([4, 'B']);
+      sub[1].setSubValue('level', 0.5);
+      sub[1].setSubValue('octave', -1);
+      const [without, played] = voices();
+      expect(without.messages).toEqual([]);
+      expect(played.messages).toEqual([
+        { sub: { level: 0.5, pan: 0, cents: 0 } },
+        { sub: { level: 0.5, pan: 0, cents: -1200 } },
+      ]);
+      // its shape, Phase and Contiguous only start a voice
+      sub[1].setShape('square');
+      sub[1].setSubValue('phase', 0.5);
+      sub[1].setContiguous(true);
+      expect(voices()[1].messages).toHaveLength(2);
+    });
+
+    it('a mono voice is taken over by the next note unless it is switched or another shape would play', async () => {
+      const { onPress, voices, sub, synthActions } = await setup();
+      const [, actions] = sub;
+      synthActions.setMaxVoices(1);
+      actions.toggleActive();
+      onPress([4, 'A']);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(1);
+      // (Phase, Contiguous and its knobs only start a voice, or the voice follows them)
+      actions.setSubValue('phase', 0.4);
+      actions.setContiguous(true);
+      actions.setSubValue('level', 0.2);
+      onPress([4, 'C']);
+      expect(voices()).toHaveLength(1);
+      actions.setShape('triangle');
+      onPress([4, 'D']);
+      expect(voices()).toHaveLength(2);
+      actions.toggleActive();
+      onPress([4, 'E']);
+      expect(voices()).toHaveLength(3);
+    });
+  });
+
   describe('playing notes follow the knobs', () => {
     it('gain, detune, blend and wave glide to the knob, the octave is set at once', async () => {
       const { onPress, voices, param, osc1, audioCtx } = await setup();

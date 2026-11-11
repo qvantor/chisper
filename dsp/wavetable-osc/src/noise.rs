@@ -28,12 +28,11 @@
 //! fade-in or gains that move plays in a steady loop, on the pair its position in 32.32 (frames of the pair: the
 //! frame, the phase and the share between phases its bits; an ulp or two of f32 off the position in f64)
 
-use crate::glided::{glide_length, Glided};
 use crate::shared::Shared;
-use crate::source::{RenderCx, Source, StartCx, ZERO};
+use crate::source::{LevelPan, RenderCx, Source, StartCx};
 use crate::store::{EntryRef, Levels, Store};
 use crate::targets::{mask, target, LEVEL, NOISE, NOISE_FINE, NOISE_PITCH, PAN};
-use crate::voice::{Params, FREQUENCY};
+use crate::voice::{read, Params, FREQUENCY};
 use alloc::{boxed::Box, vec, vec::Vec};
 use dsp_core::simd::F64x2;
 use jsmath::{ceil, floor, log2, max, min, pow, round, sin, sqrt, PI};
@@ -361,18 +360,9 @@ pub struct NoiseRoutes<'a> {
     pub fine: Option<&'a [f32]>,
 }
 
-#[inline(always)]
-fn read(values: &[f32], i: usize) -> f32 {
-    if values.len() > 1 {
-        values[i]
-    } else {
-        values[0]
-    }
-}
-
 // the gains of the channels at pan s (clamped: a NaN is the centre)
 #[inline(always)]
-fn pan_gains(s: f64) -> (f64, f64) {
+pub(crate) fn pan_gains(s: f64) -> (f64, f64) {
     let s = if s.is_nan() { 0.0 } else { min(1.0, max(-1.0, s)) };
     (
         (1.0 - s) * (1.0 + PAN_CURVE * s),
@@ -389,13 +379,8 @@ pub struct Noise {
     // the frame of the sample (level 0) read next; a one-shot past its end is done
     position: f64,
     done: bool,
-    level: Glided,
-    pan: Glided,
+    level_pan: LevelPan,
     cents: f64,
-    glide: f64,
-    // the bases of the routes of the level and the pan in a block (one value while they don't glide)
-    level_one: [f32; 1],
-    pan_one: [f32; 1],
     // the samples of the fade-in left (a note of a legato phrase), of fade_length
     fade: i32,
     fade_length: i32,
@@ -433,12 +418,8 @@ impl Noise {
             entry: None,
             position: 0.0,
             done: false,
-            level: Glided::new(options.level),
-            pan: Glided::new(options.pan),
+            level_pan: LevelPan::new(sample_rate, options.level, options.pan),
             cents: options.cents,
-            glide: glide_length(sample_rate),
-            level_one: [options.level as f32],
-            pan_one: [options.pan as f32],
             fade: 0,
             fade_length: 1,
             source: None,
@@ -461,26 +442,8 @@ impl Noise {
     }
 
     pub fn set(&mut self, knobs: NoiseKnobs) {
-        self.level.glide(knobs.level, self.glide);
-        self.pan.glide(knobs.pan, self.glide);
+        self.level_pan.set(knobs.level, knobs.pan);
         self.cents = knobs.cents;
-    }
-
-    /// the bases of the routes of the level and the pan in the block of `n`
-    pub fn level_base(&self, n: usize) -> &[f32] {
-        if self.level.constant {
-            &self.level_one
-        } else {
-            &self.level.values[..n.min(self.level.values.len())]
-        }
-    }
-
-    pub fn pan_base(&self, n: usize) -> &[f32] {
-        if self.pan.constant {
-            &self.pan_one
-        } else {
-            &self.pan.values[..n.min(self.pan.values.len())]
-        }
     }
 
     // the step at sample i: the rate of the sample over the context's × 2^(cents / 1200), with Pitch Track × the
@@ -642,7 +605,7 @@ impl Noise {
         let zero = F64x2::splat(0.0);
         // the gains of the channels once for the segment while the level and the pan are one value
         let one = |values: Option<&[f32]>, base: &[f32]| values.unwrap_or(base).len() == 1;
-        let still = (one(routes.level, self.level_base(s1)) && one(routes.pan, self.pan_base(s1)))
+        let still = (one(routes.level, self.level_pan.level(s1)) && one(routes.pan, self.level_pan.pan(s1)))
             .then(|| self.gains(routes, s0, s1));
         // (taken out of the noise for the segment: nothing allocates)
         let mut window = core::mem::take(&mut self.window);
@@ -758,7 +721,7 @@ impl Noise {
     fn gains(&self, routes: &NoiseRoutes, i: usize, s1: usize) -> (f64, f64) {
         let level = match routes.level {
             Some(values) => read(values, i),
-            None => read(self.level_base(s1), i),
+            None => read(self.level_pan.level(s1), i),
         } as f64;
         let level = if level.is_nan() {
             0.0
@@ -767,7 +730,7 @@ impl Noise {
         };
         let pan = match routes.pan {
             Some(values) => read(values, i),
-            None => read(self.pan_base(s1), i),
+            None => read(self.level_pan.pan(s1), i),
         } as f64;
         let (gl, gr) = pan_gains(pan);
         let gain = level * level;
@@ -942,23 +905,12 @@ impl Source for Noise {
 
     /// the level and the pan of the block
     fn glide(&mut self, a: usize, b: usize) {
-        self.level.render(a, b);
-        self.pan.render(a, b);
-        if self.level.constant {
-            self.level_one[0] = self.level.values[a];
-        }
-        if self.pan.constant {
-            self.pan_one[0] = self.pan.values[a];
-        }
+        self.level_pan.render(a, b);
     }
 
     /// its level and its pan, the offsets of its pitch from 0
     fn base<'a>(&'a self, knob: usize, _params: &'a Params<'a>, n: usize) -> &'a [f32] {
-        match knob {
-            LEVEL => self.level_base(n),
-            PAN => self.pan_base(n),
-            _ => ZERO,
-        }
+        self.level_pan.base(knob, n)
     }
 
     /// into the left and the right of the bus (a mono sample both, by its pan), its pitch with Pitch Track from the

@@ -163,6 +163,22 @@ const OSC_SCENES = [
       ),
     ],
   }),
+  // the sub: the sine of the store an octave down in the centre (its steady loop), a shape of its own panned and
+  // Contiguous, its Coarse moved by ENV 2 (its points, its levels read alone and blended), released
+  oscScene('wavetable, sub: the sine of the store, a shape panned under a route of Coarse, Contiguous', {
+    frames: OSC_RATE / 2,
+    tables: { 'sub:saw': [saw(2048, 300)] },
+    voices: [
+      note([null, null], { frequency: 110 }, [], {
+        sub: { table: null, phase: 0.25, contiguous: false, level: 0.8, pan: 0, cents: -1200 },
+      }),
+      note([null, null], { frequency: 165 }, [[OSC_RATE / 4, 2.1]], {
+        envelopes: [ENV, { attack: 0.05, hold: 0, decay: 0.1, sustain: 0.2, release: 0.05 }, FLAT],
+        sub: { table: 'sub:saw', phase: 0, contiguous: true, level: 1, pan: -0.4, cents: 700 },
+        routes: [{ source: 1, param: 'sub.crs', amount: 1900, min: -6400, max: 6400 }],
+      }),
+    ],
+  }),
   oscScene('wavetable, a chord of unisons', {
     frames: OSC_RATE / 2,
     tables: { a: [saw(2048, 400), saw(2048, 60, 0.3)], b: [saw(2048, 900)] },

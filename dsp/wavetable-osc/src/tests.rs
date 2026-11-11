@@ -44,7 +44,7 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator;
 
-fn without_memory<T>(call: impl FnOnce() -> T) -> T {
+pub(crate) fn without_memory<T>(call: impl FnOnce() -> T) -> T {
     NO_MEMORY.with(|no| no.set(true));
     let result = call();
     NO_MEMORY.with(|no| no.set(false));
@@ -423,6 +423,7 @@ fn note() -> VoiceOptions {
     VoiceOptions {
         osc: [None, None],
         noise: None,
+        sub: None,
         start: 0.0,
         envelopes: vec![flat; 3],
         env_start: 0.0,

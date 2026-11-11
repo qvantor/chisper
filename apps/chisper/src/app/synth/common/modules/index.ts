@@ -9,6 +9,8 @@ export { Oscillator1Provider, Oscillator2Provider, useOscillator1, useOscillator
 export { SynthProvider, useSynth } from './synth';
 export { SynthCoreProvider, useSynthCore } from './synth-core';
 export { SoundSwitchProvider, useSoundSwitch } from './sound-switch';
+export { SubProvider, useSub } from './sub';
 export { TransportProvider, useTransport } from './transport';
 export type { OscillatorModule, OscillatorModel, OscillatorActions } from './oscillator';
 export type { NoiseModel } from './noise';
+export type { SubModel } from './sub';

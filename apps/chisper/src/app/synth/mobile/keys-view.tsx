@@ -121,7 +121,7 @@ export const KeysView = ({ portrait, screen }: { portrait: boolean; screen: Synt
       ) : (
         <MiniSynth
           className={panelClassName}
-          width={portrait ? 900 : 1850}
+          width={portrait ? 900 : 2000}
           fitHeight={!portrait}
           // (in portrait its rows follow its width, at most the share of the view of its max-height)
           maxHeight={portrait ? MINI_SHARE * height : undefined}

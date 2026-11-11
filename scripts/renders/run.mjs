@@ -23,8 +23,11 @@
 // - noise.json: the noise oscillator on samples of ours (state.mjs: written into User of its noises, removed after):
 //   the pitch of Pitch, Fine and Pitch Track, the bend, the laws of Level and Pan, where Start and Rand start a
 //   note, a one-shot's end, mono notes, the images and aliasing of a sine by pitch
+// - sub.json: the sub oscillator: the harmonics and a cycle of each shape, its level against the oscillator, the laws
+//   of Level and Pan, Octave and Coarse, the bend, portamento, the phase notes start at by Phase and Cont. Phase
+//   (apart, overlapping, mono), the aliasing of saw and square by note
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise` renders some of them
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub` renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -149,6 +152,19 @@ const tone = (x, frequency, from, n) => {
   }
   return { amplitude: (2 * Math.hypot(re, im)) / sum, phase: (Math.atan2(im, re) * 180) / Math.PI };
 };
+// the measures of a held note (the noise, the sub): a note of C5 from 0.05 to 1.5 s, read over 0.3..1.3 s
+const held = (note = 72) => [{ note, on: 0.05, off: 1.5 }];
+const from = Math.round(0.3 * RATE);
+// the frequency of a sine by its rising zero crossings over n samples from `start`
+const frequency = (x, start = from, n = RATE) => {
+  const crossings = [];
+  for (let i = start; i < start + n; i++)
+    if (x[i] <= 0 && x[i + 1] > 0) crossings.push(i + x[i] / (x[i] - x[i + 1]));
+  return ((crossings.length - 1) / (crossings.at(-1) - crossings[0])) * RATE;
+};
+const semitones = (x, base, start, n) => +(12 * Math.log2(frequency(x, start, n) / base)).toFixed(3);
+const amplitude = (x, f) => tone(x, f, from, RATE).amplitude;
+const dB = (v) => +(20 * Math.log10(v)).toFixed(3);
 // the shares of the harmonics 1..count of f0 in x over 0.15..0.45 s (their amplitudes, summing to 1)
 const harmonicShares = (x, f0, count) => {
   const amplitudes = Array.from(
@@ -1238,21 +1254,8 @@ if (runs('noise')) {
     Float64Array.from({ length: Math.round(seconds * 44100) }, (_, i) =>
       Math.sin((2 * Math.PI * hz * i) / 44100)
     );
-  // a note of C5 from 0.05 to 1.5 s; the measures read 0.3..1.3 s
-  const held = (note = 72) => [{ note, on: 0.05, off: 1.5 }];
   const play = (name, state, params, notes = held()) =>
     hostRender(name, { seconds: 1.6, state, params: { ...NOISE, ...params }, notes });
-  const from = Math.round(0.3 * RATE);
-  // the frequency of a sine by its rising zero crossings over 0.3..1.3 s
-  const frequency = (x) => {
-    const crossings = [];
-    for (let i = from; i < from + RATE; i++)
-      if (x[i] <= 0 && x[i + 1] > 0) crossings.push(i + x[i] / (x[i] - x[i + 1]));
-    return ((crossings.length - 1) / (crossings.at(-1) - crossings[0])) * RATE;
-  };
-  const semitones = (x, base) => +(12 * Math.log2(frequency(x) / base)).toFixed(3);
-  const amplitude = (x, hz) => tone(x, hz, from, RATE).amplitude;
-  const dB = (v) => +(20 * Math.log10(v)).toFixed(3);
   // L the sine, R the cosine of one turn over 2 s: the share of the sample a frame reads is atan2(L, R) / 2π
   const TURN = 2 * 44100;
   const turn = [0, 1].map((c) =>
@@ -1444,6 +1447,270 @@ if (runs('noise')) {
     );
   } finally {
     samples.forEach((file) => rmSync(file, { force: true }));
+    removeTables();
+  }
+}
+
+// --- sub ---
+if (runs('sub')) {
+  // the init state with osc A off and the sub on at Level 1, ENV 1 open and closing in 0.3 ms (at Release 0 a held
+  // note stops after about 1 s)
+  const SUB = {
+    'A Enable': 0,
+    'Sub Enable': 1,
+    'Sub Level': 1,
+    'Env 1 Attack': 0,
+    'Env 1 Sustain': 1,
+    'Env 1 Release': 0.1,
+  };
+  const SHAPES = ['sine', 'roundRect', 'triangle', 'saw', 'square', 'pulse'];
+  // the knob of shape i (the Audio Unit takes floor(6v))
+  const shapeOf = (i) => (i + 0.5) / 6;
+  const hz = (note) => 440 * 2 ** ((note - 69) / 12);
+  const play = (name, params, notes = held(), seconds = 1.6) =>
+    hostRender(`sub-${name}`, { seconds, params: { ...SUB, ...params }, notes });
+  const turns = (v) => +(((v % 1) + 1) % 1).toFixed(4);
+  // the sample a note at `on` s starts at: the host sends it at the start of its block of 64 (the sub sounds about
+  // 3.7 samples after it: `start`)
+  const onset = (on) => Math.floor((on * RATE) / 64) * 64;
+  // the phase (turns of a sine) at sample `at` of a tone of `f` in x: read over 0.1 s from 10 ms after `at` (or
+  // up to 10 ms before it)
+  const phaseAt = (x, f, at, before = false) => {
+    const start = before ? at - 5280 : at + 480;
+    return turns(tone(x, f, start, 4800).phase / 360 + (f * at) / RATE);
+  };
+  const sineState = tableState('sub-sine', [sine()]);
+  // osc A on a sine of ours at A Level 1, the sub off
+  const OSC = { 'A Level': 1, 'A Rand Phase': 0, 'A Phase': 0, 'Env 1 Attack': 0, 'Env 1 Sustain': 1 };
+  try {
+    // the harmonics 1..40 of each shape at C2: [amplitude, phase against n × the phase of the first (degrees)]
+    const NOTE_SHAPE = 36;
+    const shapes = SHAPES.map((shape, i) =>
+      play(`shape-${shape}`, { 'Sub Shape': shapeOf(i) }, held(NOTE_SHAPE)).then(([l]) => {
+        const parts = Array.from({ length: 40 }, (_, j) => tone(l, hz(NOTE_SHAPE) * (j + 1), from, RATE));
+        const first = parts[0].phase;
+        return [
+          shape,
+          parts.map(({ amplitude: a, phase }, j) => [
+            +a.toFixed(5),
+            +(((((phase - (j + 1) * first) % 360) + 540) % 360) - 180).toFixed(1),
+          ]),
+        ];
+      })
+    );
+    // one cycle of each shape at C1 at Phase 0: 128 points of its second cycle from the note on
+    const NOTE_CYCLE = 24;
+    const cycles = SHAPES.map((shape, i) =>
+      play(
+        `cycle-${shape}`,
+        { 'Sub Shape': shapeOf(i) },
+        [{ note: NOTE_CYCLE, on: 0.05, off: 0.5 }],
+        0.6
+      ).then(([l]) => {
+        const period = RATE / hz(NOTE_CYCLE);
+        const at = onset(0.05) + period;
+        return [
+          shape,
+          Array.from({ length: 128 }, (_, k) => {
+            const t = at + (k * period) / 128;
+            const i0 = Math.floor(t);
+            return +(l[i0] + (l[i0 + 1] - l[i0]) * (t - i0)).toFixed(4);
+          }),
+        ];
+      })
+    );
+    const oscillator = hostRender('sub-osc', {
+      seconds: 1.6,
+      state: sineState,
+      params: OSC,
+      notes: held(),
+    }).then(([l]) => amplitude(l, hz(72)));
+    const level = [1, 0.75, 0.5, 0.25, 0.1].map((v) =>
+      play(`level-${v}`, { 'Sub Level': v }).then(([l]) => [v, amplitude(l, hz(72))])
+    );
+    const pan = Array.from({ length: 21 }, (_, k) => k / 20).map((v) =>
+      play(`pan-${v}`, { 'Sub Pan': v }).then(([l, r]) => [v, amplitude(l, hz(72)), amplitude(r, hz(72))])
+    );
+    const octave = [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((o) =>
+      play(`octave-${o}`, { 'Sub Octave': (o + 4) / 8 }).then(([l]) => [o, semitones(l, hz(72))])
+    );
+    const coarse = [0, 0.1, 0.25, 0.4, 0.45, 0.49, 0.5, 0.51, 0.55, 0.6, 0.75, 0.9, 1].map((v) =>
+      play(`coarse-${v}`, { 'Sub Coarse Pitch': v }).then(([l]) => [v, semitones(l, hz(72))])
+    );
+    const both = [
+      [0.25, 0.6],
+      [0.75, 0.4],
+    ].map(([o, c]) =>
+      play(`pitch-${o}-${c}`, { 'Sub Octave': o, 'Sub Coarse Pitch': c }).then(([l]) => [
+        o,
+        c,
+        semitones(l, hz(72)),
+      ])
+    );
+    const bend = play('bend', { 'Pitch Bend': 1 }).then(([l]) => semitones(l, hz(72)));
+    const track = [60, 72].map((note) =>
+      play(`track-${note}`, { 'Sub Pitch Track': 0 }, held(note)).then(([l]) => [
+        note,
+        +frequency(l).toFixed(2),
+      ])
+    );
+    // mono, Porta Always: C4 at 0.05 s, C5 at 0.6 s (legato): the semitones over C4 every 20 ms from 0.56 s, of
+    // the sub and of osc A on a sine
+    const PORTA = { 'Mono Toggle': 1, 'Porta Always': 1, 'Porta Time': 0.3 };
+    const portaNotes = [
+      { note: 60, on: 0.05, off: 0.65 },
+      { note: 72, on: 0.6, off: 1.5 },
+    ];
+    const glideOf = (l) =>
+      Array.from({ length: 30 }, (_, k) => {
+        const t = 0.56 + k * 0.02;
+        return [+t.toFixed(2), semitones(l, hz(60), Math.round(t * RATE), 960)];
+      });
+    const porta = Promise.all([
+      play('porta', PORTA, portaNotes),
+      hostRender('sub-porta-osc', {
+        seconds: 1.6,
+        state: sineState,
+        params: { ...OSC, ...PORTA },
+        notes: portaNotes,
+      }),
+    ]).then(([[sub], [osc]]) => ({ sub: glideOf(sub), osc: glideOf(osc) }));
+    // notes of C5 every 0.25 s, 0.2 s long: the phase each starts at by Phase
+    const ons = Array.from({ length: 12 }, (_, j) => 0.1 + j * 0.25);
+    const phase = [0, 0.25, 0.5, 0.75].map((v) =>
+      play(
+        `phase-${v}`,
+        { 'Sub Phase': v },
+        ons.map((on) => ({ note: 72, on, off: on + 0.2 })),
+        3.2
+      ).then(([l]) => [v, ons.map((on) => phaseAt(l, hz(72), onset(on)))])
+    );
+    // a note of C1, C3, C5 and C7 at Phase 0: the phase at the start of its block (the sine starts at 0.5 some
+    // samples after it)
+    const start = [24, 48, 72, 96].map((note) =>
+      play(`start-${note}`, {}, [{ note, on: 0.05, off: 0.5 }], 0.6).then(([l]) => [
+        note,
+        phaseAt(l, hz(note), onset(0.05)),
+      ])
+    );
+    // Cont. Phase (and Phase 0.25): the phase every note starts at and the one it has at its end
+    const CONTIGUOUS = {
+      gap: [
+        [72, 0.1, 0.6],
+        [72, 0.85, 1.3],
+      ],
+      longer: [
+        [72, 0.1, 0.6],
+        [72, 0.97, 1.3],
+      ],
+      other: [
+        [72, 0.1, 0.6],
+        [79, 0.85, 1.3],
+      ],
+      overlap: [
+        [72, 0.1, 1.3],
+        [79, 0.5, 1.3],
+      ],
+      three: [
+        [72, 0.1, 1.4],
+        [76, 0.4, 1.4],
+        [79, 0.7, 1.4],
+      ],
+    };
+    const contiguous = Object.entries(CONTIGUOUS).map(([name, notes]) =>
+      play(
+        `contiguous-${name}`,
+        { 'Sub Cont. Phase': 1, 'Sub Phase': 0.25 },
+        notes.map(([note, on, off]) => ({ note, on, off })),
+        1.6
+      ).then(([l]) => [
+        name,
+        notes.map(([note, on, off]) => [
+          note,
+          on,
+          off,
+          phaseAt(l, hz(note), onset(on)),
+          phaseAt(l, hz(note), onset(off), true),
+        ]),
+      ])
+    );
+    // mono: C5 held from 0.1 s, G5 from 0.6 s: the phase of C5 at 0.6 s and the one G5 starts at, by Legato and
+    // Cont. Phase (Phase 0.25)
+    const mono = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ].map(([legato, cont]) =>
+      play(
+        `mono-${legato}-${cont}`,
+        { 'Mono Toggle': 1, Legato: legato, 'Sub Cont. Phase': cont, 'Sub Phase': 0.25 },
+        [
+          { note: 72, on: 0.1, off: 0.65 },
+          { note: 79, on: 0.6, off: 1.3 },
+        ]
+      ).then(([l]) => [
+        !!legato,
+        !!cont,
+        phaseAt(l, hz(72), onset(0.6), true),
+        phaseAt(l, hz(79), onset(0.6)),
+      ])
+    );
+    // saw and square by note: the fundamental and the loudest component 20 Hz off every harmonic (dB full scale)
+    const quality = ['saw', 'square'].flatMap((shape) =>
+      [84, 96, 108].map((note) =>
+        play(
+          `quality-${shape}-${note}`,
+          { 'Sub Shape': shapeOf(SHAPES.indexOf(shape)) },
+          [{ note, on: 0.05, off: 5.9 }],
+          6
+        ).then(([l]) => {
+          const x = spectrum(l);
+          const f0 = hz(note);
+          const bin = (k) => (k * RATE) / N;
+          let other = 1;
+          for (let k = 1; k < x.length; k++) {
+            const off = Math.abs(bin(k) / f0 - Math.round(bin(k) / f0)) * f0;
+            if (off > 20 && x[k] > x[other]) other = k;
+          }
+          return {
+            shape,
+            note,
+            tone: dB(x[Math.round((f0 * N) / RATE)]),
+            other: [+bin(other).toFixed(1), dB(x[other])],
+          };
+        })
+      )
+    );
+    const all = (list) => Promise.all(list);
+    const levels = await all(level);
+    const pans = await all(pan);
+    const center = pans.find(([v]) => v === 0.5);
+    const result = {
+      about:
+        'The sub oscillator of the Audio Unit (osc A off, the sub at Level 1, ENV 1 open, release 0; notes of C5 held 0.05..1.5 s, measured over 0.3..1.3 s at 48 kHz): `shapes` [shape, the harmonics 1..40 at C2: [amplitude, phase against n × the phase of the first, degrees]]; `cycles` [shape, one cycle at C1 at Phase 0: 128 points of its second cycle from the note on]; `oscillator` the sub (sine) at Level 1 over osc A at A Level 1 on a sine; `level` [knob, dB against Level 1]; `pan` [knob, left, right] against the centre; `octave` [Octave, semitones]; `coarse` [knob, semitones]; `pitch` [Octave knob, Coarse knob, semitones]; `bend` the semitones at Pitch Bend 1 (Bend Up 2); `track` [note, Hz] with Sub Pitch Track off; `porta` mono, Porta Always, Porta Time 0.3: C4 at 0.05 s, C5 at 0.6 s, [s, semitones over C4] of the sub and of osc A on a sine; `phase` [knob, the phase (turns of a sine) notes of C5 every 0.25 s start at]; `start` [note, the phase at the start of the block of its note on at Phase 0]; `contiguous` Cont. Phase on, Phase 0.25: [scenario, [note, on, off, the phase at its on, the phase at its off]] (the phases at the starts of the blocks of the events: the host sends them at the start of their block of 64); `mono` [Legato, Cont. Phase, the phase of C5 at 0.6 s, the phase G5 starts at at 0.6 s] (Phase 0.25); `quality` saw and square by note: the fundamental and the loudest component 20 Hz off every harmonic [Hz, dB full scale]; scripts/renders/run.mjs --only=sub',
+      shapes: Object.fromEntries(await all(shapes)),
+      cycles: Object.fromEntries(await all(cycles)),
+      oscillator: +(levels[0][1] / (await oscillator)).toFixed(5),
+      level: levels.map(([v, a]) => [v, dB(a / levels[0][1])]),
+      pan: pans.map(([v, l, r]) => [v, +(l / center[1]).toFixed(5), +(r / center[2]).toFixed(5)]),
+      octave: await all(octave),
+      coarse: await all(coarse),
+      pitch: await all(both),
+      bend: await bend,
+      track: await all(track),
+      porta: await porta,
+      phase: await all(phase),
+      start: await all(start),
+      contiguous: Object.fromEntries(await all(contiguous)),
+      mono: await all(mono),
+      quality: await all(quality),
+    };
+    writeFileSync(join(out, 'sub.json'), `${JSON.stringify(result, null, 1)}\n`);
+    console.log(
+      'dsp/measurements: sub',
+      JSON.stringify({ oscillator: result.oscillator, bend: result.bend })
+    );
+  } finally {
     removeTables();
   }
 }

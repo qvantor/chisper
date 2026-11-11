@@ -15,6 +15,7 @@ import type { FxNote } from '../app/synth/fx/effects/fx-modulation';
 import { inputController } from '../app/synth/common/modules/input-controller';
 import { noise } from '../app/synth/common/modules/noise';
 import { oscillator } from '../app/synth/common/modules/oscillator';
+import { sub } from '../app/synth/common/modules/sub';
 import { synth } from '../app/synth/common/modules/synth';
 import { synthCore } from '../app/synth/common/modules/synth-core';
 import { transport } from '../app/synth/common/modules/transport';
@@ -55,6 +56,10 @@ export const createNoise = (
   loadNoiseSample: LoadNoiseSample = () => new Promise(() => undefined)
 ) => initModel(noise({ synthCore: synthCoreModule, loadNoiseSample }), 'noise', undefined);
 
+// the sub (its shapes go to the wavetable oscillator of the synth core as it switches them on)
+export const createSub = (synthCoreModule = createSynthCore()) =>
+  initModel(sub({ synthCore: synthCoreModule }), 'sub', undefined);
+
 export const createEnvelopes = (transportModule = createTransport()) =>
   initModel(envelopes({ transport: transportModule }), 'env', undefined);
 
@@ -66,7 +71,7 @@ export const createLfos = (
 ) => initModel(lfos({ synthCore: synthCoreModule, transport: transportModule }), 'lfo', undefined);
 
 // the whole voice chain: synth core, the transport, input, envelopes, the LFOs, modulation, both oscillators, the
-// noise and the filter (the loaders of their tables and its sample: never by default)
+// noise, the sub and the filter (the loaders of their tables and its sample: never by default)
 export const createSynth = (
   initialWavePath = ['default'],
   loadWavetable?: LoadWavetable,
@@ -81,6 +86,7 @@ export const createSynth = (
   const osc1 = createOscillator(synthCoreModule, 'osc1', { active: true, initialWavePath }, loadWavetable);
   const osc2 = createOscillator(synthCoreModule, 'osc2', { active: false, initialWavePath }, loadWavetable);
   const noiseModule = createNoise(synthCoreModule, loadNoiseSample);
+  const subModule = createSub(synthCoreModule);
   const filterModule = initModel(filter({ synthCore: synthCoreModule }), 'filter', undefined);
   const synthModule = initModel(
     synth({
@@ -92,6 +98,7 @@ export const createSynth = (
       modulation: modulationModule,
       oscillator: [osc1, osc2],
       noise: noiseModule,
+      sub: subModule,
       filter: filterModule,
     }),
     'synth',
@@ -108,6 +115,7 @@ export const createSynth = (
     osc1,
     osc2,
     noise: noiseModule,
+    sub: subModule,
     synth: synthModule,
   };
 };

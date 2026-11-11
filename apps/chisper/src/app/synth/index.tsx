@@ -1,5 +1,5 @@
 import React from 'react';
-import { styled } from 'styled-components';
+import { css, styled } from 'styled-components';
 import { distinctUntilChanged, map } from 'rxjs';
 import { VolumeAnalyser, FqAnalyser, QUIET_MS, TapeSwitch, theme, useIsMobile } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
@@ -25,6 +25,8 @@ import {
   useOscillator2,
   NoiseProvider,
   useNoise,
+  SubProvider,
+  useSub,
   KeyboardControllerProvider,
   SynthCoreProvider,
   useSynthCore,
@@ -41,6 +43,7 @@ import { MidiInput, SettingsButton } from './settings';
 import { EnvelopeSection, VelocitySection } from './envelope';
 import { LfoSection } from './lfo';
 import { NoiseSection } from './noise';
+import { SUB_LOW_SCREEN, SUB_WIDE_WIDTH, SUB_WIDTH, SubSection } from './sub';
 import { MobileLayout } from './mobile';
 import { FxScreen, FxProvider, useFx } from './fx';
 import { desktopScreen, SYNTH_SCREENS, SynthScreen } from './screens';
@@ -56,23 +59,31 @@ const Root = styled.div`
   background: ${theme.colors.primaryLowContrast};
 `;
 
-// the oscillators, the noise (half the width of the filter) and the filter after them, in the order the sound goes
-const COLUMNS = '3fr 3fr 1fr 2fr';
+// the sub left of the oscillators (narrow: its knobs under its shapes; on a low screen wider, its knobs at their
+// right), the noise (half the width of the filter) and the filter after them
+const COLUMNS = css`
+  grid-template-columns: ${SUB_WIDTH}px 3fr 3fr 1fr 2fr;
+
+  @media ${SUB_LOW_SCREEN} {
+    grid-template-columns: ${SUB_WIDE_WIDTH}px 3fr 3fr 1fr 2fr;
+  }
+`;
 const SynthRow = styled.div`
   display: grid;
-  grid-template-columns: ${COLUMNS};
+  ${COLUMNS};
   background: ${theme.colors.primaryLowContrast};
   gap: 1px;
 `;
 
-// the columns of the row above (fr shares what the gaps leave: the same tracks, so the lines meet): ENV under OSC 1,
-// the LFOs under OSC 2 and the noise
+// the columns of the row above (fr shares what the gaps leave: the same tracks, so the lines meet): ENV under the
+// sub and OSC 1, the LFOs under OSC 2 and the noise
 const ModRow = styled.div`
   display: grid;
-  grid-template-columns: ${COLUMNS};
+  ${COLUMNS};
   background: ${theme.colors.primaryLowContrast};
   gap: 1px;
 
+  & > :nth-child(1),
   & > :nth-child(2) {
     grid-column: span 2;
   }
@@ -110,6 +121,7 @@ const HeaderEq = styled(FqAnalyser)`
 
 const SynthRowInternal = () => (
   <SynthRow>
+    <SubSection />
     <Oscillator1 />
     <Oscillator2 />
     <NoiseSection />
@@ -186,6 +198,7 @@ const SoundSwitchInternal = ({ children }: React.PropsWithChildren) => {
   const oscillator1 = useOscillator1();
   const oscillator2 = useOscillator2();
   const noise = useNoise();
+  const sub = useSub();
   return (
     <SoundSwitchProvider
       initial={undefined}
@@ -194,6 +207,7 @@ const SoundSwitchInternal = ({ children }: React.PropsWithChildren) => {
       fx={fx}
       oscillator={[oscillator1, oscillator2]}
       noise={noise}
+      sub={sub}
     >
       {children}
     </SoundSwitchProvider>
@@ -243,6 +257,7 @@ const VoicesInternal = ({ children }: React.PropsWithChildren) => {
   const oscillator1 = useOscillator1();
   const oscillator2 = useOscillator2();
   const noise = useNoise();
+  const sub = useSub();
   const filter = useFilter();
   return (
     <SynthProvider
@@ -254,6 +269,7 @@ const VoicesInternal = ({ children }: React.PropsWithChildren) => {
       modulation={modulation}
       oscillator={[oscillator1, oscillator2]}
       noise={noise}
+      sub={sub}
       filter={filter}
       synthCore={synthCore}
     >
@@ -329,7 +345,9 @@ const OscillatorInternal = ({ children }: React.PropsWithChildren) => {
         synthCore={synthCore}
       >
         <NoiseProvider initial={{}} synthCore={synthCore}>
-          {children}
+          <SubProvider initial={{}} synthCore={synthCore}>
+            {children}
+          </SubProvider>
         </NoiseProvider>
       </Oscillator2Provider>
     </Oscillator1Provider>

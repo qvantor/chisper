@@ -1,7 +1,7 @@
 import React from 'react';
 
-// icons of the keys of the tempo and of the noise, 16 × 16 in currentColor: shown at the size of the key's text and
-// up
+// icons of the keys of the tempo, of the noise and of the sub, 16 × 16 in currentColor: shown at the size of the
+// key's text and up
 
 const Icon = ({ children }: React.PropsWithChildren) => (
   <svg viewBox='0 0 16 16' fill='currentColor' aria-hidden focusable='false'>
@@ -151,5 +151,53 @@ export const FollowIcon = () => (
       <path d='M8.4 9.2h5.6' />
       <path d='M11.8 7l2.2 2.2-2.2 2.2' />
     </g>
+  </Icon>
+);
+
+// the shapes of the sub: one cycle each across the key
+export const SineIcon = () => (
+  <Icon>
+    <path d='M1.5 8c1.6-6.4 4.9-6.4 6.5 0s4.9 6.4 6.5 0' {...LINE} />
+  </Icon>
+);
+
+export const RoundRectIcon = () => (
+  <Icon>
+    <path
+      d='M1.5 8V5.4a2.4 2.4 0 0 1 2.4-2.4h1.7a2.4 2.4 0 0 1 2.4 2.4v5.2a2.4 2.4 0 0 0 2.4 2.4h1.7a2.4 2.4 0 0 0 2.4-2.4V8'
+      {...LINE}
+    />
+  </Icon>
+);
+
+export const TriangleIcon = () => (
+  <Icon>
+    <path d='M1.5 8l3.25-5 6.5 10 3.25-5' {...LINE} />
+  </Icon>
+);
+
+export const SawIcon = () => (
+  <Icon>
+    <path d='M1.5 12.5l6.5-9v9l6.5-9' {...LINE} />
+  </Icon>
+);
+
+export const SquareIcon = () => (
+  <Icon>
+    <path d='M1.5 12.5v-9H8v9h6.5v-9' {...LINE} />
+  </Icon>
+);
+
+export const PulseIcon = () => (
+  <Icon>
+    <path d='M1.5 12.5v-9h3.5v9h9.5v-9' {...LINE} />
+  </Icon>
+);
+
+// a note going on with the phase of the one before: a wave across the line between them
+export const ContiguousIcon = () => (
+  <Icon>
+    <path d='M8 1.5v13' fill='none' stroke='currentColor' strokeWidth={1} strokeDasharray='1.6 1.6' />
+    <path d='M1.5 9c1.6-5.4 4.9-5.4 6.5-1s4.9 4.4 6.5-1' {...LINE} />
   </Icon>
 );

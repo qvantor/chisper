@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import FFT from 'fft.js';
+import { frequencyOf, semitones } from '../../../../test-utils/measures';
 import { seeded } from '../../../../test-utils/seeded';
 import { VOICE_DEFAULTS } from '../../../../test-utils/voice-dsp';
 import { wasmCore } from '../../../../test-utils/wasm';
@@ -163,14 +164,6 @@ const play = ({
   return [left, right];
 };
 
-// the frequency of a sine by its rising zero crossings over the samples from..to
-const frequencyOf = (x: Float32Array, rate: number, from = 4800, to = x.length) => {
-  const crossings: number[] = [];
-  for (let i = from; i < to - 1; i++)
-    if (x[i] <= 0 && x[i + 1] > 0) crossings.push(i + x[i] / (x[i] - x[i + 1]));
-  return ((crossings.length - 1) / (crossings[crossings.length - 1] - crossings[0])) * rate;
-};
-const semitones = (hz: number, base: number) => 12 * Math.log2(hz / base);
 // the amplitude of a tone of `hz` in x over its last `n` samples (Hann)
 const amplitudeOf = (x: Float32Array, hz: number, rate: number, n = 16384) => {
   const from = x.length - n;

@@ -2,9 +2,8 @@ import React from 'react';
 import { styled } from 'styled-components';
 import hexToRgba from 'hex-to-rgba';
 import { Deactivated, theme, useCanvas, useElementSize } from '@chisper/ui-kit';
-import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react';
 import { useNoise } from '../../common/modules';
-import { useNoiseField } from '../hooks/use-noise-field';
 import type { NoiseSample } from '../../services';
 
 const Root = styled.div`
@@ -52,8 +51,8 @@ export const startSpan = (start: number, rand: number): [number, number] => [
 export const NoiseOverview = () => {
   const [{ $sample, $noise, $active }] = useNoise();
   const sample = useBehaviorSubject($sample);
-  const start = useNoiseField($noise, 'start');
-  const rand = useNoiseField($noise, 'rand');
+  const start = useBehaviorSubjectField($noise, 'start');
+  const rand = useBehaviorSubjectField($noise, 'rand');
   const active = useBehaviorSubject($active);
   const [ref, [width, height]] = useElementSize<HTMLDivElement>();
   const { canvas, begin } = useCanvas(width, height);

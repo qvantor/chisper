@@ -5,7 +5,7 @@
 //! wrapper, wavetable-osc-wasm.ts), the params and the outputs of a block through osc_io. The voices of a node play
 //! in a scope (scope.rs): their params as AudioParams would give them (timeline.rs), the events of the main thread
 //! and the options of a new voice through osc_command too, the sum of their outputs at osc_scope_output. A voice is
-//! made of modules: its sources (source.rs: the oscillators, the noise) into its bus, its filter, its envelopes and
+//! made of modules: its sources (source.rs: the oscillators, the noise, the sub) into its bus, its filter, its envelopes and
 //! LFOs; the knobs the routes move are those of the modules of targets.rs
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
@@ -24,6 +24,7 @@ pub mod scope;
 pub mod shared;
 pub mod source;
 pub mod store;
+pub mod sub;
 pub mod targets;
 pub mod timeline;
 pub mod velocity;
@@ -38,6 +39,7 @@ use noise::{NoiseKnobs, NoiseOptions};
 use scope::Scope;
 use shared::{Shared, IO_ROWS, LFO_STATE, PARAMS};
 use store::Store;
+use sub::SubOptions;
 use velocity::VoiceVelocity;
 use voice::{OscOptions, Params, UnisonShape, Voice, VoiceOptions, MAX_UNISON};
 
@@ -150,6 +152,24 @@ fn read_noise(reader: &mut Reader) -> Option<NoiseOptions> {
     })
 }
 
+// the sub of a note: present, the sine of the store (else its table), table, cents, phase, contiguous, level, pan
+fn read_sub(reader: &mut Reader) -> Option<SubOptions> {
+    let present = reader.next() != 0.0;
+    let sine = reader.next() != 0.0;
+    let table = reader.next() as u32;
+    let (cents, phase) = (reader.next(), reader.next());
+    let contiguous = reader.next() != 0.0;
+    let (level, pan) = (reader.next(), reader.next());
+    present.then_some(SubOptions {
+        table: (!sine).then_some(table),
+        cents,
+        phase,
+        contiguous,
+        level,
+        pan,
+    })
+}
+
 // an oscillator of a note: present, table, unison, phase, phaseRand and its 8 random shares, its UnisonShape (width,
 // stack, detune, position spread and the 8 random shares of a random detune)
 fn read_osc(reader: &mut Reader) -> Option<OscOptions> {
@@ -179,7 +199,7 @@ fn read_osc(reader: &mut Reader) -> Option<OscOptions> {
 // (one copy for osc_voice_new and osc_scope_on)
 #[inline(never)]
 // VoiceOptions: start, envStart, phrase; its sources in the order of their slots, each a block with whether it is on
-// first (read_osc × 2, read_noise; a new source after them); the envelopes (count, then 8 each: the stages and the
+// first (read_osc × 2, read_noise, read_sub; a new source after them); the envelopes (count, then 8 each: the stages and the
 // curves), the velocity (VELO, amp), the filter, the routes
 fn read_voice_options(reader: &mut Reader) -> VoiceOptions {
     let start = reader.next();
@@ -187,6 +207,7 @@ fn read_voice_options(reader: &mut Reader) -> VoiceOptions {
     let phrase = reader.next();
     let osc = core::array::from_fn(|_| read_osc(reader));
     let noise = read_noise(reader);
+    let sub = read_sub(reader);
     let count = reader.next() as usize;
     let envelopes = (0..count)
         .map(|_| EnvelopeParams {
@@ -204,6 +225,7 @@ fn read_voice_options(reader: &mut Reader) -> VoiceOptions {
     VoiceOptions {
         osc,
         noise,
+        sub,
         start,
         envelopes,
         env_start,
@@ -313,8 +335,8 @@ pub unsafe extern "C" fn osc_scope_filter(scope: *mut Scope, id: f64) {
     (*scope).set_filter(id, filter);
 }
 
-/// new knobs of `module` (targets.rs) for voice `id`, `count` values in the command buffer (the noise: level, pan,
-/// cents); a voice that doesn't play the module takes nothing
+/// new knobs of `module` (targets.rs) for voice `id`, `count` values in the command buffer (the noise, the sub: level,
+/// pan, cents); a voice that doesn't play the module takes nothing
 ///
 /// # Safety
 /// `scope` comes from osc_scope_new and was not freed
@@ -796,7 +818,7 @@ pub unsafe extern "C" fn osc_voice_set_filter(voice: *mut Voice) {
     (*voice).set_filter(filter);
 }
 
-/// new knobs of `module` (targets.rs), `count` values in the command buffer (the noise: level, pan, cents)
+/// new knobs of `module` (targets.rs), `count` values in the command buffer (the noise, the sub: level, pan, cents)
 ///
 /// # Safety
 /// `voice` comes from osc_voice_new and was not freed

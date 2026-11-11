@@ -4,6 +4,7 @@ import { KILL_FADE } from '../wavetable/voice-options';
 import type { FxModule } from '../../fx/modules/fx';
 import type { NoiseModule } from './noise';
 import { OscillatorModule } from './oscillator';
+import type { SubModule } from './sub';
 import type { SynthModule } from './synth';
 import { SynthCoreModule } from './synth-core';
 
@@ -13,6 +14,7 @@ interface Deps {
   fx: FxModule;
   oscillator: [OscillatorModule, OscillatorModule];
   noise: NoiseModule;
+  sub: SubModule;
 }
 
 // seconds of silence after the next preset is applied: the clear messages reach the worklets before the
@@ -31,8 +33,8 @@ const POLL = 10;
 // (synth pause); once the audio thread has rendered the silence the preset is applied (the chain rewired then
 // doesn't click) and the fx and the limiter forget the sound before (after it: the delay makes its nodes at the
 // knobs of the preset, from those before Time would glide); the output opens at once (nothing sounds before it,
-// a fade would take the attacks of the keys) when the tables of its oscillators on and the sample of its noise on
-// are played, then the keys
+// a fade would take the attacks of the keys) when the tables of its oscillators on, the sample of its noise on and
+// the shape of its sub on (built at once, no part of the progress) are played, then the keys
 // still held start on it (synth resume). A preset chosen meanwhile replaces one waiting for the fade, after it is
 // applied at once (the synth is silent) and the wait starts again. A context that doesn't run isn't waited for,
 // a clock that doesn't move MAX_CLOCK_WAIT at most at either stage. A preset that throws doesn't keep the synth
@@ -48,6 +50,7 @@ const createSoundSwitch = ({
   fx: [, { clear }],
   oscillator,
   noise: [{ $active: $noise, samplePlayed, $sampleProgress }],
+  sub: [{ $active: $sub, shapePlayed }],
 }: Deps) => {
   // set while it switches (the poll of its stage)
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -59,22 +62,28 @@ const createSoundSwitch = ({
   const $progress = new BehaviorSubject<number | null>(null);
   // the loads of the sound applied, followed until they all ended
   let loads: Subscription | undefined;
-  // the sources of a sound: whether each is on and the progress of its load
+  // the sources of a sound: whether each is on, whether new notes play it, the progress of its load (the shape of
+  // the sub: built at once, none)
   const sources = [
-    ...oscillator.map(([{ $active, $tableProgress }]) => ({ $active, $share: $tableProgress })),
-    { $active: $noise, $share: $sampleProgress },
+    ...oscillator.map(([{ $active, tablePlayed, $tableProgress }]) => ({
+      $active,
+      played: tablePlayed,
+      $share: $tableProgress,
+    })),
+    { $active: $noise, played: samplePlayed, $share: $sampleProgress },
+    { $active: $sub, played: shapePlayed, $share: undefined },
   ];
-  // each source on as the sound is applied, until its load ended (played or failed: a progress that isn't a share)
-  // or another one replaced it (its progress went down); whole from then on
+  // each source on with a load as the sound is applied, until its load ended (played or failed: a progress that
+  // isn't a share) or another one replaced it (its progress went down); whole from then on
   const followLoads = () => {
     loads?.unsubscribe();
-    const followed = sources.filter(({ $active }) => $active.value);
+    const followed = sources.flatMap(({ $active, $share }) => ($active.value && $share ? [$share] : []));
     if (followed.length === 0) {
       $progress.next(null);
       return;
     }
     const start = followed.map(() => ({ share: 0, ended: false }));
-    loads = combineLatest(followed.map(({ $share }) => $share))
+    loads = combineLatest(followed)
       .pipe(
         scan(
           (states, shares) =>
@@ -111,8 +120,7 @@ const createSoundSwitch = ({
   // an oscillator that isn't ready plays no note anyway
   const tablesPlayed = () =>
     wavetables.$status.value !== 'ready' ||
-    (oscillator.every(([{ $active, tablePlayed }]) => !$active.value || tablePlayed()) &&
-      (!$noise.value || samplePlayed()));
+    sources.every(({ $active, played }) => !$active.value || played());
 
   const apply = (next: () => void) => {
     pending = null;

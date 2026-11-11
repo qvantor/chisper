@@ -13,6 +13,8 @@ pub const FILTER: usize = 1;
 pub const NOISE: usize = 2;
 /// the knobs of the LFOs (rate, delay, rise, smooth, phase: lfo.rs), a Modulation of their own moves them
 pub const LFO_KNOBS: usize = 3;
+/// the sub: its level, its pan, the offset of its pitch (Coarse in cents)
+pub const SUB: usize = 4;
 
 /// the knobs of an oscillator
 pub const POSITION: usize = 0;
@@ -26,14 +28,16 @@ const OSC_KNOBS: usize = 6;
 pub const CUTOFF: usize = 0;
 pub const RESONANCE: usize = 1;
 pub const FILTER_GAIN: usize = 2;
-/// the knobs of the noise
+/// the knobs of the noise (LEVEL and PAN of the sub too)
 pub const LEVEL: usize = 0;
 pub const PAN: usize = 1;
 pub const NOISE_PITCH: usize = 2;
 pub const NOISE_FINE: usize = 3;
+/// the knobs of the sub
+pub const COARSE: usize = 2;
 
 /// (instances, knobs) of each module, in the order of their ids
-pub const MODULES: [(usize, usize); 4] = [(2, OSC_KNOBS), (1, 3), (1, 4), (LFOS, KNOBS)];
+pub const MODULES: [(usize, usize); 5] = [(2, OSC_KNOBS), (1, 3), (1, 4), (LFOS, KNOBS), (1, 3)];
 
 /// the id of the first knob of `module` of `modules`
 pub const fn first_in(modules: &[(usize, usize)], module: usize) -> usize {
@@ -95,7 +99,9 @@ mod tests {
         assert_eq!(target(NOISE, 0, NOISE_FINE), 18);
         assert_eq!(target(LFO_KNOBS, 0, RATE), 19);
         assert_eq!(target(LFO_KNOBS, 3, PHASE), 38);
-        assert_eq!(TARGETS, 39);
+        assert_eq!(target(SUB, 0, LEVEL), 39);
+        assert_eq!(target(SUB, 0, COARSE), 41);
+        assert_eq!(TARGETS, 42);
     }
 
     #[test]
@@ -122,12 +128,12 @@ mod tests {
 
     #[test]
     fn a_module_appended_keeps_the_ids_of_the_others() {
-        let mut appended = [(0, 0); 5];
-        appended[..4].copy_from_slice(&MODULES);
-        appended[4] = (1, 7);
+        let mut appended = [(0, 0); MODULES.len() + 1];
+        appended[..MODULES.len()].copy_from_slice(&MODULES);
+        appended[MODULES.len()] = (1, 7);
         for module in 0..MODULES.len() {
             assert_eq!(first_in(&appended, module), first(module));
         }
-        assert_eq!(first_in(&appended, 4), TARGETS);
+        assert_eq!(first_in(&appended, MODULES.len()), TARGETS);
     }
 }

@@ -58,6 +58,7 @@ const WASM_CORE = 'src/app/synth/common/wasm/wasm-core';
 const NOISE_LEVELS = 'src/app/synth/common/wavetable/noise-levels';
 // the tables of the shapes of the LFOs (a tree that has them)
 const LFO_CURVE = 'src/app/synth/common/lfo/lfo-curve';
+const SUB_SHAPES = 'src/app/synth/common/wavetable/sub-shapes';
 
 // as in production: the counters of the perf build out. A tree with wasm cores bundles their facades too and
 // instantiates them (one instance per core, as one AudioWorkletGlobalScope)
@@ -81,6 +82,7 @@ const loadDsp = async (source = root, name) => {
     ...(instantiate ? [[WASM_CORE, 'instantiateCore']] : []),
     ...(fs.existsSync(path.join(app, `${LFO_CURVE}.ts`)) ? [[LFO_CURVE, 'lfoTable']] : []),
     ...(fs.existsSync(path.join(app, `${NOISE_LEVELS}.ts`)) ? [[NOISE_LEVELS, 'buildNoiseLevels']] : []),
+    ...(fs.existsSync(path.join(app, `${SUB_SHAPES}.ts`)) ? [[SUB_SHAPES, 'subShapeFrame']] : []),
   ]
     .map(([module, create]) => `export { ${create} } from './${module}';\n`)
     .join('')}`;
@@ -258,26 +260,35 @@ const createCases = (dsp) => {
     wasmStore.set('n', 1, dsp.buildNoiseLevels([channel(), channel()], 44100));
     wasmStore.set('m', 1, dsp.buildNoiseLevels([channel()], 44100));
   }
-  const noiseVoiceOf =
-    (cents, sample = 'n') =>
-    (oscs, params) =>
-    () => {
-      const voiceDsp = createVoice.wasm({
-        osc: oscs.map((unison) => (unison ? { table: 'a', unison, phase: 0, phaseRand: 1 } : null)),
-        noise: { sample, loop: true, keytrack: false, start: 0, rand: 0, level: 0.5, pan: 0.2, cents },
-        start: 0,
-        envelopes: [0, 1, 2].map(() => ({ attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 })),
-        envStart: 0,
-        phrase: 0,
-        routes: [],
-        filter: null,
-      });
-      let frameAt = 0;
-      return () => {
-        voiceDsp.process(frameAt, params, outL, outR);
-        frameAt += BLOCK;
-      };
+  // a voice of the oscillators with another source (`source`: { noise } or { sub }), its params those of a block or a
+  // function of its frame
+  const voiceWith = (source) => (oscs, params) => () => {
+    const voiceDsp = createVoice.wasm({
+      osc: oscs.map((unison) => (unison ? { table: 'a', unison, phase: 0, phaseRand: 1 } : null)),
+      ...source,
+      start: 0,
+      envelopes: [0, 1, 2].map(() => ({ attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 })),
+      envStart: 0,
+      phrase: 0,
+      routes: [],
+      filter: null,
+    });
+    let frameAt = 0;
+    return () => {
+      voiceDsp.process(frameAt, typeof params === 'function' ? params(frameAt) : params, outL, outR);
+      frameAt += BLOCK;
     };
+  };
+  const noiseVoiceOf = (cents, sample = 'n') =>
+    voiceWith({
+      noise: { sample, loop: true, keytrack: false, start: 0, rand: 0, level: 0.5, pan: 0.2, cents },
+    });
+  // a voice with a sub (a tree before it: none) on the sine of the store (`table` null) or a shape, in the centre at a
+  // still level (its steady loop into the centre of the bus)
+  const subbed = Boolean(dsp.subShapeFrame && wasmStore);
+  if (subbed) wasmStore.set('sub:saw', 1, dsp.buildLevels([dsp.subShapeFrame('saw')]));
+  const subVoiceOf = (table) =>
+    voiceWith({ sub: { table, phase: 0, contiguous: false, level: 0.8, pan: 0, cents: -1200 } });
   // a chord of 12 notes × 2 × u8 struck again every ATTACK blocks, about the time its 192 unison voices take to go
   // onto their mix tables under the budget: the direct path, the builds, the note on (the peak of a block is
   // there); one shared a core, its pool of mix tables as in a scope
@@ -360,6 +371,15 @@ const createCases = (dsp) => {
     };
   };
   const held = constant(BASE);
+  // the frequency a sample gliding up and down an octave over 2 s (the params of each block of the cycle made once)
+  const glideBlocks = Array.from({ length: Math.round((2 * RATE) / BLOCK) }, (_, k) => ({
+    ...held,
+    frequency: Float32Array.from(
+      { length: BLOCK },
+      (_, i) => 220 * 2 ** (0.5 - 0.5 * Math.cos((2 * Math.PI * (k * BLOCK + i)) / (2 * RATE)))
+    ),
+  }));
+  const gliding = (frameAt) => glideBlocks[(frameAt / BLOCK) % glideBlocks.length];
   // the LFOs of a shared or a node: sines of `period` seconds, retrig, at once with their tables (a tree before
   // them: none)
   const lfoState = (period) => ({
@@ -555,6 +575,11 @@ const createCases = (dsp) => {
     ...withTs({ 'voice u8 + noise up 7': [[8, null], held] }, noisy && noiseVoiceOf(700), null),
     ...withTs({ 'voice u8 + noise up 19': [[8, null], held] }, noisy && noiseVoiceOf(1900), null),
     ...withTs({ 'voice u8 + noise, mono': [[8, null], held] }, noisy && noiseVoiceOf(0, 'm'), null),
+    // its cost over `voice u8 held` (the sine of the store, a shape) and over `voice u8 glide` (the pitch at its points)
+    ...withTs({ 'voice u8 + sub': [[8, null], held] }, subbed && subVoiceOf(null), null),
+    ...withTs({ 'voice u8 + sub saw': [[8, null], held] }, subbed && subVoiceOf('sub:saw'), null),
+    ...withTs({ 'voice u8 glide': [[8, null], gliding] }, subbed && voiceOf('wasm'), null),
+    ...withTs({ 'voice u8 + sub glide': [[8, null], gliding] }, subbed && subVoiceOf('sub:saw'), null),
     // blend, width (the channels of the oscillator and their pan), a stack and a position spread (a frame per
     // voice); its cost over `voice u8 held` (the blend a param of the oscillator, of a tree before it in the shape)
     ...withTs(

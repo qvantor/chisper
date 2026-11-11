@@ -72,11 +72,15 @@ describe('the modules of a voice', () => {
           ])
         )
       ),
+      'sub.level': 39,
+      'sub.pan': 40,
+      'sub.crs': 41,
     });
     expect(routeParam('osc', 1, 'blend')).toBe('blend2');
     expect(routeParam('filter', 0, 'cutoff')).toBe('cutoff');
     expect(routeParam('noise', 0, 'pan')).toBe('noise.pan');
     expect(routeParam('lfo', 3, 'phase')).toBe('lfo4.phase');
+    expect(routeParam('sub', 0, 'crs')).toBe('sub.crs');
   });
 
   describe('a source off for the note', () => {
@@ -94,6 +98,7 @@ describe('the modules of a voice', () => {
       noise: all
         ? { sample: 'n', loop: true, keytrack: false, start: 0, rand: 0, level: 1, pan: 0, cents: 0 }
         : null,
+      sub: all ? { table: 's', phase: 0, contiguous: false, level: 1, pan: 0.5, cents: 0 } : null,
       start: 0,
       envelopes: [FLAT],
       envStart: 0,
@@ -107,12 +112,14 @@ describe('the modules of a voice', () => {
     const play = (all: boolean, blocks: number) => {
       const { store } = storeWith({ a: [SINE], b: [SINE] });
       store.set('n', 1, noiseLevels(300));
+      store.set('s', 1, buildLevels([SINE]));
       const shared = createVoiceSharedWasm(oscScope());
       const voice = createVoiceWasm(oscScope(), 48000, options(all), store, () => 0.5, shared);
       const [outL, outR] = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
       for (let block = 0; block < blocks; block++) voice.process(block * BLOCK, params, outL, outR);
       store.set('b', 2, buildLevels([SINE.map((v) => -v)]));
       store.set('n', 2, noiseLevels(400));
+      store.set('s', 2, buildLevels([SINE.map((v) => -v)]));
       const { unison, mixSamples, directSamples } = shared.stats();
       const { versions } = store.stats();
       voice.end();
@@ -122,10 +129,10 @@ describe('the modules of a voice', () => {
     };
 
     it('plays nothing of it and holds none of its versions', () => {
-      // osc 2 and the noise off: osc 1 alone (3 voices); the old versions of their table and sample go
-      expect(play(false, 4)).toEqual({ unison: 3, samples: 3 * 4 * BLOCK, versions: 3 });
-      // on: osc 1, osc 2 (5 voices), the noise; it holds the versions it plays
-      expect(play(true, 4)).toEqual({ unison: 5, samples: 5 * 4 * BLOCK, versions: 5 });
+      // osc 2, the noise and the sub off: osc 1 alone (3 voices); the old versions of their tables and sample go
+      expect(play(false, 4)).toEqual({ unison: 3, samples: 3 * 4 * BLOCK, versions: 4 });
+      // on: osc 1, osc 2 (5 voices), the noise, the sub (no unison voice); it holds the versions it plays
+      expect(play(true, 4)).toEqual({ unison: 5, samples: 5 * 4 * BLOCK, versions: 7 });
     });
   });
 });

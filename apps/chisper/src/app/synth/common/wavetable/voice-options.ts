@@ -87,6 +87,24 @@ export interface VoiceNoiseOptions extends VoiceNoiseKnobs {
   rand: number;
 }
 
+// the knobs of the sub of a note (the sub model): its level 0..1 (its amplitude SUB_SCALE of sub.rs × its square), its
+// pan -1..1, its pitch in cents over the note (Octave · 1200 + Coarse · 100); a playing note follows them (a `knobs`
+// event of the sub: the level and the pan glide in 10 ms, the cents step)
+export interface VoiceSubKnobs {
+  level: number;
+  pan: number;
+  cents: number;
+}
+
+// the sub of a note (null in VoiceOptions.sub: off for it): one cycle of its shape, a table of the store (its id,
+// sub-shapes.ts; null: the sine of the store), the share of a cycle it starts at (Phase), or with `contiguous` the
+// phase of the sub of the note started last (sub.rs), its knobs
+export interface VoiceSubOptions extends VoiceSubKnobs {
+  table: string | null;
+  phase: number;
+  contiguous: boolean;
+}
+
 // the velocity of a note: the level of VELO (the curve of its velocity: a source of the routes, after the
 // envelopes) and its amp (its volume after ENV 1: 1 - Amp + Amp · level)
 export interface VoiceVelocity {
@@ -98,6 +116,8 @@ export interface VoiceOptions {
   osc: (VoiceOscOptions | null)[];
   // the noise of the note (none: off)
   noise?: VoiceNoiseOptions | null;
+  // the sub of the note (none: off)
+  sub?: VoiceSubOptions | null;
   // seconds of the context time the note starts at
   start: number;
   // ENV 1–3 as they were at the note on (ENV 1 is the volume of the note) and the seconds of the context
@@ -122,6 +142,7 @@ export interface VoiceOptions {
 // every module: KNOB_ORDER of voice-modules.ts on the wire)
 export interface VoiceModuleKnobs {
   noise: VoiceNoiseKnobs;
+  sub: VoiceSubKnobs;
 }
 export type KnobsModule = keyof VoiceModuleKnobs;
 
