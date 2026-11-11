@@ -210,6 +210,16 @@ mod lanes4 {
             let tiny = f32x4_lt(f32x4_abs(self.0), f32x4_splat(super::TINY));
             F32x4(v128_andnot(self.0, tiny))
         }
+        /// the lanes that equal those of `other`: all their bits set, else none
+        #[inline(always)]
+        pub fn equal(self, other: F32x4) -> U32x4 {
+            U32x4(f32x4_eq(self.0, other.0))
+        }
+        /// the lanes of `self` where those of `mask` are set (all their bits or none), else those of `other`
+        #[inline(always)]
+        pub fn or_else(self, mask: U32x4, other: F32x4) -> F32x4 {
+            F32x4(v128_bitselect(self.0, other.0, mask.0))
+        }
         /// the samples at[lane] and at[lane] + 1 after `base`, of each lane: the first ones, the second ones (a
         /// load of 64 bits per lane: wasm has no gather)
         ///
@@ -367,6 +377,26 @@ mod lanes4 {
         pub fn flush(self) -> F32x4 {
             F32x4(self.0.map(|x| if x.abs() < super::TINY { 0.0 } else { x }))
         }
+        #[inline(always)]
+        pub fn equal(self, other: F32x4) -> U32x4 {
+            U32x4(core::array::from_fn(|k| {
+                if self.0[k] == other.0[k] {
+                    u32::MAX
+                } else {
+                    0
+                }
+            }))
+        }
+        #[inline(always)]
+        pub fn or_else(self, mask: U32x4, other: F32x4) -> F32x4 {
+            F32x4(core::array::from_fn(|k| {
+                if mask.0[k] != 0 {
+                    self.0[k]
+                } else {
+                    other.0[k]
+                }
+            }))
+        }
         /// # Safety
         /// two f32 can be read at base + at[lane] for every lane
         #[inline(always)]
@@ -508,6 +538,12 @@ mod tests {
         assert!(max.lanes()[1].is_nan() && max.lanes()[3].is_nan());
         let rounded = F32x4::from_f64(F64x2::new(0.1, -2.5), F64x2::new(1e300, 1e-300));
         assert_eq!(rounded.lanes(), [0.1, -2.5, f32::INFINITY, 0.0]);
+        let same = a.equal(F32x4::new(1.5, 2.0, 0.25, f32::NAN));
+        assert_eq!(same.lanes(), [u32::MAX, 0, u32::MAX, 0]);
+        assert_eq!(a.or_else(same, b).lanes(), [1.5, 4.0, 0.25, 2.0]);
+        // (a NaN equals nothing, 0 equals -0)
+        let zero = F32x4::new(0.0, f32::NAN, -0.0, 1.0).equal(F32x4::new(-0.0, f32::NAN, 0.0, 1.0));
+        assert_eq!(zero.lanes(), [u32::MAX, 0, u32::MAX, u32::MAX]);
         let table = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         // SAFETY: the places and the ones after them are in the table
         let (first, second) = unsafe { F32x4::pairs_at(table.as_ptr(), [4, 0, 2, 1]) };

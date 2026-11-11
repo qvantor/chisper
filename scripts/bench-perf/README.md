@@ -13,6 +13,7 @@ npx -y -p playwright@1.50.1 node scripts/bench-perf/run.mjs --against=main   # A
 npx -y -p playwright@1.50.1 node scripts/bench-perf/run.mjs --against=HEAD   # the uncommitted changes
 npx -y -p playwright@1.50.1 node scripts/bench-perf/run.mjs                  # this tree alone: budgets, drift, ~13 min
 node scripts/bench-perf/run.mjs --only=dsp --against=main                     # the DSP in Node only, A/B: ~40 s
+node scripts/bench-perf/run.mjs --only=dsp --dsp=reverb,chord --against=main  # its cases with these in their names
 ```
 
 Options: `--against=<ref>` (a commit, branch or tag: an A/B run); `--only=` cases (`S5`, `S5s`, `SUB`, `T1`, `T2`, `L1`, `L3`), groups

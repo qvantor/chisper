@@ -1,8 +1,10 @@
 //! The stereo blocks: the left channel in the low lane, the right one in the high lane, each lane worked out as
-//! the mono block does it for its channel; the oversampling chains of the distortion in f32
+//! the mono block does it for its channel; the oversampling chain of the distortion in f32
 
 use crate::biquad::{coefficients_into, FilterType};
-use crate::consts::{DOWN8_PHASES, DOWN_PHASES, UP8_PHASES, UP_PHASES};
+use crate::consts::{
+    CASCADE_DOWN_PHASE, CASCADE_HALF_DOWN, CASCADE_HALF_UP, CASCADE_UP_LATE_PHASES, CASCADE_UP_PHASES,
+};
 use crate::fir::{dot, lanes_of, phases, TAPS};
 use crate::simd::{F32x4, F64x2};
 use crate::tanh::tanh4;
@@ -148,137 +150,285 @@ impl StereoDcBlocker {
     }
 }
 
-const HALF: usize = TAPS / 2;
+/// the points per sample of a chain
+pub const OVERSAMPLING: usize = 4;
 
-/// the points per sample of the 8× chain
-pub const OVERSAMPLING8: usize = 8;
+/// the samples a chain delays its input by: CENTER each way in its first stage, 2 in its halfbands
+pub const CHAIN_LATENCY: usize = 2 * CENTER + (HALF_UP + HALF_DOWN) / OVERSAMPLING;
+
+// the samples the sinc of the first stage reaches each way (30 of its 32 taps: the latency of the chain is the 32
+// samples of one stage of 4×), the centres of the halfbands (7 and 11 taps) in points
+const CENTER: usize = 15;
+const HALF_UP: usize = 3;
+const HALF_DOWN: usize = 5;
 
 // the taps the other way round: a window of a buffer runs forward in time
-static UP4: [[f32; TAPS]; 4] = phases(&UP_PHASES, true, 1.0);
-static UP8: [[f32; TAPS]; 8] = phases(&UP8_PHASES, true, 1.0);
-// (the average of the streams in the taps: 1 / the ratio, a power of two)
-static DOWN4: [[f32; TAPS]; 3] = phases(&DOWN_PHASES, true, 0.25);
-static DOWN8: [[f32; TAPS]; 7] = phases(&DOWN8_PHASES, true, 0.125);
+static UP: [[f32; TAPS]; 2] = phases(&CASCADE_UP_PHASES, true, 1.0);
+static UP_LATE: [[f32; TAPS]; 2] = phases(&CASCADE_UP_LATE_PHASES, true, 1.0);
+// (the average of both streams in the taps)
+static DOWN: [[f32; TAPS]; 1] = phases(&CASCADE_DOWN_PHASE, true, 0.5);
+
+// the samples of before the first stage works out again in every block, for the halfband that reads their points
+// (it keeps no points of its own: a chain that starts has those of one that ran all along)
+const BEFORE: usize = 2;
 
 /// the samples of input a chain reads before those of a block: an input buffer holds them, then the block
-pub const INPUT_CARRY: usize = TAPS - 1;
+pub const INPUT_CARRY: usize = TAPS - 1 + BEFORE;
 
-/// An oversampling chain of both channels in f32 (the oversampler.ts of the app, 4× or 8×, 32 taps a phase at the
-/// input rate, a latency of OVERSAMPLER_LATENCY): up() works out the points of a block, shape() puts a curve and
-/// the gains on them, down() brings them back to the input rate. The points of a phase are a plane of their own, in
-/// time order after the TAPS last ones of the block before, so a FIR reads a window of a slice
+// the points of before in the buffers: of the shaped planes (the halfband down), of the streams of the last stage
+const SHAPED_BEFORE: usize = 8;
+
+/// An oversampling chain of both channels in f32: 4× in two stages of 2×, a latency of CHAIN_LATENCY. up() works
+/// out the points of a block at 2× (a sinc of 30 taps a phase at the input rate), shape() those at 4× (a halfband:
+/// every other point is one of 2×, the ones between a FIR of 4 taps) with a curve and the gains on them, down()
+/// brings them back to the input rate (a halfband of 6 taps and its centre, then the sinc). The curve of a `hard`
+/// chain is the clip at ±1 antialiased (its mean between a point and the one before: an antiderivative
+/// antialiasing of the 1st order), which delays by half a point and takes off some of the top (-0.5 dB at 20 kHz
+/// under the ceiling): its first stage reads as much later and lifts the top as much.
+/// scripts/distortion-adaa/run.mjs measures the aliases of this against one stage of 4× or 8×
 pub struct Chain {
-    ratio: usize,
-    up: &'static [[f32; TAPS]],
-    down: &'static [[f32; TAPS]],
-    // [channel][phase]: TAPS + frames points (+ 3: the curve runs four at a time)
-    planes: [Vec<Vec<f32>>; 2],
+    hard: bool,
+    // of each channel: the points at 2× (BEFORE samples of before, then the block; + 4: the lanes), the shaped
+    // points at 4× by parity (SHAPED_BEFORE of before), the streams at 2× by parity (the even ones delayed to
+    // the centre of the sinc, the odd ones its window)
+    points: [Vec<f32>; 2],
+    shaped: [[Vec<f32>; 2]; 2],
+    center: [Vec<f32>; 2],
+    window: [Vec<f32>; 2],
     frames: usize,
 }
 
+// a buffer of `length` that keeps the first `kept` values of the one before
+fn grown(old: &[f32], kept: usize, length: usize) -> Vec<f32> {
+    let mut buffer = vec![0.0f32; length];
+    if old.len() >= kept {
+        buffer[..kept].copy_from_slice(&old[..kept]);
+    }
+    buffer
+}
+
+// the mean of the clip at ±1 between the points a and b: with m(x) = max(|x| - 1, 0), what a point is over the
+// ceiling, the antiderivative of the clip is x² / 2 - m(x)² / 2, so its mean is
+// (a + b) / 2 - (m(a) - m(b)) / (a - b) × (m(a) + m(b)) / 2: no difference of two near values is divided
+// (m(a) - m(b) is within a - b). The same point twice: its clip
+#[inline(always)]
+fn clip_mean(a: F32x4, b: F32x4) -> F32x4 {
+    let (one, half) = (F32x4::splat(1.0), F32x4::splat(0.5));
+    let over = |x: F32x4| (x.abs() - one).max(F32x4::default());
+    let (ma, mb) = (over(a), over(b));
+    let d = a - b;
+    let mean = (a + b) * half - (ma - mb) / d * ((ma + mb) * half);
+    a.min(one)
+        .max(F32x4::default() - one)
+        .or_else(d.equal(F32x4::default()), mean)
+}
+
 impl Chain {
-    pub fn new(ratio: usize) -> Chain {
-        let eight = ratio == OVERSAMPLING8;
+    pub fn new(hard: bool) -> Chain {
         Chain {
-            ratio,
-            up: if eight { &UP8 } else { &UP4 },
-            down: if eight { &DOWN8 } else { &DOWN4 },
-            planes: [Vec::new(), Vec::new()],
+            hard,
+            points: [Vec::new(), Vec::new()],
+            shaped: [[Vec::new(), Vec::new()], [Vec::new(), Vec::new()]],
+            center: [Vec::new(), Vec::new()],
+            window: [Vec::new(), Vec::new()],
             frames: 0,
         }
     }
 
-    /// the planes of blocks of `frames` (allocates: not while a block renders)
+    /// the buffers of blocks of `frames` (allocates: not while a block renders)
     pub fn grow(&mut self, frames: usize) {
-        if frames <= self.frames && !self.planes[0].is_empty() {
+        if frames <= self.frames && !self.points[0].is_empty() {
             return;
         }
-        for channel in self.planes.iter_mut() {
-            let mut planes = Vec::with_capacity(self.ratio);
-            for p in 0..self.ratio {
-                let mut plane = vec![0.0f32; TAPS + frames + 3];
-                if let Some(old) = channel.get(p) {
-                    plane[..TAPS].copy_from_slice(&old[..TAPS]);
-                }
-                planes.push(plane);
+        for channel in 0..2 {
+            self.points[channel] = vec![0.0f32; 2 * (BEFORE + frames) + 4];
+            for plane in self.shaped[channel].iter_mut() {
+                *plane = grown(plane, SHAPED_BEFORE, SHAPED_BEFORE + 2 * frames + 4);
             }
-            *channel = planes;
+            self.center[channel] = grown(&self.center[channel], CENTER, CENTER + frames + 2);
+            self.window[channel] = grown(&self.window[channel], TAPS, TAPS + frames + 2);
         }
         self.frames = frames;
     }
 
-    /// the points of a block: `input` of each channel is INPUT_CARRY samples of before, then the frames
+    /// the points at 2× of a block: `input` of each channel is INPUT_CARRY samples of before, then the frames
     pub fn up(&mut self, input: [&[f32]; 2], frames: usize) {
-        for (channel, input) in self.planes.iter_mut().zip(input) {
+        let taps = if self.hard { &UP_LATE } else { &UP };
+        let taps = [lanes_of(&taps[0]), lanes_of(&taps[1])];
+        for (points, input) in self.points.iter_mut().zip(input) {
             let input = &input[..INPUT_CARRY + frames];
-            for (plane, taps) in channel.iter_mut().zip(self.up) {
-                let taps = lanes_of(taps);
-                for (s, point) in plane[TAPS..TAPS + frames].iter_mut().enumerate() {
-                    *point = dot(&input[s..], &taps);
-                }
+            for (s, pair) in points[..2 * (BEFORE + frames)].chunks_exact_mut(2).enumerate() {
+                pair[0] = dot(&input[s..], &taps[0]);
+                pair[1] = dot(&input[s..], &taps[1]);
             }
         }
     }
 
-    /// curve(point) × the gain of its sample on the points of the block: tanh, or a clip at ±1 (`hard`).
-    /// `gains` holds frames + 3 values
-    pub fn shape(&mut self, hard: bool, gains: &[f32], frames: usize) {
-        let (low, high) = (F32x4::splat(-1.0), F32x4::splat(1.0));
-        for plane in self.planes.iter_mut().flatten() {
-            let points = &mut plane[TAPS..];
-            let mut s = 0;
-            while s < frames {
-                let x = F32x4::load(&points[s..]);
-                let y = if hard { x.min(high).max(low) } else { tanh4(x) };
-                (y * F32x4::load(&gains[s..])).store(&mut points[s..]);
-                s += 4;
+    /// The points at 4× of the block with the curve and the gain of their sample on them: tanh, or the mean of
+    /// the clip (a `hard` chain). `gains` holds frames + 3 values. The even points are a FIR of the points at 2×
+    /// (the halfband: 4 taps), the odd ones those points themselves, 1 before
+    pub fn shape(&mut self, gains: &[f32], frames: usize) {
+        let [c0, c1] = HALF_UP_TAPS.map(F32x4::splat);
+        for (points, [even, odd]) in self.points.iter().zip(self.shaped.iter_mut()) {
+            let (even, odd) = (&mut even[SHAPED_BEFORE..], &mut odd[SHAPED_BEFORE..]);
+            let mut j = 0;
+            while j < 2 * frames {
+                // point j of the block is 2 × BEFORE + j of the buffer
+                let at = |k: usize| F32x4::load(&points[2 * BEFORE + j - k..]);
+                let e = (at(0) + at(3)) * c0 + (at(1) + at(2)) * c1;
+                let o = at(1);
+                let (g0, g1) = (gains[j / 2], gains[j / 2 + 1]);
+                let gain = F32x4::new(g0, g0, g1, g1);
+                let (e, o) = if self.hard {
+                    // (in time: the odd point before, the even one, the odd one)
+                    (clip_mean(e, at(2)), clip_mean(o, e))
+                } else {
+                    (tanh4(e), tanh4(o))
+                };
+                (e * gain).store(&mut even[j..]);
+                (o * gain).store(&mut odd[j..]);
+                j += 4;
             }
         }
     }
 
     /// points of 0 for the block (a chain that stopped empties its decimator)
     pub fn silence(&mut self, frames: usize) {
-        for plane in self.planes.iter_mut().flatten() {
-            plane[TAPS..TAPS + frames].fill(0.0);
+        for plane in self.shaped.iter_mut().flatten() {
+            plane[SHAPED_BEFORE..SHAPED_BEFORE + 2 * frames].fill(0.0);
         }
     }
 
-    /// the points of the block back at the input rate into (or added to) output[channel][0..frames): point q of a
-    /// step weighed with phase ratio - q of the sinc cut at the nyquist, phase 0 the center point alone, the
-    /// streams averaged. The block is then the one before
+    /// The points of the block back at the input rate into (or added to) output[channel][0..frames): the halfband
+    /// (6 taps of the even points and the odd one at its centre) brings them to 2×, then the sinc cut at the
+    /// nyquist (the even stream at its centre alone, the odd one through its taps), the streams averaged. The
+    /// block is then the one before
     pub fn down(&mut self, output: [&mut [f32]; 2], frames: usize, add: bool) {
-        let center = 1.0 / self.ratio as f32;
-        for (channel, output) in self.planes.iter_mut().zip(output) {
-            let output = &mut output[..frames];
-            for (s, out) in output.iter_mut().enumerate() {
-                let value = center * channel[0][s + HALF];
+        let [h0, h1, h2] = HALF_DOWN_TAPS.map(F32x4::splat);
+        let half = F32x4::splat(0.5);
+        let taps = lanes_of(&DOWN[0]);
+        let streams = self.center.iter_mut().zip(self.window.iter_mut());
+        for (([even, odd], (center, window)), output) in self.shaped.iter_mut().zip(streams).zip(output) {
+            let mut j = 0;
+            while j < 2 * frames {
+                let at = |k: usize| F32x4::load(&even[SHAPED_BEFORE + j - k..]);
+                let sum = ((at(0) + at(5)) * h0 + (at(1) + at(4)) * h1) + (at(2) + at(3)) * h2;
+                let [u0, u1, u2, u3] = (F32x4::load(&odd[SHAPED_BEFORE + j - 3..]) * half + sum).lanes();
+                let s = j / 2;
+                center[CENTER + s] = u0;
+                window[TAPS + s] = u1;
+                center[CENTER + s + 1] = u2;
+                window[TAPS + s + 1] = u3;
+                j += 4;
+            }
+            for (s, out) in output[..frames].iter_mut().enumerate() {
+                let value = 0.5 * center[s];
                 *out = if add { *out + value } else { value };
+                *out += dot(&window[s..], &taps);
             }
-            for q in 1..self.ratio {
-                let taps = lanes_of(&self.down[self.ratio - 1 - q]);
-                let plane = &channel[q][..TAPS + frames];
-                for (s, out) in output.iter_mut().enumerate() {
-                    *out += dot(&plane[s..], &taps);
-                }
+            for plane in [even, odd] {
+                plane.copy_within(2 * frames..2 * frames + SHAPED_BEFORE, 0);
             }
-            for plane in channel.iter_mut() {
-                plane.copy_within(frames..frames + TAPS, 0);
-            }
+            center.copy_within(frames..frames + CENTER, 0);
+            window.copy_within(frames..frames + TAPS, 0);
         }
     }
 
     /// no points of before: the decimator at 0 (a chain that starts, or cleared)
     pub fn clear(&mut self) {
-        for plane in self.planes.iter_mut().flatten() {
-            plane[..TAPS].fill(0.0);
+        for plane in self.shaped.iter_mut().flatten() {
+            plane[..SHAPED_BEFORE].fill(0.0);
+        }
+        for channel in 0..2 {
+            self.center[channel][..CENTER].fill(0.0);
+            self.window[channel][..TAPS].fill(0.0);
         }
     }
 }
+
+// the even taps of the halfbands in f32 (the first half: they are symmetric)
+static HALF_UP_TAPS: [f32; 2] = [CASCADE_HALF_UP[0] as f32, CASCADE_HALF_UP[1] as f32];
+static HALF_DOWN_TAPS: [f32; 3] = [
+    CASCADE_HALF_DOWN[0] as f32,
+    CASCADE_HALF_DOWN[1] as f32,
+    CASCADE_HALF_DOWN[2] as f32,
+];
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::biquad::Biquad;
+
+    #[test]
+    fn the_mean_of_the_clip_between_two_points() {
+        // against the integral of the clip worked out in steps, in doubles
+        let exact = |a: f64, b: f64| {
+            if a == b {
+                return a.clamp(-1.0, 1.0);
+            }
+            let steps = 20000;
+            let sum: f64 = (0..steps)
+                .map(|k| (b + (a - b) * (k as f64 + 0.5) / steps as f64).clamp(-1.0, 1.0))
+                .sum();
+            sum / steps as f64
+        };
+        let points = [
+            -3.7, -1.000001, -1.0, -0.99, -0.3, -1e-7, 0.0, 1e-7, 0.4, 0.999999, 1.0, 1.0000001, 1.3, 2.0,
+            3.9,
+        ];
+        for &a in &points {
+            for &b in &points {
+                let mean = clip_mean(F32x4::splat(a), F32x4::splat(b)).lanes();
+                assert!(
+                    (mean[0] as f64 - exact(a as f64, b as f64)).abs() < 2e-7,
+                    "{a} {b}: {}",
+                    mean[0]
+                );
+                assert_eq!(mean[0].to_bits(), mean[3].to_bits());
+            }
+        }
+        // each lane its own points: the same one twice next to others
+        let mean = clip_mean(F32x4::new(0.5, 2.0, -3.0, 0.2), F32x4::new(0.5, 2.0, -3.0, 0.4)).lanes();
+        assert_eq!(
+            mean,
+            [
+                0.5,
+                1.0,
+                -1.0,
+                clip_mean(F32x4::splat(0.2), F32x4::splat(0.4)).lanes()[0]
+            ]
+        );
+    }
+
+    #[test]
+    fn a_chain_passes_a_sound_under_the_ceiling_delayed_by_its_latency() {
+        for hard in [false, true] {
+            let frames = 256;
+            let mut chain = Chain::new(hard);
+            chain.grow(frames);
+            // a quiet sine of 1 kHz at 48 kHz: tanh and the clip are the sound itself there
+            let wave = |i: usize| 1e-3 * jsmath::sin(2.0 * PI * 1000.0 * i as f64 / 48000.0);
+            let input: Vec<f32> = (0..INPUT_CARRY + 2 * frames).map(|i| wave(i) as f32).collect();
+            let gains = vec![1.0f32; frames + 3];
+            let (mut left, mut right) = (vec![0.0f32; frames], vec![0.0f32; frames]);
+            for block in 0..2 {
+                let window = &input[block * frames..];
+                chain.up([window, window], frames);
+                chain.shape(&gains, frames);
+                chain.down([&mut left, &mut right], frames, false);
+            }
+            for s in 0..frames {
+                // sample s of the second block: INPUT_CARRY + frames + s of the input
+                let dry = wave(INPUT_CARRY + frames + s - CHAIN_LATENCY);
+                assert!(
+                    (left[s] as f64 - dry).abs() < 3e-6,
+                    "{hard} {s}: {} {dry}",
+                    left[s]
+                );
+                assert_eq!(left[s].to_bits(), right[s].to_bits());
+            }
+        }
+    }
 
     #[test]
     fn the_lanes_of_a_biquad_are_a_biquad_each() {

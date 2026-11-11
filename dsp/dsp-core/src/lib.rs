@@ -13,7 +13,6 @@ pub mod blocks;
 pub mod consts;
 pub mod fir;
 pub mod io;
-pub mod oversampler;
 pub mod simd;
 pub mod stereo;
 pub mod tanh;

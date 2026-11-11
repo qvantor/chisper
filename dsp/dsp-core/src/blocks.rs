@@ -39,7 +39,12 @@ impl<const LANES: usize> Lines<LANES> {
     /// the lines at the delays of the lanes of `delay` (lanes 0 and 1, then 2 and 3)
     #[inline(always)]
     pub fn read(&self, delay: [F64x2; 2]) -> F32x4 {
-        let (index, two) = (F64x2::splat(self.index as f64), F64x2::splat(2.0));
+        self.read_from(self.index, delay)
+    }
+
+    #[inline(always)]
+    fn read_from(&self, index: i32, delay: [F64x2; 2]) -> F32x4 {
+        let (index, two) = (F64x2::splat(index as f64), F64x2::splat(2.0));
         let (lo, hi) = (index - two.max(delay[0]), index - two.max(delay[1]));
         let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
         let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
@@ -87,6 +92,155 @@ impl Lines<4> {
         let sum = input + gain * delayed;
         self.write(sum);
         delayed - gain * sum
+    }
+}
+
+/// Four delay lines in f32, each a ring of its own (`Lines<4>` keeps their samples side by side), so four samples
+/// in a row of a line are one load: its reads and writes go four samples of time in the lanes (read4, write4)
+/// where those of `Lines<4>` go four lines. A read is the one of `Lines::read`, sample by sample: the same place,
+/// the same hermite, the same bits. The lines are written together (`advance`); the first GUARD samples of a ring
+/// are kept after its end too, so the taps of a read never wrap
+pub struct Rows {
+    buffer: Vec<f32>,
+    stride: usize,
+    size: usize,
+    mask: i32,
+    index: i32,
+}
+
+const GUARD: usize = 8;
+
+impl Rows {
+    pub fn new(max_delay: f64) -> Rows {
+        let size = power_of_two_above(max_delay + 4.0);
+        Rows {
+            buffer: vec![0.0; 4 * (size + GUARD)],
+            stride: size + GUARD,
+            size,
+            mask: size as i32 - 1,
+            index: 0,
+        }
+    }
+
+    /// line `row` at four samples in a row, the first `ahead` writes from now, each at its delay: what
+    /// `Lines::read` gives one after the other (if what they read is written: delay > 5 of what their group
+    /// writes, more than `ahead` + 5 of what is written after)
+    #[inline(always)]
+    pub fn read4(&self, row: usize, ahead: usize, delay: [F64x2; 2]) -> F32x4 {
+        let first = (self.index + ahead as i32) & self.mask;
+        let two = F64x2::splat(2.0);
+        if first + 3 <= self.mask {
+            let at = first as f64;
+            let (lo, hi) = (
+                F64x2::new(at, at + 1.0) - two.max(delay[0]),
+                F64x2::new(at + 2.0, at + 3.0) - two.max(delay[1]),
+            );
+            let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
+            let i = floor_lo.lo() as i32;
+            // their places one after the other (delays that glide: almost always): the taps of all four in a
+            // row of the ring, from the one before the first
+            let in_a_row = floor_lo.hi() as i32 == i.wrapping_add(1)
+                && floor_hi.lo() as i32 == i.wrapping_add(2)
+                && floor_hi.hi() as i32 == i.wrapping_add(3);
+            if in_a_row {
+                let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
+                let from = row * self.stride + (i.wrapping_sub(1) & self.mask) as usize;
+                let taps = &self.buffer[from..from + 7];
+                return hermite4(
+                    F32x4::load(taps),
+                    F32x4::load(&taps[1..]),
+                    F32x4::load(&taps[2..]),
+                    F32x4::load(&taps[3..]),
+                    t,
+                );
+            }
+        }
+        self.read_each(row, first, delay)
+    }
+
+    // read4 where its samples are not in a row (the index wraps in the group, a delay jumps or is not a number):
+    // each on its own. Rare: a function of its own, not in the loops of read4
+    #[inline(never)]
+    fn read_each(&self, row: usize, first: i32, delay: [F64x2; 2]) -> F32x4 {
+        let two = F64x2::splat(2.0);
+        let index = |k: i32| ((first + k) & self.mask) as f64;
+        let (lo, hi) = (
+            F64x2::new(index(0), index(1)) - two.max(delay[0]),
+            F64x2::new(index(2), index(3)) - two.max(delay[1]),
+        );
+        let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
+        let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
+        let i = [
+            floor_lo.lo() as i32,
+            floor_lo.hi() as i32,
+            floor_hi.lo() as i32,
+            floor_hi.hi() as i32,
+        ];
+        let at = |j: i32| {
+            let sample =
+                |k: usize| self.buffer[row * self.stride + (i[k].wrapping_add(j) & self.mask) as usize];
+            F32x4::new(sample(0), sample(1), sample(2), sample(3))
+        };
+        hermite4(at(-1), at(0), at(1), at(2), t)
+    }
+
+    /// four samples in a row of line `row`, the first `ahead` writes from now (what is too small to sound as 0)
+    #[inline(always)]
+    pub fn write4(&mut self, row: usize, ahead: usize, value: F32x4) {
+        let value = value.flush();
+        let first = ((self.index + ahead as i32) & self.mask) as usize;
+        if first >= GUARD && first + 4 <= self.size {
+            let from = row * self.stride + first;
+            value.store(&mut self.buffer[from..from + 4]);
+            return;
+        }
+        self.write_each(row, first, value);
+    }
+
+    // write4 at the ends of the ring (its guard, its wrap): each sample on its own
+    #[inline(never)]
+    fn write_each(&mut self, row: usize, first: usize, value: F32x4) {
+        let line = &mut self.buffer[row * self.stride..(row + 1) * self.stride];
+        for (k, sample) in value.lanes().into_iter().enumerate() {
+            let place = (first + k) & (self.size - 1);
+            line[place] = sample;
+            if place < GUARD {
+                line[self.size + place] = sample;
+            }
+        }
+    }
+
+    /// a sample of line `row`, `ahead` writes from now
+    #[inline(always)]
+    pub fn write1(&mut self, row: usize, ahead: usize, value: f32) {
+        let place = ((self.index + ahead as i32) & self.mask) as usize;
+        let sample = if value.abs() < TINY { 0.0 } else { value };
+        self.buffer[row * self.stride + place] = sample;
+        if place < GUARD {
+            self.buffer[row * self.stride + self.size + place] = sample;
+        }
+    }
+
+    /// a sample of each line, `ahead` writes from now
+    #[inline(always)]
+    pub fn write(&mut self, ahead: usize, value: F32x4) {
+        let place = ((self.index + ahead as i32) & self.mask) as usize;
+        for (row, sample) in value.flush().lanes().into_iter().enumerate() {
+            self.buffer[row * self.stride + place] = sample;
+            if place < GUARD {
+                self.buffer[row * self.stride + self.size + place] = sample;
+            }
+        }
+    }
+
+    /// `frames` samples of every line are written: the next ones come after them
+    #[inline(always)]
+    pub fn advance(&mut self, frames: usize) {
+        self.index = (self.index + frames as i32) & self.mask;
+    }
+
+    pub fn clear(&mut self) {
+        self.buffer.fill(0.0);
     }
 }
 
@@ -328,6 +482,84 @@ mod tests {
                 core::array::from_fn(|lane| exact[lane].read(of[lane])),
             );
         }
+    }
+
+    // Rows against Lines<4>, to the bit: the samples of a line four in a row (delays that glide, jump, sit at the
+    // clamp, are not numbers; over the wrap of the ring and of its index), an allpass in groups of four
+    #[test]
+    fn rows_read_and_write_as_four_lines_do() {
+        let mut next = noise(5);
+        let (mut lines, mut allpasses) = (Lines::<4>::new(300.0), Lines::<4>::new(300.0));
+        let (mut rows, mut turned) = (Rows::new(300.0), Rows::new(300.0));
+        let bits = |values: [f32; 4]| values.map(f32::to_bits);
+        let mut glide: [f64; 4] = [40.3, 7.0, 150.9, 299.0];
+        for group in 0..3000 {
+            // the delays of the four samples of each line: gliding, with a jump or a NaN now and then
+            let delays: [[f64; 4]; 4] = core::array::from_fn(|row| {
+                core::array::from_fn(|k| {
+                    glide[row] += 0.37 * next();
+                    glide[row] = glide[row].clamp(6.5, 299.5);
+                    match (group + row) % 97 {
+                        13 if k == 2 => 250.0 * (next() + 1.0) / 2.0 + 6.0,
+                        29 => f64::NAN,
+                        _ => glide[row],
+                    }
+                })
+            });
+            let inputs: [[f32; 4]; 4] = core::array::from_fn(|_| core::array::from_fn(|_| next() as f32));
+            // sample after sample, four lines in the lanes
+            let mut read = [[0.0f32; 4]; 4];
+            let mut passed = [[0.0f32; 4]; 4];
+            for k in 0..4 {
+                let delay = [
+                    F64x2::new(delays[0][k], delays[1][k]),
+                    F64x2::new(delays[2][k], delays[3][k]),
+                ];
+                let delayed = lines.read(delay);
+                let out = allpasses.allpass(delayed, delay, F32x4::splat(0.5)).lanes();
+                for row in 0..4 {
+                    read[row][k] = delayed.lanes()[row];
+                    passed[row][k] = out[row];
+                }
+                lines.write(F32x4::new(inputs[0][k], inputs[1][k], inputs[2][k], inputs[3][k]));
+            }
+            // line after line, four samples in the lanes
+            for row in 0..4 {
+                let delay = [
+                    F64x2::new(delays[row][0], delays[row][1]),
+                    F64x2::new(delays[row][2], delays[row][3]),
+                ];
+                let delayed = rows.read4(row, 0, delay);
+                assert_eq!(bits(delayed.lanes()), bits(read[row]), "group {group} line {row}");
+                let behind = turned.read4(row, 0, delay);
+                let sum = delayed + F32x4::splat(0.5) * behind;
+                turned.write4(row, 0, sum);
+                let out = behind - F32x4::splat(0.5) * sum;
+                assert_eq!(
+                    bits(out.lanes()),
+                    bits(passed[row]),
+                    "allpass, group {group} line {row}"
+                );
+            }
+            for k in 0..4 {
+                rows.write(
+                    k,
+                    F32x4::new(inputs[0][k], inputs[1][k], inputs[2][k], inputs[3][k]),
+                );
+            }
+            rows.advance(4);
+            turned.advance(4);
+        }
+    }
+
+    #[test]
+    fn rows_hold_no_denormals() {
+        let mut rows = Rows::new(64.0);
+        rows.write4(1, 0, F32x4::new(1e-30, -1e-39, 0.5, -1e-26));
+        rows.write(4, F32x4::splat(1e-38));
+        rows.write1(2, 5, 1e-40);
+        assert!(rows.buffer.iter().all(|x| *x == 0.0 || x.abs() >= TINY));
+        assert_eq!(rows.buffer.iter().filter(|x| **x != 0.0).count(), 2);
     }
 
     #[test]

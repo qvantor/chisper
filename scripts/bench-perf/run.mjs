@@ -3,7 +3,8 @@
 // the latency of the notes from the test hook of the page — and the signal processing in Node; regressions
 // against the baseline of the machine fail, budgets warn. What needs no browser is in the Jest specs:
 //   npx -y -p playwright@1.50.1 node scripts/bench-perf/run.mjs [--against=<ref>] [--browsers=chromium,webkit]
-//     [--only=S5,L1,L3,dsp|cpu|latency] [--runs=5] [--update-baseline] [--headless] [--keep-traces]
+//     [--only=S5,L1,L3,dsp|cpu|latency] [--dsp=reverb,chord] [--runs=5] [--update-baseline] [--headless]
+//     [--keep-traces]
 //     [--dump-trace] [--rebuild]
 // --against: an A/B run, the code of the commit <ref> (main, HEAD: the uncommitted changes) and the working tree
 // alternate in one session; only its regressions fail (a baseline of another session only warns of drift)
@@ -257,7 +258,7 @@ const main = async () => {
     }
     if (dsp) {
       console.log(`dsp: micro-benchmarks in Node${reference ? `, against ${reference.short}` : ''}…`);
-      results.dsp = await runDspBenchmarks({ reference });
+      results.dsp = await runDspBenchmarks({ reference, names: args.dsp?.split(',') });
     }
     if (cases.length) {
       const playwright = loadPlaywright();

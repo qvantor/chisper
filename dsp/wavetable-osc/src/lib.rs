@@ -484,6 +484,16 @@ pub unsafe extern "C" fn osc_scope_tap_data(scope: *mut Scope) -> *mut f32 {
     (*scope).taps.as_mut_ptr()
 }
 
+/// voice `id` traps as it finishes its blocks from now on (the specs: only the perf build has it)
+///
+/// # Safety
+/// `scope` comes from osc_scope_new and was not freed
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub unsafe extern "C" fn osc_scope_trap(scope: *mut Scope, id: f64) {
+    (*scope).set_trap(id);
+}
+
 /// the voices of the scope and the events their timelines hold, into the command buffer
 ///
 /// # Safety

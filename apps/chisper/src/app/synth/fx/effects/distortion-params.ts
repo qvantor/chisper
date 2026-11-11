@@ -22,9 +22,9 @@ export interface DistortionMessage {
   params?: Partial<DistortionDspParams>;
 }
 
-// samples the output lags the input: the oversampling filters (4× and the 8× of the hard clip, 32 taps a phase
-// at the input rate each) are linear phase, the fx slot delays the dry signal as much, so the mix doesn't comb
-// filter
+// samples the output lags the input: the oversampling filters (4× in two stages: 15 samples each way in the sincs
+// of the first, 2 in the halfbands of the second; the hard clip reads its points as much later as its
+// antialiasing delays) are linear phase, the fx slot delays the dry signal as much, so the mix doesn't comb filter
 export const DISTORTION_LATENCY = 32;
 
 // the top of the tone range (FX_PARAMS.distortion.tone.max, not imported: it would bundle zod) is open: the

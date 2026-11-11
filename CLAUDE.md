@@ -81,12 +81,15 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
 - **Deterministic DSP.** A core gives the same bits in every browser and in Node (`scripts/wasm-browsers/run.mjs`),
   so: no `mul_add`, no fast-math, no relaxed-simd, wasm-opt never with fast-math. The hot loops run in f32 lanes
   with their sums in an order of their own (`F32x4`/`U32x4` of `dsp-core/src/simd.rs`: FIRs of `fir.rs`, the
-  rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators); the native variant of a
+  rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators, the filters of two voices);
+  the native variant of a
   lane type does the same operations in the same order (cargo tests compute the bits of the wasm). Math per block
   goes through `dsp/jsmath` (`dsp/clippy.toml` disallows `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…).
-  What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut, voice filter), the gain
-  path of the limiter, the delays of the reverb lines, the phase a voice keeps between spans (a whole number of
-  2^-52 of a cycle). A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
+  What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut; the filter of a voice
+  is a state variable filter, which holds a low cutoff in f32), the gain path of the limiter, the delays of the
+  reverb lines, the phase a voice keeps between spans (a whole number of 2^-52 of a cycle). A pass that reorders
+  a loop (the chunks of the reverb, the voices filtered in pairs) gives the bits of the plain order: its cargo
+  test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
   flush-to-zero). Any change of the bits is an explicit golden update, checked by the quality specs with their
   tolerances as they are and by `node scripts/null-test/run.mjs --against=<ref>` (the difference from a commit, dB
   under the signal). Goldens specs import `test-utils/js-math.ts` first.
@@ -168,7 +171,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - FX (`synth/fx/`): effects are defined in `FX_REGISTRY` (`fx/effects/`) with params/ranges from `FX_PARAMS` of
   `libs/preset-schema`; a new effect type = a registry entry + its preset schema. `createFxSlot` wraps each (mix
   crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, delay, reverb).
-  Delay is native nodes; reverb (16-line FDN) and distortion (4×/8× oversampled) are wasm worklets.
+  Delay is native nodes; reverb (16-line FDN) and distortion (4× oversampled in two stages, the hard clip
+  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables) are wasm worklets.
 - Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
   destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
   module fails, the app works without that effect; until `ready` a slot passes only the dry signal.
@@ -185,8 +189,9 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `sending`/`stored`/`refused`/`failed` in `$tables`; versions only grow.
 - `createVoice(options, values)` gives a `VoiceHandle` whose params mimic AudioParam calls; each call is an event
   of the voices node, a task's events go in one message (by a microtask). The node reports `started`/`ended`.
-  A trap in a voice ends only that voice.
-- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node), `voice.rs`, `source.rs` (oscillators,
+  A trap in a voice (as it renders or as its filter finishes its block; two filtered in the lanes of one end both)
+  ends only that voice.
+- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node, filtered in pairs), `voice.rs`, `source.rs` (oscillators,
   noise and sub as slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
   `envelope.rs`, `lfo.rs`, `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `sub.rs`, `store.rs`,
   `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids). Options/messages:
@@ -227,7 +232,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 ### Rust cores (`dsp/`)
 
 - One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `limiter`, `reverb`,
-  `distortion`, `wavetable-osc`; shared crates `dsp-core` (biquads, oversampler, true peak, delay blocks, `F64x2`
+  `distortion`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
   lanes), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.
 - A bundle `<name>.worklet.ts` registers its processors (names in `common/processors.ts`); its facade

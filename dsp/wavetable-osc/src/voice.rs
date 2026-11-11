@@ -3,7 +3,7 @@
 //! into one stereo output (ported from the TS; the loops that read the tables are in fixed point and f32 lanes)
 
 use crate::envelope::{EnvelopeBlock, EnvelopeParams};
-use crate::filter::{FilterOptions, VoiceFilter};
+use crate::filter::{self, FilterOptions, VoiceFilter};
 use crate::lfo::{LfoBlock, LfoGlobal, DELAY, KNOBS, LFOS, RATE, RISE, SMOOTH};
 use crate::modulation::{lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
 use crate::noise::{Noise, NoiseOptions};
@@ -507,6 +507,44 @@ impl Reader {
         // SAFETY: i < the length of the frame (the top bits of a phase), base holds length + 1 samples
         let (now, next) = unsafe { F32x4::pairs_at(base, i) };
         now + (next - now) * f
+    }
+}
+
+// a channel of the bus and its centre over a..b into an output × the volume (ENV 1 × the amp of the velocity), four
+// samples in the lanes: (side + centre) × volume in f32, each sample the same operations wherever its group starts
+fn mix_out(out: &mut [f32], side: &[f32], center: &[f32], a: usize, b: usize, volume: &Volume) {
+    let (out, side, center) = (&mut out[..b], &side[..b], &center[..b]);
+    if volume.constant() && volume.gain == 1.0 {
+        // (× 1 changes no bit: the sum alone)
+        for i in a..b {
+            out[i] = side[i] + center[i];
+        }
+        return;
+    }
+    let mut s = a;
+    while s + 4 <= b {
+        let sum = F32x4::load(&side[s..s + 4]) + F32x4::load(&center[s..s + 4]);
+        (sum * volume.lanes(s)).store(&mut out[s..s + 4]);
+        s += 4;
+    }
+    for i in s..b {
+        out[i] = (side[i] + center[i]) * volume.at32(i);
+    }
+}
+
+// an output over a..b × the volume, as mix_out does
+fn scale_out(out: &mut [f32], a: usize, b: usize, volume: &Volume) {
+    if volume.constant() && volume.gain == 1.0 {
+        return;
+    }
+    let out = &mut out[..b];
+    let mut s = a;
+    while s + 4 <= b {
+        (F32x4::load(&out[s..s + 4]) * volume.lanes(s)).store(&mut out[s..s + 4]);
+        s += 4;
+    }
+    for i in s..b {
+        out[i] *= volume.at32(i);
     }
 }
 
@@ -1644,6 +1682,8 @@ pub struct Voice {
     phrase: f64,
     started: bool,
     pub ended: bool,
+    // it traps as it finishes a block (set_trap: the specs of the perf build)
+    trap: bool,
     block_frame: f64,
     pub started_at: f64,
     unison: f64,
@@ -1736,6 +1776,7 @@ impl Voice {
             phrase: options.phrase,
             started: false,
             ended: false,
+            trap: false,
             block_frame: 0.0,
             started_at: -1.0,
             unison: 0.0,
@@ -1828,6 +1869,12 @@ impl Voice {
         // the versions of every source first: they release nothing that allocates, the mixes may
         each_source!(self.slots, source => source.release(store));
         each_source!(self.slots, source => source.free(shared));
+    }
+
+    /// the voice traps as it finishes its blocks from now on (the specs: a trap past its render)
+    #[cfg(feature = "perf")]
+    pub fn set_trap(&mut self) {
+        self.trap = true;
     }
 
     /// a voice of mono: it lives on RELEASE_LEAD after the end of its release (silent, its phases running), so a
@@ -1972,12 +2019,33 @@ impl Voice {
         store: &mut Store,
         shared: &mut Shared,
     ) -> bool {
+        let (playing, filtered) = self.render(frame, params, bend, out_l, out_r, store, shared);
+        if let Some((a, b)) = filtered {
+            self.finish(frame, a, b, out_l, out_r);
+        }
+        playing
+    }
+
+    /// The block of `process` up to the filter: whether the voice still plays and, with its filter on, the a..b
+    /// its channels hold unfiltered (silence around them), for `finish` or `finish_pair` to end the block. The
+    /// voices of a node finish in pairs: the filters of two in the lanes of one
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        &mut self,
+        frame: f64,
+        params: &Params,
+        bend: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        store: &mut Store,
+        shared: &mut Shared,
+    ) -> (bool, Option<(usize, usize)>) {
         let n = out_l.len();
         let nf = n as f64;
         if self.ended {
             out_l.fill(0.0);
             out_r.fill(0.0);
-            return false;
+            return (false, None);
         }
         self.grow(n, shared);
         self.block_frame = frame;
@@ -1986,7 +2054,7 @@ impl Voice {
         if a >= nf {
             out_l.fill(0.0);
             out_r.fill(0.0);
-            return true;
+            return (true, None);
         }
         if !self.started {
             self.start(params, a as usize, store, shared);
@@ -2082,33 +2150,73 @@ impl Voice {
         }
         out_l.fill(0.0);
         out_r.fill(0.0);
-        // ENV 1 × the amp of the velocity, in the same pass (at an amp of 1: the output of ENV 1, to the bit)
-        let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
         let s = &shared.scratch.bus;
-        if self.filter.on {
-            let moved = [CUTOFF, RESONANCE, FILTER_GAIN]
-                .map(|knob| self.modulation.moved(targets::target(FILTER, 0, knob)));
-            self.filter
-                .process((&s.left, &s.right, &s.center), out_l, out_r, a, b, volume, moved);
-        } else if volume.constant() && volume.gain == 1.0 {
-            for i in a..b {
-                out_l[i] = (s.left[i] as f64 + s.center[i] as f64) as f32;
-                out_r[i] = (s.right[i] as f64 + s.center[i] as f64) as f32;
-            }
-        } else if volume.constant() {
-            let g = volume.gain;
-            for i in a..b {
-                out_l[i] = ((s.left[i] as f64 + s.center[i] as f64) * g) as f32;
-                out_r[i] = ((s.right[i] as f64 + s.center[i] as f64) * g) as f32;
-            }
+        let filtered = self.filter.on.then_some((a, b));
+        if filtered.is_some() {
+            // the channels as they are: through the filter, then × the volume (finish)
+            mix_out(out_l, &s.left, &s.center, a, b, &Volume::UNITY);
+            mix_out(out_r, &s.right, &s.center, a, b, &Volume::UNITY);
         } else {
-            for i in a..b {
-                let g = volume.at(i);
-                out_l[i] = ((s.left[i] as f64 + s.center[i] as f64) * g) as f32;
-                out_r[i] = ((s.right[i] as f64 + s.center[i] as f64) * g) as f32;
-            }
+            // ENV 1 × the amp of the velocity, in the same pass (at an amp of 1: the output of ENV 1, to the bit)
+            let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
+            mix_out(out_l, &s.left, &s.center, a, b, &volume);
+            mix_out(out_r, &s.right, &s.center, a, b, &volume);
+            self.fade(frame, a, b, out_l, out_r);
         }
-        // the fade of a stolen voice: a raised cosine from 1 at killFrom to 0 at the stop
+        if self.stop_frame - frame <= nf {
+            self.end(store, shared);
+            return (false, filtered);
+        }
+        (true, filtered)
+    }
+
+    /// the end of a block `render` left unfiltered over a..b: the filter, ENV 1 × the amp of the velocity, the
+    /// fade of a stolen voice
+    pub fn finish(&mut self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
+        filter::run(
+            &mut self.filter.pass(a, b, filter_moved(&self.modulation)),
+            out_l,
+            out_r,
+        );
+        self.volume(frame, a, b, out_l, out_r);
+    }
+
+    /// `finish` of two voices (their a..b, their channels of n samples): both filters in the lanes of one, each
+    /// voice the bits of its own `finish`
+    pub fn finish_pair(
+        voices: [&mut Voice; 2],
+        frame: f64,
+        spans: [(usize, usize); 2],
+        outs: [[&mut [f32]; 2]; 2],
+        n: usize,
+    ) {
+        let [p, q] = voices;
+        let [[pl, pr], [ql, qr]] = outs;
+        filter::run_pair(
+            [
+                &mut p.filter.pass(spans[0].0, spans[0].1, filter_moved(&p.modulation)),
+                &mut q.filter.pass(spans[1].0, spans[1].1, filter_moved(&q.modulation)),
+            ],
+            [[&mut *pl, &mut *pr], [&mut *ql, &mut *qr]],
+            n,
+        );
+        p.volume(frame, spans[0].0, spans[0].1, pl, pr);
+        q.volume(frame, spans[1].0, spans[1].1, ql, qr);
+    }
+
+    // the filtered channels × ENV 1 × the amp of the velocity, then the fade of a stolen voice
+    fn volume(&self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
+        if cfg!(feature = "perf") && self.trap {
+            panic!();
+        }
+        let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
+        scale_out(out_l, a, b, &volume);
+        scale_out(out_r, a, b, &volume);
+        self.fade(frame, a, b, out_l, out_r);
+    }
+
+    // the fade of a stolen voice: a raised cosine from 1 at killFrom to 0 at the stop
+    fn fade(&self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
         if self.kill_from != f64::INFINITY {
             let from = max(a as f64, self.kill_from - frame);
             let mut i = from;
@@ -2120,12 +2228,12 @@ impl Voice {
                 i += 1.0;
             }
         }
-        if self.stop_frame - frame <= nf {
-            self.end(store, shared);
-            return false;
-        }
-        true
     }
+}
+
+// the knobs of the filter the routes move (cutoff, resonance, gain), None: its base
+fn filter_moved(modulation: &Modulation) -> [Option<&[f32]>; 3] {
+    [CUTOFF, RESONANCE, FILTER_GAIN].map(|knob| modulation.moved(targets::target(FILTER, 0, knob)))
 }
 
 // what the render functions of an oscillator read of its voice

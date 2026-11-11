@@ -265,7 +265,8 @@ describe('the distortion', () => {
 
   it.each([
     // a high note hit hard: its harmonics above the nyquist would fold back as inharmonic tones. The hard clip
-    // is oversampled 8× (-62.8 dB; at 4×, as the TS core did, -50.2 dB; at 10 kHz -56.7 and -44.5 dB)
+    // is antialiased on top of the 4× (the mean of the curve between two points: -72 dB; 8× without it -62.8 dB,
+    // 4× -50.2 dB; at 10 kHz -66, -56.7 and -44.5 dB: scripts/distortion-adaa/run.mjs)
     { name: 'hard clip of 7 kHz', mode: HARD, k0: 1195, drive: 12, better: 20, below: -60 },
     { name: 'soft clip of 2 kHz', mode: SOFT, k0: 341, drive: 12, better: 25, below: -95 },
   ])('$name keeps the aliases far below the ones of a naive curve', ({ mode, k0, drive, better, below }) => {

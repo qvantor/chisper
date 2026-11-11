@@ -18,7 +18,8 @@ const OUT_PERF = 'tmp/wasm-perf';
 // over the size of the port: dlmalloc, the tables of jsmath and the fmt the panic sites still reference are ~12 KB)
 const CORES = [
   { crate: 'limiter', name: 'limiter', budget: 15500 },
-  { crate: 'reverb', name: 'reverb', budget: 25500 },
+  // (its lines four samples of time in the lanes, each a ring of its own, the passes of a chunk: +2.2 KB)
+  { crate: 'reverb', name: 'reverb', budget: 26000 },
   { crate: 'distortion', name: 'distortion', budget: 25500 },
   // (the voices of one node: their timelines and their scope, +5.8 KB; the fades of a frame, +1.3 KB; the LFOs and
   // the routes of their knobs, +6.3 KB; the blend a param, its blocks that move it, +1.2 KB; the noise, its

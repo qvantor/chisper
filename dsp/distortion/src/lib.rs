@@ -3,7 +3,8 @@
 //! oversampled part runs in f32 (four taps of a FIR, four points of the curve in the lanes, a rational tanh), the
 //! tone, the level and the DC blocker in f64. The C ABI of a stereo core and fx_set, fx_clear, fx_idle; the params of
 //! fx_new and fx_set come through fx_command (distortion-wasm.ts wraps it).
-//! The hard clip is oversampled 8× (its harmonics fold back less): a chain of its own with the same latency. A fade
+//! The hard clip is antialiased on top of the oversampling (the mean of the curve between two points: its harmonics
+//! fold back less than at 8×): a chain of its own with the same latency (dsp_core::stereo::Chain). A fade
 //! between modes runs both chains, each with its curve and gains, their outputs added at the input rate; the chains
 //! read one input (its history is theirs both), a chain that starts has its decimator at 0 (its points weighed 0
 //! before), a chain that stops flushes its decimator with points of 0 for STREAM samples. So it renders what both
@@ -21,9 +22,8 @@ use dsp_core::biquad::FilterType;
 use dsp_core::blocks::{peak, Smoothed};
 use dsp_core::consts::MAKEUP_TABLES;
 use dsp_core::io::StereoIo;
-use dsp_core::oversampler::{OVERSAMPLER_LATENCY, OVERSAMPLING};
 use dsp_core::simd::F64x2;
-use dsp_core::stereo::{Chain, StereoBiquad, StereoDcBlocker, INPUT_CARRY, OVERSAMPLING8};
+use dsp_core::stereo::{Chain, StereoBiquad, StereoDcBlocker, CHAIN_LATENCY, INPUT_CARRY};
 use jsmath::{max, min, pow, round};
 
 // the params, in the order of DISTORTION_KEYS of distortion-wasm.ts
@@ -39,18 +39,18 @@ const DC_CUTOFF: f64 = 5.0;
 const SILENCE: f64 = 1e-10;
 const BLOCK: usize = 128;
 const BUTTERWORTH_Q: f64 = -3.01;
-const DISTORTION_LATENCY: f64 = OVERSAMPLER_LATENCY as f64;
+const DISTORTION_LATENCY: f64 = CHAIN_LATENCY as f64;
 // distortion-makeup.ts
 const MAX_DRIVE: f64 = 12.0;
 const STEP: f64 = 0.25;
 // DISTORTION_MODES: soft clip (tanh), hard clip
 const MODES: usize = 2;
 const HARD: usize = 1;
-// the chains: the 4× one, the 8× one of the hard clip
-const CHAIN4: usize = 0;
-const CHAIN8: usize = 1;
-// the samples a decimator holds points of, TAPS + 1 (a stopped chain flushes them)
-const STREAM: usize = OVERSAMPLER_LATENCY + 1;
+// the chains: the one of tanh, the one of the hard clip
+const SOFT_CHAIN: usize = 0;
+const HARD_CHAIN: usize = 1;
+// the samples a decimator holds points of (a stopped chain flushes them)
+const STREAM: usize = CHAIN_LATENCY + 1;
 
 fn db_to_gain(db: f64) -> f64 {
     pow(10.0, db / 20.0)
@@ -159,7 +159,7 @@ impl Distortion {
             mode_from: mode,
             mode_to: mode,
             morphing: false,
-            chains: [Chain::new(OVERSAMPLING), Chain::new(OVERSAMPLING8)],
+            chains: [Chain::new(false), Chain::new(true)],
             running: [false; 2],
             flushing: [0; 2],
             #[cfg(test)]
@@ -180,9 +180,9 @@ impl Distortion {
 
     fn chain_of(&self, mode: usize) -> usize {
         if mode == HARD {
-            CHAIN8
+            HARD_CHAIN
         } else {
-            CHAIN4
+            SOFT_CHAIN
         }
     }
 
@@ -335,11 +335,11 @@ impl Distortion {
     // `decimated`
     fn render_chains(&mut self, to: usize, from: usize, frames: usize) {
         #[cfg(not(test))]
-        let needed = [CHAIN4, CHAIN8].map(|chain| chain == to || chain == from);
+        let needed = [SOFT_CHAIN, HARD_CHAIN].map(|chain| chain == to || chain == from);
         #[cfg(test)]
-        let needed = [CHAIN4, CHAIN8].map(|chain| self.continuous || chain == to || chain == from);
+        let needed = [SOFT_CHAIN, HARD_CHAIN].map(|chain| self.continuous || chain == to || chain == from);
         debug_assert!(!self.morphing || from != to);
-        for chain in [CHAIN4, CHAIN8] {
+        for chain in [SOFT_CHAIN, HARD_CHAIN] {
             if needed[chain] && !self.running[chain] {
                 // its decimator at 0; the input history is the one of the chain that ran
                 self.chains[chain].clear();
@@ -358,7 +358,7 @@ impl Distortion {
         } = &mut self.buffers;
         let [decimated_l, decimated_r] = decimated;
         let mut first = true;
-        for chain in [CHAIN4, CHAIN8] {
+        for chain in [SOFT_CHAIN, HARD_CHAIN] {
             if !self.running[chain] {
                 continue;
             }
@@ -366,9 +366,9 @@ impl Distortion {
             if needed[chain] {
                 points.up([&driven[0], &driven[1]], frames);
                 if chain == to {
-                    points.shape(self.mode_to == HARD, sample_to, frames);
+                    points.shape(sample_to, frames);
                 } else if chain == from {
-                    points.shape(self.mode_from == HARD, sample_from, frames);
+                    points.shape(sample_from, frames);
                 } else {
                     // (continuous: a chain of no mode, its points weighed 0)
                     points.silence(frames);

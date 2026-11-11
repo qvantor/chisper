@@ -5,6 +5,7 @@
 use crate::envelope::EnvelopeBlock;
 use crate::glided::{glide_length, Glided};
 use alloc::vec::Vec;
+use dsp_core::simd::F32x4;
 
 /// VoiceVelocity: the level of VELO (the curve of the velocity of the note) and the amp of the voice
 #[derive(Clone, Copy, Debug)]
@@ -98,6 +99,13 @@ pub struct Volume<'a> {
 }
 
 impl<'a> Volume<'a> {
+    /// no volume: × 1
+    pub const UNITY: Volume<'static> = Volume {
+        gain: 1.0,
+        env: None,
+        amp: None,
+    };
+
     /// of a block from `a` (ENV 1 and the amp rendered)
     pub fn new(env: &'a EnvelopeBlock, amp: &'a Glided, a: usize) -> Volume<'a> {
         let (gain, env) = if env.constant {
@@ -125,6 +133,30 @@ impl<'a> Volume<'a> {
             (Some(env), None) => env[i] as f64 * self.gain,
             (None, Some(amp)) => amp[i] as f64 * self.gain,
             (Some(env), Some(amp)) => env[i] as f64 * amp[i] as f64 * self.gain,
+        }
+    }
+
+    /// the volume of sample i in f32: ENV 1 × the amp × `gain`, in that order
+    #[inline(always)]
+    pub fn at32(&self, i: usize) -> f32 {
+        let gain = self.gain as f32;
+        match (self.env, self.amp) {
+            (None, None) => gain,
+            (Some(env), None) => env[i] * gain,
+            (None, Some(amp)) => amp[i] * gain,
+            (Some(env), Some(amp)) => env[i] * amp[i] * gain,
+        }
+    }
+
+    /// the volumes of the four samples from i (`at32` of each, the same operations in the lanes)
+    #[inline(always)]
+    pub fn lanes(&self, i: usize) -> F32x4 {
+        let gain = F32x4::splat(self.gain as f32);
+        match (self.env, self.amp) {
+            (None, None) => gain,
+            (Some(env), None) => F32x4::load(&env[i..i + 4]) * gain,
+            (None, Some(amp)) => F32x4::load(&amp[i..i + 4]) * gain,
+            (Some(env), Some(amp)) => F32x4::load(&env[i..i + 4]) * F32x4::load(&amp[i..i + 4]) * gain,
         }
     }
 }
