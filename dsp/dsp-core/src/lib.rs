@@ -1,7 +1,8 @@
-//! The building blocks of the worklet cores (biquad, the blocks of the effects, true peak, the oversamplers), ported
-//! bit for bit from the TS cores they replaced (removed at stage 5 of the plan: the goldens of dsp/goldens hold the
-//! sound since; "as the TS" in a comment names an order of operations they pin): the same operations in the same
-//! order, the same points of rounding to f32, the Math of JS from jsmath. The tables are in `consts`
+//! The building blocks of the worklet cores (biquad, the blocks of the effects, true peak, the oversamplers). They
+//! came from the TS cores they replaced ("as the TS" in a comment names an order of operations kept from them); the
+//! goldens of dsp/goldens hold the sound. The filters and the gains are doubles, with the Math of JS from jsmath;
+//! the FIRs, the curve of the distortion and the lines of the reverb are lanes of f32 (`simd`, `fir`, `tanh`): the
+//! same bits in every browser, a change of them an update of the goldens. The tables are in `consts`
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -10,10 +11,12 @@ extern crate alloc;
 pub mod biquad;
 pub mod blocks;
 pub mod consts;
+pub mod fir;
 pub mod io;
 pub mod oversampler;
 pub mod simd;
 pub mod stereo;
+pub mod tanh;
 pub mod true_peak;
 
 /// 2 ** Math.ceil(Math.log2(x)): the ring buffers of the TS are powers of two of at least x

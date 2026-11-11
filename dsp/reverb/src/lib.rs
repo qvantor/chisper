@@ -1,7 +1,9 @@
-//! The reverb (ported bit for bit from the TS core it replaced, the tables of reverb-decay.ts and reverb-era.ts of the
-//! app; the goldens hold its sound): a 16-line FDN with early reflections, input diffusion and the input stage of the eras. The C ABI of a
-//! stereo core (fx_new, fx_buffers, fx_process, fx_free) and fx_set, fx_set_active, fx_clear, fx_idle; the params of
-//! fx_new and fx_set come through fx_command (reverb-wasm.ts wraps it)
+//! The reverb (the tables of reverb-decay.ts and reverb-era.ts of the app; the goldens hold its sound): a 16-line
+//! FDN with early reflections, input diffusion and the input stage of the eras. The input stage runs in doubles,
+//! both channels in the lanes; the lines, their allpasses and shelves and the early reflections in f32, four lines
+//! in the lanes (their delays in doubles). The C ABI of a stereo core (fx_new, fx_buffers, fx_process, fx_free) and
+//! fx_set, fx_set_active, fx_clear, fx_idle; the params of fx_new and fx_set come through fx_command
+//! (reverb-wasm.ts wraps it)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -11,10 +13,10 @@ use alloc::{boxed::Box, vec::Vec};
 use wasm_rt as _;
 
 use dsp_core::biquad::{Biquad, FilterType};
-use dsp_core::blocks::{peak, Allpass, DelayLine, Smoothed, StereoDelayLine, StereoFixedAllpass};
+use dsp_core::blocks::{peak, Lines, Smoothed, StereoDelayLine, StereoFixedAllpass};
 use dsp_core::io::StereoIo;
-use dsp_core::simd::F64x2;
-use dsp_core::stereo::{LaneBiquad, StereoBiquad};
+use dsp_core::simd::{F32x4, F64x2};
+use dsp_core::stereo::{QuadBiquad, StereoBiquad};
 use jsmath::{max, min, pow, sin, tanh, PI};
 
 // the params, in the order of REVERB_KEYS of reverb-wasm.ts
@@ -138,8 +140,7 @@ fn allpass_gain(delay: f64, decay: f64, gain: f64) -> f64 {
     min(gain, pow(10.0, (-3.0 * delay) / (decay * ALLPASS_RING)))
 }
 
-// the input stage of both channels, the left one in the low lane, the right one in the high lane (the TS renders
-// them one after the other: the lanes are independent, each the bits of its channel)
+// the input stage of both channels, the left one in the low lane, the right one in the high lane
 struct Input {
     bandwidth: [StereoBiquad; 2],
     lowcut: StereoBiquad,
@@ -148,28 +149,48 @@ struct Input {
     diffusers: [StereoFixedAllpass; 4],
 }
 
-// two lines of the FDN (2p and 2p + 1) in the lanes: each lane a line of the TS, the even one in the low lane (its
-// output goes left), the odd one in the high lane (right)
-struct LinePair {
-    base: F64x2,
-    allpass_base: F64x2,
-    delay: [DelayLine; 2],
-    allpass: [Allpass; 2],
-    low: LaneBiquad,
-    high: LaneBiquad,
-    input: F64x2,
-    gain: F64x2,
-    allpass_gain: F64x2,
-    phase: [f64; 2],
-    mod_from: F64x2,
-    mod_to: F64x2,
+// four lines of the FDN (4q..4q + 4) in the lanes: the even ones (lanes 0 and 2) go left, the odd ones right. The
+// delays are doubles, two lanes each
+struct LineQuad {
+    base: [F64x2; 2],
+    allpass_base: [F64x2; 2],
+    delay: Lines<4>,
+    allpass: Lines<4>,
+    low: QuadBiquad,
+    high: QuadBiquad,
+    input: F32x4,
+    gain: F32x4,
+    allpass_gain: F32x4,
+    phase: [f64; 4],
+    mod_from: [F64x2; 2],
+    mod_to: [F64x2; 2],
 }
 
-const PAIRS: usize = LINE_TIMES.len() / 2;
+const QUADS: usize = LINE_TIMES.len() / 4;
 
-// a value per lane of a pair (line 2p in the low lane, 2p + 1 in the high one)
-fn lanes(p: usize, value: impl Fn(usize) -> f64) -> F64x2 {
-    F64x2::new(value(2 * p), value(2 * p + 1))
+// a value per lane of quad q (line 4q + lane), as doubles (lanes 0 and 1, then 2 and 3) and as f32
+fn pairs(q: usize, value: impl Fn(usize) -> f64) -> [F64x2; 2] {
+    [
+        F64x2::new(value(4 * q), value(4 * q + 1)),
+        F64x2::new(value(4 * q + 2), value(4 * q + 3)),
+    ]
+}
+fn lanes(q: usize, value: impl Fn(usize) -> f64) -> F32x4 {
+    let [lo, hi] = pairs(q, value);
+    F32x4::from_f64(lo, hi)
+}
+// the longest of the lines of quad q (their ring is one)
+fn longest_of(q: usize, value: impl Fn(usize) -> f64) -> f64 {
+    (0..4).fold(f64::NEG_INFINITY, |longest, lane| {
+        max(longest, value(4 * q + lane))
+    })
+}
+
+// the sums of the lanes that go left (0 and 2) and right (1 and 3), as doubles
+#[inline(always)]
+fn sides(value: F32x4) -> (f64, f64) {
+    let [a, b, c, d] = value.lanes();
+    ((a + c) as f64, (b + d) as f64)
 }
 
 pub struct Reverb {
@@ -186,11 +207,11 @@ pub struct Reverb {
     drain_frames: f64,
     input: Input,
     er_absorb: Biquad,
-    er_line: DelayLine,
+    er_line: Lines<1>,
     er_delays: [f64; 8],
     diffuser_gains: [f64; 4],
-    pairs: Vec<LinePair>,
-    outs: [F64x2; PAIRS],
+    quads: Vec<LineQuad>,
+    outs: [F32x4; QUADS],
     pub io: StereoIo,
 }
 
@@ -224,24 +245,24 @@ impl Reverb {
             diffusers: core::array::from_fn(|i| StereoFixedAllpass::new(samples(DIFFUSER_TIMES[i]))),
         };
         let line_input = 0.5 * jsmath::sqrt(8.0 / LINE_TIMES.len() as f64);
-        let pairs = (0..PAIRS)
-            .map(|p| LinePair {
-                base: lanes(p, |i| samples(LINE_TIMES[i])),
-                allpass_base: lanes(p, |i| samples(LOOP_ALLPASS_TIMES[i])),
-                delay: core::array::from_fn(|lane| {
-                    DelayLine::new(samples(LINE_TIMES[2 * p + lane] * max_line_factor + MOD_DEPTH) + 2.0)
-                }),
-                allpass: core::array::from_fn(|lane| {
-                    Allpass::new(samples(LOOP_ALLPASS_TIMES[2 * p + lane] * max_line_factor) + 2.0)
-                }),
-                low: LaneBiquad::default(),
-                high: LaneBiquad::default(),
-                input: lanes(p, |i| line_input * line_polarity(i)),
-                gain: F64x2::splat(1.0),
-                allpass_gain: F64x2::splat(LOOP_DIFFUSION),
-                phase: [0.0; 2],
-                mod_from: F64x2::default(),
-                mod_to: F64x2::default(),
+        let quads = (0..QUADS)
+            .map(|q| LineQuad {
+                base: pairs(q, |i| samples(LINE_TIMES[i])),
+                allpass_base: pairs(q, |i| samples(LOOP_ALLPASS_TIMES[i])),
+                delay: Lines::new(longest_of(q, |i| {
+                    samples(LINE_TIMES[i] * max_line_factor + MOD_DEPTH) + 2.0
+                })),
+                allpass: Lines::new(longest_of(q, |i| {
+                    samples(LOOP_ALLPASS_TIMES[i] * max_line_factor) + 2.0
+                })),
+                low: QuadBiquad::default(),
+                high: QuadBiquad::default(),
+                input: lanes(q, |i| line_input * line_polarity(i)),
+                gain: F32x4::splat(1.0),
+                allpass_gain: F32x4::splat(LOOP_DIFFUSION as f32),
+                phase: [0.0; 4],
+                mod_from: [F64x2::default(); 2],
+                mod_to: [F64x2::default(); 2],
             })
             .collect();
         let mut reverb = Reverb {
@@ -262,11 +283,11 @@ impl Reverb {
             drain_frames,
             input,
             er_absorb: Biquad::default(),
-            er_line: DelayLine::new(samples(ER_TAPS[ER_TAPS.len() - 1].0 * max_factor) + 2.0),
+            er_line: Lines::new(samples(ER_TAPS[ER_TAPS.len() - 1].0 * max_factor) + 2.0),
             er_delays: core::array::from_fn(|i| samples(ER_TAPS[i].0)),
             diffuser_gains: [DIFFUSION; 4],
-            pairs,
-            outs: [F64x2::default(); PAIRS],
+            quads,
+            outs: [F32x4::default(); QUADS],
             io: StereoIo::default(),
         };
         reverb.update_input();
@@ -306,36 +327,37 @@ impl Reverb {
             self.diffuser_gains[i] = allpass_gain(*time, decay, DIFFUSION);
         }
         let bass = self.values[BASS].value;
-        for (p, pair) in self.pairs.iter_mut().enumerate() {
-            let mut gains = [0.0; 2];
-            let mut allpass_gains = [0.0; 2];
-            for lane in 0..2 {
-                let i = 2 * p + lane;
+        for (q, quad) in self.quads.iter_mut().enumerate() {
+            let mut gains = [0.0; 4];
+            let mut allpass_gains = [0.0; 4];
+            for lane in 0..4 {
+                let i = 4 * q + lane;
                 let (gain, low_db, high_db) = line_decay(loop_length(i, factor), decay, bass);
-                gains[lane] = gain;
-                allpass_gains[lane] = allpass_gain(LOOP_ALLPASS_TIMES[i] * factor, decay, LOOP_DIFFUSION);
-                pair.low.set(lane, FilterType::Lowshelf, XOVER, 0.0, low_db, rate);
-                pair.high
+                gains[lane] = gain as f32;
+                allpass_gains[lane] =
+                    allpass_gain(LOOP_ALLPASS_TIMES[i] * factor, decay, LOOP_DIFFUSION) as f32;
+                quad.low.set(lane, FilterType::Lowshelf, XOVER, 0.0, low_db, rate);
+                quad.high
                     .set(lane, FilterType::Highshelf, damp, 0.0, high_db, rate);
             }
-            pair.gain = F64x2::new(gains[0], gains[1]);
-            pair.allpass_gain = F64x2::new(allpass_gains[0], allpass_gains[1]);
+            quad.gain = F32x4::load(&gains);
+            quad.allpass_gain = F32x4::load(&allpass_gains);
         }
     }
 
     fn update_mod(&mut self, frames: f64) {
         let rate = self.sample_rate;
         let depth = self.values[DEPTH].value * (MOD_DEPTH * rate);
-        for (p, pair) in self.pairs.iter_mut().enumerate() {
-            let mut to = [0.0; 2];
-            for lane in 0..2 {
-                let i = 2 * p + lane;
-                pair.phase[lane] =
-                    (pair.phase[lane] + (2.0 * PI * MOD_RATES[i] * frames) / rate) % (2.0 * PI);
-                to[lane] = line_polarity(i) * depth * sin(pair.phase[lane]);
+        for (q, quad) in self.quads.iter_mut().enumerate() {
+            let mut to = [0.0; 4];
+            for lane in 0..4 {
+                let i = 4 * q + lane;
+                quad.phase[lane] =
+                    (quad.phase[lane] + (2.0 * PI * MOD_RATES[i] * frames) / rate) % (2.0 * PI);
+                to[lane] = line_polarity(i) * depth * sin(quad.phase[lane]);
             }
-            pair.mod_from = pair.mod_to;
-            pair.mod_to = F64x2::new(to[0], to[1]);
+            quad.mod_from = quad.mod_to;
+            quad.mod_to = [F64x2::new(to[0], to[1]), F64x2::new(to[2], to[3])];
         }
     }
 
@@ -359,14 +381,12 @@ impl Reverb {
         }
         self.er_absorb.clear();
         self.er_line.clear();
-        for pair in self.pairs.iter_mut() {
-            for lane in 0..2 {
-                pair.delay[lane].clear();
-                pair.allpass[lane].clear();
-            }
-            pair.low.clear();
-            pair.high.clear();
-            pair.mod_from = pair.mod_to;
+        for quad in self.quads.iter_mut() {
+            quad.delay.clear();
+            quad.allpass.clear();
+            quad.low.clear();
+            quad.high.clear();
+            quad.mod_from = quad.mod_to;
         }
     }
 
@@ -401,7 +421,7 @@ impl Reverb {
         if !self.idle {
             self.clear();
         }
-        self.outs.fill(F64x2::default());
+        self.outs.fill(F32x4::default());
         self.idle = true;
     }
 
@@ -456,21 +476,24 @@ impl Reverb {
         let width = self.values[SEP].value;
         let er = self.values[ER].value;
         let drive = self.values[DRIVE].value;
-        let count = LINE_TIMES.len();
-        let loop_scale = 2.0 / count as f64;
-        let mut output_peak = 0.0;
+        let loop_scale = 2.0 / LINE_TIMES.len() as f32;
+        let mut output_peak = F64x2::default();
         let input = &mut self.input;
-        let er_taps: [F64x2; ER_TAPS.len() / 2] = core::array::from_fn(|p| lanes(p, |i| ER_TAPS[i].1));
-        let er_delays: [F64x2; ER_TAPS.len() / 2] = core::array::from_fn(|p| lanes(p, |i| self.er_delays[i]));
-        // (the left channel in the low lane, the right one in the high lane; of the lines the even ones low, the
-        // odd ones high: what the TS sums into the left and the right side, in the same order)
+        // the early reflections: four taps a read (the even ones left, the odd ones right), their line one
+        let er_taps: [F32x4; ER_TAPS.len() / 4] = core::array::from_fn(|q| lanes(q, |i| ER_TAPS[i].1));
+        let er_delays: [[F64x2; 2]; ER_TAPS.len() / 4] =
+            core::array::from_fn(|q| pairs(q, |i| self.er_delays[i]));
+        let (er4, tail_level) = (F32x4::splat(er as f32), F32x4::splat(TAIL_LEVEL as f32));
+        // (the left channel in the low lane, the right one in the high lane; of the lines the even ones left, the
+        // odd ones right)
         for s in 0..frames {
             let t = (s as f64 + 1.0) / n;
             let room_scale = size_factor(size_from + (size_value - size_from) * t);
             let factor = scale_from + (scale_value - scale_from) * t;
             let predelay = (pre_from + (pre_value - pre_from) * t) * rate;
             let gain = fade_from + (fade_value - fade_from) * t;
-            let (t2, factor2, gain2) = (F64x2::splat(t), F64x2::splat(factor), F64x2::splat(gain));
+            let (t2, factor2) = (F64x2::splat(t), F64x2::splat(factor));
+            let gain4 = F32x4::splat(gain as f32);
 
             let banded = input.bandwidth[0].process(F64x2::new(in_l[s] as f64, in_r[s] as f64));
             let mut x = input.bandwidth[1].process(banded);
@@ -480,63 +503,60 @@ impl Reverb {
             let pre = input.predelay.read(predelay);
             input.predelay.write(x);
 
-            let mut er_sides = F64x2::default();
+            let mut early = F32x4::default();
             let room_scale2 = F64x2::splat(room_scale);
-            for p in 0..er_taps.len() {
-                let tap = er_taps[p]
-                    * DelayLine::read_pair(&self.er_line, &self.er_line, er_delays[p] * room_scale2);
-                er_sides = er_sides + tap;
+            for q in 0..er_taps.len() {
+                let [lo, hi] = er_delays[q];
+                early = early + er_taps[q] * self.er_line.read([lo * room_scale2, hi * room_scale2]);
             }
             self.er_line
-                .write(self.er_absorb.process((pre.lo() + pre.hi()) / 2.0));
+                .write(self.er_absorb.process((pre.lo() + pre.hi()) / 2.0) as f32);
 
             let mut diff = pre;
             for i in 0..self.diffuser_gains.len() {
                 diff = input.diffusers[i].process(diff, F64x2::splat(self.diffuser_gains[i]));
             }
+            // (left, right, left, right: the lines of a quad)
+            let diff4 = F32x4::from_f64(diff, diff);
 
-            let mut sum = 0.0;
-            let mut tail = F64x2::default();
-            for (p, pair) in self.pairs.iter_mut().enumerate() {
-                let modulation = pair.mod_from + (pair.mod_to - pair.mod_from) * t2;
-                let delayed =
-                    DelayLine::read_pair(&pair.delay[0], &pair.delay[1], pair.base * factor2 + modulation);
-                let [allpass_a, allpass_b] = &mut pair.allpass;
-                let out = Allpass::process_pair(
-                    allpass_a,
-                    allpass_b,
+            let mut tail = F32x4::default();
+            for (q, quad) in self.quads.iter_mut().enumerate() {
+                let delay: [F64x2; 2] = core::array::from_fn(|half| {
+                    let modulation = quad.mod_from[half] + (quad.mod_to[half] - quad.mod_from[half]) * t2;
+                    quad.base[half] * factor2 + modulation
+                });
+                let delayed = quad.delay.read(delay);
+                let out = quad.allpass.allpass(
                     delayed,
-                    pair.allpass_base * factor2,
-                    pair.allpass_gain,
+                    quad.allpass_base.map(|base| base * factor2),
+                    quad.allpass_gain,
                 );
-                self.outs[p] = out;
-                sum += out.lo();
-                sum += out.hi();
+                self.outs[q] = out;
                 tail = tail + out;
             }
-            let feedback = F64x2::splat(sum * loop_scale);
-            for (p, pair) in self.pairs.iter_mut().enumerate() {
-                let line_in = diff * pair.input + self.outs[p] - feedback;
-                let y = pair.high.process(pair.low.process(line_in * pair.gain * gain2));
-                pair.delay[0].write(y.lo());
-                pair.delay[1].write(y.hi());
+            // the Householder reflection of the lines: each takes its output less 2 / N of the sum of all
+            let feedback = F32x4::splat(tail.sum() * loop_scale);
+            for (q, quad) in self.quads.iter_mut().enumerate() {
+                let line_in = diff4 * quad.input + self.outs[q] - feedback;
+                let y = quad.high.process(quad.low.process(line_in * quad.gain * gain4));
+                quad.delay.write(y);
             }
 
             // mid/side: L = M + w·S, R = M - w·S
-            let side = F64x2::splat(er) * er_sides + F64x2::splat(TAIL_LEVEL) * tail;
-            let (side_l, side_r) = (side.lo(), side.hi());
+            let (side_l, side_r) = sides(er4 * early + tail_level * tail);
             let y_l = gain * ((side_l * (1.0 + width)) / 2.0 + (side_r * (1.0 - width)) / 2.0);
             let y_r = gain * ((side_r * (1.0 + width)) / 2.0 + (side_l * (1.0 - width)) / 2.0);
             out_l[s] = y_l as f32;
             out_r[s] = y_r as f32;
-            output_peak = max(max(output_peak, y_l.abs()), y_r.abs());
+            output_peak = output_peak.max(F64x2::new(y_l, y_r).abs());
         }
+        let output_peak = max(output_peak.lo(), output_peak.hi());
 
         // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
         // stay in the lines until the reverb is off: forgotten, the block is silence
         if output_peak.is_nan() || output_peak > f32::MAX as f64 {
             self.clear();
-            self.outs.fill(F64x2::default());
+            self.outs.fill(F32x4::default());
             out_l.fill(0.0);
             out_r.fill(0.0);
             return;
@@ -549,7 +569,7 @@ impl Reverb {
             && self
                 .outs
                 .iter()
-                .all(|value| value.lo().abs() < SILENCE && value.hi().abs() < SILENCE);
+                .all(|value| value.lanes().iter().all(|lane| (lane.abs() as f64) < SILENCE));
         if faded || drained {
             self.clear();
             self.idle = true;

@@ -1,5 +1,5 @@
-//! The wavetable oscillator (ported bit for bit from the TS core it replaced, with its modulation, filter and
-//! envelopes; the goldens hold its sound): the store of the tables in the linear memory of
+//! The wavetable oscillator (from the TS core it replaced, with its modulation, filter and envelopes; the goldens
+//! hold its sound, the loops of its tables run in fixed point and f32 lanes: voice.rs): the store of the tables in the linear memory of
 //! the core, the voices of a scope and what they share. The C ABI: handles of stores, shareds and voices; the
 //! options of a voice, its routes and the layout of a table come through osc_command (a Float64Array of the
 //! wrapper, wavetable-osc-wasm.ts), the params and the outputs of a block through osc_io. The voices of a node play

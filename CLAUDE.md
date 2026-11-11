@@ -66,6 +66,8 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `scripts/bench-osc/run.mjs` — the oscillator vs a native `OscillatorNode` (README in its folder).
 - `scripts/wasm-browsers/run.mjs` — bit parity of the wasm cores in browsers vs Node; `app.mjs` — the app in each
   browser (sound, no glitches, no paints over the LFOs).
+- `node scripts/null-test/run.mjs --against=<ref> [--only=…] [--limit=<dB>]` — the scenes of the browser parity
+  rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal.
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
   `dsp/measurements/*.json`, which the specs compare the engine with.
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
@@ -76,11 +78,18 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
 
 ## Rules that are easy to break
 
-- **Bit-exact DSP.** The Rust cores were ported bit for bit from TS and compute every value in a fixed order: no
-  `mul_add`, no fast-math, no relaxed-simd, SIMD only over independent lanes, sums in their order, `as f32` where
-  the TS wrote to a Float32Array, Math only through `dsp/jsmath` (V8's fdlibm; `dsp/clippy.toml` disallows
-  `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…). Goldens specs import `test-utils/js-math.ts` first.
-  wasm-opt never with fast-math.
+- **Deterministic DSP.** A core gives the same bits in every browser and in Node (`scripts/wasm-browsers/run.mjs`),
+  so: no `mul_add`, no fast-math, no relaxed-simd, wasm-opt never with fast-math. The hot loops run in f32 lanes
+  with their sums in an order of their own (`F32x4`/`U32x4` of `dsp-core/src/simd.rs`: FIRs of `fir.rs`, the
+  rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators); the native variant of a
+  lane type does the same operations in the same order (cargo tests compute the bits of the wasm). Math per block
+  goes through `dsp/jsmath` (`dsp/clippy.toml` disallows `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…).
+  What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut, voice filter), the gain
+  path of the limiter, the delays of the reverb lines, the phase a voice keeps between spans (a whole number of
+  2^-52 of a cycle). A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
+  flush-to-zero). Any change of the bits is an explicit golden update, checked by the quality specs with their
+  tolerances as they are and by `node scripts/null-test/run.mjs --against=<ref>` (the difference from a commit, dB
+  under the signal). Goldens specs import `test-utils/js-math.ts` first.
 - **`__PERF__`** (`src/globals.d.ts`) gates instrumentation: true only in the `perf` build and in specs. Any script
   that bundles app code with esbuild must `--define` it (an unset `NX_*` env var isn't a dead branch).
 - **Worklet modules** must not import `@chisper/ui-kit`, `@chisper/preset-schema` (zod) or anything touching

@@ -12,6 +12,7 @@
     "scripts/*.mjs",
     "scripts/bench-osc/run.mjs",
     "scripts/bench-perf/run.mjs",
+    "scripts/null-test/run.mjs",
     "scripts/wasm-browsers/run.mjs",
     "scripts/wasm-browsers/app.mjs",
     "scripts/renders/run.mjs",

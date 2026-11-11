@@ -1,11 +1,13 @@
 //! The stereo blocks: the left channel in the low lane, the right one in the high lane, each lane worked out as
-//! the mono block of the TS (dsp.ts, oversampler.ts) does it for its channel
+//! the mono block does it for its channel; the oversampling chains of the distortion in f32
 
 use crate::biquad::{coefficients_into, FilterType};
 use crate::consts::{DOWN8_PHASES, DOWN_PHASES, UP8_PHASES, UP_PHASES};
-use crate::oversampler::OVERSAMPLING;
-use crate::simd::F64x2;
-use core::ops::{Add, Div, Mul, Sub};
+use crate::fir::{dot, lanes_of, phases, TAPS};
+use crate::simd::{F32x4, F64x2};
+use crate::tanh::tanh4;
+use alloc::{vec, vec::Vec};
+use core::ops::{Add, Mul, Sub};
 use jsmath::{exp, PI};
 
 /// createBiquad of both channels: one set of coefficients, a state per lane
@@ -61,47 +63,41 @@ impl StereoBiquad {
     }
 }
 
-/// createBiquad of two filters at once: the coefficients of each lane, a state per lane (two lines of a reverb)
+/// four biquads at once in f32 (four lines of a reverb): the coefficients of each lane, a state per lane
 #[derive(Clone)]
-pub struct LaneBiquad {
-    c: [F64x2; 5],
-    z1: F64x2,
-    z2: F64x2,
+pub struct QuadBiquad {
+    // [coefficient][lane]
+    values: [[f32; 4]; 5],
+    c: [F32x4; 5],
+    z1: F32x4,
+    z2: F32x4,
 }
 
-impl Default for LaneBiquad {
+impl Default for QuadBiquad {
     fn default() -> Self {
-        LaneBiquad {
-            c: [
-                F64x2::splat(1.0),
-                F64x2::default(),
-                F64x2::default(),
-                F64x2::default(),
-                F64x2::default(),
-            ],
-            z1: F64x2::default(),
-            z2: F64x2::default(),
+        let values = [[1.0; 4], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]];
+        QuadBiquad {
+            values,
+            c: values.map(|lanes| F32x4::load(&lanes)),
+            z1: F32x4::default(),
+            z2: F32x4::default(),
         }
     }
 }
 
-impl LaneBiquad {
-    /// the coefficients of lane `lane` (0 or 1)
+impl QuadBiquad {
+    /// the coefficients of lane `lane` (0..4), worked out in doubles
     pub fn set(&mut self, lane: usize, ty: FilterType, frequency: f64, q: f64, gain: f64, sample_rate: f64) {
         let mut c = [0.0; 5];
         coefficients_into(&mut c, Some(ty), frequency, q, gain, sample_rate);
         for k in 0..5 {
-            let (lo, hi) = (self.c[k].lo(), self.c[k].hi());
-            self.c[k] = if lane == 0 {
-                F64x2::new(c[k], hi)
-            } else {
-                F64x2::new(lo, c[k])
-            };
+            self.values[k][lane] = c[k] as f32;
+            self.c[k] = F32x4::load(&self.values[k]);
         }
     }
 
     #[inline(always)]
-    pub fn process(&mut self, input: F64x2) -> F64x2 {
+    pub fn process(&mut self, input: F32x4) -> F32x4 {
         let [b0, b1, b2, a1, a2] = self.c;
         let output = b0 * input + self.z1;
         self.z1 = b1 * input - a1 * output + self.z2;
@@ -110,8 +106,8 @@ impl LaneBiquad {
     }
 
     pub fn clear(&mut self) {
-        self.z1 = F64x2::default();
-        self.z2 = F64x2::default();
+        self.z1 = F32x4::default();
+        self.z2 = F32x4::default();
     }
 }
 
@@ -152,209 +148,130 @@ impl StereoDcBlocker {
     }
 }
 
-const TAPS: usize = 32;
 const HALF: usize = TAPS / 2;
-const STREAM: usize = TAPS + 1;
 
-/// createOversampler of both channels: the 4× up and down of oversampler.ts on each lane
-pub struct StereoOversampler {
-    history: [F64x2; 2 * TAPS],
-    pos: usize,
-    streams: [[F64x2; 2 * STREAM]; OVERSAMPLING],
-    stream_pos: usize,
-}
-
-impl Default for StereoOversampler {
-    fn default() -> Self {
-        StereoOversampler {
-            history: [F64x2::default(); 2 * TAPS],
-            pos: 0,
-            streams: [[F64x2::default(); 2 * STREAM]; OVERSAMPLING],
-            stream_pos: 0,
-        }
-    }
-}
-
-impl StereoOversampler {
-    /// 4 points per sample of input[0..frames) into points[0..4·frames)
-    pub fn up(&mut self, input: &[F64x2], frames: usize, points: &mut [F64x2]) {
-        let [up0, up1, up2, up3] = &UP_PHASES;
-        for s in 0..frames {
-            self.pos = if self.pos == 0 { TAPS - 1 } else { self.pos - 1 };
-            let pos = self.pos;
-            self.history[pos] = input[s];
-            self.history[pos + TAPS] = input[s];
-            let window = &self.history[pos..pos + TAPS];
-            let mut y0 = F64x2::default();
-            let mut y1 = F64x2::default();
-            let mut y2 = F64x2::default();
-            let mut y3 = F64x2::default();
-            for j in 0..TAPS {
-                let h = window[j];
-                y0 = y0.add(h.mul(F64x2::splat(up0[j])));
-                y1 = y1.add(h.mul(F64x2::splat(up1[j])));
-                y2 = y2.add(h.mul(F64x2::splat(up2[j])));
-                y3 = y3.add(h.mul(F64x2::splat(up3[j])));
-            }
-            let point = OVERSAMPLING * s;
-            points[point] = y0;
-            points[point + 1] = y1;
-            points[point + 2] = y2;
-            points[point + 3] = y3;
-        }
-    }
-
-    /// the (shaped) points of up() back at the input rate into output[0..frames)
-    pub fn down(&mut self, points: &[F64x2], frames: usize, output: &mut [F64x2]) {
-        let [phase1, phase2, phase3] = &DOWN_PHASES;
-        let quarter = F64x2::splat(OVERSAMPLING as f64);
-        for s in 0..frames {
-            let point = OVERSAMPLING * s;
-            self.stream_pos = if self.stream_pos == 0 {
-                STREAM - 1
-            } else {
-                self.stream_pos - 1
-            };
-            let sp = self.stream_pos;
-            for (q, stream) in self.streams.iter_mut().enumerate() {
-                stream[sp] = points[point + q];
-                stream[sp + STREAM] = points[point + q];
-            }
-            let [s0, s1, s2, s3] = &self.streams;
-            let mut sum = s0[sp + HALF];
-            for j in 0..TAPS {
-                let i = sp + j + 1;
-                // sum += s1·P3 + s2·P2 + s3·P1, added in this order
-                let products = s1[i]
-                    .mul(F64x2::splat(phase3[j]))
-                    .add(s2[i].mul(F64x2::splat(phase2[j])))
-                    .add(s3[i].mul(F64x2::splat(phase1[j])));
-                sum = sum.add(products);
-            }
-            output[s] = sum.div(quarter);
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.history = [F64x2::default(); 2 * TAPS];
-        self.streams = [[F64x2::default(); 2 * STREAM]; OVERSAMPLING];
-    }
-
-    /// the input up() has read: its last TAPS samples (the whole state of the interpolator)
-    pub fn input_history(&self) -> InputHistory {
-        InputHistory {
-            history: self.history,
-            pos: self.pos,
-        }
-    }
-
-    /// starts again on the input of another chain: its interpolator as if it had read that input, its decimator
-    /// at 0 (as after shaped points of 0)
-    pub fn warm(&mut self, input: &InputHistory) {
-        self.history = input.history;
-        self.pos = input.pos;
-        self.streams = [[F64x2::default(); 2 * STREAM]; OVERSAMPLING];
-    }
-}
-
-/// the last TAPS samples an interpolator read, written twice as its history keeps them
-#[derive(Clone, Copy)]
-pub struct InputHistory {
-    history: [F64x2; 2 * TAPS],
-    pos: usize,
-}
-
-/// the points per sample of StereoOversampler8
+/// the points per sample of the 8× chain
 pub const OVERSAMPLING8: usize = 8;
 
-/// the 8× chain of the hard clip (not in the TS core): StereoOversampler at 8×, 32 taps per phase at the input rate
-/// as its 4× (the same latency, OVERSAMPLER_LATENCY), the phases of UP8_PHASES and DOWN8_PHASES
-pub struct StereoOversampler8 {
-    history: [F64x2; 2 * TAPS],
-    pos: usize,
-    streams: [[F64x2; 2 * STREAM]; OVERSAMPLING8],
-    stream_pos: usize,
+// the taps the other way round: a window of a buffer runs forward in time
+static UP4: [[f32; TAPS]; 4] = phases(&UP_PHASES, true, 1.0);
+static UP8: [[f32; TAPS]; 8] = phases(&UP8_PHASES, true, 1.0);
+// (the average of the streams in the taps: 1 / the ratio, a power of two)
+static DOWN4: [[f32; TAPS]; 3] = phases(&DOWN_PHASES, true, 0.25);
+static DOWN8: [[f32; TAPS]; 7] = phases(&DOWN8_PHASES, true, 0.125);
+
+/// the samples of input a chain reads before those of a block: an input buffer holds them, then the block
+pub const INPUT_CARRY: usize = TAPS - 1;
+
+/// An oversampling chain of both channels in f32 (the oversampler.ts of the app, 4× or 8×, 32 taps a phase at the
+/// input rate, a latency of OVERSAMPLER_LATENCY): up() works out the points of a block, shape() puts a curve and
+/// the gains on them, down() brings them back to the input rate. The points of a phase are a plane of their own, in
+/// time order after the TAPS last ones of the block before, so a FIR reads a window of a slice
+pub struct Chain {
+    ratio: usize,
+    up: &'static [[f32; TAPS]],
+    down: &'static [[f32; TAPS]],
+    // [channel][phase]: TAPS + frames points (+ 3: the curve runs four at a time)
+    planes: [Vec<Vec<f32>>; 2],
+    frames: usize,
 }
 
-impl Default for StereoOversampler8 {
-    fn default() -> Self {
-        StereoOversampler8 {
-            history: [F64x2::default(); 2 * TAPS],
-            pos: 0,
-            streams: [[F64x2::default(); 2 * STREAM]; OVERSAMPLING8],
-            stream_pos: 0,
+impl Chain {
+    pub fn new(ratio: usize) -> Chain {
+        let eight = ratio == OVERSAMPLING8;
+        Chain {
+            ratio,
+            up: if eight { &UP8 } else { &UP4 },
+            down: if eight { &DOWN8 } else { &DOWN4 },
+            planes: [Vec::new(), Vec::new()],
+            frames: 0,
         }
     }
-}
 
-impl StereoOversampler8 {
-    /// 8 points per sample of input[0..frames) into points[0..8·frames)
-    pub fn up(&mut self, input: &[F64x2], frames: usize, points: &mut [F64x2]) {
-        for s in 0..frames {
-            self.pos = if self.pos == 0 { TAPS - 1 } else { self.pos - 1 };
-            let pos = self.pos;
-            self.history[pos] = input[s];
-            self.history[pos + TAPS] = input[s];
-            let window = &self.history[pos..pos + TAPS];
-            let mut y = [F64x2::default(); OVERSAMPLING8];
-            for j in 0..TAPS {
-                let h = window[j];
-                for (p, phase) in UP8_PHASES.iter().enumerate() {
-                    y[p] = y[p].add(h.mul(F64x2::splat(phase[j])));
+    /// the planes of blocks of `frames` (allocates: not while a block renders)
+    pub fn grow(&mut self, frames: usize) {
+        if frames <= self.frames && !self.planes[0].is_empty() {
+            return;
+        }
+        for channel in self.planes.iter_mut() {
+            let mut planes = Vec::with_capacity(self.ratio);
+            for p in 0..self.ratio {
+                let mut plane = vec![0.0f32; TAPS + frames + 3];
+                if let Some(old) = channel.get(p) {
+                    plane[..TAPS].copy_from_slice(&old[..TAPS]);
+                }
+                planes.push(plane);
+            }
+            *channel = planes;
+        }
+        self.frames = frames;
+    }
+
+    /// the points of a block: `input` of each channel is INPUT_CARRY samples of before, then the frames
+    pub fn up(&mut self, input: [&[f32]; 2], frames: usize) {
+        for (channel, input) in self.planes.iter_mut().zip(input) {
+            let input = &input[..INPUT_CARRY + frames];
+            for (plane, taps) in channel.iter_mut().zip(self.up) {
+                let taps = lanes_of(taps);
+                for (s, point) in plane[TAPS..TAPS + frames].iter_mut().enumerate() {
+                    *point = dot(&input[s..], &taps);
                 }
             }
-            points[OVERSAMPLING8 * s..OVERSAMPLING8 * (s + 1)].copy_from_slice(&y);
         }
     }
 
-    /// the (shaped) points of up() back at the input rate into output[0..frames): point q of a step weighed with
-    /// phase 8 - q of the sinc cut at the nyquist, phase 0 the center point alone, the 8 streams averaged
-    pub fn down(&mut self, points: &[F64x2], frames: usize, output: &mut [F64x2]) {
-        let eighth = F64x2::splat(OVERSAMPLING8 as f64);
-        for s in 0..frames {
-            let point = OVERSAMPLING8 * s;
-            self.stream_pos = if self.stream_pos == 0 {
-                STREAM - 1
-            } else {
-                self.stream_pos - 1
-            };
-            let sp = self.stream_pos;
-            for (q, stream) in self.streams.iter_mut().enumerate() {
-                stream[sp] = points[point + q];
-                stream[sp + STREAM] = points[point + q];
+    /// curve(point) × the gain of its sample on the points of the block: tanh, or a clip at ±1 (`hard`).
+    /// `gains` holds frames + 3 values
+    pub fn shape(&mut self, hard: bool, gains: &[f32], frames: usize) {
+        let (low, high) = (F32x4::splat(-1.0), F32x4::splat(1.0));
+        for plane in self.planes.iter_mut().flatten() {
+            let points = &mut plane[TAPS..];
+            let mut s = 0;
+            while s < frames {
+                let x = F32x4::load(&points[s..]);
+                let y = if hard { x.min(high).max(low) } else { tanh4(x) };
+                (y * F32x4::load(&gains[s..])).store(&mut points[s..]);
+                s += 4;
             }
-            let mut sum = self.streams[0][sp + HALF];
-            for j in 0..TAPS {
-                let i = sp + j + 1;
-                let mut products = self.streams[1][i].mul(F64x2::splat(DOWN8_PHASES[OVERSAMPLING8 - 2][j]));
-                for q in 2..OVERSAMPLING8 {
-                    products = products
-                        .add(self.streams[q][i].mul(F64x2::splat(DOWN8_PHASES[OVERSAMPLING8 - 1 - q][j])));
+        }
+    }
+
+    /// points of 0 for the block (a chain that stopped empties its decimator)
+    pub fn silence(&mut self, frames: usize) {
+        for plane in self.planes.iter_mut().flatten() {
+            plane[TAPS..TAPS + frames].fill(0.0);
+        }
+    }
+
+    /// the points of the block back at the input rate into (or added to) output[channel][0..frames): point q of a
+    /// step weighed with phase ratio - q of the sinc cut at the nyquist, phase 0 the center point alone, the
+    /// streams averaged. The block is then the one before
+    pub fn down(&mut self, output: [&mut [f32]; 2], frames: usize, add: bool) {
+        let center = 1.0 / self.ratio as f32;
+        for (channel, output) in self.planes.iter_mut().zip(output) {
+            let output = &mut output[..frames];
+            for (s, out) in output.iter_mut().enumerate() {
+                let value = center * channel[0][s + HALF];
+                *out = if add { *out + value } else { value };
+            }
+            for q in 1..self.ratio {
+                let taps = lanes_of(&self.down[self.ratio - 1 - q]);
+                let plane = &channel[q][..TAPS + frames];
+                for (s, out) in output.iter_mut().enumerate() {
+                    *out += dot(&plane[s..], &taps);
                 }
-                sum = sum.add(products);
             }
-            output[s] = sum.div(eighth);
+            for plane in channel.iter_mut() {
+                plane.copy_within(frames..frames + TAPS, 0);
+            }
         }
     }
 
+    /// no points of before: the decimator at 0 (a chain that starts, or cleared)
     pub fn clear(&mut self) {
-        self.history = [F64x2::default(); 2 * TAPS];
-        self.streams = [[F64x2::default(); 2 * STREAM]; OVERSAMPLING8];
-    }
-
-    /// as StereoOversampler::input_history
-    pub fn input_history(&self) -> InputHistory {
-        InputHistory {
-            history: self.history,
-            pos: self.pos,
+        for plane in self.planes.iter_mut().flatten() {
+            plane[..TAPS].fill(0.0);
         }
-    }
-
-    /// as StereoOversampler::warm
-    pub fn warm(&mut self, input: &InputHistory) {
-        self.history = input.history;
-        self.pos = input.pos;
-        self.streams = [[F64x2::default(); 2 * STREAM]; OVERSAMPLING8];
     }
 }
 
@@ -367,20 +284,22 @@ mod tests {
     fn the_lanes_of_a_biquad_are_a_biquad_each() {
         let (rate, mut x) = (48000.0, 0.3);
         let mut stereo = StereoBiquad::new();
-        let mut lanes = LaneBiquad::default();
-        let (mut left, mut right, mut low, mut high) = (
-            Biquad::default(),
-            Biquad::default(),
-            Biquad::default(),
-            Biquad::default(),
-        );
+        let mut quad = QuadBiquad::default();
+        let (mut left, mut right) = (Biquad::default(), Biquad::default());
+        let mut each: [Biquad; 4] = core::array::from_fn(|_| Biquad::default());
         stereo.set(FilterType::Lowpass, 3000.0, 0.7, 0.0, rate);
         left.set(FilterType::Lowpass, 3000.0, 0.7, 0.0, rate);
         right.set(FilterType::Lowpass, 3000.0, 0.7, 0.0, rate);
-        lanes.set(0, FilterType::Lowshelf, 200.0, 0.0, -2.5, rate);
-        lanes.set(1, FilterType::Highshelf, 6000.0, 0.0, -7.0, rate);
-        low.set(FilterType::Lowshelf, 200.0, 0.0, -2.5, rate);
-        high.set(FilterType::Highshelf, 6000.0, 0.0, -7.0, rate);
+        let shelves = [
+            (FilterType::Lowshelf, 200.0, -2.5),
+            (FilterType::Highshelf, 6000.0, -7.0),
+            (FilterType::Lowshelf, 300.0, 4.0),
+            (FilterType::Highshelf, 12000.0, -30.0),
+        ];
+        for (lane, (ty, frequency, gain)) in shelves.into_iter().enumerate() {
+            quad.set(lane, ty, frequency, 0.0, gain, rate);
+            each[lane].set(ty, frequency, 0.0, gain, rate);
+        }
         for s in 0..2000 {
             x = jsmath::sin(x * 3.7 + s as f64);
             let input = F64x2::new(x, -0.5 * x);
@@ -392,14 +311,17 @@ mod tests {
                     right.process(input.hi()).to_bits()
                 ]
             );
-            let each = lanes.process(input);
-            assert_eq!(
-                [each.lo().to_bits(), each.hi().to_bits()],
-                [
-                    low.process(input.lo()).to_bits(),
-                    high.process(input.hi()).to_bits()
-                ]
-            );
+            // in f32: within its rounding of the biquads in doubles
+            let lanes = [x, -0.5 * x, 0.25 * x, -x].map(|value| value as f32);
+            let out = quad.process(F32x4::load(&lanes)).lanes();
+            for lane in 0..4 {
+                let exact = each[lane].process(lanes[lane] as f64);
+                assert!(
+                    (out[lane] as f64 - exact).abs() < 2e-5,
+                    "{} != {exact}",
+                    out[lane]
+                );
+            }
         }
     }
 }
