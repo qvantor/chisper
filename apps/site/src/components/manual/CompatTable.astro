@@ -1,0 +1,48 @@
+---
+import { MESSAGES } from '../../i18n';
+import { COMPAT } from '../../manual/compat';
+import { langOf } from '../../manual/pages';
+
+// the browsers and systems the synth plays on, whether a MIDI keyboard and the choice of latency work there
+const m = MESSAGES[langOf(Astro.url.pathname)];
+const { compat } = m.manual;
+---
+
+<div class='compat'>
+  <table>
+    <thead>
+      <tr>
+        <th scope='col'>{compat.browser}</th>
+        <th scope='col'>{compat.system}</th>
+        <th scope='col'>{compat.midi}</th>
+        <th scope='col'>{compat.latency}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {COMPAT.map(({ browser, system, midi, latency }) => (
+        <tr>
+          <th scope='row'>{browser === 'any' ? compat.any : browser}</th>
+          <td>{system}</td>
+          <td class:list={midi ? 'yes' : 'no'}>{midi ? compat.yes : compat.no}</td>
+          <td class:list={latency ? 'yes' : 'no'}>{latency ? compat.yes : compat.no}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .compat {
+    margin: 24px 0;
+    overflow-x: auto;
+  }
+
+  .yes {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .no {
+    color: var(--text-muted);
+  }
+</style>

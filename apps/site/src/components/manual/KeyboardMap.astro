@@ -1,0 +1,156 @@
+---
+import { MESSAGES } from '../../i18n';
+import { ROWS, legendOf, noteOf } from '../../manual/keyboard';
+import { langOf } from '../../manual/pages';
+
+// the letters and digits of a computer keyboard as the synth plays them (octave 3), the legends of the keyboards of
+// the language: a key that plays a note shows it, white or black as on a piano; the arrows ↓ ↑ move the octave
+const lang = langOf(Astro.url.pathname);
+const m = MESSAGES[lang];
+// the rows step to the right as on a keyboard (in widths of a key)
+const STAGGER = [0, 0.5, 0.75, 1.25];
+---
+
+<figure class='keyboard' role='group' aria-label={m.manual.keyboard.label}>
+  <div class='rows'>
+    {ROWS.map((row, index) => (
+      <div class='row' style={`--stagger: ${STAGGER[index]}`}>
+        {row.map(([code, legend]) => {
+          const note = noteOf(code);
+          return (
+            <span class:list={['k', note && (note.includes('#') ? 'black' : 'white')]} data-code={code}>
+              <span class='legend'>{legendOf(code, legend, lang)}</span>
+              {note && <span class='note'>{note}</span>}
+            </span>
+          );
+        })}
+      </div>
+    ))}
+  </div>
+  <div class='arrows'>
+    <span class='k arrow' data-code='ArrowDown'>
+      <span class='legend'>↓</span>
+    </span>
+    <span class='k arrow' data-code='ArrowUp'>
+      <span class='legend'>↑</span>
+    </span>
+  </div>
+  <figcaption>
+    <span class='swatch white'></span>
+    {m.manual.keyboard.white}
+    <span class='swatch black'></span>
+    {m.manual.keyboard.black}
+    <span class='swatch arrow'></span>
+    {m.manual.keyboard.octave}
+  </figcaption>
+</figure>
+
+<style>
+  .keyboard {
+    --key: clamp(19px, 5.5vw, 46px);
+
+    display: grid;
+    grid-template-columns: auto auto;
+    align-items: end;
+    justify-content: start;
+    gap: 6px 14px;
+    margin: 28px 0;
+    overflow-x: auto;
+  }
+
+  .rows {
+    display: grid;
+    gap: 4px;
+  }
+
+  .row {
+    display: flex;
+    gap: 4px;
+    padding-left: calc(var(--stagger) * (var(--key) + 4px));
+  }
+
+  .arrows {
+    display: flex;
+    gap: 4px;
+  }
+
+  .k {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: var(--key);
+    height: var(--key);
+    padding: 3px 4px;
+    border-radius: var(--radius-m);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .legend {
+    font-weight: 600;
+  }
+
+  /* a key that plays nothing */
+  .k:not(.white, .black, .arrow) {
+    opacity: 0.45;
+  }
+
+  .note {
+    align-self: flex-end;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+  }
+
+  .white {
+    background: var(--primary);
+    color: var(--dark);
+  }
+
+  .black {
+    background: #070b0f;
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .arrow {
+    background: var(--second-accent);
+    color: var(--dark);
+  }
+
+  figcaption {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: var(--radius-s);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+
+  /* a phone: the arrows under the rows */
+  @media (max-width: 560px) {
+    .keyboard {
+      grid-template-columns: auto;
+    }
+
+    .note {
+      font-size: 8px;
+    }
+
+    .legend {
+      font-size: 9px;
+    }
+  }
+</style>

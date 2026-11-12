@@ -1,38 +1,41 @@
 ---
-import { jsonLd } from '../seo/json-ld';
-import type { Messages } from '../i18n';
-import { DEFAULT_LANG, LANGS, LOCALES, absolute, pageUrl, type Lang } from '../i18n/locales';
+import { DEFAULT_LANG, LANGS, LOCALES, absolute, type Lang } from '../i18n/locales';
 
 interface Props {
   lang: Lang;
-  m: Messages;
-  // the path of the screenshot of the synth (JSON-LD)
-  screenshot: string;
+  title: string;
+  description: string;
+  // the path of the page in every language: its canonical, the alternates, x-default (English)
+  paths: Record<Lang, string>;
+  ogType: 'website' | 'article';
+  ogImageAlt: string;
+  // the structured data of the page (JSON-LD)
+  structured: object;
 }
 
-const { lang, m, screenshot } = Astro.props;
-const url = pageUrl(lang);
+const { lang, title, description, paths, ogType, ogImageAlt, structured } = Astro.props;
+const url = absolute(paths[lang]);
 const ogImage = absolute(`/og/${lang}.png`);
 // a `<` in a string would end the script early
-const structured = JSON.stringify(jsonLd(lang, m, screenshot)).replace(/</g, '\\u003c');
+const json = JSON.stringify(structured).replace(/</g, '\\u003c');
 ---
 
 <meta charset='utf-8' />
 <meta name='viewport' content='width=device-width, initial-scale=1' />
-<title>{m.meta.title}</title>
-<meta name='description' content={m.meta.description} />
+<title>{title}</title>
+<meta name='description' content={description} />
 <link rel='canonical' href={url} />
 {LANGS.map((other) => (
-  <link rel='alternate' hreflang={other} href={pageUrl(other)} />
+  <link rel='alternate' hreflang={other} href={absolute(paths[other])} />
 ))}
-<link rel='alternate' hreflang='x-default' href={pageUrl(DEFAULT_LANG)} />
+<link rel='alternate' hreflang='x-default' href={absolute(paths[DEFAULT_LANG])} />
 <link rel='icon' href='/favicon.ico' sizes='32x32' />
 <meta name='theme-color' content='#0e151b' />
 
-<meta property='og:type' content='website' />
+<meta property='og:type' content={ogType} />
 <meta property='og:site_name' content='Chisper' />
-<meta property='og:title' content={m.meta.title} />
-<meta property='og:description' content={m.meta.description} />
+<meta property='og:title' content={title} />
+<meta property='og:description' content={description} />
 <meta property='og:url' content={url} />
 <meta property='og:locale' content={LOCALES[lang].ogLocale} />
 {LANGS.filter((other) => other !== lang).map((other) => (
@@ -41,11 +44,11 @@ const structured = JSON.stringify(jsonLd(lang, m, screenshot)).replace(/</g, '\\
 <meta property='og:image' content={ogImage} />
 <meta property='og:image:width' content='1200' />
 <meta property='og:image:height' content='630' />
-<meta property='og:image:alt' content={m.meta.ogImageAlt} />
+<meta property='og:image:alt' content={ogImageAlt} />
 <meta name='twitter:card' content='summary_large_image' />
-<meta name='twitter:title' content={m.meta.title} />
-<meta name='twitter:description' content={m.meta.description} />
+<meta name='twitter:title' content={title} />
+<meta name='twitter:description' content={description} />
 <meta name='twitter:image' content={ogImage} />
-<meta name='twitter:image:alt' content={m.meta.ogImageAlt} />
+<meta name='twitter:image:alt' content={ogImageAlt} />
 
-<script type='application/ld+json' set:html={structured} />
+<script type='application/ld+json' set:html={json} />

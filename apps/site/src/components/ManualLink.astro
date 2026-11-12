@@ -1,0 +1,127 @@
+---
+import BookIcon from './BookIcon.astro';
+
+interface Props {
+  href: string;
+  // the name of the manual (over the label, small)
+  kicker: string;
+  // what the page tells
+  label: string;
+  // in an answer of the questions: smaller
+  small?: boolean;
+}
+
+// a page of the manual from the landing: a book, the name of the manual over what the page tells, an arrow
+const { href, kicker, label, small = false } = Astro.props;
+---
+
+<a class:list={['manual-link', { small }]} href={href}>
+  <span class='mark'>
+    <BookIcon />
+  </span>
+  <span class='text'>
+    <span class='kicker'>{kicker}</span>
+    <span class='page-name'>{label}</span>
+  </span>
+  <svg class='arrow' viewBox='0 0 16 16' aria-hidden='true'>
+    <path
+      d='M6 3l5 5-5 5'
+      fill='none'
+      stroke='currentColor'
+      stroke-width='1.8'
+      stroke-linecap='round'
+      stroke-linejoin='round'
+    ></path>
+  </svg>
+</a>
+
+<style>
+  .manual-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 100%;
+    padding: 10px 14px 10px 10px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+    color: var(--text);
+    text-decoration: none;
+    transition:
+      background 150ms,
+      box-shadow 150ms;
+  }
+
+  .manual-link:hover {
+    background: var(--surface-high);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border-radius: 8px;
+    font-size: 20px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  .text {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .kicker {
+    font: 600 11px/1 var(--font);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .page-name {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .arrow {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    margin-left: 4px;
+    color: var(--text-muted);
+    transition:
+      color 150ms,
+      transform 150ms;
+  }
+
+  .manual-link:hover .arrow {
+    color: var(--accent);
+    transform: translateX(3px);
+  }
+
+  .small {
+    gap: 10px;
+    padding: 8px 12px 8px 8px;
+  }
+
+  .small .mark {
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+  }
+
+  .small .page-name {
+    font-size: 14px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .manual-link:hover .arrow {
+      transform: none;
+    }
+  }
+</style>

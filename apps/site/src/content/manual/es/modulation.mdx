@@ -1,0 +1,277 @@
+---
+title: 'Modulación: envolvente ADSR, LFO y velocidad en cualquier perilla'
+h1: 'Modulación: envolventes, LFO y velocidad'
+description: 'Arrastra una envolvente, un LFO o la velocidad a cualquier perilla: ADSR con curvas, LFO sincronizado al tempo, bombeo sidechain, formas dibujadas, 64 rutas.'
+nav: 'Modulación'
+updated: 2026-11-12
+preset: zesty-drive-bass
+image: modulation-drag
+---
+
+La modulación hace que una perilla se mueva sola. En Chisper modulas arrastrando la pestaña de una fuente (una
+envolvente, ENV 1–3; un LFO, LFO 1–4; o la velocidad de las notas, VELO) a cualquier perilla, y a partir de ahí la
+perilla se mueve con esa fuente en cada nota, hacia arriba o alrededor de su propio valor, hasta donde marque la
+cantidad que fijes. Un preset admite hasta 64 de estas rutas, cuatro por perilla.
+
+Las envolventes dan forma a cada nota desde que la pulsas hasta después de soltarla: un pluck, un sonido que crece
+poco a poco, un barrido de filtro. Los LFO repiten una forma una y otra vez, libres o a tempo: un vibrato, un
+wobble, el bombeo de un sidechain, un gate. La velocidad (velocity: la fuerza con la que pulsas cada tecla) da a
+cada nota su propio nivel: más fuerte o más brillante cuanto más fuerte tocas.
+
+## Las fuentes
+
+Las fuentes son las pestañas de la fila inferior del sintetizador, cada una con su propio color:
+
+- **ENV 1**, **ENV 2**, **ENV 3** (abajo a la izquierda): tres envolventes. ENV 1 es además el volumen de cada
+  nota.
+- **LFO 1** a **LFO 4** (abajo en el centro): cuatro LFO.
+- **VELO** (abajo a la derecha, junto a Voicing): la velocidad de cada nota.
+
+El punto de una pestaña cuenta las rutas de esa fuente. La última pestaña en la que hiciste clic es la
+seleccionada: las perillas muestran sus rutas, y solo esas rutas se pueden cambiar en ellas.
+
+## ¿Cómo añado una modulación?
+
+<Figure name='modulation-drag' alt='LFO 1 arrastrado desde su pestaña hasta la perilla Res del filtro: las perillas que admiten una ruta tienen anillos rojos y la etiqueta LFO 1 sigue al puntero' >
+
+Arrastra una pestaña y las perillas que la admiten se iluminan con su color; la que está bajo el puntero es donde
+caerá.
+
+</Figure>
+
+1. Pulsa la pestaña de una fuente y arrástrala (con el ratón, con el dedo o con un lápiz).
+2. Se iluminan todas las perillas que admiten esa fuente. Llévala hasta la que quieras.
+3. Suelta. La ruta queda creada a +50 %, y la pestaña que arrastraste queda seleccionada.
+
+Las perillas de la otra pantalla superior también admiten rutas: mantén un momento la pestaña arrastrada sobre
+**OSC | FX** en la cabecera y la pantalla cambia. En un móvil, la columna se desplaza sola cuando arrastras cerca
+de su borde superior o inferior.
+
+Soltar una fuente sobre una perilla que ya la tiene no cambia nada; en su lugar, arrastra su punto (más abajo).
+
+## Cómo leer una perilla modulada
+
+- Una perilla que admite rutas tiene un anillo gris alrededor.
+- La ruta de la pestaña seleccionada es un arco de su color, desde el valor de la perilla hasta donde la lleva la
+  fuente.
+- Un puntito arriba a la izquierda de la perilla tiene una porción por cada una de sus rutas, bajo un pequeño
+  símbolo de onda senoidal.
+- Mientras suenan notas, una segunda marca, más pálida, se mueve alrededor de la perilla: es donde la ponen todas
+  sus rutas en ese momento. Las perillas de los efectos siguen moviéndose con un LFO aunque no haya ninguna nota
+  pulsada.
+
+## Cantidad, unipolar y bipolar
+
+La cantidad es cuánto mueve una fuente a una perilla, de −100 % a +100 % del rango de la perilla. Arrastra el punto
+de la perilla hacia arriba o hacia abajo para fijarla, en pasos de 1 %. Una cantidad negativa mueve la perilla
+hacia abajo. En las perillas que trabajan en octavas, como **Cutoff**, la cantidad se lee en octavas: +50 % en
+Cutoff son unas 5,5 octavas.
+
+Una ruta puede ser:
+
+- **Unipolar** (**Uni**): la perilla sube desde su valor la cantidad multiplicada por el nivel de la fuente (de 0 a
+  1). Con una envolvente en su punto más alto o una nota a velocidad máxima, sube la cantidad entera.
+- **Bipolar** (**Bi**): la perilla oscila alrededor de su valor, la mitad de la cantidad por encima y la otra mitad
+  por debajo. Ideal para un vibrato o un paneo que va de izquierda a derecha.
+
+Un LFO que sueltas sobre una perilla con el rango centrado en cero (**Pan**, **Pitch**, **Fine**, el **Crs** del
+sub, la perilla Gain del filtro) empieza bipolar; cualquier otra ruta empieza unipolar.
+
+| Gesto | Qué hace |
+|---|---|
+| Arrastrar una pestaña sobre una perilla | Añade una ruta a +50 % |
+| Arrastrar el punto de una perilla hacia arriba o hacia abajo | Fija la cantidad de la ruta de la pestaña seleccionada |
+| <kbd>Shift</kbd> + clic en el punto | Unipolar ↔ bipolar |
+| <kbd>Shift</kbd>+<kbd>Alt</kbd> + clic en la perilla | Unipolar ↔ bipolar |
+| Clic derecho en la perilla, o mantenerla pulsada en una pantalla táctil | El menú de la perilla: todas sus rutas, Default, Clear modulation |
+
+## El menú de una perilla: apagar, quitar, borrar
+
+<Figure name='knob-menu' alt='El menú de la perilla Cutoff: su ruta desde ENV 2 a +3,9 octavas con los botones Uni y Bi, una luz y una cruz, Default y Clear modulation' narrow>
+
+Haz clic derecho en una perilla (en una pantalla táctil, mantenla pulsada, o mantén pulsado su punto) y verás todas
+sus rutas en una sola lista.
+
+</Figure>
+
+Cada ruta tiene su fuente, su cantidad (arrástrala a la derecha o hacia arriba para subirla), **Uni | Bi**, una luz
+y **×**. La luz apaga la ruta sin perder su cantidad: así comparas el sonido con y sin ella. **×** la quita.
+**Default** devuelve la perilla a su valor por defecto y **Clear modulation** quita todas sus rutas. Una perilla
+sin rutas dice *Drag a source tab here to add a modulation* (arrastra aquí la pestaña de una fuente para añadir una
+modulación).
+
+## ¿Cuántas rutas hay y qué se puede modular?
+
+- **64 rutas** por preset y **4 fuentes** por perilla. Una perilla con cuatro, o un preset con 64, ya no se
+  ilumina. Una ruta apagada también cuenta.
+- **Osc 1** y **Osc 2**: Gain, Wave, Detune, Blend, Pitch (en el recuadro **Semi**) y Fine. **Oct** no admite
+  ninguna.
+- **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
+- **Filter**: Cutoff, Res, Gain. Una ruta se queda en una perilla que el tipo de filtro no usa, y vuelve a
+  funcionar cuando eliges un tipo que sí la usa.
+- **Efectos**: todas las perillas y el Mix de cada efecto (Drive, Tone y Level de la distorsión; Time, Feedback,
+  Freq, Q y Pan del delay; las perillas y los faders de la reverb). Sus interruptores no admiten ninguna.
+- **LFO 1–4**: Rate, Delay, Rise, Smooth y Phase, movidas por una envolvente o por la velocidad. Un LFO no puede
+  mover a ningún LFO.
+- Las perillas de las envolventes y de VELO, **Oct** y los interruptores no admiten rutas.
+
+## Envolventes ADSR: ENV 1, ENV 2, ENV 3
+
+<Figure name='envelopes' alt='La sección de envolventes de Chisper en ENV 2: la curva que cae a Sustain 58 en un segundo y se suelta hasta cero, el punto de la última nota sobre ella, las perillas Attack, Hold, Decay, Sustain y Release y el botón BPM'>
+
+Las envolventes, abajo a la izquierda. El punto recorre la curva con la última nota que tocaste.
+
+</Figure>
+
+Una envolvente es la forma de una nota en el tiempo. Al pulsar una tecla sube (**Attack**), se mantiene arriba
+(**Hold**), cae (**Decay**) hasta el nivel que conserva mientras mantienes la tecla (**Sustain**) y, cuando la
+sueltas, cae hasta desaparecer (**Release**).
+
+**ENV 1 es el volumen** de cada nota, siempre: las voces pasan por ella después del filtro. También es una fuente,
+así que la misma forma puede mover cualquier otra perilla. **ENV 2** y **ENV 3** solo mueven aquello a lo que las
+arrastras, y empiezan como un pluck: un ataque rápido y una caída a cero en medio segundo.
+
+| Perilla | Rango | ENV 1 | ENV 2 y ENV 3 |
+|---|---|---|---|
+| Attack | de 0 a 32 s | 5 ms | 5 ms |
+| Hold | de 0 a 32 s | 100 ms | 0 |
+| Decay | de 0 a 32 s | 0 | 0,5 s |
+| Sustain | de 0 a 100 | 100 | 0 |
+| Release | de 0 a 32 s | 5 ms | 0,3 s |
+
+Las perillas de tiempo dedican la mayor parte de su recorrido a los tiempos cortos, donde unos pocos milisegundos
+se notan.
+
+**Curvas.** Attack, Decay y Release se pueden curvar: arrastra el punto central de una etapa hacia arriba o hacia
+abajo. Cerca del centro vuelve a encajar en una línea recta; <kbd>↑</kbd> <kbd>↓</kbd> mueven en pasos pequeños un
+punto que tenga el foco; un doble clic devuelve la etapa a su curva por defecto. Una etapa muy corta o que no
+cambia de nivel no tiene punto.
+
+**BPM.** El botón **BPM**, a la derecha de Release, convierte los tiempos en valores de nota: Off, y luego desde
+1/512 de compás hasta 32 compases, al tempo del piano roll. Sustain sigue siendo un nivel. Al activar BPM se elige
+el valor de nota más cercano a cada tiempo con el tempo actual; al desactivarlo se conserva el tiempo.
+
+Una nota lee sus envolventes al empezar, así que el cambio de una perilla se oye a partir de la siguiente nota.
+
+## LFO: de LFO 1 a LFO 4
+
+<Figure name='lfo' alt='La sección LFO de Chisper: la forma Kick, que empieza arriba y cae a cero, el selector de formas en Kick, el modo Retrig, los botones BPM, ancla, tresillo y puntillo y las perillas Rate, Delay, Rise, Smooth y Phase'>
+
+Un LFO, abajo en el centro: su forma, el selector de formas, el modo, los botones de tempo y sus perillas.
+
+</Figure>
+
+¿Qué es un LFO? Un oscilador de baja frecuencia (*low frequency oscillator*) que toca una forma una y otra vez,
+demasiado despacio para oírla como una nota: la oyes como movimiento. Su nivel va de 0, abajo del gráfico, a 1,
+arriba.
+
+### Formas
+
+El selector bajo el gráfico tiene formas listas para usar, en cuatro grupos:
+
+- **Basic**: Sine, Triangle, Saw up, Saw down, Square.
+- **Sidechain**: Pump, Pump soft, Pump hard, Pump ×2, Pump ×4, Kick. Los Pump caen al principio del ciclo y vuelven a
+  crecer: el ducking de un compresor en sidechain, sin compresor. Kick empieza arriba y cae. En una ruta con
+  cantidad negativa hace el mismo ducking.
+- **Rhythm**: Gate ×4, Gate ×8, Gate ×16, Offbeat, Dotted 3-3-2, Trance A, Trance B, Stutter, Pluck ×4.
+- **Steps**: Up ×4, Down ×4, Up-down, Random ×8.
+
+### ¿Cómo dibujo mi propia forma de LFO?
+
+Cada forma es una línea que pasa por varios puntos, y puedes editar cualquiera de ellos; el selector pasa entonces
+a decir *Custom*.
+
+- **Añadir un punto:** pulsa sobre la línea (un punto pálido muestra dónde irá) y arrástralo sin soltar.
+- **Mover un punto:** arrástralo. Se queda entre sus vecinos; suéltalo encima de un vecino para crear un escalón
+  brusco.
+- **Quitar un punto:** haz doble clic en él. El primer punto no se puede quitar, y una forma conserva al menos dos.
+- **Curvar un tramo:** arrastra hacia arriba o hacia abajo el punto de su centro; con un doble clic vuelve a quedar
+  recto.
+- Hasta 64 puntos.
+
+### Modo y perillas
+
+- **Retrig** (por defecto): cada nota arranca la forma desde el principio, después de su **Delay**.
+- **Free**: el LFO va por su cuenta y todas las notas lo comparten.
+
+| Perilla | Rango | Por defecto | Qué hace |
+|---|---|---|---|
+| Rate | de 10 ms a 32 s | 0,5 s | Cuánto dura un ciclo (se muestra como tiempo; 0,5 s son 2 Hz). Hacia la derecha, más rápido. |
+| Delay | de 0 a 32 s | 0 | Cuánto espera el LFO después de que empiece la nota, en el nivel de su primer punto |
+| Rise | de 0 a 32 s | 0 | Cuánto tarda en pasar con un fundido de ese nivel a la forma completa |
+| Smooth | de 0 a 0,5 s | 0 | Redondea los escalones de la forma |
+| Phase | de 0° a 360° | 0° | En qué punto de la forma empieza |
+
+### LFO sincronizado al tempo y MIDI Clock
+
+- **BPM** fija Rate, Delay y Rise en valores de nota en lugar de segundos: Rate va de 1/256 a 32 compases, 1/4 por
+  defecto. Un valor más corto que 10 ms con el tempo actual no aparece: a 120 BPM el más corto es 1/128.
+  1/256 está hasta 93 BPM.
+- Los dos últimos botones añaden a los pasos de Rate los tresillos (⅔ de la duración, 1/8T) y los valores con
+  puntillo (1,5 veces más largos, 1/8D). No cambian el valor en el que está Rate: gira la perilla hasta uno de los
+  pasos nuevos.
+- El ancla mantiene un LFO en Free sobre los tiempos del tempo, para que un bombeo caiga donde caería el bombo.
+  Está activada por defecto y solo funciona en modo Free.
+- El tempo es el del piano roll (su tira: arrástrala, o haz doble clic y escribe, de 30 a 240). No se guarda en los
+  presets: lo guarda el navegador.
+- Un MIDI Clock de tu DAW o de una caja de ritmos puede marcar el tempo; el recuadro del tempo muestra entonces
+  **EXT**. Consulta [Teclados y dispositivos MIDI](/es/manual/teclado-midi/).
+
+## Velocidad: VELO
+
+La sección VELO (abajo a la derecha) muestra cómo la velocidad de una nota (la fuerza con la que pulsas la tecla,
+de 1 a 127) se convierte en un nivel de 0 a 1: arrastra el punto central de la curva para curvarla y haz doble clic
+en él para volver a dejarla recta. El punto sobre la curva es la última nota que tocaste.
+
+Por defecto, la velocidad fija el volumen: con **Amp** al 100 %, una nota a velocidad 64 suena unos 6 dB más baja
+que una a 127. Baja **Amp** a 0 y todas las notas suenan igual de fuerte, sea cual sea su velocidad.
+
+VELO es una fuente como las demás: arrástrala a **Cutoff** y las notas fuertes también sonarán más brillantes. Una
+nota conserva su velocidad mientras suena.
+
+<Note>
+
+El teclado del ordenador y el piano en pantalla tocan todas las notas a velocidad 100. Para tocar notas suaves y
+fuertes, usa un [teclado MIDI](/es/manual/teclado-midi/).
+
+</Note>
+
+## Tres ejercicios
+
+<Try title='Un pluck: ENV 2 sobre Cutoff' preset='zesty-drive-bass'>
+
+1. Carga *Init* (la flecha circular junto al nombre del preset) y enciende la sección Filter con un clic en su
+   título.
+2. Baja **Cutoff** hasta unos 200.
+3. Arrastra la pestaña **ENV 2** a **Cutoff**.
+4. Toca unas cuantas notas cortas. Luego acorta el **Decay** de ENV 2 y vuelve a tocar.
+
+Deberías oír cada nota empezar brillante y cerrarse en medio segundo, el sonido de un pluck; con un Decay más
+corto, suena más seco. El preset de abajo hace lo mismo con un bajo resonante, con casi cuatro octavas de barrido
+en cada nota.
+
+</Try>
+
+<Try title='Efecto sidechain: un LFO sobre Gain' preset='pumping-house-chords'>
+
+1. Carga *Init* y baja del todo **Gain** de Osc 1.
+2. En LFO 1, elige **Pump** en el selector de formas (Sidechain) y pon el modo en **Free**.
+3. Activa **BPM**; Rate está en 1/4, un bombeo por tiempo.
+4. Arrastra la pestaña **LFO 1** a **Gain** de Osc 1 y luego sube su punto hasta un +80 % más o menos.
+5. Mantén un acorde.
+
+Deberías oír el acorde hundirse en cada tiempo y volver a crecer, el bombeo del house y del EDM, clavado al tempo.
+
+</Try>
+
+<Try title='Un wobble: LFO sobre Cutoff' preset='dubstep-wobble'>
+
+1. Carga *Init*, enciende la sección Filter, baja **Cutoff** hasta unos 200 y sube un poco **Res**.
+2. Activa **BPM** en LFO 1 y pon **Rate** en 1/8.
+3. Arrastra **LFO 1** a **Cutoff** y pon la cantidad en un +40 % más o menos.
+4. Mantén una nota grave, luego activa el botón de tresillo y gira Rate hasta 1/8T.
+
+Deberías oír el filtro abrirse y cerrarse en cada corchea: un bajo wobble. El preset de abajo va más allá: el LFO
+mueve también la onda y el drive, y ENV 2 cambia la rapidez del LFO a medida que avanza la nota.
+
+</Try>

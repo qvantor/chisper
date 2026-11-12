@@ -1,0 +1,220 @@
+---
+title: 'Cómo usar Chisper: primeros pasos con el sintetizador online'
+h1: 'Primeros pasos con Chisper'
+description: 'Guía para principiantes: toca el sintetizador online con el teclado del ordenador, un teclado MIDI o la pantalla, abre presets y comparte tu sonido sin cuenta.'
+nav: 'Primeros pasos'
+updated: 2026-11-12
+preset: biting-brass-keys
+image: synth-map
+---
+
+Chisper es un sintetizador wavetable online que funciona en tu navegador. Abre [chisper.qvantor.org](/), haz clic
+en cualquier parte y toca las letras del teclado del ordenador: <kbd>Z</kbd> es C3, <kbd>Q</kbd> es C4. Ya hay un
+preset popular cargado; gira cualquier perilla para cambiarlo y guarda el resultado como preset, con un enlace que
+cualquiera puede abrir. Sin descargas y sin cuenta.
+
+Si es tu primer sintetizador online, esta guía te lleva por los diez primeros minutos: arrancar el sonido, tocarlo,
+encontrar presets, las partes de la pantalla, las primeras perillas que girar y guardar un sonido propio.
+
+## Paso 1: abre Chisper y arranca el sonido
+
+Abre [chisper.qvantor.org](/) en Chrome, Edge, Firefox o Safari (16.4 o posterior), en un ordenador, un Chromebook
+o un móvil. Cada vez que entras se abre un preset al azar de la lista Popular, así que el primer sonido es una
+sorpresa; su nombre aparece en la cabecera.
+
+Los navegadores mantienen una página en silencio hasta que la tocas, así que el sonido arranca con tu primer clic,
+toque o pulsación de tecla en cualquier parte de la página. No hay ningún botón de inicio que buscar.
+
+<Note>
+
+Un teclado MIDI por sí solo no despierta el sonido: el navegador espera a que hagas clic, toques o escribas en la
+propia página. Si solo tocas por MIDI, haz clic una vez en la página antes de empezar.
+
+</Note>
+
+## Paso 2: tócalo
+
+### ¿Cómo toco un sintetizador con el teclado del ordenador?
+
+Dos filas de letras son dos octavas de un piano. La fila de abajo empieza en <kbd>Z</kbd> = C3 y sube por las
+teclas blancas <kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> <kbd>M</kbd>, con las
+negras en la fila de encima (<kbd>S</kbd> <kbd>D</kbd>, <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd>). La fila de arriba
+empieza una octava más alta, en <kbd>Q</kbd> = C4, con sus teclas negras en los números
+(<kbd>2</kbd> <kbd>3</kbd>, <kbd>5</kbd> <kbd>6</kbd> <kbd>7</kbd>), y llega hasta <kbd>+</kbd> = G5.
+
+<KeyboardMap />
+
+- <kbd>↓</kbd> y <kbd>↑</kbd> bajan o suben las dos filas una octava, de la octava 0 a la 6. El navegador recuerda
+  dónde las dejaste. El recuadro a la izquierda de las teclas en pantalla muestra la octava (C3) y tiene las mismas
+  flechas.
+- Las teclas cuentan por su sitio en el teclado, no por su letra. El dibujo muestra un teclado español; en uno
+  latinoamericano, las teclas de F5 y F#5 llevan <kbd>´</kbd> y <kbd>¿</kbd>. En un teclado alemán, la tecla
+  marcada <kbd>Y</kbd> toca C3 (está donde la <kbd>Z</kbd>), y en uno francés lo hace la <kbd>W</kbd>.
+- No suena nada mientras mantienes pulsada <kbd>Ctrl</kbd> o <kbd>⌘</kbd> ni mientras escribes en un campo de
+  texto, así que los atajos y la búsqueda de presets no hacen ruido.
+- Todas las notas del teclado del ordenador tienen la misma velocidad, 100 (la velocidad, velocity en inglés, es
+  la fuerza con la que se pulsa una tecla). Para tocar notas suaves y fuertes, usa un
+  [teclado MIDI](/es/manual/teclado-midi/).
+
+### El piano en pantalla y la rueda de pitch
+
+La fila de abajo de la pantalla es un piano: tantas octavas como quepan en la ventana (hasta cinco), empezando una
+octava por debajo del teclado del ordenador. Haz clic en las teclas o, en una pantalla táctil, tócalas con varios
+dedos y desliza el dedo por encima para hacer un glissando.
+
+A su izquierda está la rueda de pitch. Arrástrala hacia arriba o hacia abajo para doblar las notas (pitch bend); al
+soltarla vuelve sola al centro. Los recuadros **Up** y **Down** que tiene al lado fijan cuánto dobla, en semitonos
+(de 0 a 24, 2 por defecto), y el preset los guarda.
+
+## Paso 3: elige un preset
+
+<Figure name='presets' alt='La ventana Presets de Chisper: la pestaña Popular, el campo de búsqueda y una lista de presets, cada uno con su número de oyentes' narrow>
+
+Haz clic en el nombre del preset en la cabecera para abrir la ventana. Un clic en una fila toca ese preset al
+instante y la ventana sigue abierta, así que puedes probarlos uno detrás de otro.
+
+</Figure>
+
+- **Popular** muestra los presets destacados y aquellos con los que se quedan los oyentes; el número junto a un
+  preset es cuántos oyentes se quedaron con él.
+- **All** muestra todos los presets, ordenados por **New**, **A–Z** o **Popular**. Lo que escribes en *Search all
+  presets* se busca por nombre en todos ellos.
+- **◀ ▶** junto al nombre, en la cabecera, recorren la lista en la que estabas (los presets populares o tu última
+  búsqueda), así que ni siquiera necesitas abrir la ventana.
+- La flecha circular, **Init preset**, carga *Init*: un sonido sencillo de un solo oscilador con todo lo demás
+  apagado. Aquí empiezan tus propios sonidos.
+- Un **\*** detrás del nombre significa que has cambiado el sonido desde que se abrió o se guardó.
+- Cada preset tiene su propio enlace (`chisper.qvantor.org/?preset=…`): la barra de direcciones lo muestra en
+  cuanto eliges uno.
+
+## ¿Qué hay en la pantalla?
+
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='La pantalla completa de Chisper en un ordenador con sus partes numeradas: la cabecera; el sub, los osciladores, el ruido y el filtro en la fila de arriba; las envolventes, los LFO, la velocidad y las voces debajo; las teclas abajo del todo'>
+
+1. **Logo**: abre este sitio en una pestaña nueva. El sintetizador sigue sonando en la suya.
+2. **Espectro**: las frecuencias que salen del sintetizador en este momento, los graves a la izquierda y los agudos
+   a la derecha.
+3. **OSC | FX**: cambia la fila de arriba entre las fuentes del sonido y los efectos (distorsión, delay y reverb,
+   en el orden en que los arrastres).
+4. **Presets**: el nombre, ◀ ▶ y la flecha circular de *Init*; debajo, **Save**, **Share**, **Midi** (tu
+   [teclado MIDI](/es/manual/teclado-midi/)) y el engranaje (la latencia del sonido, este manual).
+5. **Master**: el volumen de todo, de −40 a +12 dB, con un medidor al lado. Un limitador detrás evita que los picos
+   saturen.
+6. **Sub**: un suboscilador para dar peso a los graves: una senoidal o una de otras cinco formas sencillas, hasta a
+   cuatro octavas de la nota.
+7. **Osc 1**: el primer [oscilador wavetable](/es/manual/wavetables/). Arriba, la tabla y sus flechas; luego la
+   afinación (**Oct**, **Semi**, **Fine**) y la onda que suena, y debajo **Gain**, **Wave**, **Detune** y **Blend**.
+8. **Osc 2**: el segundo, igual en todo; en *Init* está apagado.
+9. **Noise**: un oscilador de ruido en cada voz: ruido blanco, rosa y marrón, hi-hats, crepitar de vinilo y más, en
+   bucle o una sola vez.
+10. **Filter**: un filtro en cada voz, de ocho tipos, con **Cutoff**, **Res** y **Gain**.
+11. **ENV 1–3**: [envolventes](/es/manual/modulacion-envolventes-lfo/). ENV 1 es el volumen de cada nota.
+12. **LFO 1–4**: [LFO](/es/manual/modulacion-envolventes-lfo/) que mueven cualquier perilla sobre la que los
+    arrastres.
+13. **VELO**: lo que hace la velocidad de una nota.
+14. **Voicing**: **Poly** y cuántas notas suenan a la vez (de 1 a 12, 8 por defecto), **Legato** y **Portamento**.
+15. **Rueda de pitch** y la octava del teclado del ordenador.
+16. **Keys**: el piano en pantalla.
+17. **Clip**: el loop del piano roll. Un clic abre el piano roll sobre el sintetizador; ▶ reproduce el clip.
+
+</InterfaceMap>
+
+Las partes con una casilla en la barra de título se pueden apagar y encender: haz clic en el título. *Init* empieza
+con Osc 1 encendido y Osc 2, Noise, Sub y Filter apagados.
+
+## Primeras perillas: gira y escucha
+
+Una perilla (un knob) gira cuando la arrastras: hacia arriba o a la derecha sube, hacia abajo o a la izquierda
+baja. Mientras la sujetas, muestra su valor. Haz clic derecho en una perilla (en una pantalla táctil, mantenla
+pulsada) para abrir su menú; ahí, **Default** la devuelve a su valor por defecto. El doble clic no hace nada, así
+que tira del menú.
+
+Carga *Init* (la flecha circular junto al nombre), mantén una nota con una mano y gira con la otra.
+
+### Wave
+
+*Init* toca la tabla *Basic Shapes*: nueve ondas básicas. Gira **Wave** en Osc 1 y el tono salta de una onda a la
+siguiente; la tira bajo la onda muestra dónde estás (Wave 3/9). En una tabla de 256 frames, el mismo giro es un
+barrido suave, y ese barrido es la esencia de la síntesis wavetable.
+
+### Detune y Blend
+
+Cada oscilador toca un unísono de voces en cada nota: *Init* tiene dos (**Unison**, bajo la onda, admite hasta 8).
+**Detune** (de 0 a 100, 5 por defecto) las separa en afinación: súbelo y la nota se vuelve más ancha, con más
+efecto chorus. **Blend** fija el nivel de las voces centrales frente a las laterales, 75 % por defecto.
+
+### Cutoff
+
+Enciende la sección Filter con un clic en su título. Es un paso bajo con la frecuencia de corte en 440 Hz por
+defecto (la perilla muestra los hercios sin la unidad). Baja **Cutoff** y el sonido se oscurece; súbelo y se abre.
+Sube **Res** y aparece un silbido en la frecuencia de corte.
+
+## Ejercicio: tu primer sonido desde cero
+
+<Try title='De Init a un lead supersaw en cinco pasos' preset='supersaw-lead'>
+
+1. Carga *Init* (la flecha circular junto al nombre) y mantén pulsada la <kbd>Q</kbd>.
+2. Pon **Unison** de Osc 1 en 8 y gira **Detune** hasta unos 30.
+3. Gira **Wave** hasta la última onda de *Basic Shapes*.
+4. Enciende la sección Filter y baja **Cutoff** hasta unos 1000.
+5. Sube un poco **Res**.
+
+Deberías oír cómo un tono fino y solitario se convierte en un lead ancho y luego pierde su brillo más afilado al
+cerrarse el filtro. El preset de abajo es ese sonido terminado: 8 voces con Detune 30 sobre una tabla de sierra y
+una envolvente que abre el filtro en cada nota.
+
+</Try>
+
+## ¿Cómo guardo y comparto un sonido sin cuenta?
+
+1. Pulsa **Save** (o <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
+2. Ponle un nombre de hasta 40 caracteres. Los nombres son únicos, con mayúsculas o sin ellas: si uno ya está en
+   uso, te avisa mientras escribes.
+3. Pulsa **Save**. La ventana muestra el enlace de tu preset y **Copy link**.
+
+Quien abra el enlace oirá tu sonido: cada perilla, cada modulación y cada efecto. Más adelante, **Share** en la
+cabecera vuelve a copiar el enlace del preset. El enlace toca el sonido tal como se guardó, así que guarda otra vez
+antes de compartir un cambio.
+
+No hay cuenta: el navegador desde el que guardaste conserva una clave del preset, y ese navegador puede
+sobrescribirlo después (**Save** ofrece entonces **Save** y **Save as new**). Otro navegador, otro dispositivo o
+unos datos del sitio borrados no pueden sobrescribirlo, solo guardar uno nuevo.
+
+Si el piano roll tiene notas, la ventana también ofrece **Default clip**: el preset se abre entonces con esa
+melodía, y su enlace también la toca.
+
+<Note>
+
+Un preset se borra 90 días después de la última vez que lo guardaste o lo abriste, salvo que para entonces al menos
+dos personas lo hayan tocado un minuto cada una. A partir de ahí se queda.
+
+</Note>
+
+## Chisper en el móvil
+
+<Figure name='phone-keys' alt='Chisper en un móvil en el modo Keys: el sintetizador encima de dos filas de teclas, los botones de octava y la rueda de pitch' phone>
+
+El modo Keys en un móvil: el sintetizador arriba y dos filas de teclas debajo.
+
+</Figure>
+
+Los móviles y las tablets tienen una disposición propia (una tablet grande en horizontal muestra la pantalla
+completa de un ordenador). Su cabecera tiene los mismos presets, **Save** y **Share**, las pantallas **OSC**,
+**FX** y **CLIP**, y dos modos:
+
+- **Keys** (por defecto): una pequeña vista en vivo del sintetizador sobre dos filas de teclas, C4 encima de C3, de
+  una octava cada una con el móvil en vertical y de dos en horizontal. Cada fila tiene sus propios botones de
+  octava; la rueda de pitch está al lado.
+- **Synth**: las partes del sintetizador una debajo de otra (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO,
+  Voicing) para recorrerlas deslizando; **CLIP** abre el piano roll a pantalla completa.
+
+En un iPhone o un iPad el sonido se oye incluso con el interruptor de silencio activado.
+
+## ¿Y ahora qué?
+
+- [Modulación: envolventes, LFO y velocidad](/es/manual/modulacion-envolventes-lfo/): haz que cualquier perilla se
+  mueva sola.
+- [Wavetables](/es/manual/wavetables/): la biblioteca, tablas propias a partir de archivos WAV y de audio, y cómo
+  dibujar una onda.
+- [Teclados MIDI, Chromebooks e iPads](/es/manual/teclado-midi/): configuración, tocar desde un DAW sincronizado,
+  latencia y qué hacer cuando no hay sonido.

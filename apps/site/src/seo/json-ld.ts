@@ -24,6 +24,27 @@ export const FEATURES = [
   'Community presets shared by link',
 ];
 
+export const AUTHOR = { '@type': 'Person', name: 'Qvantor', url: 'https://github.com/qvantor' } as const;
+
+// the synth (`#app`), the same on every page of the site (`screenshot`: the path of its screenshot)
+export const appNode = (screenshot: string) => ({
+  '@type': 'WebApplication',
+  '@id': `${SYNTH_URL}#app`,
+  name: 'Chisper',
+  url: SYNTH_URL,
+  description: APP_DESCRIPTION,
+  applicationCategory: 'MultimediaApplication',
+  operatingSystem: 'Any (web browser)',
+  browserRequirements: 'Web Audio API with AudioWorklet, WebAssembly SIMD',
+  inLanguage: 'en',
+  isAccessibleForFree: true,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  featureList: FEATURES,
+  screenshot: absolute(screenshot),
+  author: AUTHOR,
+  sameAs: [LINKS.github, LINKS.instagram, LINKS.youtube],
+});
+
 // the structured data of a version of the page: the synth, the questions of the page and its clips (in the
 // language of the page); what search engines and AI assistants read as facts
 export const jsonLd = (lang: Lang, messages: Messages, screenshot: string) => {
@@ -31,23 +52,7 @@ export const jsonLd = (lang: Lang, messages: Messages, screenshot: string) => {
   return {
     '@context': 'https://schema.org',
     '@graph': [
-      {
-        '@type': 'WebApplication',
-        '@id': `${SYNTH_URL}#app`,
-        name: 'Chisper',
-        url: SYNTH_URL,
-        description: APP_DESCRIPTION,
-        applicationCategory: 'MultimediaApplication',
-        operatingSystem: 'Any (web browser)',
-        browserRequirements: 'Web Audio API with AudioWorklet, WebAssembly SIMD',
-        inLanguage: 'en',
-        isAccessibleForFree: true,
-        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-        featureList: FEATURES,
-        screenshot: absolute(screenshot),
-        author: { '@type': 'Person', name: 'Qvantor', url: 'https://github.com/qvantor' },
-        sameAs: [LINKS.github, LINKS.instagram, LINKS.youtube],
-      },
+      appNode(screenshot),
       {
         '@type': 'FAQPage',
         '@id': `${url}#faq`,

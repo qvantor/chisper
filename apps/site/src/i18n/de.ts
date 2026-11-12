@@ -60,6 +60,7 @@ export const de: Messages = {
         'Lass den Klang sich verändern, während die Note klingt: Der Regler Wave fährt durch eine Wavetable, und die Klangfarbe folgt ihm. Zwei Oszillatoren spielen Wavetables mit bis zu 256 Frames aus einer nach Ordnern sortierten Bibliothek, jeder Framewechsel wird weich überblendet. Tabellen mit Morph-Markierung werden auf 256 Frames erweitert.',
         'Jeder Oszillator hat Oct, Semi und Fine, und Phase und Phase rand legen fest, wo seine Stimmen beginnen.',
       ],
+      more: 'Wavetables: importieren, aus Audio erstellen, zeichnen',
     },
     unison: {
       h2: 'Supersaw-Unisono mit bis zu 8 Stimmen',
@@ -100,6 +101,7 @@ export const de: Messages = {
         'Bring jeden Regler in Bewegung: Zieh den Tab einer Quelle auf ihn, unipolar oder bipolar, mit bis zu 64 Routen, 4 pro Regler. Die Quellen: drei Hüllkurven (ENV 1 ist die Lautstärke) mit einstellbarer Krümmung jeder Phase, vier LFOs mit fünf Formen, eigene Formen aus Punkten und fertige Muster Sidechain, Rhythm und Steps, dazu die Anschlagstärke jeder Note (VELO).',
         'Die LFOs, die Zeiten der Hüllkurven und das Delay laufen synchron zum Tempo, mit Triolen und punktierten Noten, oder folgen einer MIDI Clock.',
       ],
+      more: 'Modulation: Hüllkurven, LFOs, Anschlagstärke',
     },
     effects: {
       h2: 'Effekte: Distortion, Delay, Reverb',
@@ -112,6 +114,7 @@ export const de: Messages = {
       text: [
         'Spiel ihn wie ein Instrument: auf einem MIDI-Keyboard (Anschlagstärke und Pitch Bend), der Computertastatur (mit Oktavumschaltung) oder dem Bildschirmklavier mit seinem Pitch-Rad, auch auf dem Touchscreen. Bis zu 12 Noten in Poly, oder Mono, mit Legato und Portamento.',
       ],
+      more: 'MIDI-Keyboard, Chromebook und iPad: Einrichtung und Hilfe',
     },
     track: {
       h2: 'Piano Roll online: Loops aufnehmen, Noten bearbeiten, MIDI importieren',
@@ -128,6 +131,7 @@ export const de: Messages = {
         'Bau eigene Wavetables: Zeichne einen Frame von Hand, mach aus jeder Audiodatei eine Tabelle oder lade die WAV-Wavetables, die du schon von anderen Synthesizern und aus Wavetable-Packs hast (ihre clm-Markierung wird gelesen).',
       ],
       screenshotAlt: 'Der Wavetable-Editor von Chisper: die Frames einer Tabelle und der gerade gezeichnete',
+      more: 'WAV-Wavetable importieren oder aus Audio erstellen',
     },
     presets: {
       h2: 'Kostenlose Community-Presets per Link',
@@ -200,18 +204,22 @@ export const de: Messages = {
         a: 'Nein. Chisper läuft im Browser: Chrome, Edge, Safari und Firefox, auf dem Computer oder dem Smartphone. Die Klangerzeugung ist in Rust geschrieben und nach WebAssembly SIMD kompiliert. Chrome auf dem Computer hat einen Modus mit niedriger Latenz.',
       },
       {
+        page: 'midi',
         q: 'Funktioniert Chisper auf Chromebook, iPad oder iPhone?',
         a: 'Ja. Auf dem Chromebook läuft Chisper in Chrome wie auf jedem Computer, auch mit MIDI-Keyboards: praktisch auf Schul- und Firmenrechnern, auf denen du nichts installieren darfst. Auf iPhone und iPad läuft es in Safari (ab iOS 16.4), auf Android in Chrome; auf dem Smartphone hat es ein eigenes Layout, mit den Tasten auf einem eigenen Bildschirm. iOS hat kein Web MIDI: Dort spielst du auf den Tasten am Bildschirm.',
       },
       {
+        page: 'midi',
         q: 'Funktioniert Chisper mit meinem MIDI-Keyboard?',
         a: 'Ja. Chisper funktioniert mit MIDI-Keyboards in Browsern mit Web MIDI: Chrome, Edge, Opera und Firefox auf dem Computer, Chrome auf Android. Safari (und jeder Browser auf iPhone und iPad) hat kein Web MIDI: Dort spielst du auf der Computertastatur oder dem Bildschirmklavier. Chisper liest Noten, Anschlagstärke, Pitch Bend und MIDI Clock.',
       },
       {
+        page: 'getting-started',
         q: 'Eignet sich Chisper zum Lernen von Synthese?',
         a: 'Ja. Chisper zeigt, was jeder Regler tut, während du ihn drehst: die Welle, die jeder Oszillator spielt, die Stimmen des Unisonos, solange Detune gehalten wird, die Kurve des Filters, die Hüllkurven und LFOs als Kurven mit einem Punkt der klingenden Note. Öffne ein beliebiges Preset, um zu sehen, wie sein Sound gebaut ist, ändere es und hör den Unterschied.',
       },
       {
+        page: 'wavetables',
         q: 'Kann ich beliebige Wavetables importieren?',
         a: 'Ja. Chisper lädt jede WAV-Wavetable mit Frames von 2048 Samples, aus anderen Wavetable-Synthesizern oder Wavetable-Packs (ihre clm-Markierung wird gelesen). Eine Tabelle lässt sich auch aus einer kurzen Audiodatei machen oder von Hand zeichnen.',
       },
@@ -232,6 +240,7 @@ export const de: Messages = {
         a: 'Ja. Die Sounds, die du auf Chisper spielst, darfst du in deinen Tracks verwenden, auch in kommerziellen Releases.',
       },
       {
+        page: 'getting-started',
         q: 'Wie teile ich einen Sound?',
         a: 'Speichere ihn als Preset und kopiere den Link: Wer ihn öffnet, hört denselben Sound, mit jedem Regler, jeder Modulation und jedem Effekt so, wie du sie eingestellt hast. Um auch eine Melodie zu teilen, klick in der Piano Roll auf Share: Der Link öffnet den Clip mit seinen Noten und seinem Tempo; hast du ein Preset gewählt oder gespeichert und seitdem nicht verändert, öffnet er auch dieses Preset (das zufällige Preset, mit dem Chisper startet, zählt nicht). Setz beim Speichern eines Presets den Haken bei Default clip, dann öffnet sich das Preset mit seinem Clip.',
       },
@@ -240,6 +249,33 @@ export const de: Messages = {
         a: 'Ja. Der Quellcode von Chisper liegt auf GitHub, unter der Lizenz PolyForm Noncommercial.',
       },
     ],
+  },
+  manual: {
+    name: 'Anleitung',
+    nav: 'Seiten der Anleitung',
+    breadcrumbs: 'Brotkrümelnavigation',
+    onThisPage: 'Auf dieser Seite',
+    prev: 'Zurück',
+    next: 'Weiter',
+    tip: 'Tipp',
+    note: 'Hinweis',
+    tryIt: 'Probier es aus',
+    updated: 'Aktualisiert',
+    keyboard: {
+      label: 'Die Tasten der Computertastatur und die Noten, die sie spielen, in Oktave 3 (Standard)',
+      black: 'Schwarze Tasten',
+      white: 'Weiße Tasten',
+      octave: 'Oktave tiefer und höher',
+    },
+    compat: {
+      browser: 'Browser',
+      any: 'Jeder',
+      system: 'System',
+      midi: 'MIDI-Keyboard',
+      latency: 'Latenz wählbar',
+      yes: 'Ja',
+      no: 'Nein',
+    },
   },
   footer: {
     source: 'Quellcode auf GitHub',

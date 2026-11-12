@@ -3,13 +3,21 @@ import Logo from './Logo.astro';
 import SocialIcon from './SocialIcon.astro';
 import type { Messages } from '../i18n';
 import { LANGS, LINKS, LOCALES, type Lang } from '../i18n/locales';
+import { manualNav } from '../manual/entries';
 
 interface Props {
   lang: Lang;
   m: Messages;
+  // the page in every language: the language links lead to its translations
+  paths: Record<Lang, string>;
 }
 
-const { lang, m } = Astro.props;
+const { lang, m, paths } = Astro.props;
+// the pages of the manual in its language, by their names in the nav
+const manual = (await manualNav(lang)).map((link) => ({
+  ...link,
+  current: Astro.url.pathname === link.href,
+}));
 const SOCIAL = [
   { name: 'github', label: 'GitHub', href: LINKS.github },
   { name: 'instagram', label: 'Instagram', href: LINKS.instagram },
@@ -20,7 +28,7 @@ const SOCIAL = [
 <footer class='footer'>
   <div class='column grid'>
     <div class='brand'>
-      <Logo size='small' />
+      <Logo size='small' href={LOCALES[lang].path} />
       <ul class='social' aria-label={m.footer.follow}>
         {SOCIAL.map(({ name, label, href }) => (
           <li>
@@ -31,13 +39,25 @@ const SOCIAL = [
         ))}
       </ul>
     </div>
+    <nav aria-label={m.manual.name}>
+      <p class='heading'>{m.manual.name}</p>
+      <ul>
+        {manual.map(({ href, name, current }) => (
+          <li>
+            <a href={href} aria-current={current ? 'page' : undefined}>
+              {name}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
     <nav aria-label={m.footer.languages}>
       <p class='heading'>{m.footer.languages}</p>
       <ul>
         {LANGS.map((other) => (
           <li>
             <a
-              href={LOCALES[other].path}
+              href={paths[other]}
               hreflang={other}
               lang={other}
               aria-current={other === lang ? 'page' : undefined}
@@ -75,7 +95,7 @@ const SOCIAL = [
 
   .grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
     gap: 32px;
     align-items: start;
   }

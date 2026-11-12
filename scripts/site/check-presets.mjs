@@ -1,9 +1,9 @@
 // Every clip of the promo page opens its preset on the site: GET /api/presets/:id answers it, under the name of
-// its card (less the prefix of the featured presets, [AI], and of the category, FX). Run it before a deploy and
-// after presets are edited on the site:
+// its card (less the prefix of the featured presets, [AI], and of the category, FX); so does every preset the manual
+// opens (apps/site/src/manual/presets.ts). Run it before a deploy and after presets are edited on the site:
 //   node scripts/site/check-presets.mjs [--url=https://chisper.qvantor.org]
 import { parseArgs } from '../bench-common.mjs';
-import { DEMOS, SITE } from './common.mjs';
+import { DEMOS, MANUAL_PRESETS, SITE } from './common.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const URL_BASE = args.url ?? SITE;
@@ -19,7 +19,8 @@ const check = async ({ slug, presetId, name }) => {
   return null;
 };
 
-const problems = (await Promise.all(DEMOS.map(check))).filter(Boolean);
+const PRESETS = [...DEMOS, ...MANUAL_PRESETS];
+const problems = (await Promise.all(PRESETS.map(check))).filter(Boolean);
 for (const problem of problems) console.error(problem);
-console.log(`${DEMOS.length - problems.length} of ${DEMOS.length} presets open as their cards say`);
+console.log(`${PRESETS.length - problems.length} of ${PRESETS.length} presets open as their cards say`);
 process.exitCode = problems.length ? 1 : 0;

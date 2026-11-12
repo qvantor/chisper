@@ -1,0 +1,177 @@
+---
+title: 'Wavetables: importar tablas WAV, crear una desde audio y dibujar'
+h1: 'Wavetables: importar, crear desde audio, dibujar'
+description: 'Cómo funcionan las wavetables en Chisper: frames de 2048 muestras, hasta 256, la marca clm. Importa una wavetable WAV, créala desde audio o dibuja una onda.'
+nav: 'Wavetables'
+updated: 2026-11-12
+preset: ufo-drone
+image: editor-audio
+---
+
+Una wavetable (tabla de ondas) es una fila de ondas de un solo ciclo (frames), normalmente de 2048 muestras cada
+una y hasta 256 por tabla. Un oscilador de Chisper toca un frame cada vez, y su perilla **Wave** los recorre, así
+que el tono cambia al girarla o cuando una envolvente o un LFO la gira por ti. Elige una tabla de la biblioteca,
+importa una wavetable WAV que ya tengas (otros sintetizadores y packs de wavetables usan el mismo formato),
+convierte cualquier archivo de audio corto en una tabla o dibuja una onda a mano.
+
+## ¿Qué es una wavetable?
+
+Un solo ciclo de una onda repetido una y otra vez es un tono: su forma es su timbre. Una wavetable pone en fila
+muchos de esos ciclos, de una senoidal a una sierra, de una vocal a otra, de un tono limpio a un gruñido, y el
+oscilador toca el que está en la posición de **Wave**.
+
+- **Un frame** es un ciclo, de 2048 muestras en la mayoría de las tablas. Suena a la altura de la nota, sea cual
+  sea su longitud en muestras.
+- **Una tabla** contiene hasta 256 frames. **Wave** elige uno; la tira bajo la onda muestra dónde estás (*Wave
+  33/256*).
+- **Una tabla morph** tiene pocos frames pero suena como si tuviera 256: Chisper rellena los huecos con fundidos
+  cruzados entre los frames de cada lado, así que al girar **Wave** pasas suavemente de uno al siguiente. Una tabla
+  indica que es morph en la marca de su archivo (más abajo), y todas las tablas hechas a partir de un archivo de
+  audio lo son.
+- **Sin clics:** cuando **Wave** se mueve, cada voz pasa al nuevo frame con un fundido de un ciclo de su nota (5 ms
+  como mucho).
+
+<Figure name='oscillator' alt='Osc 1 de Chisper en la tabla Spectral Gyro, en el frame 33 de 256: el nombre de la tabla con sus flechas, Oct, Semi y Fine, la onda de ese frame, Wave 33/256, Phase, Phase rand, Unison 3 y las perillas Gain, Wave, Detune y Blend' narrow>
+
+Un oscilador: la tabla arriba, el frame que suena en el centro y **Wave** debajo.
+
+</Figure>
+
+## La biblioteca
+
+El nombre de la tabla está entre **◀ ▶**, en la parte de arriba de cada oscilador. Las flechas recorren todas las
+tablas de la biblioteca, carpeta tras carpeta; un clic en el nombre abre el navegador de tablas.
+
+<Figure name='wavetable-browser' alt='El navegador de wavetables de Chisper: las carpetas a la izquierda con el número de tablas de cada una y, a la derecha, las tablas de la carpeta Spectral con sus tamaños' narrow>
+
+Las carpetas a la izquierda (con cuántas tablas tiene cada una) y las tablas de la carpeta abierta a la derecha.
+
+</Figure>
+
+También funcionan las flechas del teclado: <kbd>↑</kbd> <kbd>↓</kbd> dentro de una columna, y entre las
+carpetas y las tablas, <kbd>→</kbd> <kbd>←</kbd>. *Init* toca *Basic Shapes*, de la carpeta Basics. Las tablas se
+descargan cuando las eliges; la barra bajo el nombre muestra la descarga.
+
+## El editor de wavetables
+
+Haz clic en el lápiz arriba a la izquierda de la onda de un oscilador. El editor ocupa toda la pantalla; a su
+izquierda hay dos pestañas, **Manual** (el marcador: dibujar) y **Audio file** (el altavoz: importar y crear), y la
+cruz de arriba lo cierra.
+
+Lo que cambias suena al momento: no hay botón de aplicar ni opción de deshacer. Elegir otra tabla en el oscilador
+reemplaza tu trabajo.
+
+Las dos pestañas tienen arriba la tira de frames: haz clic en un frame (o gira su perilla **Wave**) para editarlo;
+el oscilador también salta a él.
+
+### ¿Cómo dibujo una onda?
+
+<Figure name='editor-draw' alt='La pestaña Manual del editor de wavetables: arriba la tira de frames de la tabla, el frame en edición sobre una cuadrícula y las perillas Wave, Grid X y Grid Y a la izquierda'>
+
+La pestaña Manual: los frames arriba y el frame que editas sobre su cuadrícula.
+
+</Figure>
+
+Pulsa sobre el gráfico y arrastra. Cada columna de la cuadrícula por la que pasas toma la altura que hay bajo el
+puntero, ajustada a la cuadrícula. Se dibuja igual con el ratón, con el dedo o con un lápiz.
+
+- **Grid X**: el número de columnas, de 4 a 256 (16 por defecto). Con pocas columnas salen escalones y cuadradas;
+  con muchas, detalle.
+- **Grid Y**: lo fino que se ajusta la altura: 2, 5, 10 o 20 pasos del centro hasta arriba (5 por defecto).
+- **+**, al final de la tira, añade una copia del frame actual al final de la tabla, hasta 256 frames.
+
+<Tip>
+
+Dibuja unos cuantos frames que se diferencien un poco y luego mueve **Wave** con un LFO o una envolvente: hasta un
+dibujo tosco se mueve como una wavetable de verdad.
+
+</Tip>
+
+### ¿Cómo importo una wavetable WAV?
+
+1. Abre la pestaña **Audio file**.
+2. Suelta el archivo encima o pulsa **Choose a file**.
+3. La tabla suena al instante, el editor muestra sus frames en la pestaña Manual y un mensaje dice cuántos tiene.
+
+Un archivo se toma como wavetable cuando:
+
+- es un WAV con una marca `clm`, la marca de las wavetables de otros sintetizadores: de ella se leen el tamaño de
+  los frames y si es una tabla morph; **o**
+- es un WAV de frames completos de 2048 muestras, de 1 a 256 (muchos packs de wavetables no llevan marca).
+
+El archivo puede ser PCM de 8, 16, 24 o 32 bits o float de 32 o 64 bits, mono o estéreo (se usa el canal
+izquierdo). Su frecuencia de muestreo da igual: los frames se leen tal cual, nunca se remuestrean. De una tabla con
+marca y más de 256 frames suenan los primeros 256, y el mensaje lo indica.
+
+### ¿Cómo creo una wavetable a partir de un archivo de audio?
+
+<Figure name='editor-audio' alt='La pestaña Audio file del editor de wavetables con un sonido de bajo cargado: arriba los frames cortados de él, el sonido con las ventanas de corte marcadas, debajo el frame actual y las perillas W Count, Size y Phase'>
+
+Un archivo de audio cortado en 32 frames: las ventanas están marcadas sobre el sonido, y el frame que elegiste,
+debajo.
+
+</Figure>
+
+Cualquier otro archivo de audio se corta en frames: suéltalo o pulsa **Choose a file** (WAV, MP3, OGG, FLAC, M4A,
+lo que reproduzca tu navegador), de hasta 12 segundos. O prueba uno de los ejemplos: *Square Wave*, *707 Kick*,
+*Bass sound*.
+
+- **W Count**: cuántos frames cortar, de 1 a 64 (32 por defecto), repartidos por igual a lo largo de todo el
+  archivo.
+- **Size**: la longitud de cada frame, de 16 a 2048 muestras (512 por defecto). El frame se convierte en un ciclo,
+  así que con un Size más corto suena un trozo más corto del sonido a la altura de la nota.
+- **Phase**: desplaza todos los cortes hacia más tarde, como mucho la distancia entre dos de ellos.
+- El botón de la carpeta, bajo las perillas, vuelve a la pantalla donde se suelta el archivo, para cargar otro.
+
+El resultado es una tabla morph: suena como 256 frames con fundidos cruzados, así que al girar **Wave** recorres el
+sonido de principio a fin.
+
+**¿Qué es una buena fuente?** Una nota mantenida a una altura estable: una vocal cantada, una nota de bajo, un pad
+de sintetizador. Chisper no busca la altura, corta donde dicen las perillas, así que un frame hace un bucle limpio
+solo cuando contiene ciclos completos del sonido. A 44,1 kHz, un frame de 512 muestras es exactamente un ciclo de
+86 Hz (un poco por debajo de F2), y uno de 1024 es un ciclo de 43 Hz: una nota cerca de esas alturas, o una octava
+por encima, da los frames más limpios. Un golpe de batería o una textura ruidosa también sirven, para una tabla más
+áspera y sucia.
+
+<Note>
+
+El archivo de audio sigue cargado mientras la página está abierta, y al volver a la pestaña **Audio file** se corta
+de nuevo en el oscilador, por encima de lo que hayas dibujado entretanto. Si quieres conservar tu dibujo, pulsa
+antes el botón de la carpeta.
+
+</Note>
+
+## ¿Dónde se guarda mi propia tabla?
+
+Solo en el oscilador de la página en la que la hiciste. Un preset guarda el nombre de una tabla de la biblioteca,
+no tus frames: al recargar, y para cualquiera que abra tu preset o su enlace, suena en su lugar la tabla de la
+biblioteca.
+
+Por eso el logo del sintetizador abre este sitio en una pestaña nueva: el sintetizador conserva tu tabla en la
+suya.
+
+## ¿Por qué no se acepta mi archivo?
+
+- **"… is not an audio file"**: ni su tipo es de audio ni su nombre termina en `.wav`, `.aiff`, `.flac`, `.mp3` o
+  similares. Si sueltas un archivo que no es de audio, ni siquiera se acepta.
+- **"… is longer than 12 seconds"**: recorta el audio; solo una wavetable WAV puede durar más.
+- **"… can't be read as audio"**: tu navegador no puede decodificarlo (un códec poco común, un archivo dañado).
+  Conviértelo a WAV.
+- Si una tabla de la biblioteca no carga, su barra se detiene bajo el nombre y el oscilador conserva la tabla que
+  tenía. *Not enough memory for the table* o *The table failed to build* dicen lo mismo, con **Retry**.
+
+## Ejercicio: crea tu propia wavetable
+
+<Try title='Una tabla a partir de un bombo' preset='ufo-drone'>
+
+1. Abre el editor de Osc 1 (el lápiz) y la pestaña **Audio file**, y pulsa **707 Kick**.
+2. Pon **W Count** en 8 y cierra el editor.
+3. Gira **Wave** de Osc 1 del todo hacia arriba, hasta el último frame.
+4. Arrastra la pestaña **ENV 2** a **Wave** y baja su punto hasta −100 %.
+5. Toca unas cuantas notas.
+
+Deberías oír cada nota empezar con el clic seco del bombo y deslizarse hacia su cola grave a medida que ENV 2
+vuelve a cero: un golpe afinado y contundente hecho a partir de un tambor. El preset de abajo barre dos tablas con
+envolventes para crear un drone ambient.
+
+</Try>

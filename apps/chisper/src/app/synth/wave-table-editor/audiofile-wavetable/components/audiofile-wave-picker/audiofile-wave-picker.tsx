@@ -1,6 +1,7 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { LineChart, Line } from '@chisper/ui-kit';
+import { FolderOpenOutlined } from '@ant-design/icons';
+import { LineChart, Line, theme } from '@chisper/ui-kit';
 import { number } from '@chisper/math';
 import { RxHandle } from '../../../../../common/components';
 import { useAudiofile } from '../../modules';
@@ -19,7 +20,25 @@ const HandlersWrapper = styled.div`
   align-items: center;
 `;
 
-export const AudiofileWavePicker = () => {
+const AnotherFile = styled.button`
+  border: none;
+  padding: 6px;
+  background: none;
+  font-size: 18px;
+  color: ${theme.colors.primaryDarkMediumContrast};
+  cursor: pointer;
+
+  &:hover {
+    color: ${theme.colors.secondAccent};
+  }
+`;
+
+interface Props {
+  // back to the drop screen, for another file
+  onAnotherFile: () => void;
+}
+
+export const AudiofileWavePicker = ({ onAnotherFile }: Props) => {
   const [
     { audioBuffer, waveSizeRange, $wavesPickersCount, pickersCountRange, $waveSize },
     { setWavesPickersCount, setWaveSize },
@@ -46,6 +65,9 @@ export const AudiofileWavePicker = () => {
           formatValue={number.powerOfTwo}
           precision={1}
         />
+        <AnotherFile type='button' onClick={onAnotherFile} aria-label='Another file' title='Another file'>
+          <FolderOpenOutlined />
+        </AnotherFile>
       </HandlersWrapper>
       <LineChart domainY={[-1, 1]} domainX={[0, audioBuffer.length]}>
         <Line data={[...audioBuffer]} style={{ strokeWidth: 1 }} />

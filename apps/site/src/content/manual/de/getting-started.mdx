@@ -1,0 +1,218 @@
+---
+title: 'Chisper benutzen: Anleitung zum Online-Synthesizer für Anfänger'
+h1: 'Erste Schritte mit Chisper'
+description: 'Spiel den kostenlosen Online-Synthesizer mit Computertastatur, MIDI-Keyboard oder Touch, lade Presets, lerne die Oberfläche kennen, teile Sounds ohne Konto.'
+nav: 'Erste Schritte'
+updated: 2026-11-12
+preset: biting-brass-keys
+image: synth-map
+---
+
+Chisper ist ein Wavetable-Synthesizer, der direkt in deinem Browser läuft. Öffne [chisper.qvantor.org](/), klick
+irgendwohin und spiel auf den Buchstabentasten deiner Computertastatur: <kbd>Y</kbd> ist C3, <kbd>Q</kbd> ist C4.
+Ein beliebtes Preset ist schon geladen; dreh an einem beliebigen Regler, um es zu verändern, und speichere das
+Ergebnis als Preset mit einem Link, den jeder öffnen kann. Kein Download, kein Konto.
+
+Diese Seite führt dich durch die ersten zehn Minuten: den Sound starten, ihn spielen, Presets finden, die Bereiche
+des Bildschirms kennenlernen, an den ersten Reglern drehen und einen eigenen Sound speichern.
+
+## Schritt 1: Chisper öffnen und den Sound starten
+
+Öffne [chisper.qvantor.org](/) in Chrome, Edge, Firefox oder Safari (ab 16.4), auf dem Computer, einem Chromebook
+oder dem Smartphone. Jeder Start öffnet ein zufälliges Preset aus der Liste Popular, der erste Sound ist also eine
+Überraschung; sein Name steht in der Kopfzeile.
+
+Browser lassen eine Seite stumm, bis du sie berührst: Der Sound startet mit deinem ersten Klick, Tippen oder
+Tastendruck irgendwo auf der Seite. Einen Startknopf musst du nicht suchen.
+
+<Note>
+
+Ein MIDI-Keyboard allein weckt den Sound nicht auf: Der Browser wartet, bis auf der Seite selbst geklickt, getippt
+oder eine Taste gedrückt wird. Wenn du nur über MIDI spielst, klick vorher einmal auf die Seite.
+
+</Note>
+
+## Schritt 2: Spielen
+
+### Wie spiele ich einen Synthesizer mit der Computertastatur?
+
+Zwei Buchstabenreihen sind zwei Oktaven einer Klaviatur. Die untere Reihe beginnt bei <kbd>Y</kbd> = C3 und läuft
+die weißen Tasten <kbd>Y</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> <kbd>M</kbd>
+hinauf, die schwarzen Tasten liegen in der Reihe darüber (<kbd>S</kbd> <kbd>D</kbd>, <kbd>G</kbd> <kbd>H</kbd>
+und <kbd>J</kbd>). Die obere Reihe beginnt eine Oktave höher bei <kbd>Q</kbd> = C4 und reicht bis <kbd>+</kbd> = G5,
+ihre schwarzen Tasten liegen auf den Ziffern (<kbd>2</kbd> <kbd>3</kbd>, <kbd>5</kbd> <kbd>6</kbd> <kbd>7</kbd>).
+
+<KeyboardMap />
+
+- <kbd>↓</kbd> und <kbd>↑</kbd> verschieben beide Reihen um eine Oktave nach unten oder oben, von Oktave 0 bis
+  Oktave 6. Der Browser merkt sich, wo du sie gelassen hast. Das Feld links von den Bildschirmtasten zeigt die
+  Oktave (C3) und hat dieselben Pfeile.
+- Die Tasten zählen nach ihrer Lage auf der Tastatur, nicht nach ihrem Buchstaben. Die Abbildung zeigt eine
+  deutsche Tastatur; auf einer englischen (QWERTY) spielt die Taste mit der Aufschrift <kbd>Z</kbd> das C3 (sie
+  sitzt dort, wo bei uns <kbd>Y</kbd> ist), auf einer französischen die Taste <kbd>W</kbd>.
+- Solange <kbd>Ctrl</kbd> (Strg) oder <kbd>⌘</kbd> gedrückt ist oder du in ein Textfeld schreibst, spielt nichts:
+  Tastenkürzel und die Preset-Suche machen also keinen Lärm.
+- Jede Note von der Computertastatur hat dieselbe Anschlagstärke (100). Für leise und kräftige Noten nimm ein
+  [MIDI-Keyboard](/de/anleitung/midi-keyboard/).
+
+### Das Bildschirmklavier und das Pitch-Rad
+
+Die unterste Reihe des Bildschirms ist eine Klaviatur: so viele Oktaven, wie ins Fenster passen (bis zu fünf),
+beginnend eine Oktave unter der Computertastatur. Klick auf die Tasten, oder spiel sie auf dem Touchscreen mit
+mehreren Fingern und streich für ein Glissando darüber.
+
+Links davon sitzt das Pitch-Rad. Zieh es nach oben oder unten, um die Noten zu biegen; lässt du los, springt es
+zurück. Die Felder **Up** und **Down** daneben legen fest, wie weit es biegt, in Halbtönen (0 bis 24, Standard 2),
+und das Preset speichert sie.
+
+## Schritt 3: Ein Preset auswählen
+
+<Figure name='presets' alt='Der Dialog Presets von Chisper: der Tab Popular, das Suchfeld und eine Liste von Presets, jedes mit der Zahl seiner Zuhörer' narrow>
+
+Klick in der Kopfzeile auf den Namen des Presets, um den Dialog zu öffnen. Ein Klick auf eine Zeile spielt dieses
+Preset sofort, und der Dialog bleibt offen: So hörst du dich eines nach dem anderen durch.
+
+</Figure>
+
+- **Popular** zeigt die empfohlenen Presets und die, bei denen Zuhörer bleiben; die Zahl neben einem Preset sagt,
+  wie viele Zuhörer dabei geblieben sind.
+- **All** zeigt jedes Preset, sortiert nach **New**, **A–Z** oder **Popular**. Wenn du in *Search all presets*
+  tippst, durchsuchst du alle nach Namen.
+- **◀ ▶** neben dem Namen in der Kopfzeile blättern durch die Liste, in der du warst (die beliebten Presets oder
+  deine letzte Suche): Den Dialog brauchst du dafür nicht einmal.
+- Der Kreispfeil, **Init preset**, lädt *Init*: einen schlichten Sound aus einem Oszillator, alles andere
+  ausgeschaltet. Hier beginnen deine eigenen Sounds.
+- Ein **\*** hinter dem Namen bedeutet, dass du den Sound verändert hast, seit er geöffnet oder gespeichert wurde.
+- Jedes Preset hat seinen eigenen Link (`chisper.qvantor.org/?preset=…`): Die Adressleiste zeigt ihn, sobald du
+  eines auswählst.
+
+## Was ist wo auf dem Bildschirm?
+
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='Der ganze Bildschirm von Chisper auf einem Computer mit nummerierten Bereichen: die Kopfzeile; Sub, die Oszillatoren, Noise und das Filter in der oberen Reihe; darunter die Hüllkurven, LFOs, die Anschlagstärke und Voicing; unten die Tasten'>
+
+1. **Logo**: öffnet diese Website in einem neuen Tab. Der Synth spielt in seinem eigenen weiter.
+2. **Spektrum**: die Frequenzen, die gerade aus dem Synth kommen, tiefe links, hohe rechts.
+3. **OSC | FX**: schaltet die obere Reihe zwischen den Klangquellen und den Effekten um (Distortion, Delay und
+   Reverb, in der Reihenfolge, in die du sie ziehst).
+4. **Presets**: der Name, ◀ ▶ und der Kreispfeil von *Init*; darunter **Save**, **Share**, **Midi** (dein
+   [MIDI-Keyboard](/de/anleitung/midi-keyboard/)) und das Zahnrad (die Latenz des Sounds, diese Anleitung).
+5. **Master**: die Lautstärke von allem, −40 bis +12 dB, mit einer Pegelanzeige daneben. Ein Limiter dahinter
+   bewahrt die Spitzen vor dem Übersteuern.
+6. **Sub**: ein Sub-Oszillator für Gewicht im Bass: ein Sinus oder eine von fünf anderen einfachen Formen, bis zu
+   vier Oktaven von der Note entfernt.
+7. **Osc 1**: der erste [Wavetable-Oszillator](/de/anleitung/wavetables/). Oben die Tabelle mit ihren Pfeilen, die
+   Tonhöhe (**Oct**, **Semi**, **Fine**), die Welle, die gerade spielt, und darunter **Gain**, **Wave**, **Detune**
+   und **Blend**.
+8. **Osc 2**: der zweite, in allem gleich; in *Init* ist er aus.
+9. **Noise**: ein Rausch-Oszillator in jeder Stimme: weißes, rosa und braunes Rauschen, Hi-Hats, Vinyl-Knistern
+   und mehr, als Loop oder einmal gespielt.
+10. **Filter**: ein Filter in jeder Stimme, acht Typen, mit **Cutoff**, **Res** und **Gain**.
+11. **ENV 1–3**: [Hüllkurven](/de/anleitung/modulation-huellkurven-lfo/). ENV 1 ist die Lautstärke jeder Note.
+12. **LFO 1–4**: [LFOs](/de/anleitung/modulation-huellkurven-lfo/), die jeden Regler bewegen, auf den du sie
+    ziehst.
+13. **VELO**: was die Anschlagstärke einer Note bewirkt.
+14. **Voicing**: **Poly** und wie viele Noten gleichzeitig spielen (1 bis 12, Standard 8), **Legato** und
+    **Portamento**.
+15. **Pitch-Rad** und die Oktave der Computertastatur.
+16. **Keys**: das Bildschirmklavier.
+17. **Clip**: der Loop der Piano Roll. Ein Klick öffnet die Piano Roll über dem Synth, ▶ spielt den Clip.
+
+</InterfaceMap>
+
+Ein Bereich mit einem Kästchen in der Titelleiste lässt sich aus- und einschalten: Klick auf den Titel. *Init*
+startet mit Osc 1 an und Osc 2, Noise, Sub und Filter aus.
+
+## Die ersten Regler: dreh dran, hör hin
+
+Ein Regler dreht sich, wenn du ihn ziehst: Nach oben oder rechts erhöht ihn, nach unten oder links senkt ihn.
+Solange du ihn hältst, zeigt er seinen Wert. Ein Rechtsklick auf einen Regler (auf dem Touchscreen: gedrückt
+halten) öffnet sein Menü; **Default** dort setzt ihn zurück. Ein Doppelklick bewirkt nichts, nimm also das Menü.
+
+Lade *Init* (der Kreispfeil neben dem Namen), halte mit einer Hand eine Note und dreh mit der anderen.
+
+### Wave
+
+*Init* spielt die Tabelle *Basic Shapes*: neun Grundwellen. Dreh **Wave** an Osc 1, und der Klang springt von einer
+Welle zur nächsten; der Streifen unter der Welle zeigt, wo du bist (Wave 3/9). Bei einer Tabelle mit 256 Frames
+wird dieselbe Drehung zu einem fließenden Sweep, und genau um diesen Sweep geht es bei der Wavetable-Synthese.
+
+### Detune und Blend
+
+Jeder Oszillator spielt pro Note ein Unisono aus mehreren Stimmen: *Init* hat zwei (**Unison** unter der Welle, bis
+zu 8). **Detune** (0 bis 100, Standard 5) verstimmt sie gegeneinander: Dreh es auf, und die Note wird breiter und
+schwebt wie mit Chorus. **Blend** regelt den Pegel der mittleren Stimmen gegenüber den äußeren, Standard 75 %.
+
+### Cutoff
+
+Schalte das Filter mit einem Klick auf seinen Titel ein. Es ist ein Lowpass, sein Cutoff liegt standardmäßig bei
+440 Hz (der Regler zeigt die Hertz ohne Einheit). Dreh **Cutoff** herunter, und der Sound wird dunkler, dreh ihn
+hoch, und er öffnet sich; erhöhe **Res**, und am Cutoff steigt ein Pfeifen auf.
+
+## Übung: dein erster eigener Sound
+
+<Try title='Von Init zum Supersaw-Lead in fünf Schritten' preset='supersaw-lead'>
+
+1. Lade *Init* (der Kreispfeil neben dem Namen) und halte <kbd>Q</kbd>.
+2. Stell **Unison** an Osc 1 auf 8 und dreh **Detune** auf etwa 30.
+3. Dreh **Wave** auf die letzte Welle von *Basic Shapes*.
+4. Schalte das Filter ein und senk **Cutoff** auf etwa 1000.
+5. Erhöhe **Res** ein wenig.
+
+Du solltest hören, wie aus einem einzelnen dünnen Ton ein breiter Lead wird, der dann seine hellste Kante verliert,
+während sich das Filter schließt. Das Preset unten ist dieser Sound fertig ausgearbeitet: 8 Stimmen bei Detune 30
+auf einer Sägezahn-Tabelle, eine Hüllkurve öffnet das Filter bei jeder Note.
+
+</Try>
+
+## Wie speichere und teile ich einen Sound ohne Konto?
+
+1. Drück **Save** (oder <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
+2. Gib ihm einen Namen mit bis zu 40 Zeichen. Namen sind eindeutig, egal ob groß oder klein geschrieben: Ist einer
+   schon vergeben, siehst du das schon beim Tippen.
+3. Drück **Save**. Der Dialog zeigt den Link zu deinem Preset und **Copy link**.
+
+Wer den Link öffnet, hört deinen Sound: jeden Regler, jede Modulation und jeden Effekt. **Share** in der Kopfzeile
+kopiert den Link des Presets später noch einmal. Er spielt den Sound so, wie er gespeichert wurde: Speichere also
+erneut, bevor du eine Änderung teilst.
+
+Ein Konto gibt es nicht: Der Browser, in dem du gespeichert hast, behält einen Schlüssel zum Preset, und dieser
+Browser kann es später überschreiben (**Save** bietet dann **Save** und **Save as new** an). Ein anderer Browser,
+ein anderes Gerät oder gelöschte Websitedaten können es nicht überschreiben, nur ein neues speichern.
+
+Hat die Piano Roll Noten, bietet der Dialog außerdem **Default clip** an: Das Preset öffnet sich dann mit dieser
+Melodie, und sein Link spielt sie auch.
+
+<Note>
+
+Ein Preset wird 90 Tage nachdem du es zuletzt gespeichert oder geöffnet hast gelöscht, außer bis dahin haben
+mindestens zwei Leute es je eine Minute gespielt. Ab dann bleibt es.
+
+</Note>
+
+## Chisper auf dem Smartphone
+
+<Figure name='phone-keys' alt='Chisper auf einem Smartphone im Modus Keys: der Synth über zwei Tastenreihen, die Oktavtasten und das Pitch-Rad' phone>
+
+Der Modus Keys auf dem Smartphone: oben der Synth, darunter zwei Tastenreihen.
+
+</Figure>
+
+Smartphones und Tablets bekommen ein eigenes Layout (ein großes Tablet im Querformat zeigt den vollen Bildschirm
+eines Computers). Seine Kopfzeile hat dieselben Presets, **Save** und **Share**, die Bildschirme **OSC**, **FX**
+und **CLIP** und zwei Modi:
+
+- **Keys** (Standard): eine kleine Live-Ansicht des Synths über zwei Tastenreihen, C4 über C3, je eine Oktave im
+  Hochformat und zwei im Querformat. Jede Reihe hat ihre eigenen Oktavtasten; das Pitch-Rad sitzt an der Seite.
+- **Synth**: die Bereiche des Synths untereinander (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO, Voicing) zum
+  Durchscrollen; **CLIP** öffnet die Piano Roll im Vollbild.
+
+Auf iPhone und iPad spielt der Sound auch dann, wenn der Lautlos-Schalter an ist.
+
+## Wie geht es weiter?
+
+- [Modulation: Hüllkurven, LFOs und Anschlagstärke](/de/anleitung/modulation-huellkurven-lfo/): Lass jeden Regler
+  sich von selbst bewegen.
+- [Wavetables](/de/anleitung/wavetables/): die Bibliothek, eigene Tabellen aus WAV- und Audiodateien, eine Welle
+  zeichnen.
+- [MIDI-Keyboards, Chromebooks und iPads](/de/anleitung/midi-keyboard/): Einrichtung, synchron aus einer DAW
+  spielen, Latenz und was zu tun ist, wenn kein Ton kommt.

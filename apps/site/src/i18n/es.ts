@@ -60,6 +60,7 @@ export const es: Messages = {
         'Haz que el sonido cambie mientras suena: el control Wave recorre una wavetable y el timbre cambia con él. Dos osciladores tocan tablas de hasta 256 frames de una biblioteca ordenada en carpetas, y cada cambio de frame entra con un fundido suave. Las tablas con marca de morph se expanden a 256 frames.',
         'Cada oscilador tiene Oct, Semi y Fine, y Phase y Phase rand fijan dónde empiezan sus voces.',
       ],
+      more: 'Wavetables: importar, crear desde audio, dibujar',
     },
     unison: {
       h2: 'Unísono supersaw: hasta 8 voces',
@@ -103,6 +104,7 @@ export const es: Messages = {
         'Haz que cualquier control se mueva: arrastra la pestaña de una fuente hasta él, en modo unipolar o bipolar, con hasta 64 rutas, 4 por control. Las fuentes: tres envolventes (ENV 1 es el volumen) con una curva ajustable en cada etapa, cuatro LFO con cinco formas, formas propias dibujadas con puntos y patrones listos de Sidechain, Rhythm y Steps, y la velocidad de cada nota (VELO).',
         'Los LFO, los tiempos de las envolventes y el delay se sincronizan con el tempo, con tresillos y puntillos, o siguen un MIDI Clock.',
       ],
+      more: 'Modulación: envolventes, LFO, velocidad',
     },
     effects: {
       h2: 'Efectos: distorsión, delay y reverb',
@@ -115,6 +117,7 @@ export const es: Messages = {
       text: [
         'Tócalo como un instrumento: con un teclado MIDI (velocidad y pitch bend), con el teclado del ordenador (con cambio de octava) o con el piano en pantalla y su rueda de pitch, también en una pantalla táctil. Hasta 12 notas en Poly, o mono, con legato y portamento.',
       ],
+      more: 'Teclado MIDI, Chromebook e iPad: configuración y soluciones',
     },
     track: {
       h2: 'Piano roll online: graba, edita e importa MIDI',
@@ -131,6 +134,7 @@ export const es: Messages = {
         'Crea tus propias wavetables: dibuja un frame a mano, convierte cualquier archivo de audio en una tabla o carga las wavetables WAV que ya tienes de otros sintetizadores y packs de wavetables (se lee su marca clm).',
       ],
       screenshotAlt: 'El editor de wavetables de Chisper: los frames de una tabla y el que se está dibujando',
+      more: 'Importar una wavetable WAV o crearla desde audio',
     },
     presets: {
       h2: 'Presets gratis de la comunidad, por enlace',
@@ -203,18 +207,22 @@ export const es: Messages = {
         a: 'No. Chisper funciona en el navegador: Chrome, Edge, Safari y Firefox, en el ordenador o en el móvil. Su motor de sonido está escrito en Rust y compilado a WebAssembly SIMD. Chrome en el ordenador tiene un modo de baja latencia.',
       },
       {
+        page: 'midi',
         q: '¿Chisper funciona en un Chromebook, iPad o iPhone?',
         a: 'Sí. En un Chromebook, Chisper funciona en Chrome como en cualquier ordenador, también con teclados MIDI: sirve en los ordenadores del colegio o del trabajo donde no puedes instalar programas. En iPhone y iPad funciona en Safari (iOS 16.4 o posterior), en Android en Chrome; en el móvil tiene su propia disposición, con el teclado en una pantalla aparte. iOS no tiene Web MIDI: ahí toca con las teclas en pantalla.',
       },
       {
+        page: 'midi',
         q: '¿Chisper funciona con mi teclado MIDI?',
         a: 'Sí. Chisper funciona con teclados MIDI en los navegadores con Web MIDI: Chrome, Edge, Opera y Firefox en el ordenador, Chrome en Android. Safari (y cualquier navegador en iPhone y iPad) no tiene Web MIDI: ahí toca con el teclado del ordenador o el piano en pantalla. Chisper lee notas, velocidad, pitch bend y MIDI Clock.',
       },
       {
+        page: 'getting-started',
         q: '¿Chisper sirve para aprender síntesis?',
         a: 'Sí. Chisper muestra lo que hace cada control mientras lo giras: la onda que toca cada oscilador, las voces del unísono mientras mantienes Detune, la respuesta del filtro, las envolventes y los LFO como curvas con un punto de la nota que suena. Abre cualquier preset para ver cómo está hecho su sonido, cámbialo y oye la diferencia.',
       },
       {
+        page: 'wavetables',
         q: '¿Puedo importar cualquier wavetable?',
         a: 'Sí. Chisper carga cualquier wavetable WAV con frames de 2048 muestras, de otros sintetizadores wavetable o de packs de wavetables (se lee su marca clm). También puedes crear una tabla a partir de un archivo de audio corto o dibujarla a mano.',
       },
@@ -235,6 +243,7 @@ export const es: Messages = {
         a: 'Sí. Los sonidos que tocas en Chisper son tuyos para usarlos en tus canciones, también en lanzamientos comerciales.',
       },
       {
+        page: 'getting-started',
         q: '¿Cómo comparto un sonido?',
         a: 'Guárdalo como preset y copia su enlace: quien lo abra oirá el mismo sonido, con cada control, modulación y efecto como los dejaste. Para compartir también una melodía, pulsa Share en el piano roll: el enlace abre el clip con sus notas y su tempo; si elegiste o guardaste un preset y no lo has cambiado desde entonces, abre también ese preset (el preset aleatorio con el que arranca Chisper no cuenta). Marca Default clip al guardar un preset y el preset se abrirá con su clip.',
       },
@@ -243,6 +252,33 @@ export const es: Messages = {
         a: 'Sí. El código fuente de Chisper está en GitHub, con la licencia PolyForm Noncommercial.',
       },
     ],
+  },
+  manual: {
+    name: 'Manual',
+    nav: 'Páginas del manual',
+    breadcrumbs: 'Ruta de navegación',
+    onThisPage: 'En esta página',
+    prev: 'Anterior',
+    next: 'Siguiente',
+    tip: 'Consejo',
+    note: 'Nota',
+    tryIt: 'Pruébalo',
+    updated: 'Actualizado',
+    keyboard: {
+      label: 'Las teclas del teclado del ordenador y las notas que tocan, en la octava 3 (por defecto)',
+      black: 'Teclas negras',
+      white: 'Teclas blancas',
+      octave: 'Bajar y subir una octava',
+    },
+    compat: {
+      browser: 'Navegador',
+      any: 'Cualquiera',
+      system: 'Sistema',
+      midi: 'Teclado MIDI',
+      latency: 'Elegir latencia',
+      yes: 'Sí',
+      no: 'No',
+    },
   },
   footer: {
     source: 'Código en GitHub',

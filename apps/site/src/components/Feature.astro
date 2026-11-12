@@ -2,6 +2,7 @@
 import { Picture } from 'astro:assets';
 import type { ImageMetadata } from 'astro';
 import DemoCard from './DemoCard.astro';
+import ManualLink from './ManualLink.astro';
 import { FEATURE_COLORS, type Scene } from '../art/scenes';
 import type { Demo } from '../data/demos';
 import { marks, type Messages } from '../i18n';
@@ -15,6 +16,8 @@ interface Props {
   text: string[];
   // its first paragraph a lead: larger, its **words** standing out
   lead?: boolean;
+  // its page of the manual, under the text
+  more?: { href: string; label: string };
   demos?: Demo[];
   // the part of the synth it is about, beside the text
   image?: ImageMetadata;
@@ -36,6 +39,7 @@ const {
   title,
   text,
   lead = false,
+  more,
   demos = [],
   image,
   imageAlt = '',
@@ -62,6 +66,11 @@ const drawing = !image && Astro.slots.has('figure');
           {marks(paragraph).map((part) => (part.strong ? <strong>{part.text}</strong> : part.text))}
         </p>
       ))}
+      {more && (
+        <div class='more'>
+          <ManualLink href={more.href} kicker={m.manual.name} label={more.label} />
+        </div>
+      )}
       <slot />
       {demos.length > 0 && (
         <div class='demos'>
@@ -106,6 +115,11 @@ const drawing = !image && Astro.slots.has('figure');
 </section>
 
 <style>
+  /* the page of the manual on what the section shows */
+  .more {
+    margin-top: 18px;
+  }
+
   /* the light behind a picture doesn't widen the page; the wave behind stays behind its own content */
   .feature {
     isolation: isolate;

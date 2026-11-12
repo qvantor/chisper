@@ -1,6 +1,11 @@
 // The texts of the English page, the shape of the others (es.ts, de.ts: a missing or extra key is a type error).
 // Only what the synth on main has and shows. The names of its knobs and sections stay in English in every
 // language (Wave, Detune, Blend, Unison, ENV, LFO, VELO). `{name}` is filled in (`fill` of ./index.ts).
+import type { ManualPage } from '../manual/pages';
+
+// a question, its answer, the page of the manual that tells more of it
+type Question = { q: string; a: string; page?: ManualPage };
+
 export const en = {
   meta: {
     title: 'Chisper: Free Online Wavetable Synth in Your Browser',
@@ -64,6 +69,7 @@ export const en = {
         'Make a sound change as it plays: the Wave knob moves through a wavetable, and the tone moves with it. Two oscillators play tables of up to 256 frames from a library sorted into folders, each change of frame fading in smoothly. Tables with a morph mark play expanded to 256 frames.',
         'Each oscillator has Oct, Semi and Fine, and Phase and Phase rand set where its voices start.',
       ],
+      more: 'Wavetables: import, make from audio, draw',
     },
     unison: {
       h2: 'Supersaw unison: up to 8 voices',
@@ -103,6 +109,7 @@ export const en = {
         'Make any knob move: drag the tab of a source onto it, unipolar or bipolar, with up to 64 routes, 4 per knob. The sources: three envelopes (ENV 1 is the volume) with a curve you bend on each stage, four LFOs with five shapes, shapes of your own drawn as points and ready Sidechain, Rhythm and Steps patterns, and the velocity of each note (VELO).',
         'The LFOs, the times of the envelopes and the delay sync to the tempo, with triplets and dotted notes, or follow a MIDI Clock.',
       ],
+      more: 'Modulation: envelopes, LFOs, velocity',
     },
     effects: {
       h2: 'Effects: distortion, delay, reverb',
@@ -115,6 +122,7 @@ export const en = {
       text: [
         'Play it like an instrument: a MIDI keyboard (velocity and pitch bend), the computer keyboard (with an octave shift) or the on-screen piano and its pitch wheel, on a touch screen too. Up to 12 notes in Poly, or mono, with legato and portamento.',
       ],
+      more: 'MIDI keyboards, Chromebooks and iPads: setup and fixes',
     },
     // the piano roll and its clip (Track.astro): what it is (a lead, the ways notes come in standing out), what it
     // does with the notes and where they go, the text of its drawing
@@ -133,6 +141,7 @@ export const en = {
         'Make wavetables of your own: draw a frame by hand, turn any audio file into a table, or load the WAV wavetables you already have from other synths and wavetable packs (their clm marker is read).',
       ],
       screenshotAlt: 'The wavetable editor of Chisper: the frames of a table and the one being drawn',
+      more: 'Import a WAV wavetable or make one from audio',
     },
     presets: {
       h2: 'Free community presets, shared by link',
@@ -201,18 +210,22 @@ export const en = {
         a: 'No. Chisper runs in the browser: Chrome, Edge, Safari and Firefox, on a computer or a phone. Its sound engine is written in Rust and compiled to WebAssembly SIMD. Chrome on a computer has a low-latency mode.',
       },
       {
+        page: 'midi',
         q: 'Does Chisper work on a Chromebook, iPad or iPhone?',
         a: "Yes. On a Chromebook, Chisper runs in Chrome as on any computer, MIDI keyboards included, so it works on school and work computers where you can't install software. On iPhone and iPad it runs in Safari (iOS 16.4 or later), on Android in Chrome; on a phone it has a layout of its own, with the keys on a screen of their own. iOS has no Web MIDI: play the keys on screen there.",
       },
       {
+        page: 'midi',
         q: 'Does Chisper work with my MIDI keyboard?',
         a: 'Yes. Chisper works with MIDI keyboards in browsers with Web MIDI: Chrome, Edge, Opera and Firefox on a computer, Chrome on Android. Safari (and every browser on iPhone and iPad) has no Web MIDI: play the computer keyboard or the on-screen piano there. Chisper reads notes, velocity, pitch bend and MIDI Clock.',
       },
       {
+        page: 'getting-started',
         q: 'Is Chisper good for learning synthesis?',
         a: 'Yes. Chisper shows what each knob does as you turn it: the wave each oscillator plays, the voices of the unison while Detune is held, the response of the filter, the envelopes and LFOs as curves with a dot of the note playing. Open any preset to see how its sound is made, change it and hear the difference.',
       },
       {
+        page: 'wavetables',
         q: 'Can I import any wavetables?',
         a: 'Yes. Chisper loads any WAV wavetable of 2048-sample frames, from other wavetable synths or wavetable packs (its clm marker is read). You can also make a table from a short audio file or draw one by hand.',
       },
@@ -233,6 +246,7 @@ export const en = {
         a: 'Yes. The sounds you play on Chisper are yours to use in your tracks, commercial releases included.',
       },
       {
+        page: 'getting-started',
         q: 'How do I share a sound?',
         a: "Save it as a preset and copy its link: whoever opens it hears the same sound, every knob, modulation and effect as you set them. To share a melody too, press Share in the piano roll: the link opens the clip with its notes and tempo; if you chose or saved a preset and haven't changed it since, the link opens that preset too (the random preset Chisper opens at start doesn't count). Check Default clip as you save a preset, and the preset opens with its clip.",
       },
@@ -240,7 +254,37 @@ export const en = {
         q: 'Is the source code available?',
         a: 'Yes. The source code of Chisper is on GitHub, under the PolyForm Noncommercial license.',
       },
-    ],
+    ] satisfies Question[] as Question[],
+  },
+  // the manual (components/manual/): its name, what its pages show around their text
+  manual: {
+    name: 'Manual',
+    nav: 'Pages of the manual',
+    breadcrumbs: 'Breadcrumbs',
+    onThisPage: 'On this page',
+    prev: 'Previous',
+    next: 'Next',
+    tip: 'Tip',
+    note: 'Note',
+    tryIt: 'Try it',
+    updated: 'Updated',
+    // the computer keyboard (KeyboardMap.astro)
+    keyboard: {
+      label: 'The keys of a computer keyboard and the notes they play, at octave 3 (the default)',
+      black: 'Black keys',
+      white: 'White keys',
+      octave: 'Octave down and up',
+    },
+    // the table of browsers (CompatTable.astro)
+    compat: {
+      browser: 'Browser',
+      any: 'Any',
+      system: 'System',
+      midi: 'MIDI keyboard',
+      latency: 'Latency choice',
+      yes: 'Yes',
+      no: 'No',
+    },
   },
   footer: {
     source: 'Source on GitHub',

@@ -1,16 +1,36 @@
 ---
+import { getCollection } from 'astro:content';
 import Landing from '../components/Landing.astro';
+import ManualPage from '../components/manual/ManualPage.astro';
 import { LANGS, LOCALES, type Lang } from '../i18n/locales';
+import { manualEntries } from '../manual/entries';
+import { MANUAL_PAGES, isManualPage, manualPath, type ManualPage as Page } from '../manual/pages';
 
 interface Props {
   lang: Lang;
+  page?: Page;
 }
 
-// a page per language at the path of its locale
-export const getStaticPaths = () =>
-  LANGS.map((lang) => ({ params: { page: LOCALES[lang].path.slice(1, -1) }, props: { lang } }));
+// the landing per language at the path of its locale; every page of the manual per language at its own path. A text
+// of the manual of no page or language, or a page without its text in a language, fails the build
+export const getStaticPaths = async () => {
+  const ids = new Set((await getCollection('manual')).map((entry) => entry.id));
+  for (const id of ids) {
+    const [lang, page] = id.split('/');
+    if (!(LANGS as readonly string[]).includes(lang) || !page || !isManualPage(page))
+      throw new Error(`src/content/manual/${id}.mdx is no page of the manual (src/manual/pages.ts)`);
+  }
+  await Promise.all(LANGS.map(manualEntries));
+  const manual = MANUAL_PAGES.flatMap((page) =>
+    LANGS.map((lang) => ({ params: { page: manualPath(page, lang).slice(1, -1) }, props: { lang, page } }))
+  );
+  return [
+    ...LANGS.map((lang) => ({ params: { page: LOCALES[lang].path.slice(1, -1) }, props: { lang } })),
+    ...manual,
+  ];
+};
 
-const { lang } = Astro.props;
+const { lang, page } = Astro.props;
 ---
 
-<Landing lang={lang} />
+{page ? <ManualPage lang={lang} page={page} /> : <Landing lang={lang} />}

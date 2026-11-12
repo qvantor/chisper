@@ -57,14 +57,32 @@ export const Tabs = ({ children, activeTab, onSelect }: React.PropsWithChildren<
 
   const currentTab = React.useMemo(() => tabs.find((tab) => tab.id === activeTab), [activeTab, tabs]);
 
+  // a tab of an icon is named by its id (its tooltip too)
   return (
     <>
-      <TabsContainer>
-        {tabs.map((tab) => (
-          <TabItem $active={tab.id === activeTab} key={tab.id} onClick={() => onSelect?.(tab.id)}>
-            {tab.name}
-          </TabItem>
-        ))}
+      <TabsContainer role='tablist' aria-orientation='vertical'>
+        {tabs.map((tab) => {
+          const label = typeof tab.name === 'string' ? undefined : tab.id;
+          return (
+            <TabItem
+              $active={tab.id === activeTab}
+              key={tab.id}
+              role='tab'
+              tabIndex={0}
+              aria-selected={tab.id === activeTab}
+              aria-label={label}
+              title={label}
+              onClick={() => onSelect?.(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                onSelect?.(tab.id);
+              }}
+            >
+              {tab.name}
+            </TabItem>
+          );
+        })}
       </TabsContainer>
       {currentTab && currentTab.element}
     </>

@@ -20,7 +20,7 @@ export default () => {
           <ManualWavetable />
         </Tabs.Tab>
         <Tabs.Tab id='Audio file' name={<SoundOutlined />}>
-          <AudiofileWavetable />
+          <AudiofileWavetable onWavetable={() => setTab('Manual')} />
         </Tabs.Tab>
       </Tabs>
     </Root>

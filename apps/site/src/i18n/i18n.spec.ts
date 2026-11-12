@@ -37,6 +37,11 @@ describe('the messages', () => {
     }
   });
 
+  it.each(LANGS)('%s links answers to the same pages of the manual as English', (lang) => {
+    const pages = (messages: typeof MESSAGES.en) => messages.faq.items.map((item) => item.page);
+    expect(pages(MESSAGES[lang])).toEqual(pages(MESSAGES.en));
+  });
+
   it.each(LANGS)('%s describes every clip', (lang) => {
     expect(Object.keys(MESSAGES[lang].demos).sort()).toEqual(DEMOS.map((demo) => demo.slug).sort());
   });

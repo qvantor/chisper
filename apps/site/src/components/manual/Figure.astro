@@ -1,0 +1,54 @@
+---
+import { Picture } from 'astro:assets';
+import { figureOf } from '../../manual/figures';
+
+interface Props {
+  // a picture of src/assets/manual
+  name: string;
+  alt: string;
+  // a narrow picture (a popover, a part of the synth) at its own width, not the column's
+  narrow?: boolean;
+  // the screen of a phone: narrower still
+  phone?: boolean;
+}
+
+// a screenshot and what to look at on it (the slot)
+const { name, alt, narrow = false, phone = false } = Astro.props;
+const width = phone ? 280 : narrow ? 420 : 760;
+const image = figureOf(name);
+---
+
+<figure class='figure' style={`--width: ${width}px`}>
+  <Picture
+    src={image}
+    alt={alt}
+    formats={['avif', 'webp']}
+    widths={[480, 760, 1440, image.width].filter(
+      (width, i, all) => width <= image.width && all.indexOf(width) === i
+    )}
+    sizes={`(min-width: ${width + 40}px) ${width}px, 100vw`}
+  />
+  {Astro.slots.has('default') && (
+    <figcaption>
+      <slot />
+    </figcaption>
+  )}
+</figure>
+
+<style>
+  .figure {
+    margin: 28px 0;
+  }
+
+  .figure :global(img) {
+    max-width: min(var(--width), 100%);
+    border-radius: var(--radius-m);
+    box-shadow: var(--raised);
+  }
+
+  figcaption {
+    margin-top: 10px;
+    font-size: 15px;
+    color: var(--text-muted);
+  }
+</style>

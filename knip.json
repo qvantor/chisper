@@ -34,7 +34,7 @@
   ],
   "project": [
     "apps/**/*.{ts,tsx,js}",
-    "apps/site/src/**/*.astro",
+    "apps/site/src/**/*.{astro,mdx}",
     "libs/**/*.{ts,tsx}",
     "netlify/**/*.{ts,mts}",
     "scripts/**/*.mjs",
@@ -62,7 +62,11 @@
   "ignoreExportsUsedInFile": true,
   "astro": {
     "config": ["apps/site/astro.config.mjs"],
-    "entry": ["apps/site/src/pages/**/*.astro"]
+    "entry": [
+      "apps/site/src/pages/**/*.astro",
+      "apps/site/src/content.config.ts",
+      "apps/site/src/content/**/*.mdx"
+    ]
   },
   "eslint": {
     "config": ["eslint.config.mjs", "{apps,libs}/*/eslint.config.mjs"]

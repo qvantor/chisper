@@ -1,0 +1,45 @@
+---
+import { MESSAGES } from '../../i18n';
+import { langOf } from '../../manual/pages';
+
+interface Props {
+  kind: 'tip' | 'note';
+}
+
+// what is easy to miss, beside the text: a tip (a way to do it better) or a note (a limit, a catch)
+const { kind } = Astro.props;
+const m = MESSAGES[langOf(Astro.url.pathname)];
+---
+
+<aside class:list={['callout', kind]}>
+  <p class='label'>{m.manual[kind]}</p>
+  <div class='body'>
+    <slot />
+  </div>
+</aside>
+
+<style>
+  .callout {
+    margin: 28px 0;
+    padding: 16px 20px;
+    border-left: 3px solid var(--tint);
+    border-radius: 0 var(--radius-m) var(--radius-m) 0;
+    background: color-mix(in srgb, var(--tint) 9%, var(--surface));
+  }
+
+  .tip {
+    --tint: var(--accent);
+  }
+
+  .note {
+    --tint: var(--third-accent);
+  }
+
+  .label {
+    margin-bottom: 6px;
+  }
+
+  .body :global(p + p) {
+    margin-top: 10px;
+  }
+</style>

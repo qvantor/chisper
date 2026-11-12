@@ -22,8 +22,10 @@ import phone from '../assets/phone.png';
 import synth from '../assets/synth.png';
 import unison from '../assets/unison.png';
 import { demosOf, type Section } from '../data/demos';
-import { MESSAGES } from '../i18n';
+import { MESSAGES, type Messages } from '../i18n';
 import type { Lang } from '../i18n/locales';
+import { LANDING_PATHS, manualPath, type ManualPage } from '../manual/pages';
+import { jsonLd } from '../seo/json-ld';
 
 interface Props {
   lang: Lang;
@@ -57,6 +59,19 @@ const FEATURES: (
   { section: 'track' },
 ];
 
+// the page of the manual each section leads to (its link named by `more` of its messages)
+const MORE: Partial<Record<keyof Messages['features'], ManualPage>> = {
+  wavetables: 'wavetables',
+  modulation: 'modulation',
+  playing: 'midi',
+  editor: 'wavetables',
+};
+const moreOf = (section: keyof Messages['features']) => {
+  const page = MORE[section];
+  const feature = m.features[section];
+  return page && 'more' in feature ? { href: manualPath(page, lang), label: feature.more } : undefined;
+};
+
 // the screenshot of the synth for the structured data: one webp of the width of the column
 const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
 ---
@@ -64,11 +79,19 @@ const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
 <!doctype html>
 <html lang={lang}>
   <head>
-    <Head lang={lang} m={m} screenshot={screenshot.src} />
+    <Head
+      lang={lang}
+      title={m.meta.title}
+      description={m.meta.description}
+      paths={LANDING_PATHS}
+      ogType='website'
+      ogImageAlt={m.meta.ogImageAlt}
+      structured={jsonLd(lang, m, screenshot.src)}
+    />
     <Font cssVariable='--font-inter-tight' preload />
   </head>
   <body>
-    <Header m={m} />
+    <Header lang={lang} m={m} />
     <main>
       <Hero m={m} />
       <Listen m={m} />
@@ -84,6 +107,7 @@ const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
             label={label}
             title={m.features[section].h2}
             text={m.features[section].text}
+            more={moreOf(section)}
             demos={demosOf(section)}
             image={image}
             imageAlt={m.figures[section]}
@@ -98,6 +122,7 @@ const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
         label='Wavetable edit'
         title={m.features.editor.h2}
         text={m.features.editor.text}
+        more={moreOf('editor')}
         image={editor}
         imageAlt={m.features.editor.screenshotAlt}
         side={FEATURES.length % 2 ? 'right' : 'left'}
@@ -116,10 +141,10 @@ const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
           </a>
         </div>
       </Feature>
-      <Faq m={m} />
+      <Faq lang={lang} m={m} />
       <Finale m={m} />
     </main>
-    <Footer lang={lang} m={m} />
+    <Footer lang={lang} m={m} paths={LANDING_PATHS} />
     <script>
       import { initPlayers } from '../scripts/player';
       import { animateScenesWhenIdle } from '../scripts/scenes';

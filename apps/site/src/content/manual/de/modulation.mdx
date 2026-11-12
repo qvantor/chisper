@@ -1,0 +1,274 @@
+---
+title: 'Synthesizer-Modulation erklärt: LFO, ADSR-Hüllkurve, Anschlagstärke'
+h1: 'Modulation: Hüllkurven, LFOs und Anschlagstärke'
+description: 'Modulation per Drag-and-drop: Hüllkurve, LFO oder Anschlagstärke auf jeden Regler, ADSR mit Kurven, LFO mit Tempo-Sync, Sidechain, eigene Formen, 64 Routen.'
+nav: 'Modulation'
+updated: 2026-11-12
+preset: zesty-drive-bass
+image: modulation-drag
+---
+
+Modulation lässt einen Regler sich von selbst bewegen. In Chisper ziehst du den Tab einer Quelle (einer Hüllkurve,
+ENV 1–3, eines LFO, LFO 1–4, oder der Anschlagstärke der Noten, VELO) per Drag-and-drop auf einen beliebigen
+Regler; der Regler bewegt sich dann bei jeder Note mit dieser Quelle, nach oben oder um seinen eigenen Wert herum,
+so weit, wie die eingestellte Stärke reicht. Ein Preset fasst bis zu 64 solcher Routen, vier auf einem Regler.
+
+Hüllkurven formen jede Note vom Moment des Drückens bis nach dem Loslassen: ein Pluck, ein Anschwellen, ein
+Filter-Sweep. LFOs wiederholen eine Form immer wieder, frei oder im Takt des Tempos: Vibrato, ein Wobble, ein
+Sidechain-Pumpen, ein Gate. Die Anschlagstärke gibt jeder Note ihren eigenen Pegel, lauter oder heller, je fester
+du spielst.
+
+## Die Quellen
+
+Die Quellen sind die Tabs in der unteren Reihe des Synths, jeder in seiner eigenen Farbe:
+
+- **ENV 1**, **ENV 2**, **ENV 3** (unten links): drei Hüllkurven. ENV 1 ist außerdem die Lautstärke jeder Note.
+- **LFO 1** bis **LFO 4** (unten in der Mitte): vier LFOs.
+- **VELO** (unten rechts, neben Voicing): die Anschlagstärke jeder Note.
+
+Der Punkt auf einem Tab zählt die Routen dieser Quelle. Der Tab, den du zuletzt angeklickt hast, ist der
+ausgewählte: Die Regler zeigen seine Routen, und nur seine Routen lassen sich an ihnen ändern.
+
+## Wie füge ich eine Modulation hinzu?
+
+<Figure name='modulation-drag' alt='LFO 1 von seinem Tab auf den Regler Res des Filters gezogen: die Regler, die eine Route annehmen, haben rote Ringe, die Beschriftung LFO 1 folgt dem Zeiger' >
+
+Zieh einen Tab, und die Regler, die ihn annehmen, leuchten in seiner Farbe auf; der unter dem Zeiger ist der, auf
+dem er landet.
+
+</Figure>
+
+1. Drück auf den Tab einer Quelle und zieh ihn (mit der Maus, dem Finger oder einem Stift).
+2. Jeder Regler, der diese Quelle annimmt, leuchtet auf. Zieh auf den gewünschten.
+3. Lass los. Die Route ist da, mit +50 %, und der gezogene Tab ist ausgewählt.
+
+Auch die Regler des anderen oberen Bildschirms nehmen Routen an: Halte den gezogenen Tab einen Moment über **OSC |
+FX** in der Kopfzeile, und der Bildschirm wechselt. Auf dem Smartphone scrollt die Spalte von selbst, wenn du nahe
+an ihren oberen oder unteren Rand ziehst.
+
+Ziehst du eine Quelle auf einen Regler, der sie schon hat, ändert sich nichts; zieh stattdessen seinen Punkt
+(siehe unten).
+
+## So liest du einen modulierten Regler
+
+- Ein Regler, der Routen annehmen kann, hat einen grauen Ring.
+- Die Route des ausgewählten Tabs ist ein Bogen in seiner Farbe, vom Wert des Reglers bis dorthin, wohin die
+  Quelle ihn bringt.
+- Ein kleiner Punkt oben links am Regler hat ein Segment für jede seiner Routen, unter einem kleinen Sinuszeichen.
+- Während Noten klingen, wandert eine zweite, blassere Markierung um den Regler: dorthin, wo alle seine Routen ihn
+  gerade hinstellen. Regler der Effekte bewegen sich mit einem LFO weiter, auch wenn keine Note gehalten wird.
+
+## Stärke (Amount), unipolar und bipolar
+
+Die Stärke gibt an, wie weit eine Quelle einen Regler bewegt, von −100 % bis +100 % seines Bereichs. Zieh den Punkt
+des Reglers nach oben oder unten, um sie einzustellen, in Schritten von 1 %. Eine negative Stärke bewegt den Regler
+nach unten. Bei Reglern, die in Oktaven arbeiten, etwa **Cutoff**, wird die Stärke in Oktaven angezeigt: +50 % auf
+Cutoff sind etwa 5,5 Oktaven.
+
+Eine Route ist entweder:
+
+- **Unipolar** (**Uni**): Der Regler steigt von seinem Wert aus um Stärke × Pegel der Quelle (0 bis 1). Eine
+  Hüllkurve auf ihrem Gipfel, eine Note mit voller Anschlagstärke: die ganze Stärke.
+- **Bipolar** (**Bi**): Der Regler schwingt um seinen Wert, die halbe Stärke darüber und die halbe darunter. Genau
+  richtig für Vibrato oder ein Panning, das nach links und rechts wandert.
+
+Ein LFO, den du auf einen Regler mit einem um null zentrierten Bereich ziehst (**Pan**, **Pitch**, **Fine**,
+**Crs** des Subs, Gain des Filters), startet bipolar; jede andere Route startet unipolar.
+
+| Geste | Was sie bewirkt |
+|---|---|
+| Tab auf einen Regler ziehen | Fügt eine Route mit +50 % hinzu |
+| Punkt eines Reglers nach oben oder unten ziehen | Stellt die Stärke der Route des ausgewählten Tabs ein |
+| <kbd>Shift</kbd>-Klick auf den Punkt | Unipolar ↔ bipolar |
+| <kbd>Shift</kbd>+<kbd>Alt</kbd>-Klick auf den Regler | Unipolar ↔ bipolar |
+| Rechtsklick auf den Regler, oder auf dem Touchscreen gedrückt halten | Das Menü des Reglers: jede Route, Default, Clear modulation |
+
+## Das Menü eines Reglers: ausschalten, entfernen, löschen
+
+<Figure name='knob-menu' alt='Das Menü des Reglers Cutoff: seine Route von ENV 2 mit +3,9 Oktaven, mit den Tasten Uni und Bi, einer Lampe und einem Kreuz, Default und Clear modulation' narrow>
+
+Ein Rechtsklick auf einen Regler (auf dem Touchscreen: ihn oder seinen Punkt gedrückt halten), und alle Routen des
+Reglers stehen in einer Liste.
+
+</Figure>
+
+Jede Route zeigt ihre Quelle, ihre Stärke (nach rechts oder oben ziehen, um sie zu erhöhen), **Uni | Bi**, eine
+Lampe und **×**. Die Lampe schaltet die Route aus, ohne ihre Stärke zu verlieren: So vergleichst du den Sound mit
+und ohne sie. **×** entfernt sie. **Default** setzt den Regler auf seinen Standardwert zurück, **Clear modulation**
+entfernt alle seine Routen. Ein Regler ohne Routen sagt *Drag a source tab here to add a modulation*.
+
+## Wie viele Routen gibt es, und was lässt sich modulieren?
+
+- **64 Routen** pro Preset und **4 Quellen** auf einem Regler. Ein Regler mit vier oder ein Preset mit 64 leuchtet
+  nicht mehr auf. Eine ausgeschaltete Route zählt mit.
+- **Osc 1** und **Osc 2**: Gain, Wave, Detune, Blend, Pitch (auf dem Feld **Semi**) und Fine. **Oct** nimmt keine
+  an.
+- **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
+- **Filter**: Cutoff, Res, Gain. Eine Route bleibt auf einem Regler, den der Filtertyp nicht nutzt, und wirkt
+  wieder, sobald du einen Typ wählst, der ihn nutzt.
+- **Effekte**: jeder Regler und der Mix jedes Effekts (Drive, Tone und Level der Distortion; Time, Feedback, Freq,
+  Q und Pan des Delays; die Regler und Fader des Reverbs). Ihre Schalter nehmen keine an.
+- **LFO 1–4**: Rate, Delay, Rise, Smooth und Phase, bewegt von einer Hüllkurve oder der Anschlagstärke. Ein LFO
+  kann keinen LFO bewegen.
+- Die Regler der Hüllkurven, von VELO, **Oct** und die Schalter nehmen keine Routen an.
+
+## ADSR-Hüllkurven: ENV 1, ENV 2, ENV 3
+
+<Figure name='envelopes' alt='Der Hüllkurvenbereich von Chisper auf ENV 2: die Kurve, die in einer Sekunde auf Sustain 58 fällt und beim Loslassen auf null ausklingt, darauf der Punkt der letzten Note, die Regler Attack, Hold, Decay, Sustain und Release und die Taste BPM'>
+
+Die Hüllkurven, unten links. Der Punkt läuft mit der zuletzt gespielten Note die Kurve entlang.
+
+</Figure>
+
+Eine Hüllkurve ist die Form einer Note in der Zeit. Drückst du eine Taste, steigt sie an (**Attack**), bleibt auf
+ihrem Gipfel (**Hold**), fällt (**Decay**) auf den Pegel, den sie hält, solange die Taste gedrückt ist
+(**Sustain**), und nach dem Loslassen fällt sie auf nichts (**Release**).
+
+**ENV 1 ist die Lautstärke** jeder Note, immer: Die Stimmen laufen nach dem Filter durch sie. Sie ist auch eine
+Quelle, dieselbe Form kann also jeden anderen Regler bewegen. **ENV 2** und **ENV 3** bewegen nur, worauf du sie
+ziehst, und starten als Pluck: ein schneller Attack, ein Decay auf null in einer halben Sekunde.
+
+| Regler | Bereich | ENV 1 | ENV 2 und ENV 3 |
+|---|---|---|---|
+| Attack | 0 bis 32 s | 5 ms | 5 ms |
+| Hold | 0 bis 32 s | 100 ms | 0 |
+| Decay | 0 bis 32 s | 0 | 0,5 s |
+| Sustain | 0 bis 100 | 100 | 0 |
+| Release | 0 bis 32 s | 5 ms | 0,3 s |
+
+Die Zeitregler geben den größten Teil ihres Wegs den kurzen Zeiten, wo schon ein paar Millisekunden hörbar sind.
+
+**Kurven.** Attack, Decay und Release lassen sich biegen: Zieh den Punkt in der Mitte einer Phase nach oben oder
+unten. Nahe der Mitte rastet er wieder auf eine Gerade ein; <kbd>↑</kbd> <kbd>↓</kbd> bewegen einen fokussierten
+Punkt in kleinen Schritten; ein Doppelklick setzt die Phase auf ihre Standardkurve zurück. Eine sehr kurze Phase
+oder eine, die den Pegel nicht ändert, hat keinen Punkt.
+
+**BPM.** Die Taste **BPM** rechts von Release macht aus den Zeiten Notenwerte: Off, dann 1/512 Takt bis 32 Takte,
+im Tempo der Piano Roll. Sustain bleibt ein Pegel. Beim Einschalten von BPM wird der nächstliegende Notenwert beim
+aktuellen Tempo gewählt; beim Ausschalten bleibt die Zeit erhalten.
+
+Eine Note liest ihre Hüllkurven, wenn sie beginnt: Eine Änderung an einem Regler hörst du also ab der nächsten
+Note.
+
+## LFOs: LFO 1 bis LFO 4
+
+<Figure name='lfo' alt='Der LFO-Bereich von Chisper: die Form Kick, die oben beginnt und auf null fällt, die Formauswahl auf Kick, der Modus Retrig, die Tasten BPM, Anker, Triole und Punktierung und die Regler Rate, Delay, Rise, Smooth und Phase'>
+
+Ein LFO, unten in der Mitte: seine Form, die Formauswahl, der Modus, die Tempotasten und seine Regler.
+
+</Figure>
+
+Ein LFO (Low Frequency Oscillator, ein Niederfrequenz-Oszillator) spielt eine Form immer wieder, zu langsam, um sie
+als Tonhöhe zu hören: Du hörst sie als Bewegung. Sein Pegel reicht von 0 am unteren Rand des Diagramms bis 1 am
+oberen.
+
+### Formen
+
+Die Auswahl unter dem Diagramm hat fertige Formen in vier Gruppen:
+
+- **Basic**: Sine, Triangle, Saw up, Saw down, Square.
+- **Sidechain**: Pump, Pump soft, Pump hard, Pump ×2, Pump ×4, Kick. Die Pumps tauchen am Anfang des Zyklus ab und
+  schwellen wieder an: das Ducking eines Sidechain-Kompressors, ganz ohne Kompressor. Kick beginnt oben und
+  fällt. Auf einer Route mit negativer Stärke duckt sie genauso.
+- **Rhythm**: Gate ×4, Gate ×8, Gate ×16, Offbeat, Dotted 3-3-2, Trance A, Trance B, Stutter, Pluck ×4.
+- **Steps**: Up ×4, Down ×4, Up-down, Random ×8.
+
+### Wie zeichne ich eine eigene LFO-Form?
+
+Jede Form ist eine Linie durch Punkte, und du kannst jeden davon bearbeiten; die Auswahl zeigt dann *Custom*.
+
+- **Punkt hinzufügen:** Drück auf die Linie (ein blasser Punkt zeigt, wo er hinkommt) und zieh ihn gleich weiter.
+- **Punkt verschieben:** Zieh ihn. Er bleibt zwischen seinen Nachbarn; lass ihn auf einen Nachbarn fallen, und du
+  bekommst eine harte Stufe.
+- **Punkt entfernen:** Doppelklick darauf. Der erste Punkt lässt sich nicht entfernen, und eine Form behält
+  mindestens zwei.
+- **Segment biegen:** Zieh den Punkt in seiner Mitte nach oben oder unten; ein Doppelklick darauf macht es wieder
+  gerade.
+- Bis zu 64 Punkte.
+
+### Modus und Regler
+
+- **Retrig** (Standard): Jede Note startet die Form von vorn, nach ihrem **Delay**.
+- **Free**: Der LFO läuft für sich, und alle Noten teilen ihn.
+
+| Regler | Bereich | Standard | Was er bewirkt |
+|---|---|---|---|
+| Rate | 10 ms bis 32 s | 0,5 s | Wie lange ein Zyklus dauert (als Zeit angezeigt; 0,5 s sind 2 Hz). Nach rechts ist schneller. |
+| Delay | 0 bis 32 s | 0 | Wie lange der LFO nach dem Notenbeginn wartet, auf dem Pegel seines ersten Punkts |
+| Rise | 0 bis 32 s | 0 | Wie lange er braucht, um von diesem Pegel zur vollen Form einzublenden |
+| Smooth | 0 bis 0,5 s | 0 | Rundet die Stufen der Form ab |
+| Phase | 0° bis 360° | 0° | Wo in der Form er beginnt |
+
+### LFO-Tempo-Sync und MIDI Clock
+
+- **BPM** stellt Rate, Delay und Rise in Notenwerten statt in Sekunden ein: Rate von 1/256 bis 32 Takte, Standard
+  1/4. Ein Wert, der beim aktuellen Tempo kürzer als 10 ms ist, fehlt: Bei 120 BPM ist 1/128 der kürzeste.
+  1/256 gibt es bis 93 BPM.
+- Die letzten zwei Tasten fügen den Schritten von Rate Triolen (⅔ so lang, 1/8T) und punktierte Werte (1,5× so
+  lang, 1/8D) hinzu. Sie ändern den Wert nicht, auf dem Rate steht: Dreh den Regler auf einen der neuen Schritte.
+- Der Anker hält einen Free-LFO auf den Schlägen des Tempos, damit ein Pumpen dort landet, wo eine Kick landen
+  würde. Er ist standardmäßig an und wirkt nur im Modus Free.
+- Das Tempo ist das der Piano Roll (ihr Streifen: ziehen, oder doppelklicken und tippen, 30 bis 240). Es wird nicht
+  in Presets gespeichert: Der Browser merkt es sich.
+- Eine MIDI Clock aus deiner DAW oder einem Drumcomputer kann das Tempo führen; das Tempofeld zeigt dann **EXT**.
+  Siehe [MIDI-Keyboards und Geräte](/de/anleitung/midi-keyboard/).
+
+## Anschlagstärke: VELO
+
+Der Bereich VELO (unten rechts) zeigt, wie die Anschlagstärke einer Note (wie fest du eine Taste drückst, 1 bis
+127) zu einem Pegel von 0 bis 1 wird: Zieh den mittleren Punkt der Kurve, um sie zu biegen, ein Doppelklick darauf
+macht sie wieder gerade. Der Punkt auf der Kurve ist die zuletzt gespielte Note.
+
+Standardmäßig bestimmt die Anschlagstärke die Lautstärke: **Amp** auf 100 % macht eine Note mit Anschlagstärke 64
+etwa 6 dB leiser als eine mit 127. Dreh **Amp** auf 0, und jede Note spielt gleich laut, egal mit welcher
+Anschlagstärke.
+
+VELO ist eine Quelle wie die anderen: Zieh sie auf **Cutoff**, und kräftige Noten werden auch heller. Eine Note
+behält ihre Anschlagstärke, solange sie klingt.
+
+<Note>
+
+Die Computertastatur und das Bildschirmklavier spielen jede Note mit Anschlagstärke 100. Um mit Anschlagdynamik zu
+spielen, nimm ein [MIDI-Keyboard](/de/anleitung/midi-keyboard/).
+
+</Note>
+
+## Drei Übungen
+
+<Try title='Ein Pluck: ENV 2 auf dem Cutoff' preset='zesty-drive-bass'>
+
+1. Lade *Init* (der Kreispfeil neben dem Preset-Namen) und schalte das Filter mit einem Klick auf seinen Titel ein.
+2. Dreh **Cutoff** auf etwa 200 herunter.
+3. Zieh den Tab **ENV 2** auf **Cutoff**.
+4. Spiel ein paar kurze Noten. Dann verkürze **Decay** von ENV 2 und spiel noch einmal.
+
+Du solltest hören, wie jede Note hell beginnt und sich in einer halben Sekunde schließt, der Klang eines Plucks;
+ein kürzeres Decay macht ihn knackiger. Das Preset unten macht dasselbe mit einem resonanten Bass, fast vier
+Oktaven Sweep bei jeder Note.
+
+</Try>
+
+<Try title='Sidechain-Pumpen mit dem LFO auf dem Gain' preset='pumping-house-chords'>
+
+1. Lade *Init* und dreh **Gain** von Osc 1 ganz herunter.
+2. Wähl bei LFO 1 in der Formauswahl **Pump** (Sidechain) und stell den Modus auf **Free**.
+3. Schalte **BPM** ein; Rate ist 1/4, ein Pumpen pro Schlag.
+4. Zieh den Tab **LFO 1** auf **Gain** von Osc 1, dann zieh seinen Punkt auf etwa +80 % hoch.
+5. Halte einen Akkord.
+
+Du solltest hören, wie der Akkord auf jedem Schlag abtaucht und wieder anschwillt: das Pumpen von House und EDM,
+fest im Tempo.
+
+</Try>
+
+<Try title='Ein Wobble: LFO auf dem Cutoff' preset='dubstep-wobble'>
+
+1. Lade *Init*, schalte das Filter ein, dreh **Cutoff** auf etwa 200 herunter und **Res** ein wenig hoch.
+2. Schalte bei LFO 1 **BPM** ein und stell **Rate** auf 1/8.
+3. Zieh **LFO 1** auf **Cutoff** und stell die Stärke auf etwa +40 %.
+4. Halte eine tiefe Note, schalte dann die Triolentaste ein und dreh Rate auf 1/8T.
+
+Du solltest hören, wie sich das Filter auf jeder Achtelnote öffnet und schließt: ein Wobble-Bass. Das Preset unten
+geht weiter: Der LFO bewegt auch die Welle und den Drive, und ENV 2 ändert sein Tempo, während die Note läuft.
+
+</Try>

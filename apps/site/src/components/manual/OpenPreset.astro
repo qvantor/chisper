@@ -1,0 +1,26 @@
+---
+import { MESSAGES } from '../../i18n';
+import { presetUrl } from '../../i18n/locales';
+import { presetOf, type PresetKey } from '../../manual/open-preset';
+import { langOf } from '../../manual/pages';
+
+interface Props {
+  // a preset of a clip of the landing or of the manual's list
+  preset: PresetKey;
+}
+
+// the synth on a preset where what the text is about can be heard
+const m = MESSAGES[langOf(Astro.url.pathname)];
+const preset = presetOf(Astro.props.preset);
+---
+
+<a class='key key-ghost open-preset' href={presetUrl(preset.presetId)}>
+  {m.card.open}: {preset.name}
+</a>
+
+<style>
+  .open-preset {
+    min-height: 40px;
+    font-size: 12px;
+  }
+</style>

@@ -2,15 +2,17 @@
 interface Props {
   // the wordmark of the header (large) or of the footer
   size?: 'large' | 'small';
+  // the page it leads to (the landing of the language)
+  href: string;
 }
 
-const { size = 'large' } = Astro.props;
+const { size = 'large', href } = Astro.props;
 ---
 
-<span class:list={['logo', size]}>
+<a class:list={['logo', size]} href={href}>
   <span class='name'>Chisper</span>
   <span class='by'>by Qvantor</span>
-</span>
+</a>
 
 <style>
   /* the wordmark of the synth's header: gradient letters, "by Qvantor" under their right end */
@@ -19,6 +21,13 @@ const { size = 'large' } = Astro.props;
     flex-direction: column;
     align-items: flex-end;
     line-height: 1;
+    text-decoration: none;
+    transition: filter 250ms ease;
+  }
+
+  /* a link: the whole wordmark lights up a little, nothing changes color */
+  .logo:hover {
+    filter: brightness(1.15) saturate(1.1);
   }
 
   .name {

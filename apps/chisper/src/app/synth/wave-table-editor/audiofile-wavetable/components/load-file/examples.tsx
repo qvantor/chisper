@@ -19,7 +19,8 @@ const ButtonContainer = styled.div`
   gap: 20px;
 `;
 
-const Button = styled.button`
+// a raised key of the drop screen (the examples, Choose a file)
+export const Button = styled.button`
   font-weight: 100;
   cursor: pointer;
   padding: 15px 30px;
@@ -43,7 +44,7 @@ const Button = styled.button`
 `;
 
 interface Props {
-  onLoad: (buffer: ArrayBuffer) => Promise<void>;
+  onLoad: (buffer: ArrayBuffer, name: string) => Promise<void>;
 }
 
 const exampleFile = async (name: string): Promise<ArrayBuffer> => {
@@ -54,7 +55,7 @@ const exampleFile = async (name: string): Promise<ArrayBuffer> => {
 export const Examples = ({ onLoad }: Props) => {
   const onExampleClick = (name: string) => async () => {
     const buffer = await exampleFile(name);
-    await onLoad(buffer);
+    await onLoad(buffer, name);
   };
   return (
     <Root>
