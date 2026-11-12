@@ -23,11 +23,11 @@ use crate::source::{LevelPan, RenderCx, Source, StartCx};
 use crate::store::{EntryRef, Levels, Store};
 use crate::targets::{mask, target, COARSE, LEVEL, PAN, SUB};
 use crate::voice::{
-    advance, frame_start, lerp, level_base, level_weights, level_x, phase_loop, read, render11,
-    render21_same, span_level, split, window, wrap, Ctx, Params, FREQUENCY,
+    advance, frame_start, level_base, level_weights, level_x, read, render11, render21, render21_same,
+    span_level, Ctx, Params, FREQUENCY,
 };
 use alloc::{vec, vec::Vec};
-use jsmath::{log2, max, min, pow, round};
+use jsmath::{log2, max, min, pow};
 
 /// the sub (a sine) at Level 1 against an oscillator at its gain 1 on a sine of amplitude 1 (sub.json `oscillator`)
 pub const SUB_SCALE: f64 = 0.65747;
@@ -404,8 +404,7 @@ fn render_levels(
 }
 
 // a span s0..s1 of the frame of `level` (w 0), of the next (w 1) or of both × g added into out: the loops of the
-// oscillators (render11, render21_same: functions of their own) or blend21 of its own (render21 of the oscillators is
-// inlined into its one caller: a call of the sub would take it out of it)
+// oscillators (render11, render21_same, render21: functions of their own, in fixed point)
 #[allow(clippy::too_many_arguments)]
 fn span(
     levels: &Levels,
@@ -422,23 +421,31 @@ fn span(
 ) -> f64 {
     let data = &levels.data;
     if let Some(level1) = span_level(level, w, dw) {
-        let length = levels.lengths[level1] as usize;
-        let o = frame_start(levels, level1, 0);
-        if d_inc == 0.0 && length.is_power_of_two() && length <= 1 << 16 {
-            return steady(data, o, length, ph, inc, g as f32, out, s0, s1);
-        }
-        let len1 = length as f64;
-        return render11(data, o, len1, ph, inc, d_inc, g, out, s0, s1);
+        let len1 = levels.lengths[level1] as f64;
+        return render11(
+            data,
+            frame_start(levels, level1, 0),
+            len1,
+            ph,
+            inc,
+            d_inc,
+            g,
+            out,
+            s0,
+            s1,
+        );
     }
     let (len1, len2) = (levels.lengths[level] as usize, levels.lengths[level + 1] as usize);
     let (o1, o2) = (frame_start(levels, level, 0), frame_start(levels, level + 1, 0));
     if len1 == len2 {
         return render21_same(data, o1, len1 as f64, o2, w, dw, ph, inc, d_inc, g, out, s0, s1);
     }
-    blend21(
+    render21(
         data,
-        (o1, len1 as f64),
-        (o2, len2 as f64),
+        o1,
+        len1 as f64,
+        o2,
+        len2 as f64,
         w,
         dw,
         ph,
@@ -449,81 +456,6 @@ fn span(
         s0,
         s1,
     )
-}
-
-// the phase in 0.32 fixed point (a cycle 2^32)
-const CYCLE: f64 = 4294967296.0;
-
-// a span of one level at a still step, its length a power of two: the phase in 0.32 (the sample its top bits, the
-// share to the next one the rest, in f32), the step rounded to it (within 2^-33 of a cycle: 1e-4 cents at 100 Hz),
-// the samples and the sum in f32; no wrap to test, no index to clamp (the loop of a held note: half the cost of
-// render11). The phase in f64 again after it, within 2^-32 of the one of render11
-#[allow(clippy::too_many_arguments)]
-#[inline(never)]
-fn steady(
-    t: &[f32],
-    o: usize,
-    length: usize,
-    ph: f64,
-    inc: f64,
-    g: f32,
-    out: &mut [f32],
-    s0: usize,
-    s1: usize,
-) -> f64 {
-    // (sample `length` of the frame is its sample 0, in its guard)
-    let w = &t[o..o + length + 1];
-    let shift = 32 - length.trailing_zeros();
-    let mask = (1u32 << shift) - 1;
-    let scale = 1.0 / (1u64 << shift) as f32;
-    let mut acc = (ph * CYCLE) as u32;
-    let step = round(inc * CYCLE) as u32;
-    for value in out[s0..s1].iter_mut() {
-        let i = (acc >> shift) as usize;
-        let f = (acc & mask) as f32 * scale;
-        // SAFETY: i < 2^(32 - shift) = length and w has length + 1 samples
-        let (a, b) = unsafe { (*w.get_unchecked(i), *w.get_unchecked(i + 1)) };
-        *value += g * (a + (b - a) * f);
-        acc = acc.wrapping_add(step);
-    }
-    acc as f64 / CYCLE
-}
-
-// two levels of other lengths, the second at the share w (render21 of the oscillators)
-#[allow(clippy::too_many_arguments)]
-fn blend21(
-    t: &[f32],
-    (o1, len1): (usize, f64),
-    (o2, len2): (usize, f64),
-    mut w: f64,
-    dw: f64,
-    mut ph: f64,
-    mut inc: f64,
-    d_inc: f64,
-    g: f64,
-    out: &mut [f32],
-    s0: usize,
-    s1: usize,
-) -> f64 {
-    let (w1, w2) = (window(t, o1, len1 as usize), window(t, o2, len2 as usize));
-    let (last1, last2) = (len1 as i32 - 1, len2 as i32 - 1);
-    let out = &mut out[..s1];
-    phase_loop!(
-        ph,
-        inc,
-        d_inc,
-        s0,
-        s1,
-        |s| {
-            let (i1, f1) = split(ph * len1, last1);
-            let (i2, f2) = split(ph * len2, last2);
-            let v1 = lerp(w1, i1, f1);
-            let v2 = lerp(w2, i2, f2);
-            out[s] = (out[s] as f64 + g * (v1 + (v2 - v1) * w)) as f32;
-        },
-        w += dw
-    );
-    ph
 }
 
 impl Source for Sub {

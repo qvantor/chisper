@@ -3062,6 +3062,16 @@ describe('the wavetable voice', () => {
       ['a bandpass', { type: 'bandpass', cutoff: 1500, resonance: 3, gain: 0 }],
       ['a peaking', { type: 'peaking', cutoff: 800, resonance: 2, gain: 12 }],
       ['a lowshelf', { type: 'lowshelf', cutoff: 500, resonance: 0, gain: -12 }],
+      ['a highshelf', { type: 'highshelf', cutoff: 3000, resonance: 0, gain: 9 }],
+      ['a notch', { type: 'notch', cutoff: 1000, resonance: 2, gain: 0 }],
+      ['an allpass', { type: 'allpass', cutoff: 1000, resonance: 1, gain: 0 }],
+      // the edges of the knobs: the integrators of the filter are in f32
+      ['a lowpass at 20 Hz', { type: 'lowpass', cutoff: 20, resonance: 0, gain: 0 }],
+      ['a highpass at 20 Hz', { type: 'highpass', cutoff: 20, resonance: 0, gain: 0 }],
+      ['a peaking at 20 Hz', { type: 'peaking', cutoff: 20, resonance: 2, gain: 12 }],
+      ['a lowshelf at 20 Hz', { type: 'lowshelf', cutoff: 20, resonance: 0, gain: 18 }],
+      ['a lowpass at its most resonance', { type: 'lowpass', cutoff: 1000, resonance: 20, gain: 0 }],
+      ['a highpass at its most resonance', { type: 'highpass', cutoff: 2500, resonance: 20, gain: 0 }],
     ])('filters the voice as the chart (a BiquadFilterNode) shows: %s', (_, filter) => {
       [100, 400, 1000, 2500, 6000].forEach((frequency) => {
         const dry = toneAmplitude(tone(frequency).left, frequency);

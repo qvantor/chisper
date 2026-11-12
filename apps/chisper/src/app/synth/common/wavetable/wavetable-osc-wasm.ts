@@ -104,6 +104,8 @@ export interface OscExports extends CoreExports {
   osc_scope_taps: (scope: number) => number;
   osc_scope_tap_data: (scope: number) => number;
   osc_scope_stats: (scope: number) => void;
+  // (the perf build only)
+  osc_scope_trap?: (scope: number, id: number) => void;
 }
 
 // the size of the command buffer of the core (dsp/wavetable-osc/src/lib.rs)
@@ -906,6 +908,8 @@ export const createVoiceScopeWasm = (
         right: data.slice(2 * n * i + n, 2 * n * (i + 1)),
       }));
     },
+    // voice `id` traps as it finishes its blocks from now on (the specs: a core of the perf build)
+    trap: (id: number) => exports.osc_scope_trap?.(handle, id),
     // the voices playing and the events their timelines hold
     stats: () => {
       exports.osc_scope_stats(handle);

@@ -1,9 +1,9 @@
 //! createVoiceDsp of apps/chisper/src/app/synth/common/wavetable/wavetable-osc-dsp.ts: a voice of a note, its
 //! sources (both oscillators with their unison voices, its noise: source.rs) into its bus, then its filter and ENV 1
-//! into one stereo output, ported bit for bit (the comments of the algorithm are in the TS)
+//! into one stereo output (ported from the TS; the loops that read the tables are in fixed point and f32 lanes)
 
 use crate::envelope::{EnvelopeBlock, EnvelopeParams};
-use crate::filter::{FilterOptions, VoiceFilter};
+use crate::filter::{self, FilterOptions, VoiceFilter};
 use crate::lfo::{LfoBlock, LfoGlobal, DELAY, KNOBS, LFOS, RATE, RISE, SMOOTH};
 use crate::modulation::{lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
 use crate::noise::{Noise, NoiseOptions};
@@ -17,6 +17,7 @@ use crate::targets::{
 };
 use crate::velocity::{PendingVelocities, Velocity, VoiceVelocity, Volume};
 use alloc::{boxed::Box, vec, vec::Vec};
+use dsp_core::simd::{F32x4, U32x4};
 use jsmath::{ceil, cos, floor, log2, max, min, pow, round, sin, PI};
 
 pub const MAX_UNISON: usize = 8;
@@ -314,8 +315,6 @@ macro_rules! phase_loop {
     }};
 }
 
-pub(crate) use phase_loop;
-
 #[cold]
 #[inline(never)]
 pub(crate) fn wrap(ph: f64) -> f64 {
@@ -354,6 +353,228 @@ pub(crate) fn lerp(w: &[f32], i: usize, f: f64) -> f64 {
     a + (b - a) * f
 }
 
+// The loops of a table whose length is a power of two (every level and mix): the phase in fixed point, so the
+// phases of four samples in a row are four lanes with no chain between them: their samples read as pairs (the
+// sample and the next one), the lerp, the gain and the sum into `out` in f32x4. No wrap to test, no index to clamp.
+// A phase is a whole number of 2^-52 of a cycle (a double holds it as it is), a still step is rounded to that too
+// (1e-13 of the pitch at 20 Hz) and the lanes add it up exactly: the top 32 bits of the phase in a lane (the sample
+// its top bits, the share to the next one the rest), the 20 bits under them in another, their carry added when
+// read. So a voice plays the same samples however its block is cut into spans, and two voices of one pitch stay
+// in step. A step that moves (d_inc) moves by a share rounded to 2^-32 a sample over the span, the phase after the
+// span is the one the doubles give (the rounding of a span doesn't add up over the spans)
+const CYCLE: f64 = 4503599627370496.0;
+const LOW_BITS: u32 = 20;
+const LOW: u64 = (1 << LOW_BITS) - 1;
+const CYCLE_MASK: u64 = (1 << 52) - 1;
+// the samples the low bits of a still phase add up over without their carry leaving a lane (2^32 / 2^20)
+const SPAN: usize = 4000;
+
+// a table of this length is read in fixed point (else, a length no table has, by the loops in doubles)
+#[inline(always)]
+fn fixed(len: f64) -> bool {
+    let length = len as usize;
+    (2..=1 << 16).contains(&length) && length.is_power_of_two()
+}
+
+// a number of cycles in 2^-52 of a cycle, modulo a cycle
+#[inline(always)]
+fn cycles(x: f64) -> u64 {
+    (round(x * CYCLE) as i64 as u64) & CYCLE_MASK
+}
+
+// the phases of the four samples of a group, and what moves them to the next group
+struct Phases {
+    // the top 32 bits, and what is under them (as they add up: the carry is theirs over LOW_BITS)
+    acc: U32x4,
+    low: U32x4,
+    step: U32x4,
+    low_step: U32x4,
+    d_step: U32x4,
+    // the phase and the still step of the first sample
+    first: u64,
+    by: u64,
+}
+
+impl Phases {
+    #[inline(always)]
+    fn new(ph: f64, inc: f64, d_inc: f64) -> Phases {
+        let (first, by) = (cycles(ph), cycles(inc));
+        let top = |x: u64| (x >> LOW_BITS) as u32;
+        let a = top(first);
+        if d_inc == 0.0 {
+            // sample k of the span: first + k·by, its two parts added up apart
+            let (s, low, low_by) = (top(by), (first & LOW) as u32, (by & LOW) as u32);
+            let lanes = |a: u32, s: u32| {
+                U32x4::new(
+                    a,
+                    a.wrapping_add(s),
+                    a.wrapping_add(s.wrapping_mul(2)),
+                    a.wrapping_add(s.wrapping_mul(3)),
+                )
+            };
+            return Phases {
+                acc: lanes(a, s),
+                low: lanes(low, low_by),
+                step: U32x4::splat(s.wrapping_mul(4)),
+                low_step: U32x4::splat(low_by.wrapping_mul(4)),
+                d_step: U32x4::splat(0),
+                first,
+                by,
+            };
+        }
+        // sample k of the span: a + k·s + d·k(k - 1) / 2, so from a group to the next 4s + d(4k + 6) + 16d·group
+        let rounded = |x: f64| round(x * 4294967296.0) as i64 as u32;
+        let (s, d) = (rounded(inc), rounded(d_inc));
+        let at = |k: u32, tri: u32| {
+            a.wrapping_add(s.wrapping_mul(k))
+                .wrapping_add(d.wrapping_mul(tri))
+        };
+        let moves = |k: u32| s.wrapping_mul(4).wrapping_add(d.wrapping_mul(4 * k + 6));
+        Phases {
+            acc: U32x4::new(a, at(1, 0), at(2, 1), at(3, 3)),
+            low: U32x4::splat(0),
+            step: U32x4::new(moves(0), moves(1), moves(2), moves(3)),
+            low_step: U32x4::splat(0),
+            d_step: U32x4::splat(d.wrapping_mul(16)),
+            first,
+            by,
+        }
+    }
+
+    // the phases of the group in 0.32
+    #[inline(always)]
+    fn group(&self) -> U32x4 {
+        self.acc.plus(self.low.shifted(LOW_BITS))
+    }
+
+    #[inline(always)]
+    fn next(&mut self) {
+        self.acc = self.acc.plus(self.step);
+        self.low = self.low.plus(self.low_step);
+        self.step = self.step.plus(self.d_step);
+    }
+
+    // the phase after the `length` samples of the span: of a still step the one the lanes reach, of a moving one
+    // the sum of its steps in doubles, rounded once
+    #[inline(always)]
+    fn end(&self, inc: f64, d_inc: f64, length: usize) -> f64 {
+        let moved = if d_inc == 0.0 {
+            self.by.wrapping_mul(length as u64)
+        } else {
+            let n = length as f64;
+            cycles(inc * n + (d_inc * n * (n - 1.0)) / 2.0)
+        };
+        (self.first.wrapping_add(moved) & CYCLE_MASK) as f64 / CYCLE
+    }
+}
+
+// a frame read in fixed point: its sample 0, the bits of a phase under the sample (the share to the next one)
+#[derive(Clone, Copy)]
+struct Reader {
+    base: *const f32,
+    shift: u32,
+    mask: U32x4,
+    scale: F32x4,
+}
+
+impl Reader {
+    #[inline(always)]
+    fn new(t: &[f32], o: usize, len: f64) -> Reader {
+        let length = len as usize;
+        // (sample `length` of the frame is its sample 0, in its guard; checked once)
+        let frame = &t[o..o + length + 1];
+        let shift = 32 - length.trailing_zeros();
+        Reader {
+            base: frame.as_ptr(),
+            shift,
+            mask: U32x4::splat((1u32 << shift) - 1),
+            scale: F32x4::splat(1.0 / (1u64 << shift) as f32),
+        }
+    }
+
+    // the samples of the frame at the phases, and their shares to the next ones
+    #[inline(always)]
+    fn at(&self, acc: U32x4) -> ([u32; 4], F32x4) {
+        (
+            acc.shifted(self.shift).lanes(),
+            acc.and(self.mask).to_f32() * self.scale,
+        )
+    }
+
+    // the frame (or another of its length: `base`) between the samples at `i` and the next ones
+    #[inline(always)]
+    fn lerp(base: *const f32, i: [u32; 4], f: F32x4) -> F32x4 {
+        // SAFETY: i < the length of the frame (the top bits of a phase), base holds length + 1 samples
+        let (now, next) = unsafe { F32x4::pairs_at(base, i) };
+        now + (next - now) * f
+    }
+}
+
+// a channel of the bus and its centre over a..b into an output × the volume (ENV 1 × the amp of the velocity), four
+// samples in the lanes: (side + centre) × volume in f32, each sample the same operations wherever its group starts
+fn mix_out(out: &mut [f32], side: &[f32], center: &[f32], a: usize, b: usize, volume: &Volume) {
+    let (out, side, center) = (&mut out[..b], &side[..b], &center[..b]);
+    if volume.constant() && volume.gain == 1.0 {
+        // (× 1 changes no bit: the sum alone)
+        for i in a..b {
+            out[i] = side[i] + center[i];
+        }
+        return;
+    }
+    let mut s = a;
+    while s + 4 <= b {
+        let sum = F32x4::load(&side[s..s + 4]) + F32x4::load(&center[s..s + 4]);
+        (sum * volume.lanes(s)).store(&mut out[s..s + 4]);
+        s += 4;
+    }
+    for i in s..b {
+        out[i] = (side[i] + center[i]) * volume.at32(i);
+    }
+}
+
+// an output over a..b × the volume, as mix_out does
+fn scale_out(out: &mut [f32], a: usize, b: usize, volume: &Volume) {
+    if volume.constant() && volume.gain == 1.0 {
+        return;
+    }
+    let out = &mut out[..b];
+    let mut s = a;
+    while s + 4 <= b {
+        (F32x4::load(&out[s..s + 4]) * volume.lanes(s)).store(&mut out[s..s + 4]);
+        s += 4;
+    }
+    for i in s..b {
+        out[i] *= volume.at32(i);
+    }
+}
+
+// the values of the group at sample s added to out: all four, or those before s1
+#[inline(always)]
+fn add4(out: &mut [f32], s: usize, s1: usize, values: F32x4) {
+    if s + 4 <= s1 {
+        let group = &mut out[s..s + 4];
+        (F32x4::load(group) + values).store(group);
+    } else {
+        for (sample, value) in out[s..s1].iter_mut().zip(values.lanes()) {
+            *sample += value;
+        }
+    }
+}
+
+// a share that moves by `dw` a sample, at the four samples of a group, and its move to the next group
+#[inline(always)]
+fn shares(w: f64, dw: f64) -> (F32x4, F32x4) {
+    (
+        F32x4::new(
+            w as f32,
+            (w + dw) as f32,
+            (w + 2.0 * dw) as f32,
+            (w + 3.0 * dw) as f32,
+        ),
+        F32x4::splat((4.0 * dw) as f32),
+    )
+}
+
 // (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
 #[inline(never)]
 pub(crate) fn render11(
@@ -368,6 +589,25 @@ pub(crate) fn render11(
     s0: usize,
     s1: usize,
 ) -> f64 {
+    if fixed(len) {
+        if s1 > s0 + SPAN {
+            let (mid, n) = (s0 + SPAN, SPAN as f64);
+            let ph = render11(t, o, len, ph, inc, d_inc, g, out, s0, mid);
+            return render11(t, o, len, ph, inc + d_inc * n, d_inc, g, out, mid, s1);
+        }
+        let reader = Reader::new(t, o, len);
+        let mut phases = Phases::new(ph, inc, d_inc);
+        let gain = F32x4::splat(g as f32);
+        let out = &mut out[..s1];
+        let mut s = s0;
+        while s < s1 {
+            let (i, f) = reader.at(phases.group());
+            add4(out, s, s1, gain * Reader::lerp(reader.base, i, f));
+            phases.next();
+            s += 4;
+        }
+        return phases.end(inc, d_inc, s1.saturating_sub(s0));
+    }
     let w = window(t, o, len as usize);
     let last = len as i32 - 1;
     let out = &mut out[..s1];
@@ -377,107 +617,6 @@ pub(crate) fn render11(
         out[s] = (out[s] as f64 + g * v) as f32;
     });
     ph
-}
-
-// (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
-// two voices of an oscillator from one table each at once (render11 of each: a mix, or the frame of a level, at oa
-// and ob): two chains of phases in one loop. `out_b` None: both add into
-// out_a, a then b per sample, as the TS adds voice after voice (a channel sums each sample in the order of its
-// voices). STEP: the steps move by d_incs each sample (a pitch that moves), else they are constant (the loop of a
-// steady pitch, without the adds)
-#[inline(never)]
-fn render11_pair<const STEP: bool>(
-    (ta, oa, len_a): (&[f32], usize, f64),
-    (tb, ob, len_b): (&[f32], usize, f64),
-    phases: (f64, f64),
-    incs: (f64, f64),
-    d_incs: (f64, f64),
-    gains: (f64, f64),
-    out_a: &mut [f32],
-    out_b: Option<&mut [f32]>,
-    s0: usize,
-    s1: usize,
-) -> (f64, f64) {
-    let (wa, wb) = (window(ta, oa, len_a as usize), window(tb, ob, len_b as usize));
-    let out_a = &mut out_a[..s1];
-    match out_b {
-        Some(out_b) => {
-            let out_b = &mut out_b[..s1];
-            pair_loop::<STEP>(
-                wa,
-                len_a,
-                wb,
-                len_b,
-                phases,
-                incs,
-                d_incs,
-                gains,
-                s0,
-                s1,
-                |s, va, vb| {
-                    out_a[s] = (out_a[s] as f64 + va) as f32;
-                    out_b[s] = (out_b[s] as f64 + vb) as f32;
-                },
-            )
-        }
-        None => pair_loop::<STEP>(
-            wa,
-            len_a,
-            wb,
-            len_b,
-            phases,
-            incs,
-            d_incs,
-            gains,
-            s0,
-            s1,
-            |s, va, vb| {
-                let after_a = (out_a[s] as f64 + va) as f32;
-                out_a[s] = (after_a as f64 + vb) as f32;
-            },
-        ),
-    }
-}
-
-// the loop of render11_pair: `add` takes the gain × v of each voice at sample s (in the lanes of f64x2 it was no faster:
-// the loop is bound by its loads and stores, not by its arithmetic); each phase and step as render11 does them
-#[inline(always)]
-fn pair_loop<const STEP: bool>(
-    wa: &[f32],
-    len_a: f64,
-    wb: &[f32],
-    len_b: f64,
-    phases: (f64, f64),
-    incs: (f64, f64),
-    (d_inc_a, d_inc_b): (f64, f64),
-    (ga, gb): (f64, f64),
-    s0: usize,
-    s1: usize,
-    mut add: impl FnMut(usize, f64, f64),
-) -> (f64, f64) {
-    let (last_a, last_b) = (len_a as i32 - 1, len_b as i32 - 1);
-    let (mut ph_a, mut ph_b) = phases;
-    let (mut inc_a, mut inc_b) = incs;
-    for s in s0..s1 {
-        let (i, f) = split(ph_a * len_a, last_a);
-        let va = lerp(wa, i, f);
-        let (j, h) = split(ph_b * len_b, last_b);
-        let vb = lerp(wb, j, h);
-        add(s, ga * va, gb * vb);
-        ph_a += inc_a;
-        if ph_a >= 1.0 {
-            ph_a = wrap(ph_a);
-        }
-        ph_b += inc_b;
-        if ph_b >= 1.0 {
-            ph_b = wrap(ph_b);
-        }
-        if STEP {
-            inc_a += d_inc_a;
-            inc_b += d_inc_b;
-        }
-    }
-    (ph_a, ph_b)
 }
 
 // (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
@@ -498,6 +637,29 @@ pub(crate) fn render21_same(
     s0: usize,
     s1: usize,
 ) -> f64 {
+    if fixed(len1) {
+        if s1 > s0 + SPAN {
+            let (mid, n) = (s0 + SPAN, SPAN as f64);
+            let ph = render21_same(t, o1, len1, o2, w, dw, ph, inc, d_inc, g, out, s0, mid);
+            let (w, inc) = (w + dw * n, inc + d_inc * n);
+            return render21_same(t, o1, len1, o2, w, dw, ph, inc, d_inc, g, out, mid, s1);
+        }
+        let (first, second) = (Reader::new(t, o1, len1), Reader::new(t, o2, len1));
+        let mut phases = Phases::new(ph, inc, d_inc);
+        let gain = F32x4::splat(g as f32);
+        let (mut share, by) = shares(w, dw);
+        let out = &mut out[..s1];
+        let mut s = s0;
+        while s < s1 {
+            let (i, f) = first.at(phases.group());
+            let (v1, v2) = (Reader::lerp(first.base, i, f), Reader::lerp(second.base, i, f));
+            add4(out, s, s1, gain * (v1 + (v2 - v1) * share));
+            phases.next();
+            share = share + by;
+            s += 4;
+        }
+        return phases.end(inc, d_inc, s1.saturating_sub(s0));
+    }
     let (w1, w2) = (window(t, o1, len1 as usize), window(t, o2, len1 as usize));
     let last = len1 as i32 - 1;
     let out = &mut out[..s1];
@@ -701,8 +863,9 @@ impl<'a> Lanes4<'a> {
 }
 
 // (not inlined: a loop of its own keeps its values in registers, inlined into render_voices they spilled)
+// two windows of other lengths, the second at the share w: two levels of a frame
 #[inline(never)]
-fn render21(
+pub(crate) fn render21(
     t: &[f32],
     o1: usize,
     len1: f64,
@@ -718,6 +881,34 @@ fn render21(
     s0: usize,
     s1: usize,
 ) -> f64 {
+    if fixed(len1) && fixed(len2) {
+        if s1 > s0 + SPAN {
+            let (mid, n) = (s0 + SPAN, SPAN as f64);
+            let ph = render21(t, o1, len1, o2, len2, w, dw, ph, inc, d_inc, g, out, s0, mid);
+            let (w, inc) = (w + dw * n, inc + d_inc * n);
+            return render21(t, o1, len1, o2, len2, w, dw, ph, inc, d_inc, g, out, mid, s1);
+        }
+        let (first, second) = (Reader::new(t, o1, len1), Reader::new(t, o2, len2));
+        let mut phases = Phases::new(ph, inc, d_inc);
+        let gain = F32x4::splat(g as f32);
+        let (mut share, by) = shares(w, dw);
+        let out = &mut out[..s1];
+        let mut s = s0;
+        while s < s1 {
+            let group = phases.group();
+            let (i1, f1) = first.at(group);
+            let (i2, f2) = second.at(group);
+            let (v1, v2) = (
+                Reader::lerp(first.base, i1, f1),
+                Reader::lerp(second.base, i2, f2),
+            );
+            add4(out, s, s1, gain * (v1 + (v2 - v1) * share));
+            phases.next();
+            share = share + by;
+            s += 4;
+        }
+        return phases.end(inc, d_inc, s1.saturating_sub(s0));
+    }
     let (w1, w2) = (window(t, o1, len1 as usize), window(t, o2, len2 as usize));
     let (last1, last2) = (len1 as i32 - 1, len2 as i32 - 1);
     let out = &mut out[..s1];
@@ -1491,6 +1682,8 @@ pub struct Voice {
     phrase: f64,
     started: bool,
     pub ended: bool,
+    // it traps as it finishes a block (set_trap: the specs of the perf build)
+    trap: bool,
     block_frame: f64,
     pub started_at: f64,
     unison: f64,
@@ -1583,6 +1776,7 @@ impl Voice {
             phrase: options.phrase,
             started: false,
             ended: false,
+            trap: false,
             block_frame: 0.0,
             started_at: -1.0,
             unison: 0.0,
@@ -1675,6 +1869,12 @@ impl Voice {
         // the versions of every source first: they release nothing that allocates, the mixes may
         each_source!(self.slots, source => source.release(store));
         each_source!(self.slots, source => source.free(shared));
+    }
+
+    /// the voice traps as it finishes its blocks from now on (the specs: a trap past its render)
+    #[cfg(feature = "perf")]
+    pub fn set_trap(&mut self) {
+        self.trap = true;
     }
 
     /// a voice of mono: it lives on RELEASE_LEAD after the end of its release (silent, its phases running), so a
@@ -1819,12 +2019,33 @@ impl Voice {
         store: &mut Store,
         shared: &mut Shared,
     ) -> bool {
+        let (playing, filtered) = self.render(frame, params, bend, out_l, out_r, store, shared);
+        if let Some((a, b)) = filtered {
+            self.finish(frame, a, b, out_l, out_r);
+        }
+        playing
+    }
+
+    /// The block of `process` up to the filter: whether the voice still plays and, with its filter on, the a..b
+    /// its channels hold unfiltered (silence around them), for `finish` or `finish_pair` to end the block. The
+    /// voices of a node finish in pairs: the filters of two in the lanes of one
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        &mut self,
+        frame: f64,
+        params: &Params,
+        bend: &[f32],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        store: &mut Store,
+        shared: &mut Shared,
+    ) -> (bool, Option<(usize, usize)>) {
         let n = out_l.len();
         let nf = n as f64;
         if self.ended {
             out_l.fill(0.0);
             out_r.fill(0.0);
-            return false;
+            return (false, None);
         }
         self.grow(n, shared);
         self.block_frame = frame;
@@ -1833,7 +2054,7 @@ impl Voice {
         if a >= nf {
             out_l.fill(0.0);
             out_r.fill(0.0);
-            return true;
+            return (true, None);
         }
         if !self.started {
             self.start(params, a as usize, store, shared);
@@ -1929,33 +2150,73 @@ impl Voice {
         }
         out_l.fill(0.0);
         out_r.fill(0.0);
-        // ENV 1 × the amp of the velocity, in the same pass (at an amp of 1: the output of ENV 1, to the bit)
-        let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
         let s = &shared.scratch.bus;
-        if self.filter.on {
-            let moved = [CUTOFF, RESONANCE, FILTER_GAIN]
-                .map(|knob| self.modulation.moved(targets::target(FILTER, 0, knob)));
-            self.filter
-                .process((&s.left, &s.right, &s.center), out_l, out_r, a, b, volume, moved);
-        } else if volume.constant() && volume.gain == 1.0 {
-            for i in a..b {
-                out_l[i] = (s.left[i] as f64 + s.center[i] as f64) as f32;
-                out_r[i] = (s.right[i] as f64 + s.center[i] as f64) as f32;
-            }
-        } else if volume.constant() {
-            let g = volume.gain;
-            for i in a..b {
-                out_l[i] = ((s.left[i] as f64 + s.center[i] as f64) * g) as f32;
-                out_r[i] = ((s.right[i] as f64 + s.center[i] as f64) * g) as f32;
-            }
+        let filtered = self.filter.on.then_some((a, b));
+        if filtered.is_some() {
+            // the channels as they are: through the filter, then × the volume (finish)
+            mix_out(out_l, &s.left, &s.center, a, b, &Volume::UNITY);
+            mix_out(out_r, &s.right, &s.center, a, b, &Volume::UNITY);
         } else {
-            for i in a..b {
-                let g = volume.at(i);
-                out_l[i] = ((s.left[i] as f64 + s.center[i] as f64) * g) as f32;
-                out_r[i] = ((s.right[i] as f64 + s.center[i] as f64) * g) as f32;
-            }
+            // ENV 1 × the amp of the velocity, in the same pass (at an amp of 1: the output of ENV 1, to the bit)
+            let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
+            mix_out(out_l, &s.left, &s.center, a, b, &volume);
+            mix_out(out_r, &s.right, &s.center, a, b, &volume);
+            self.fade(frame, a, b, out_l, out_r);
         }
-        // the fade of a stolen voice: a raised cosine from 1 at killFrom to 0 at the stop
+        if self.stop_frame - frame <= nf {
+            self.end(store, shared);
+            return (false, filtered);
+        }
+        (true, filtered)
+    }
+
+    /// the end of a block `render` left unfiltered over a..b: the filter, ENV 1 × the amp of the velocity, the
+    /// fade of a stolen voice
+    pub fn finish(&mut self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
+        filter::run(
+            &mut self.filter.pass(a, b, filter_moved(&self.modulation)),
+            out_l,
+            out_r,
+        );
+        self.volume(frame, a, b, out_l, out_r);
+    }
+
+    /// `finish` of two voices (their a..b, their channels of n samples): both filters in the lanes of one, each
+    /// voice the bits of its own `finish`
+    pub fn finish_pair(
+        voices: [&mut Voice; 2],
+        frame: f64,
+        spans: [(usize, usize); 2],
+        outs: [[&mut [f32]; 2]; 2],
+        n: usize,
+    ) {
+        let [p, q] = voices;
+        let [[pl, pr], [ql, qr]] = outs;
+        filter::run_pair(
+            [
+                &mut p.filter.pass(spans[0].0, spans[0].1, filter_moved(&p.modulation)),
+                &mut q.filter.pass(spans[1].0, spans[1].1, filter_moved(&q.modulation)),
+            ],
+            [[&mut *pl, &mut *pr], [&mut *ql, &mut *qr]],
+            n,
+        );
+        p.volume(frame, spans[0].0, spans[0].1, pl, pr);
+        q.volume(frame, spans[1].0, spans[1].1, ql, qr);
+    }
+
+    // the filtered channels × ENV 1 × the amp of the velocity, then the fade of a stolen voice
+    fn volume(&self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
+        if cfg!(feature = "perf") && self.trap {
+            panic!();
+        }
+        let volume = Volume::new(&self.envelopes[0], &self.velocity.amp, a);
+        scale_out(out_l, a, b, &volume);
+        scale_out(out_r, a, b, &volume);
+        self.fade(frame, a, b, out_l, out_r);
+    }
+
+    // the fade of a stolen voice: a raised cosine from 1 at killFrom to 0 at the stop
+    fn fade(&self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
         if self.kill_from != f64::INFINITY {
             let from = max(a as f64, self.kill_from - frame);
             let mut i = from;
@@ -1967,12 +2228,12 @@ impl Voice {
                 i += 1.0;
             }
         }
-        if self.stop_frame - frame <= nf {
-            self.end(store, shared);
-            return false;
-        }
-        true
     }
+}
+
+// the knobs of the filter the routes move (cutoff, resonance, gain), None: its base
+fn filter_moved(modulation: &Modulation) -> [Option<&[f32]>; 3] {
+    [CUTOFF, RESONANCE, FILTER_GAIN].map(|knob| modulation.moved(targets::target(FILTER, 0, knob)))
 }
 
 // what the render functions of an oscillator read of its voice
@@ -2342,54 +2603,6 @@ fn channel_of(s: &mut Scratch, channels: Channels, channel: usize) -> (&mut [f32
     (out, fading)
 }
 
-// channels ca and cb of the channels (channel_of): the same one is one buffer (None for b)
-fn two_channels(
-    s: &mut Scratch,
-    channels: Channels,
-    ca: usize,
-    cb: usize,
-) -> (&mut [f32], Option<&mut [f32]>) {
-    let Scratch {
-        bus: Bus { left, right, center },
-        a_left,
-        a_right,
-        a_center,
-        b_left,
-        b_right,
-        b_center,
-        a_mid_left,
-        a_mid_right,
-        b_mid_left,
-        b_mid_right,
-        ..
-    } = s;
-    // (the voice has no mid channels: those of the oscillator, while its blend moves)
-    let mut slots = match channels {
-        Channels::Voice => [Some(left), Some(right), Some(center), None, None],
-        Channels::A => [
-            Some(a_left),
-            Some(a_right),
-            Some(a_center),
-            Some(a_mid_left),
-            Some(a_mid_right),
-        ],
-        Channels::B => [
-            Some(b_left),
-            Some(b_right),
-            Some(b_center),
-            Some(b_mid_left),
-            Some(b_mid_right),
-        ],
-    };
-    let first = slots[ca].take().expect("a channel");
-    let second = if cb == ca {
-        None
-    } else {
-        Some(slots[cb].take().expect("another channel").as_mut_slice())
-    };
-    (first.as_mut_slice(), second)
-}
-
 // whether the voices of an oscillator may play their mix tables in a block: not at all; the pitch, the position and
 // the version of the last block (steady: the mixes of that pitch); another pitch or one that moves over a constant
 // position and the same version (the mixes whose reach holds it; `build`: one is built for a pitch that moves)
@@ -2535,7 +2748,6 @@ fn render_voices(
     // plays now, or of its pitch (SourceFade), played directly, its table after it
     let t1 = ctx.block_frame + b as f64;
     let mut on_mix = [false; MAX_UNISON];
-    let mut paired = [false; MAX_UNISON];
     if mixing != Mixing::Off {
         for v in 0..voices {
             // (a voice that fades plays both frames directly; none does in a settled block)
@@ -2672,70 +2884,8 @@ fn render_voices(
             }
         }
     }
-    if mixing != Mixing::Off {
-        let ready = |osc: &Osc, v: usize| on_mix[v] && osc.fades[v] == 0 && !osc.sources[v].fading(t);
-        let mut v = 0;
-        while v + 1 < voices {
-            if ready(osc, v) && ready(osc, v + 1) {
-                paired[v] = true;
-                v += 2;
-            } else {
-                v += 1;
-            }
-        }
-    }
     let mut v = 0;
     while v < voices {
-        if paired[v] {
-            // v and v + 1 from their tables, segment by segment
-            let (table_a, table_b) = (source(osc, levels, v), source(osc, levels, v + 1));
-            let gains = (g * osc.gains[v], g * osc.gains[v + 1]);
-            let mut phases = (osc.phases[v], osc.phases[v + 1]);
-            for p in 0..count - 1 {
-                let (s0, s1) = (
-                    shared.scratch.points[p] as usize,
-                    shared.scratch.points[p + 1] as usize,
-                );
-                let (ia, ib) = (v * points_length + p, (v + 1) * points_length + p);
-                let incs = (osc.incs[ia], osc.incs[ib]);
-                let (out_a, out_b) = two_channels(
-                    &mut shared.scratch,
-                    channels,
-                    channel_of_voice(v),
-                    channel_of_voice(v + 1),
-                );
-                phases = if mixing != Mixing::Steady {
-                    let length = (s1 - s0) as f64;
-                    let d_incs = (
-                        (osc.incs[ia + 1] - incs.0) / length,
-                        (osc.incs[ib + 1] - incs.1) / length,
-                    );
-                    render11_pair::<true>(
-                        table_a, table_b, phases, incs, d_incs, gains, out_a, out_b, s0, s1,
-                    )
-                } else {
-                    render11_pair::<false>(
-                        table_a,
-                        table_b,
-                        phases,
-                        incs,
-                        (0.0, 0.0),
-                        gains,
-                        out_a,
-                        out_b,
-                        s0,
-                        s1,
-                    )
-                };
-                if cfg!(feature = "perf") && counted {
-                    shared.counts[MIX_SAMPLES] += 2.0 * (s1 - s0) as f64;
-                }
-            }
-            osc.phases[v] = phases.0;
-            osc.phases[v + 1] = phases.1;
-            v += 2;
-            continue;
-        }
         let fade_left = osc.fades[v];
         let channel = channel_of_voice(v);
         let g = g * osc.gains[v];

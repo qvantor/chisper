@@ -1,5 +1,6 @@
-# the cores compute as the TS ones do: the Math of JS from jsmath (V8's fdlibm, glibc's pow, the JS semantics of
-# round, max and min), never the libm of Rust or a fused multiply-add
+# the cores compute the same bits everywhere: the Math of JS from jsmath (V8's fdlibm, glibc's pow, the JS semantics
+# of round, max and min), never the libm of Rust or a fused multiply-add (the hot loops in f32 lanes have their own
+# functions: dsp-core's tanh4)
 disallowed-methods = [
   { path = "f64::sin", reason = "jsmath::sin (V8's fdlibm)" },
   { path = "f64::cos", reason = "jsmath::cos (V8's fdlibm)" },

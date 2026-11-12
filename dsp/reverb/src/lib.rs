@@ -1,7 +1,9 @@
-//! The reverb (ported bit for bit from the TS core it replaced, the tables of reverb-decay.ts and reverb-era.ts of the
-//! app; the goldens hold its sound): a 16-line FDN with early reflections, input diffusion and the input stage of the eras. The C ABI of a
-//! stereo core (fx_new, fx_buffers, fx_process, fx_free) and fx_set, fx_set_active, fx_clear, fx_idle; the params of
-//! fx_new and fx_set come through fx_command (reverb-wasm.ts wraps it)
+//! The reverb (the tables of reverb-decay.ts and reverb-era.ts of the app; the goldens hold its sound): a 16-line
+//! FDN with early reflections, input diffusion and the input stage of the eras. The input stage runs in doubles,
+//! both channels in the lanes; the lines, their allpasses and shelves and the early reflections in f32, four lines
+//! in the lanes (their delays in doubles). The C ABI of a stereo core (fx_new, fx_buffers, fx_process, fx_free) and
+//! fx_set, fx_set_active, fx_clear, fx_idle; the params of fx_new and fx_set come through fx_command
+//! (reverb-wasm.ts wraps it)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -11,11 +13,12 @@ use alloc::{boxed::Box, vec::Vec};
 use wasm_rt as _;
 
 use dsp_core::biquad::{Biquad, FilterType};
-use dsp_core::blocks::{peak, Allpass, DelayLine, Smoothed, StereoDelayLine, StereoFixedAllpass};
+use dsp_core::blocks::{peak, Lines, Rows, Smoothed, StereoDelayLine, StereoFixedAllpass};
 use dsp_core::io::StereoIo;
-use dsp_core::simd::F64x2;
-use dsp_core::stereo::{LaneBiquad, StereoBiquad};
-use jsmath::{max, min, pow, sin, tanh, PI};
+use dsp_core::simd::{F32x4, F64x2};
+use dsp_core::stereo::{QuadBiquad, StereoBiquad};
+use dsp_core::tanh::tanh4;
+use jsmath::{floor, max, min, pow, sin, tanh, PI};
 
 // the params, in the order of REVERB_KEYS of reverb-wasm.ts
 pub const LOWCUT: usize = 0;
@@ -86,16 +89,21 @@ const TUBE_RANGE: f64 = 8.0;
 const TUBE_BIAS: f64 = 0.3;
 const MIN_DRIVE: f64 = 1e-4;
 
-// the tube of both channels in the lanes (each lane as the tube of the TS: the same operations)
+// The tube of both channels: (tanh(drive x + bias) - tanh(bias)) / (drive (1 - tanh(bias)²)), a curve of slope 1
+// at 0 that bends one way more than the other (its 2nd harmonic). Worked out as the tanh of a sum gives it,
+// tanh(u) / (drive (1 + tanh(bias) tanh(u))) of u = drive x: no difference of two near values, so the rational
+// tanh of the lanes in f32 does (dsp_core::tanh, a tenth of the time of the one in doubles) at any drive
 #[inline(always)]
 fn tube(input: F64x2, drive: f64, offset: f64) -> F64x2 {
     let x = F64x2::splat(-TUBE_RANGE).max(F64x2::splat(TUBE_RANGE).min(input));
     if drive < MIN_DRIVE {
         return x;
     }
-    // TUBE_OFFSET ** 2: x * x in V8
-    ((F64x2::splat(drive) * x + F64x2::splat(TUBE_BIAS)).map(tanh) - F64x2::splat(offset))
-        / F64x2::splat(drive * (1.0 - offset * offset))
+    let u = F64x2::splat(drive) * x;
+    let bent = tanh4(F32x4::from_f64(u, u));
+    let out = bent / (F32x4::splat(drive as f32) * (F32x4::splat(1.0) + F32x4::splat(offset as f32) * bent));
+    let [left, right, ..] = out.lanes();
+    F64x2::new(left as f64, right as f64)
 }
 
 // reverb-dsp.ts
@@ -138,8 +146,7 @@ fn allpass_gain(delay: f64, decay: f64, gain: f64) -> f64 {
     min(gain, pow(10.0, (-3.0 * delay) / (decay * ALLPASS_RING)))
 }
 
-// the input stage of both channels, the left one in the low lane, the right one in the high lane (the TS renders
-// them one after the other: the lanes are independent, each the bits of its channel)
+// the input stage of both channels, the left one in the low lane, the right one in the high lane
 struct Input {
     bandwidth: [StereoBiquad; 2],
     lowcut: StereoBiquad,
@@ -148,28 +155,107 @@ struct Input {
     diffusers: [StereoFixedAllpass; 4],
 }
 
-// two lines of the FDN (2p and 2p + 1) in the lanes: each lane a line of the TS, the even one in the low lane (its
-// output goes left), the odd one in the high lane (right)
-struct LinePair {
-    base: F64x2,
-    allpass_base: F64x2,
-    delay: [DelayLine; 2],
-    allpass: [Allpass; 2],
-    low: LaneBiquad,
-    high: LaneBiquad,
-    input: F64x2,
-    gain: F64x2,
-    allpass_gain: F64x2,
-    phase: [f64; 2],
-    mod_from: F64x2,
-    mod_to: F64x2,
+// four lines of the FDN (4q..4q + 4) in the lanes: the even ones (lanes 0 and 2) go left, the odd ones right. The
+// delays are doubles, two lanes each
+struct LineQuad {
+    base: [F64x2; 2],
+    allpass_base: [F64x2; 2],
+    delay: Rows,
+    allpass: Rows,
+    low: QuadBiquad,
+    high: QuadBiquad,
+    input: F32x4,
+    gain: F32x4,
+    allpass_gain: F32x4,
+    phase: [f64; 4],
+    mod_from: [F64x2; 2],
+    mod_to: [F64x2; 2],
 }
 
-const PAIRS: usize = LINE_TIMES.len() / 2;
+impl LineQuad {
+    // Line `row` of the quad over a chunk of `length`, a `group` of samples at a time (4: in the lanes; 1: a sample
+    // after the other): read at its delay (the scale of the lines and its modulation at each sample: `factor`,
+    // `t`), through its Schroeder allpass of a gliding delay, into `outs`. One loop for every line (a function of
+    // its own: the pass of a chunk calls it sixteen times)
+    #[inline(never)]
+    fn line(
+        &mut self,
+        row: usize,
+        t: &[f64; CHUNK],
+        factor: &[f64; CHUNK],
+        outs: &mut [f32; CHUNK],
+        length: usize,
+        group: usize,
+    ) {
+        // the values of the line: of lane `row` of its quad
+        let of = |pairs: &[F64x2; 2]| {
+            let pair = pairs[row / 2];
+            F64x2::splat(if row.is_multiple_of(2) {
+                pair.lo()
+            } else {
+                pair.hi()
+            })
+        };
+        let (base, allpass_base) = (of(&self.base), of(&self.allpass_base));
+        let (mod_from, mod_to) = (of(&self.mod_from), of(&self.mod_to));
+        let gain = F32x4::splat(self.allpass_gain.lanes()[row]);
+        // (a group over the end of the chunk: its samples past it are not used, an allpass writes them again
+        // before it reads them)
+        let pair = |values: &[f64; CHUNK], at: usize| {
+            let at = at.min(CHUNK - 2);
+            F64x2::new(values[at], values[at + 1])
+        };
+        let mut g = 0;
+        while g < length {
+            let t2 = [pair(t, g), pair(t, g + 2)];
+            let factor2 = [pair(factor, g), pair(factor, g + 2)];
+            let delay: [F64x2; 2] = core::array::from_fn(|half| {
+                let modulation = mod_from + (mod_to - mod_from) * t2[half];
+                base * factor2[half] + modulation
+            });
+            let delayed = self.delay.read4(row, g, delay);
+            let turned = self
+                .allpass
+                .read4(row, g, [allpass_base * factor2[0], allpass_base * factor2[1]]);
+            let sum = delayed + gain * turned;
+            let out = turned - gain * sum;
+            if group == 4 {
+                self.allpass.write4(row, g, sum);
+                out.store(&mut outs[g..g + 4]);
+            } else {
+                self.allpass.write1(row, g, sum.lanes()[0]);
+                outs[g] = out.lanes()[0];
+            }
+            g += group;
+        }
+    }
+}
 
-// a value per lane of a pair (line 2p in the low lane, 2p + 1 in the high one)
-fn lanes(p: usize, value: impl Fn(usize) -> f64) -> F64x2 {
-    F64x2::new(value(2 * p), value(2 * p + 1))
+const QUADS: usize = LINE_TIMES.len() / 4;
+
+// a value per lane of quad q (line 4q + lane), as doubles (lanes 0 and 1, then 2 and 3) and as f32
+fn pairs(q: usize, value: impl Fn(usize) -> f64) -> [F64x2; 2] {
+    [
+        F64x2::new(value(4 * q), value(4 * q + 1)),
+        F64x2::new(value(4 * q + 2), value(4 * q + 3)),
+    ]
+}
+fn lanes(q: usize, value: impl Fn(usize) -> f64) -> F32x4 {
+    let [lo, hi] = pairs(q, value);
+    F32x4::from_f64(lo, hi)
+}
+// the longest of the lines of quad q (their ring is one)
+fn longest_of(q: usize, value: impl Fn(usize) -> f64) -> f64 {
+    (0..4).fold(f64::NEG_INFINITY, |longest, lane| {
+        max(longest, value(4 * q + lane))
+    })
+}
+
+// the sums of the lanes that go left (0 and 2) and right (1 and 3), as doubles
+#[inline(always)]
+fn sides(value: F32x4) -> (f64, f64) {
+    let [a, b, c, d] = value.lanes();
+    ((a + c) as f64, (b + d) as f64)
 }
 
 pub struct Reverb {
@@ -186,12 +272,35 @@ pub struct Reverb {
     drain_frames: f64,
     input: Input,
     er_absorb: Biquad,
-    er_line: DelayLine,
+    er_line: Lines<1>,
     er_delays: [f64; 8],
     diffuser_gains: [f64; 4],
-    pairs: Vec<LinePair>,
-    outs: [F64x2; PAIRS],
+    quads: Vec<LineQuad>,
+    outs: [F32x4; QUADS],
+    chunk: Box<Chunk>,
+    // (the spec of the crate: every sample a chunk of its own, what the chunks are held to)
+    #[cfg(test)]
+    sample_by_sample: bool,
     pub io: StereoIo,
+}
+
+/// the most samples of a chunk of a block (process)
+const CHUNK: usize = 64;
+const LINES: usize = LINE_TIMES.len();
+
+// The samples of a chunk between its passes. Of each sample: its share of the block and the scale of the lines there
+// (the glides), the fade, the diffused input of the lines (left, right, left, right), the early reflections. Of
+// each line a row of its samples (four in a row are the lanes of a pass over time): its output; the sums of the
+// lines of each lane, the reflection of them all
+struct Chunk {
+    t: [f64; CHUNK],
+    factor: [f64; CHUNK],
+    fade: [f64; CHUNK],
+    diffused: [F32x4; CHUNK],
+    early: [F32x4; CHUNK],
+    outs: [[f32; CHUNK]; LINES],
+    tail: [[f32; CHUNK]; 4],
+    feedback: [f32; CHUNK],
 }
 
 impl Reverb {
@@ -224,24 +333,24 @@ impl Reverb {
             diffusers: core::array::from_fn(|i| StereoFixedAllpass::new(samples(DIFFUSER_TIMES[i]))),
         };
         let line_input = 0.5 * jsmath::sqrt(8.0 / LINE_TIMES.len() as f64);
-        let pairs = (0..PAIRS)
-            .map(|p| LinePair {
-                base: lanes(p, |i| samples(LINE_TIMES[i])),
-                allpass_base: lanes(p, |i| samples(LOOP_ALLPASS_TIMES[i])),
-                delay: core::array::from_fn(|lane| {
-                    DelayLine::new(samples(LINE_TIMES[2 * p + lane] * max_line_factor + MOD_DEPTH) + 2.0)
-                }),
-                allpass: core::array::from_fn(|lane| {
-                    Allpass::new(samples(LOOP_ALLPASS_TIMES[2 * p + lane] * max_line_factor) + 2.0)
-                }),
-                low: LaneBiquad::default(),
-                high: LaneBiquad::default(),
-                input: lanes(p, |i| line_input * line_polarity(i)),
-                gain: F64x2::splat(1.0),
-                allpass_gain: F64x2::splat(LOOP_DIFFUSION),
-                phase: [0.0; 2],
-                mod_from: F64x2::default(),
-                mod_to: F64x2::default(),
+        let quads = (0..QUADS)
+            .map(|q| LineQuad {
+                base: pairs(q, |i| samples(LINE_TIMES[i])),
+                allpass_base: pairs(q, |i| samples(LOOP_ALLPASS_TIMES[i])),
+                delay: Rows::new(longest_of(q, |i| {
+                    samples(LINE_TIMES[i] * max_line_factor + MOD_DEPTH) + 2.0
+                })),
+                allpass: Rows::new(longest_of(q, |i| {
+                    samples(LOOP_ALLPASS_TIMES[i] * max_line_factor) + 2.0
+                })),
+                low: QuadBiquad::default(),
+                high: QuadBiquad::default(),
+                input: lanes(q, |i| line_input * line_polarity(i)),
+                gain: F32x4::splat(1.0),
+                allpass_gain: F32x4::splat(LOOP_DIFFUSION as f32),
+                phase: [0.0; 4],
+                mod_from: [F64x2::default(); 2],
+                mod_to: [F64x2::default(); 2],
             })
             .collect();
         let mut reverb = Reverb {
@@ -262,11 +371,23 @@ impl Reverb {
             drain_frames,
             input,
             er_absorb: Biquad::default(),
-            er_line: DelayLine::new(samples(ER_TAPS[ER_TAPS.len() - 1].0 * max_factor) + 2.0),
+            er_line: Lines::new(samples(ER_TAPS[ER_TAPS.len() - 1].0 * max_factor) + 2.0),
             er_delays: core::array::from_fn(|i| samples(ER_TAPS[i].0)),
             diffuser_gains: [DIFFUSION; 4],
-            pairs,
-            outs: [F64x2::default(); PAIRS],
+            quads,
+            outs: [F32x4::default(); QUADS],
+            chunk: Box::new(Chunk {
+                t: [0.0; CHUNK],
+                factor: [0.0; CHUNK],
+                fade: [0.0; CHUNK],
+                diffused: [F32x4::default(); CHUNK],
+                early: [F32x4::default(); CHUNK],
+                outs: [[0.0; CHUNK]; LINES],
+                tail: [[0.0; CHUNK]; 4],
+                feedback: [0.0; CHUNK],
+            }),
+            #[cfg(test)]
+            sample_by_sample: false,
             io: StereoIo::default(),
         };
         reverb.update_input();
@@ -306,36 +427,69 @@ impl Reverb {
             self.diffuser_gains[i] = allpass_gain(*time, decay, DIFFUSION);
         }
         let bass = self.values[BASS].value;
-        for (p, pair) in self.pairs.iter_mut().enumerate() {
-            let mut gains = [0.0; 2];
-            let mut allpass_gains = [0.0; 2];
-            for lane in 0..2 {
-                let i = 2 * p + lane;
+        for (q, quad) in self.quads.iter_mut().enumerate() {
+            let mut gains = [0.0; 4];
+            let mut allpass_gains = [0.0; 4];
+            for lane in 0..4 {
+                let i = 4 * q + lane;
                 let (gain, low_db, high_db) = line_decay(loop_length(i, factor), decay, bass);
-                gains[lane] = gain;
-                allpass_gains[lane] = allpass_gain(LOOP_ALLPASS_TIMES[i] * factor, decay, LOOP_DIFFUSION);
-                pair.low.set(lane, FilterType::Lowshelf, XOVER, 0.0, low_db, rate);
-                pair.high
+                gains[lane] = gain as f32;
+                allpass_gains[lane] =
+                    allpass_gain(LOOP_ALLPASS_TIMES[i] * factor, decay, LOOP_DIFFUSION) as f32;
+                quad.low.set(lane, FilterType::Lowshelf, XOVER, 0.0, low_db, rate);
+                quad.high
                     .set(lane, FilterType::Highshelf, damp, 0.0, high_db, rate);
             }
-            pair.gain = F64x2::new(gains[0], gains[1]);
-            pair.allpass_gain = F64x2::new(allpass_gains[0], allpass_gains[1]);
+            quad.gain = F32x4::load(&gains);
+            quad.allpass_gain = F32x4::load(&allpass_gains);
         }
     }
 
     fn update_mod(&mut self, frames: f64) {
         let rate = self.sample_rate;
         let depth = self.values[DEPTH].value * (MOD_DEPTH * rate);
-        for (p, pair) in self.pairs.iter_mut().enumerate() {
-            let mut to = [0.0; 2];
-            for lane in 0..2 {
-                let i = 2 * p + lane;
-                pair.phase[lane] =
-                    (pair.phase[lane] + (2.0 * PI * MOD_RATES[i] * frames) / rate) % (2.0 * PI);
-                to[lane] = line_polarity(i) * depth * sin(pair.phase[lane]);
+        for (q, quad) in self.quads.iter_mut().enumerate() {
+            let mut to = [0.0; 4];
+            for lane in 0..4 {
+                let i = 4 * q + lane;
+                quad.phase[lane] =
+                    (quad.phase[lane] + (2.0 * PI * MOD_RATES[i] * frames) / rate) % (2.0 * PI);
+                to[lane] = line_polarity(i) * depth * sin(quad.phase[lane]);
             }
-            pair.mod_from = pair.mod_to;
-            pair.mod_to = F64x2::new(to[0], to[1]);
+            quad.mod_from = quad.mod_to;
+            quad.mod_to = [F64x2::new(to[0], to[1]), F64x2::new(to[2], to[3])];
+        }
+    }
+
+    // The samples of a chunk of this block and of a group of its passes over time. The lines are read for a whole
+    // chunk before any of it is written, so the shortest delay of a line in the block (they move in straight lines
+    // over it: at its start or its end) is past the chunk and the 2 samples a read takes after its place; at
+    // least 1. An allpass is read and written four samples at a time: its delay is past those and the 2 of a
+    // read, else (no reverb of the ranges of the params; a delay that is not a number) every sample is a chunk
+    // and a group of its own, one after the other
+    fn chunk_length(&self) -> (usize, usize) {
+        let (from, to) = (self.line_scale.from, self.line_scale.value);
+        let (from2, to2) = (F64x2::splat(from), F64x2::splat(to));
+        let (mut line, mut allpass) = (f64::INFINITY, f64::INFINITY);
+        for quad in self.quads.iter() {
+            for half in 0..2 {
+                let start = quad.base[half] * from2 + quad.mod_from[half];
+                let end = quad.base[half] * to2 + quad.mod_to[half];
+                let least = start.min(end);
+                line = min(line, min(least.lo(), least.hi()));
+                let least = (quad.allpass_base[half] * from2).min(quad.allpass_base[half] * to2);
+                allpass = min(allpass, min(least.lo(), least.hi()));
+            }
+        }
+        #[cfg(test)]
+        if self.sample_by_sample {
+            return (1, 1);
+        }
+        // (a NaN is under no bound)
+        if allpass >= 6.0 && line >= 3.0 {
+            (min(CHUNK as f64, floor(line) - 2.0) as usize, 4)
+        } else {
+            (1, 1)
         }
     }
 
@@ -359,14 +513,12 @@ impl Reverb {
         }
         self.er_absorb.clear();
         self.er_line.clear();
-        for pair in self.pairs.iter_mut() {
-            for lane in 0..2 {
-                pair.delay[lane].clear();
-                pair.allpass[lane].clear();
-            }
-            pair.low.clear();
-            pair.high.clear();
-            pair.mod_from = pair.mod_to;
+        for quad in self.quads.iter_mut() {
+            quad.delay.clear();
+            quad.allpass.clear();
+            quad.low.clear();
+            quad.high.clear();
+            quad.mod_from = quad.mod_to;
         }
     }
 
@@ -401,7 +553,7 @@ impl Reverb {
         if !self.idle {
             self.clear();
         }
-        self.outs.fill(F64x2::default());
+        self.outs.fill(F32x4::default());
         self.idle = true;
     }
 
@@ -456,87 +608,138 @@ impl Reverb {
         let width = self.values[SEP].value;
         let er = self.values[ER].value;
         let drive = self.values[DRIVE].value;
-        let count = LINE_TIMES.len();
-        let loop_scale = 2.0 / count as f64;
-        let mut output_peak = 0.0;
+        let loop_scale = 2.0 / LINE_TIMES.len() as f32;
+        let mut output_peak = F64x2::default();
+        let (chunk_length, group) = self.chunk_length();
         let input = &mut self.input;
-        let er_taps: [F64x2; ER_TAPS.len() / 2] = core::array::from_fn(|p| lanes(p, |i| ER_TAPS[i].1));
-        let er_delays: [F64x2; ER_TAPS.len() / 2] = core::array::from_fn(|p| lanes(p, |i| self.er_delays[i]));
-        // (the left channel in the low lane, the right one in the high lane; of the lines the even ones low, the
-        // odd ones high: what the TS sums into the left and the right side, in the same order)
-        for s in 0..frames {
-            let t = (s as f64 + 1.0) / n;
-            let room_scale = size_factor(size_from + (size_value - size_from) * t);
-            let factor = scale_from + (scale_value - scale_from) * t;
-            let predelay = (pre_from + (pre_value - pre_from) * t) * rate;
-            let gain = fade_from + (fade_value - fade_from) * t;
-            let (t2, factor2, gain2) = (F64x2::splat(t), F64x2::splat(factor), F64x2::splat(gain));
+        // the early reflections: four taps a read (the even ones left, the odd ones right), their line one
+        let er_taps: [F32x4; ER_TAPS.len() / 4] = core::array::from_fn(|q| lanes(q, |i| ER_TAPS[i].1));
+        let er_delays: [[F64x2; 2]; ER_TAPS.len() / 4] =
+            core::array::from_fn(|q| pairs(q, |i| self.er_delays[i]));
+        let (er4, tail_level) = (F32x4::splat(er as f32), F32x4::splat(TAIL_LEVEL as f32));
+        // The block in chunks: the input stage of a chunk, then the lines and their allpasses a line at a time (four
+        // samples of time in the lanes: a line is a ring of its own, Rows), the reflection, the shelves and the
+        // writes a quad at a time (four lines in the lanes), the output. A line is read before the chunk writes
+        // it: what its reads take is in it already (chunk_length), so every sample is worked out as one after the
+        // other would, to the bit
+        let chunk = &mut *self.chunk;
+        // (the left channel in the low lane, the right one in the high lane; of the lines the even ones left, the
+        // odd ones right)
+        let mut from = 0;
+        while from < frames {
+            let length = chunk_length.min(frames - from);
+            for k in 0..length {
+                let s = from + k;
+                let t = (s as f64 + 1.0) / n;
+                let room_scale = size_factor(size_from + (size_value - size_from) * t);
+                let predelay = (pre_from + (pre_value - pre_from) * t) * rate;
+                chunk.t[k] = t;
+                chunk.factor[k] = scale_from + (scale_value - scale_from) * t;
+                chunk.fade[k] = fade_from + (fade_value - fade_from) * t;
 
-            let banded = input.bandwidth[0].process(F64x2::new(in_l[s] as f64, in_r[s] as f64));
-            let mut x = input.bandwidth[1].process(banded);
-            x = input
-                .body
-                .process(input.lowcut.process(tube(x, drive, tube_offset)));
-            let pre = input.predelay.read(predelay);
-            input.predelay.write(x);
+                let banded = input.bandwidth[0].process(F64x2::new(in_l[s] as f64, in_r[s] as f64));
+                let mut x = input.bandwidth[1].process(banded);
+                x = input
+                    .body
+                    .process(input.lowcut.process(tube(x, drive, tube_offset)));
+                let pre = input.predelay.read(predelay);
+                input.predelay.write(x);
 
-            let mut er_sides = F64x2::default();
-            let room_scale2 = F64x2::splat(room_scale);
-            for p in 0..er_taps.len() {
-                let tap = er_taps[p]
-                    * DelayLine::read_pair(&self.er_line, &self.er_line, er_delays[p] * room_scale2);
-                er_sides = er_sides + tap;
+                let mut early = F32x4::default();
+                let room_scale2 = F64x2::splat(room_scale);
+                for q in 0..er_taps.len() {
+                    let [lo, hi] = er_delays[q];
+                    early = early + er_taps[q] * self.er_line.read([lo * room_scale2, hi * room_scale2]);
+                }
+                self.er_line
+                    .write(self.er_absorb.process((pre.lo() + pre.hi()) / 2.0) as f32);
+
+                let mut diff = pre;
+                for i in 0..self.diffuser_gains.len() {
+                    diff = input.diffusers[i].process(diff, F64x2::splat(self.diffuser_gains[i]));
+                }
+                // (left, right, left, right: the lines of a quad)
+                chunk.diffused[k] = F32x4::from_f64(diff, diff);
+                chunk.early[k] = early;
             }
-            self.er_line
-                .write(self.er_absorb.process((pre.lo() + pre.hi()) / 2.0));
 
-            let mut diff = pre;
-            for i in 0..self.diffuser_gains.len() {
-                diff = input.diffusers[i].process(diff, F64x2::splat(self.diffuser_gains[i]));
+            for (q, quad) in self.quads.iter_mut().enumerate() {
+                for row in 0..4 {
+                    quad.line(
+                        row,
+                        &chunk.t,
+                        &chunk.factor,
+                        &mut chunk.outs[4 * q + row],
+                        length,
+                        group,
+                    );
+                }
+                quad.allpass.advance(length);
+            }
+            // the sum of the lines of each lane (quad after quad), then the Householder reflection of the lines:
+            // each takes its output less 2 / N of the sum of all (the lanes added as F32x4::sum adds them)
+            let mut g = 0;
+            while g < length {
+                let lane = |row: usize| {
+                    let mut tail = F32x4::default();
+                    for q in 0..QUADS {
+                        tail = tail + F32x4::load(&chunk.outs[4 * q + row][g..g + 4]);
+                    }
+                    tail
+                };
+                let tails = [lane(0), lane(1), lane(2), lane(3)];
+                for (row, tail) in tails.iter().enumerate() {
+                    tail.store(&mut chunk.tail[row][g..g + 4]);
+                }
+                let sum = (tails[0] + tails[2]) + (tails[1] + tails[3]);
+                (sum * F32x4::splat(loop_scale)).store(&mut chunk.feedback[g..g + 4]);
+                g += 4;
+            }
+            // (the quads of a sample together: the shelves of each wait for their sample before, not for each other)
+            for k in 0..length {
+                let gain4 = F32x4::splat(chunk.fade[k] as f32);
+                let feedback = F32x4::splat(chunk.feedback[k]);
+                for (q, quad) in self.quads.iter_mut().enumerate() {
+                    let row = |row: usize| chunk.outs[4 * q + row][k];
+                    let out = F32x4::new(row(0), row(1), row(2), row(3));
+                    let line_in = chunk.diffused[k] * quad.input + out - feedback;
+                    let y = quad.high.process(quad.low.process(line_in * quad.gain * gain4));
+                    quad.delay.write(k, y);
+                    if k + 1 == length {
+                        self.outs[q] = out;
+                    }
+                }
+            }
+            for quad in self.quads.iter_mut() {
+                quad.delay.advance(length);
             }
 
-            let mut sum = 0.0;
-            let mut tail = F64x2::default();
-            for (p, pair) in self.pairs.iter_mut().enumerate() {
-                let modulation = pair.mod_from + (pair.mod_to - pair.mod_from) * t2;
-                let delayed =
-                    DelayLine::read_pair(&pair.delay[0], &pair.delay[1], pair.base * factor2 + modulation);
-                let [allpass_a, allpass_b] = &mut pair.allpass;
-                let out = Allpass::process_pair(
-                    allpass_a,
-                    allpass_b,
-                    delayed,
-                    pair.allpass_base * factor2,
-                    pair.allpass_gain,
+            for k in 0..length {
+                let s = from + k;
+                let gain = chunk.fade[k];
+                let tail = F32x4::new(
+                    chunk.tail[0][k],
+                    chunk.tail[1][k],
+                    chunk.tail[2][k],
+                    chunk.tail[3][k],
                 );
-                self.outs[p] = out;
-                sum += out.lo();
-                sum += out.hi();
-                tail = tail + out;
+                // mid/side: L = M + w·S, R = M - w·S
+                let (side_l, side_r) = sides(er4 * chunk.early[k] + tail_level * tail);
+                let y_l = gain * ((side_l * (1.0 + width)) / 2.0 + (side_r * (1.0 - width)) / 2.0);
+                let y_r = gain * ((side_r * (1.0 + width)) / 2.0 + (side_l * (1.0 - width)) / 2.0);
+                out_l[s] = y_l as f32;
+                out_r[s] = y_r as f32;
+                output_peak = output_peak.max(F64x2::new(y_l, y_r).abs());
             }
-            let feedback = F64x2::splat(sum * loop_scale);
-            for (p, pair) in self.pairs.iter_mut().enumerate() {
-                let line_in = diff * pair.input + self.outs[p] - feedback;
-                let y = pair.high.process(pair.low.process(line_in * pair.gain * gain2));
-                pair.delay[0].write(y.lo());
-                pair.delay[1].write(y.hi());
-            }
-
-            // mid/side: L = M + w·S, R = M - w·S
-            let side = F64x2::splat(er) * er_sides + F64x2::splat(TAIL_LEVEL) * tail;
-            let (side_l, side_r) = (side.lo(), side.hi());
-            let y_l = gain * ((side_l * (1.0 + width)) / 2.0 + (side_r * (1.0 - width)) / 2.0);
-            let y_r = gain * ((side_r * (1.0 + width)) / 2.0 + (side_l * (1.0 - width)) / 2.0);
-            out_l[s] = y_l as f32;
-            out_r[s] = y_r as f32;
-            output_peak = max(max(output_peak, y_l.abs()), y_r.abs());
+            from += length;
         }
+        let output_peak = max(output_peak.lo(), output_peak.hi());
 
         // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
         // stay in the lines until the reverb is off: forgotten, the block is silence
         if output_peak.is_nan() || output_peak > f32::MAX as f64 {
             self.clear();
-            self.outs.fill(F64x2::default());
+            self.outs.fill(F32x4::default());
             out_l.fill(0.0);
             out_r.fill(0.0);
             return;
@@ -549,7 +752,7 @@ impl Reverb {
             && self
                 .outs
                 .iter()
-                .all(|value| value.lo().abs() < SILENCE && value.hi().abs() < SILENCE);
+                .all(|value| value.lanes().iter().all(|lane| (lane.abs() as f64) < SILENCE));
         if faded || drained {
             self.clear();
             self.idle = true;
@@ -678,6 +881,77 @@ mod tests {
                 reverb.process(&silence, &silence, &mut out_l, &mut out_r);
             }
             assert!(reverb.idle);
+        }
+    }
+
+    // the tube in f32 against its formula in doubles: at every drive, the smallest too (no difference of near
+    // values), a silence stays one
+    #[test]
+    fn the_tube_is_its_curve_at_every_drive() {
+        let offset = tanh(TUBE_BIAS);
+        for drive in [MIN_DRIVE, 1e-3, 0.15, 1.0, 5.0] {
+            for step in -80..=80 {
+                let x = step as f64 * 0.1;
+                let exact = (tanh(drive * x + TUBE_BIAS) - offset) / (drive * (1.0 - offset * offset));
+                let ours = tube(F64x2::new(x, -x), drive, offset);
+                assert!(
+                    (ours.lo() - exact).abs() <= 1e-6 * max(1.0, exact.abs()),
+                    "drive {drive} at {x}: {} of {exact}",
+                    ours.lo()
+                );
+            }
+            assert_eq!(tube(F64x2::splat(0.0), drive, offset).lo(), 0.0);
+        }
+    }
+
+    // the passes over chunks give the bits of a sample after the other: blocks of any length, the size, the
+    // decay and the depth gliding (the delays of the lines move), at the rates the shortest lines are shortest
+    #[test]
+    fn the_chunks_render_what_a_sample_after_the_other_would() {
+        let mut seed = 7u32;
+        let mut random = move || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f64 / (1 << 24) as f64
+        };
+        for rate in [22050.0, 44100.0, 96000.0] {
+            let params = [20.0, 0.01, 0.0, 0.3, 6000.0, 1.0, 1.0, 1.0, 0.5, 0.2, 9000.0, 2.0];
+            let mut chunked = Reverb::new(rate, &params, true);
+            let mut single = Reverb::new(rate, &params, true);
+            single.sample_by_sample = true;
+            let mut sounded = 0;
+            for block in 0..120 {
+                let frames = if block % 3 == 0 {
+                    128
+                } else {
+                    1 + (random() * 700.0) as usize
+                };
+                if block % 9 == 4 {
+                    // (routed every other time: the glide of an envelope)
+                    let changes = [
+                        (SIZE, random()),
+                        (DECAY, 0.1 + 12.0 * random()),
+                        (DEPTH, 1.5 * random()),
+                    ];
+                    for reverb in [&mut chunked, &mut single] {
+                        reverb.set(&changes, block % 2 == 0);
+                    }
+                }
+                let input: Vec<f32> = (0..frames).map(|_| (random() - 0.5) as f32).collect();
+                let mut outs = [
+                    vec![0.0f32; frames],
+                    vec![0.0; frames],
+                    vec![0.0; frames],
+                    vec![0.0; frames],
+                ];
+                let [l, r, sl, sr] = &mut outs;
+                chunked.process(&input, &input, l, r);
+                single.process(&input, &input, sl, sr);
+                let bits = |values: &[f32]| values.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(l), bits(sl), "{rate} Hz, block {block} of {frames}");
+                assert_eq!(bits(r), bits(sr), "{rate} Hz, block {block} of {frames}");
+                sounded += l.iter().filter(|x| **x != 0.0).count();
+            }
+            assert!(sounded > 10000);
         }
     }
 }

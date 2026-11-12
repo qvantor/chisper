@@ -426,14 +426,18 @@ const createCases = (dsp) => {
   const crossfade = constant({ ...BASE, frequency: (RATE / 2 / 128) * 2 ** ((1.9 - 1) / 3) });
   // the chord of `scope chord attack` with a lowpass LFO 1 moves around its cutoff (bipolar, ±1 octave, 4 Hz),
   // the coefficients of every voice worked out again every 32 samples
-  const scopeChordLfo = () => {
+  // (`filtered` false: the same chord and route without the filter, `routed` false: the filter at rest; the share of
+  // the filter in a voice is between them and `scope chord attack`)
+  const scopeChordLfoOf = (filtered, routed) => () => {
     const shared = createShared.wasm();
     let voices = null;
     let block = 0;
     const options = {
       ...scopeOptions,
-      filter: { type: 'lowpass', cutoff: 1200, resonance: 3, gain: 0 },
-      routes: [{ source: 4, param: 'cutoff', amount: 2, min: 20, max: 20000, scale: 'log', bipolar: true }],
+      filter: filtered ? { type: 'lowpass', cutoff: 1200, resonance: 3, gain: 0 } : null,
+      routes: routed
+        ? [{ source: 4, param: 'cutoff', amount: 2, min: 20, max: 20000, scale: 'log', bipolar: true }]
+        : [],
     };
     return () => {
       if (block % ATTACK === 0) {
@@ -628,7 +632,9 @@ const createCases = (dsp) => {
             crossfade
           ),
         }),
-        'scope chord lfo cutoff': scopeChordLfo,
+        'scope chord lfo cutoff': scopeChordLfoOf(true, true),
+        'scope chord lfo cutoff, no filter': scopeChordLfoOf(false, true),
+        'scope chord filter': scopeChordLfoOf(true, false),
       }),
     'build 256 frames': {
       build: () => {
@@ -665,6 +671,17 @@ const createCases = (dsp) => {
       dsp.createReverbDsp &&
         ((source) =>
           effect(() => dsp.createReverbDsp(RATE, { params: REVERB, active: true }).process, source))
+    ),
+    // no modulation: the delays of the lines at rest; the 70s era: its tube and its bandwidth
+    ...withTs(
+      {
+        'reverb depth 0': [{ ...REVERB, depth: 0 }],
+        'reverb 70s': [{ ...REVERB, drive: 0.15, bandwidth: 6500, body: 2 }],
+      },
+      dsp.wasm.reverb &&
+        ((params) =>
+          effect(() => dsp.createReverbWasm(dsp.wasm.reverb, RATE, { params, active: true }).process, input)),
+      null
     ),
     ...withTs(
       { 'distortion soft': [0], 'distortion hard': [1] },
@@ -704,8 +721,9 @@ const withTs = (sources, wasm, ts) =>
     ])
   );
 
-// `reference`: the worktree of the reference of an A/B run (reference.mjs), its samples alternate with ours
-export const runDspBenchmarks = async ({ reference = null } = {}) => {
+// `reference`: the worktree of the reference of an A/B run (reference.mjs), its samples alternate with ours;
+// `names`: the cases whose name has one of them alone (--dsp=reverb,chord)
+export const runDspBenchmarks = async ({ reference = null, names = null } = {}) => {
   const current = createCases(await loadDsp(undefined, 'dsp'));
   let other = null;
   let referenceError = null;
@@ -719,6 +737,7 @@ export const runDspBenchmarks = async ({ reference = null } = {}) => {
   const calibration = calibrate();
   const cases = {};
   for (const [name, kase] of Object.entries(current)) {
+    if (names && !names.some((part) => name.includes(part))) continue;
     const theirs = other?.[name];
     const build = 'build' in kase;
     const sides = [kase, theirs].filter(Boolean);

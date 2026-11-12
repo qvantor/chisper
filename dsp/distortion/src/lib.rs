@@ -1,12 +1,14 @@
-//! The distortion (ported bit for bit from the TS core it replaced, the curves of distortion-modes.ts of the app; the
-//! goldens hold its sound): drive → 4× oversampled curve of the mode × its makeup gain → tone
-//! lowpass × level → DC blocker, the blocks skipped once silent. The C ABI of a stereo core and fx_set, fx_clear, fx_idle;
-//! the params of fx_new and fx_set come through fx_command (distortion-wasm.ts wraps it).
-//! The hard clip is oversampled 8× (the TS core did 4×: its harmonics fold back less): a chain of its own with the
-//! same latency. A fade between modes on two chains runs both, each with its curve and gains, their outputs added at
-//! the input rate; a chain that starts takes the input history of the one that ran (its interpolator as if it had
-//! run, its decimator at 0: its points weighed 0 before), a chain that stops flushes its decimator with points of 0
-//! for STREAM samples. So it renders what both chains running all the time would (the spec of the crate)
+//! The distortion (the curves of distortion-modes.ts of the app; the goldens hold its sound): drive → 4× oversampled
+//! curve of the mode × its makeup gain → tone lowpass × level → DC blocker, the blocks skipped once silent. The
+//! oversampled part runs in f32 (four taps of a FIR, four points of the curve in the lanes, a rational tanh), the
+//! tone, the level and the DC blocker in f64. The C ABI of a stereo core and fx_set, fx_clear, fx_idle; the params of
+//! fx_new and fx_set come through fx_command (distortion-wasm.ts wraps it).
+//! The hard clip is antialiased on top of the oversampling (the mean of the curve between two points: its harmonics
+//! fold back less than at 8×): a chain of its own with the same latency (dsp_core::stereo::Chain). A fade
+//! between modes runs both chains, each with its curve and gains, their outputs added at the input rate; the chains
+//! read one input (its history is theirs both), a chain that starts has its decimator at 0 (its points weighed 0
+//! before), a chain that stops flushes its decimator with points of 0 for STREAM samples. So it renders what both
+//! chains running all the time would (the spec of the crate)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -20,10 +22,9 @@ use dsp_core::biquad::FilterType;
 use dsp_core::blocks::{peak, Smoothed};
 use dsp_core::consts::MAKEUP_TABLES;
 use dsp_core::io::StereoIo;
-use dsp_core::oversampler::{OVERSAMPLER_LATENCY, OVERSAMPLING};
 use dsp_core::simd::F64x2;
-use dsp_core::stereo::{StereoBiquad, StereoDcBlocker, StereoOversampler, StereoOversampler8, OVERSAMPLING8};
-use jsmath::{max, min, pow, round, tanh};
+use dsp_core::stereo::{Chain, StereoBiquad, StereoDcBlocker, CHAIN_LATENCY, INPUT_CARRY};
+use jsmath::{max, min, pow, round};
 
 // the params, in the order of DISTORTION_KEYS of distortion-wasm.ts
 pub const MODE: usize = 0;
@@ -38,18 +39,18 @@ const DC_CUTOFF: f64 = 5.0;
 const SILENCE: f64 = 1e-10;
 const BLOCK: usize = 128;
 const BUTTERWORTH_Q: f64 = -3.01;
-const DISTORTION_LATENCY: f64 = OVERSAMPLER_LATENCY as f64;
+const DISTORTION_LATENCY: f64 = CHAIN_LATENCY as f64;
 // distortion-makeup.ts
 const MAX_DRIVE: f64 = 12.0;
 const STEP: f64 = 0.25;
 // DISTORTION_MODES: soft clip (tanh), hard clip
 const MODES: usize = 2;
 const HARD: usize = 1;
-// the chains: the 4× one of the TS, the 8× one of the hard clip
-const CHAIN4: usize = 0;
-const CHAIN8: usize = 1;
-// the samples a decimator holds points of, TAPS + 1 (a stopped chain flushes them)
-const STREAM: usize = OVERSAMPLER_LATENCY + 1;
+// the chains: the one of tanh, the one of the hard clip
+const SOFT_CHAIN: usize = 0;
+const HARD_CHAIN: usize = 1;
+// the samples a decimator holds points of (a stopped chain flushes them)
+const STREAM: usize = CHAIN_LATENCY + 1;
 
 fn db_to_gain(db: f64) -> f64 {
     pow(10.0, db / 20.0)
@@ -69,72 +70,47 @@ fn makeup_gain(mode: usize, drive: f64) -> f64 {
     pow(10.0, db / 20.0)
 }
 
-// shapeBlock of the mode: out[i] = curve(points[i]) × gains[i], added to out[i] when `add` (both channels in
-// the lanes, a gain per point)
-fn shape_block(mode: usize, points: &[F64x2], gains: &[f64], length: usize, out: &mut [F64x2], add: bool) {
-    let (points, gains, out) = (&points[..length], &gains[..length], &mut out[..length]);
-    if mode == 0 {
-        for i in 0..length {
-            let y = points[i].map(tanh).mul(F64x2::splat(gains[i]));
-            out[i] = if add { out[i].add(y) } else { y };
-        }
-    } else {
-        let (low, high) = (F64x2::splat(-1.0), F64x2::splat(1.0));
-        for i in 0..length {
-            // Math.max(-1, Math.min(1, x))
-            let y = low.max(high.min(points[i])).mul(F64x2::splat(gains[i]));
-            out[i] = if add { out[i].add(y) } else { y };
-        }
-    }
-}
-
-// the buffers of a block (they grow with a longer block): the gains shared by the channels, the signal of both in
-// the lanes
+// the buffers of a block (they grow with a longer block): the gains shared by the channels, the signal of each
+// channel in f32 through the chains, of both in the lanes after them
 #[derive(Default)]
 struct Buffers {
+    frames: usize,
     drives: Vec<f64>,
     levels: Vec<f64>,
     opens: Vec<f64>,
-    gains_to: Vec<f64>,
-    gains_from: Vec<f64>,
-    // the gains of each sample, put on the points of the chain that renders it
-    sample_to: Vec<f64>,
-    sample_from: Vec<f64>,
-    driven: Vec<F64x2>,
-    decimated: Vec<F64x2>,
-    chain_out: Vec<F64x2>,
+    // the gains of each sample on the points of the chain that renders it (+ 3: Chain::shape)
+    sample_to: Vec<f32>,
+    sample_from: Vec<f32>,
+    // the input × drive of each channel: INPUT_CARRY samples of before, then the block
+    driven: [Vec<f32>; 2],
+    decimated: [Vec<f32>; 2],
     filtered: Vec<F64x2>,
-    points: Vec<F64x2>,
-    shaped: Vec<F64x2>,
+    mixed: Vec<F64x2>,
 }
 
 impl Buffers {
     fn grow(&mut self, frames: usize) {
-        if frames <= self.drives.len() {
+        if frames <= self.frames {
             return;
         }
-        for buffer in [
-            &mut self.drives,
-            &mut self.levels,
-            &mut self.opens,
-            &mut self.sample_to,
-            &mut self.sample_from,
-        ] {
+        self.frames = frames;
+        for buffer in [&mut self.drives, &mut self.levels, &mut self.opens] {
             *buffer = vec![0.0; frames];
         }
-        for buffer in [&mut self.gains_to, &mut self.gains_from] {
-            *buffer = vec![0.0; OVERSAMPLING8 * frames];
+        for buffer in [&mut self.sample_to, &mut self.sample_from] {
+            *buffer = vec![0.0; frames + 3];
         }
-        for buffer in [
-            &mut self.driven,
-            &mut self.decimated,
-            &mut self.chain_out,
-            &mut self.filtered,
-        ] {
+        for buffer in self.driven.iter_mut() {
+            let mut grown = vec![0.0; INPUT_CARRY + frames];
+            let kept = buffer.len().min(INPUT_CARRY);
+            grown[..kept].copy_from_slice(&buffer[..kept]);
+            *buffer = grown;
+        }
+        for buffer in self.decimated.iter_mut() {
+            *buffer = vec![0.0; frames];
+        }
+        for buffer in [&mut self.filtered, &mut self.mixed] {
             *buffer = vec![F64x2::default(); frames];
-        }
-        for buffer in [&mut self.points, &mut self.shaped] {
-            *buffer = vec![F64x2::default(); OVERSAMPLING8 * frames];
         }
     }
 }
@@ -149,8 +125,7 @@ pub struct Distortion {
     mode_from: usize,
     mode_to: usize,
     morphing: bool,
-    oversampler: StereoOversampler,
-    oversampler8: StereoOversampler8,
+    chains: [Chain; 2],
     // the chains that rendered the last block, and the samples of 0 a stopped one still flushes
     running: [bool; 2],
     flushing: [usize; 2],
@@ -169,8 +144,7 @@ pub struct Distortion {
 impl Distortion {
     pub fn new(sample_rate: f64, params: &[f64; PARAMS]) -> Distortion {
         let mode = mode_index(params[MODE]);
-        let mut buffers = Buffers::default();
-        buffers.grow(BLOCK);
+        let buffers = Buffers::default();
         let mut distortion = Distortion {
             sample_rate,
             drive: Smoothed::new(params[DRIVE], GLIDE, sample_rate),
@@ -185,8 +159,7 @@ impl Distortion {
             mode_from: mode,
             mode_to: mode,
             morphing: false,
-            oversampler: StereoOversampler::default(),
-            oversampler8: StereoOversampler8::default(),
+            chains: [Chain::new(false), Chain::new(true)],
             running: [false; 2],
             flushing: [0; 2],
             #[cfg(test)]
@@ -199,6 +172,7 @@ impl Distortion {
             rung_out: false,
             io: StereoIo::default(),
         };
+        distortion.grow(BLOCK);
         distortion.running[distortion.chain_of(mode)] = true;
         distortion.update_tone();
         distortion
@@ -206,9 +180,9 @@ impl Distortion {
 
     fn chain_of(&self, mode: usize) -> usize {
         if mode == HARD {
-            CHAIN8
+            HARD_CHAIN
         } else {
-            CHAIN4
+            SOFT_CHAIN
         }
     }
 
@@ -226,9 +200,21 @@ impl Distortion {
         );
     }
 
+    // the buffers of blocks of `frames` (allocates: not while a block renders)
+    fn grow(&mut self, frames: usize) {
+        self.buffers.grow(frames);
+        for chain in self.chains.iter_mut() {
+            chain.grow(frames);
+        }
+    }
+
     fn clear(&mut self) {
-        self.oversampler.clear();
-        self.oversampler8.clear();
+        for chain in self.chains.iter_mut() {
+            chain.clear();
+        }
+        for driven in self.buffers.driven.iter_mut() {
+            driven[..INPUT_CARRY].fill(0.0);
+        }
         self.dc_blocker.clear();
         self.lowpass.clear();
     }
@@ -274,8 +260,7 @@ impl Distortion {
         }
     }
 
-    // a block of both channels into the outputs, with the gains of the block; returns its peak. The TS renders
-    // the left channel, then the right one: their states are apart, each lane is its channel
+    // a block of both channels into the outputs, with the gains of the block; returns its peak
     fn render(
         &mut self,
         in_l: &[f32],
@@ -284,13 +269,20 @@ impl Distortion {
         out_r: &mut [f32],
         frames: usize,
     ) -> f64 {
-        if self.rung_out {
-            self.buffers.decimated[..frames].fill(F64x2::default());
-        } else {
+        {
             let Buffers { drives, driven, .. } = &mut self.buffers;
+            let [driven_l, driven_r] = driven;
             for s in 0..frames {
-                driven[s] = F64x2::new(in_l[s] as f64, in_r[s] as f64).mul(F64x2::splat(drives[s]));
+                let drive = drives[s] as f32;
+                driven_l[INPUT_CARRY + s] = in_l[s] * drive;
+                driven_r[INPUT_CARRY + s] = in_r[s] * drive;
             }
+        }
+        if self.rung_out {
+            for decimated in self.buffers.decimated.iter_mut() {
+                decimated[..frames].fill(0.0);
+            }
+        } else {
             let to = self.chain_of(self.mode_to);
             let from = if self.morphing {
                 self.chain_of(self.mode_from)
@@ -302,13 +294,22 @@ impl Distortion {
         let Buffers {
             levels,
             opens,
+            driven,
             decimated,
             filtered,
+            mixed,
             ..
         } = &mut self.buffers;
-        self.lowpass.process_block(decimated, filtered, frames);
+        // the block is the input of before
+        for driven in driven.iter_mut() {
+            driven.copy_within(frames..frames + INPUT_CARRY, 0);
+        }
         for s in 0..frames {
-            let x = decimated[s];
+            mixed[s] = F64x2::new(decimated[0][s] as f64, decimated[1][s] as f64);
+        }
+        self.lowpass.process_block(mixed, filtered, frames);
+        for s in 0..frames {
+            let x = mixed[s];
             let y = filtered[s];
             let o = opens[s];
             let mixed = if o == 1.0 {
@@ -329,98 +330,59 @@ impl Distortion {
         max(loudest.lo(), loudest.hi())
     }
 
-    // the chains of a block: the one of mode_to, of mode_from while they fade (both curves on the points of one
-    // chain, as the TS, or each on its chain), a stopped one flushing; their outputs added into `decimated`
+    // the chains of a block: the one of mode_to, of mode_from while they fade (each curve on its chain: the modes
+    // of one chain would need both curves on its points), a stopped one flushing; their outputs added into
+    // `decimated`
     fn render_chains(&mut self, to: usize, from: usize, frames: usize) {
         #[cfg(not(test))]
-        let needed = [CHAIN4, CHAIN8].map(|chain| chain == to || chain == from);
+        let needed = [SOFT_CHAIN, HARD_CHAIN].map(|chain| chain == to || chain == from);
         #[cfg(test)]
-        let needed = [CHAIN4, CHAIN8].map(|chain| self.continuous || chain == to || chain == from);
-        for chain in [CHAIN4, CHAIN8] {
+        let needed = [SOFT_CHAIN, HARD_CHAIN].map(|chain| self.continuous || chain == to || chain == from);
+        debug_assert!(!self.morphing || from != to);
+        for chain in [SOFT_CHAIN, HARD_CHAIN] {
             if needed[chain] && !self.running[chain] {
-                // the input history of the chain that ran (both read the same input)
-                if chain == CHAIN8 {
-                    self.oversampler8.warm(&self.oversampler.input_history());
-                } else {
-                    self.oversampler.warm(&self.oversampler8.input_history());
-                }
+                // its decimator at 0; the input history is the one of the chain that ran
+                self.chains[chain].clear();
                 self.running[chain] = true;
             }
             if needed[chain] {
                 self.flushing[chain] = STREAM;
             }
         }
+        let Buffers {
+            sample_to,
+            sample_from,
+            driven,
+            decimated,
+            ..
+        } = &mut self.buffers;
+        let [decimated_l, decimated_r] = decimated;
         let mut first = true;
-        for chain in [CHAIN4, CHAIN8] {
+        for chain in [SOFT_CHAIN, HARD_CHAIN] {
             if !self.running[chain] {
                 continue;
             }
-            let ratio = if chain == CHAIN8 {
-                OVERSAMPLING8
-            } else {
-                OVERSAMPLING
-            };
-            let length = ratio * frames;
-            let Buffers {
-                sample_to,
-                sample_from,
-                gains_to,
-                gains_from,
-                driven,
-                decimated,
-                chain_out,
-                points,
-                shaped,
-                ..
-            } = &mut self.buffers;
-            // the first chain writes `decimated`, the next one is added to it
-            let out = if first { &mut *decimated } else { &mut *chain_out };
+            let points = &mut self.chains[chain];
             if needed[chain] {
-                for s in 0..frames {
-                    for q in ratio * s..ratio * (s + 1) {
-                        gains_to[q] = sample_to[s];
-                        gains_from[q] = sample_from[s];
-                    }
-                }
-                if chain == CHAIN8 {
-                    self.oversampler8.up(driven, frames, points);
-                } else {
-                    self.oversampler.up(driven, frames, points);
-                }
-                if from == to && chain == to {
-                    if self.morphing {
-                        shape_block(self.mode_from, points, gains_from, length, shaped, false);
-                        shape_block(self.mode_to, points, gains_to, length, shaped, true);
-                    } else {
-                        shape_block(self.mode_to, points, gains_to, length, shaped, false);
-                    }
-                } else if chain == to {
-                    shape_block(self.mode_to, points, gains_to, length, shaped, false);
+                points.up([&driven[0], &driven[1]], frames);
+                if chain == to {
+                    points.shape(sample_to, frames);
                 } else if chain == from {
-                    shape_block(self.mode_from, points, gains_from, length, shaped, false);
+                    points.shape(sample_from, frames);
                 } else {
                     // (continuous: a chain of no mode, its points weighed 0)
-                    gains_to[..length].fill(0.0);
-                    shape_block(self.mode_to, points, gains_to, length, shaped, false);
+                    points.silence(frames);
                 }
             } else {
                 // stopped: points of 0 through its decimator, until it holds none of the ones before
-                shaped[..length].fill(F64x2::default());
+                points.silence(frames);
                 self.flushing[chain] = self.flushing[chain].saturating_sub(frames);
                 if self.flushing[chain] == 0 {
                     self.running[chain] = false;
                 }
             }
-            if chain == CHAIN8 {
-                self.oversampler8.down(shaped, frames, out);
-            } else {
-                self.oversampler.down(shaped, frames, out);
-            }
-            if !first {
-                for s in 0..frames {
-                    decimated[s] = decimated[s].add(chain_out[s]);
-                }
-            }
+            // the first chain writes `decimated`, the next one is added to it
+            points.down([&mut decimated_l[..], &mut decimated_r[..]], frames, !first);
             first = false;
         }
     }
@@ -461,7 +423,7 @@ impl Distortion {
             value.step(n);
         }
         self.morphing = self.morph.from != 1.0 || self.morph.value != 1.0;
-        self.buffers.grow(frames);
+        self.grow(frames);
         let morphing = self.morphing;
         let drive_from = db_to_gain(self.drive.from);
         let drive_step = (db_to_gain(self.drive.value) - drive_from) / n;
@@ -491,8 +453,8 @@ impl Distortion {
             b.levels[s] = level_from + level_step * t;
             b.opens[s] = open_from + open_step * t;
             let m = morph_from + morph_step * t;
-            b.sample_to[s] = (makeup_from + makeup_step * t) * if morphing { m } else { 1.0 };
-            b.sample_from[s] = (fading_from + fading_step * t) * (1.0 - m);
+            b.sample_to[s] = ((makeup_from + makeup_step * t) * if morphing { m } else { 1.0 }) as f32;
+            b.sample_from[s] = ((fading_from + fading_step * t) * (1.0 - m)) as f32;
         }
 
         let output_peak = self.render(in_l, in_r, out_l, out_r, frames);
@@ -556,7 +518,7 @@ pub unsafe extern "C" fn fx_free(distortion: *mut Distortion) {
 pub unsafe extern "C" fn fx_buffers(distortion: *mut Distortion, frames: usize) -> *mut f32 {
     let distortion = &mut *distortion;
     // the block buffers grow here, not while it renders
-    distortion.buffers.grow(frames);
+    distortion.grow(frames);
     distortion.io.reserve(frames)
 }
 

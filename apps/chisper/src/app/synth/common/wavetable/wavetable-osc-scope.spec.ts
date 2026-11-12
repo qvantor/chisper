@@ -4,7 +4,7 @@ import { BLOCK, oscScope, seeded, storeWith } from '../../../../test-utils/voice
 import { expectSameBits } from '../../../../test-utils/parity';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import { LfosState, lfoTable, LfoWire, RETRIG } from '../lfo/lfo-curve';
-import type { VoiceEvent, VoiceOptions, VoiceOscOptions } from './voice-options';
+import type { VoiceEvent, VoiceFilterOptions, VoiceOptions, VoiceOscOptions } from './voice-options';
 import {
   HELD_AGAIN_GATE,
   RELEASE_GATE,
@@ -60,6 +60,9 @@ const render = (voices: ReturnType<typeof node>['voices'], frame: number) => {
   voices.process(frame, left, right);
   return { left, right, taps: voices.taps(BLOCK), report: voices.reports() };
 };
+
+const LOWPASS: VoiceFilterOptions = { type: 'lowpass', cutoff: 900, resonance: 9, gain: 0 };
+const PEAKING: VoiceFilterOptions = { type: 'peaking', cutoff: 2000, resonance: 3, gain: 9 };
 
 // more routes than the command buffer holds: the core reads past it, it traps
 const TOO_MANY_ROUTES = Array.from({ length: 1000 }, () => ({
@@ -264,43 +267,179 @@ describe('the voices of one node', () => {
     voices.free();
   });
 
-  it('ends a voice that traps alone: it is told ended, its versions given back, the others play on', () => {
-    const errors: unknown[] = [];
-    const { voices, shared } = node((error) => errors.push(error));
-    const versions = store.stats().versions;
-    voices.apply(
-      [1, 2, 3].map((id) => ({
+  it('filters the voices in pairs: each the bits it plays in a node of its own', () => {
+    // two with a filter (a pair), one without, a pair whose second starts late, one left alone
+    const filters = [LOWPASS, PEAKING, null, PEAKING, LOWPASS, LOWPASS];
+    const routes = [{ source: 1, param: 'cutoff', amount: 3, min: 20, max: 20000, scale: 'log' as const }];
+    const events = filters.map((filter, i): VoiceEvent => ({
+      kind: 'on',
+      voice: i + 1,
+      // (one voice of unison: the mixes of a note are built within the budget of a block in any node)
+      options: note({
+        osc: [osc({ unison: 1 }), null],
+        phrase: i + 1,
+        filter,
+        routes: i % 2 ? routes : [],
+        start: i === 4 ? 200 / RATE : 0,
+      }),
+      params: { frequency: 90 * (i + 2) },
+    }));
+    const { voices } = node();
+    voices.apply(events);
+    const alone = events.map((event) => {
+      const own = node();
+      own.voices.apply([event]);
+      return own.voices;
+    });
+    for (let block = 0; block < 6; block++) {
+      const { left, taps } = render(voices, block * BLOCK);
+      expect(taps.map(({ voice }) => voice)).toEqual([1, 2, 3, 4, 5, 6]);
+      taps.forEach((tap, i) => {
+        const own = render(alone[i], block * BLOCK);
+        expectSameBits(`voice ${i + 1}`, block, 'left', own.left, tap.left);
+        expectSameBits(`voice ${i + 1}`, block, 'right', own.right, tap.right);
+      });
+      const sum = taps.reduce(
+        (total, tap) => total.map((value, i) => Math.fround(value + tap.left[i])),
+        new Float32Array(BLOCK)
+      );
+      expectSameBits('sum', block, 'left', sum, left);
+    }
+    [voices, ...alone].forEach((each) => each.free());
+  });
+
+  it.each([
+    ['', null],
+    [', the one before it waiting for it with its filter', LOWPASS],
+  ])(
+    'ends a voice that traps alone: it is told ended, its versions given back, the others play on%s',
+    (_, filter) => {
+      const errors: unknown[] = [];
+      const { voices, shared } = node((error) => errors.push(error));
+      const versions = store.stats().versions;
+      const events = [1, 2, 3].map((id): VoiceEvent => ({
         kind: 'on',
         voice: id,
-        options: note({ phrase: id }),
+        options: note({ phrase: id, filter }),
         params: { frequency: 100 * id, spread1: 10 },
-      }))
-    );
-    render(voices, 0);
-    // the params of voice 2 for blocks of 64: its block of 128 reads past them, it traps
-    const short = Object.fromEntries(VOICE_PARAM_ORDER.map((name) => [name, new Float32Array(64)])) as Record<
-      VoiceParam,
-      Float32Array
-    >;
-    short.frequency.fill(200);
-    voices.params(2, short, 64);
-    const { left, taps, report } = render(voices, 128);
-    expect(errors).toEqual([expect.any(WebAssembly.RuntimeError)]);
-    expect(report).toEqual({ ended: [2] });
-    expect(taps.map(({ voice }) => voice)).toEqual([1, 3]);
-    // the sum is the others'
-    expectSameBits(
-      'trap',
-      1,
-      'left',
-      taps[0].left.map((value, i) => Math.fround(value + taps[1].left[i])),
-      left
-    );
-    expect(shared.stats()).toMatchObject({ voices: 2 });
-    voices.free();
-    expect(store.stats().versions).toBe(versions);
-    expect(shared.stats()).toMatchObject({ voices: 0, unison: 0 });
-  });
+      }));
+      voices.apply(events);
+      // the first voice in a node of its own: what it plays next to one that traps
+      const own = node();
+      own.voices.apply(events.slice(0, 1));
+      render(own.voices, 0);
+      render(voices, 0);
+      // the params of voice 2 for blocks of 64: its block of 128 reads past them, it traps
+      const short = Object.fromEntries(
+        VOICE_PARAM_ORDER.map((name) => [name, new Float32Array(64)])
+      ) as Record<VoiceParam, Float32Array>;
+      short.frequency.fill(200);
+      voices.params(2, short, 64);
+      const { left, taps, report } = render(voices, 128);
+      expect(errors).toEqual([expect.any(WebAssembly.RuntimeError)]);
+      expect(report).toEqual({ ended: [2] });
+      expect(taps.map(({ voice }) => voice)).toEqual([1, 3]);
+      expectSameBits('before the trap', 1, 'left', render(own.voices, 128).left, taps[0].left);
+      expect(taps[0].left.some((value) => value !== 0)).toBe(true);
+      own.voices.free();
+      // the sum is the others'
+      expectSameBits(
+        'trap',
+        1,
+        'left',
+        taps[0].left.map((value, i) => Math.fround(value + taps[1].left[i])),
+        left
+      );
+      expect(shared.stats()).toMatchObject({ voices: 2 });
+      voices.free();
+      expect(store.stats().versions).toBe(versions);
+      expect(shared.stats()).toMatchObject({ voices: 0, unison: 0 });
+    }
+  );
+
+  // a trap past the render of a voice (its filter, its volume): `filters` of the voices 1.., the voices that trap
+  // there, the one whose render traps, then the voices told ended and those that play on
+  it.each<[string, (VoiceFilterOptions | null)[], number[], number | null, number[], number[]]>([
+    ['alone', [LOWPASS], [1], null, [1], []],
+    [
+      'next to the one it waited for (both end), the first',
+      [LOWPASS, LOWPASS, LOWPASS],
+      [1],
+      null,
+      [2, 1],
+      [3],
+    ],
+    [
+      'next to the one it waited for (both end), the second',
+      [LOWPASS, LOWPASS, LOWPASS],
+      [2],
+      null,
+      [2, 1],
+      [3],
+    ],
+    ['after it waited for one with no filter', [LOWPASS, null, LOWPASS], [1], null, [1], [2, 3]],
+    ['after the one it waited for trapped', [LOWPASS, LOWPASS], [1], 2, [2, 1], []],
+    ['the last one, the pair before it plays on', [LOWPASS, LOWPASS, LOWPASS], [3], null, [3], [1, 2]],
+  ])(
+    'ends a voice that traps as it finishes its block, the others play on: %s',
+    (_, filters, traps, renderTrap, ended, playing) => {
+      const errors: unknown[] = [];
+      const { voices, shared } = node((error) => errors.push(error));
+      const versions = store.stats().versions;
+      const events = filters.map((filter, i): VoiceEvent => ({
+        kind: 'on',
+        voice: i + 1,
+        options: note({ phrase: i + 1, filter }),
+        params: { frequency: 100 * (i + 1), spread1: 10 },
+      }));
+      voices.apply(events);
+      // the same voices where none traps: what those that play on play
+      const whole = node();
+      whole.voices.apply(events);
+      render(whole.voices, 0);
+      render(voices, 0);
+      traps.forEach((id) => voices.trap(id));
+      if (renderTrap !== null) {
+        const short = Object.fromEntries(
+          VOICE_PARAM_ORDER.map((name) => [name, new Float32Array(64)])
+        ) as Record<VoiceParam, Float32Array>;
+        voices.params(renderTrap, short, 64);
+      }
+      const expected = render(whole.voices, 128).taps;
+      const { left, right, taps, report } = render(voices, 128);
+      // one trap as a voice finishes (two voices in the lanes of one: one trap), one more of the render
+      const trapped = renderTrap === null ? 1 : 2;
+      expect(errors).toEqual(Array.from({ length: trapped }, () => expect.any(WebAssembly.RuntimeError)));
+      expect(report).toEqual({ ended });
+      expect(taps.map(({ voice }) => voice)).toEqual(playing);
+      const sum = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
+      taps.forEach((tap) => {
+        const own = expected[tap.voice - 1];
+        expect(own.left.some((value) => value !== 0)).toBe(true);
+        expectSameBits(`voice ${tap.voice}`, 1, 'left', own.left, tap.left);
+        expectSameBits(`voice ${tap.voice}`, 1, 'right', own.right, tap.right);
+        sum[0].forEach((value, i) => (sum[0][i] = Math.fround(value + tap.left[i])));
+        sum[1].forEach((value, i) => (sum[1][i] = Math.fround(value + tap.right[i])));
+      });
+      // the sum is the others' (silence when none is left)
+      expectSameBits('trap', 1, 'left', sum[0], left);
+      expectSameBits('trap', 1, 'right', sum[1], right);
+      expect(shared.stats()).toMatchObject({ voices: playing.length });
+      // the block after it: no trap, the others as they play where none trapped
+      const after = render(voices, 256);
+      const afterWhole = render(whole.voices, 256).taps;
+      expect(errors).toHaveLength(trapped);
+      expect(after.report).toBeNull();
+      expect(after.taps.map(({ voice }) => voice)).toEqual(playing);
+      after.taps.forEach((tap) =>
+        expectSameBits(`voice ${tap.voice}`, 2, 'left', afterWhole[tap.voice - 1].left, tap.left)
+      );
+      whole.voices.free();
+      voices.free();
+      expect(store.stats().versions).toBe(versions);
+      expect(shared.stats()).toMatchObject({ voices: 0, unison: 0 });
+    }
+  );
 
   it('tells a note on that traps ended', () => {
     const errors: unknown[] = [];

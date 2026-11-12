@@ -1,5 +1,5 @@
-//! The master limiter (ported bit for bit from the TS core it replaced; the goldens hold its sound): a stereo
-//! linked, true peak, lookahead brickwall limiter that skips the blocks of silence once it has let go. The C ABI
+//! The master limiter (the goldens hold its sound): a stereo linked, true peak (its interpolation in f32, the
+//! gain in doubles: under the ceiling the output is the input to the bit), lookahead brickwall limiter that skips the blocks of silence once it has let go. The C ABI
 //! of a stereo core: fx_new, fx_buffers, fx_process, fx_clear, fx_latency, fx_idle, fx_free (limiter-wasm.ts wraps
 //! it)
 
@@ -260,7 +260,7 @@ impl Limiter {
             let l = finite(in_l[s] as f64);
             let r = finite(in_r[s] as f64);
 
-            let peaks = self.peaks.next(l, r);
+            let peaks = self.peaks.next(l as f32, r as f32);
             let peak = self.held.next(max(peaks.lo(), peaks.hi()));
             if peak != self.last_peak {
                 self.last_peak = peak;

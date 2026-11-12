@@ -1,75 +1,254 @@
-//! apps/chisper/src/app/synth/fx/effects/dsp.ts: the sample-by-sample blocks of the effects
+//! The sample-by-sample blocks of the effects (the dsp.ts of the app they came from)
 
-use crate::simd::F64x2;
-use crate::{int32, power_of_two_above, wrap};
+use crate::simd::{F32x4, F64x2, TINY};
+use crate::{int32, power_of_two_above};
 use alloc::{vec, vec::Vec};
-use jsmath::{exp, floor, max, round, PI};
+use jsmath::{exp, floor, max, round};
 
-/// createDelayLine: a ring buffer of at least `max_delay` samples; read before write, read(d) is the sample
-/// written d steps ago (d >= 2), fractional delays read with a 4-point cubic hermite
-pub struct DelayLine {
-    buffer: Vec<f64>,
-    mask: usize,
-    index: usize,
+// the cubic hermite of four lanes of f32 (the one of the delay lines in doubles)
+#[inline(always)]
+fn hermite4(prev: F32x4, x0: F32x4, x1: F32x4, next: F32x4, t: F32x4) -> F32x4 {
+    let half = F32x4::splat(0.5);
+    let c1 = half * (x1 - prev);
+    let c2 = prev - F32x4::splat(2.5) * x0 + F32x4::splat(2.0) * x1 - half * next;
+    let c3 = half * (next - prev) + F32x4::splat(1.5) * (x0 - x1);
+    ((c3 * t + c2) * t + c1) * t + x0
 }
 
-impl DelayLine {
-    pub fn new(max_delay: f64) -> DelayLine {
+/// Delay lines in f32 read four at a time: LANES = 4, four lines written together, their samples side by side in
+/// one ring (lane k reads line k), or LANES = 1, one line read at four delays. A ring of at least `max_delay`
+/// samples; read before write, read(d) is the sample written d steps ago (d >= 2), fractional delays read with a
+/// 4-point cubic hermite. The delays are doubles (a place in a ring of thousands of samples has too few bits
+/// left for its fraction in f32), the samples and the hermite f32
+pub struct Lines<const LANES: usize> {
+    buffer: Vec<f32>,
+    mask: i32,
+    index: i32,
+}
+
+impl<const LANES: usize> Lines<LANES> {
+    pub fn new(max_delay: f64) -> Lines<LANES> {
         let size = power_of_two_above(max_delay + 4.0);
-        DelayLine {
-            buffer: vec![0.0; size],
-            mask: size - 1,
+        Lines {
+            buffer: vec![0.0; size * LANES],
+            mask: size as i32 - 1,
             index: 0,
         }
     }
 
+    /// the lines at the delays of the lanes of `delay` (lanes 0 and 1, then 2 and 3)
     #[inline(always)]
-    pub fn read(&self, delay: f64) -> f64 {
-        let pos = self.index as f64 - max(2.0, delay);
-        let i = floor(pos);
-        let t = pos - i;
-        let b = &self.buffer;
-        let prev = b[wrap(i - 1.0, self.mask)];
-        let x0 = b[wrap(i, self.mask)];
-        let x1 = b[wrap(i + 1.0, self.mask)];
-        let next = b[wrap(i + 2.0, self.mask)];
-        let c1 = 0.5 * (x1 - prev);
-        let c2 = prev - 2.5 * x0 + 2.0 * x1 - 0.5 * next;
-        let c3 = 0.5 * (next - prev) + 1.5 * (x0 - x1);
-        ((c3 * t + c2) * t + c1) * t + x0
+    pub fn read(&self, delay: [F64x2; 2]) -> F32x4 {
+        self.read_from(self.index, delay)
     }
 
     #[inline(always)]
-    pub fn write(&mut self, value: f64) {
-        self.buffer[self.index] = value;
+    fn read_from(&self, index: i32, delay: [F64x2; 2]) -> F32x4 {
+        let (index, two) = (F64x2::splat(index as f64), F64x2::splat(2.0));
+        let (lo, hi) = (index - two.max(delay[0]), index - two.max(delay[1]));
+        let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
+        let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
+        // (a NaN delay reads at 0, one out of the ring wraps in it)
+        let i = [
+            floor_lo.lo() as i32,
+            floor_lo.hi() as i32,
+            floor_hi.lo() as i32,
+            floor_hi.hi() as i32,
+        ];
+        let (buffer, mask) = (&self.buffer, self.mask);
+        let at = |j: i32| {
+            let sample = |lane: usize| {
+                let place = (i[lane].wrapping_add(j) & mask) as usize * LANES + lane % LANES;
+                // SAFETY: the place of a sample is under the size of the ring (the mask), its lane under LANES
+                unsafe { *buffer.get_unchecked(place) }
+            };
+            F32x4::new(sample(0), sample(1), sample(2), sample(3))
+        };
+        hermite4(at(-1), at(0), at(1), at(2), t)
+    }
+
+    #[inline(always)]
+    fn step(&mut self) {
         self.index = (self.index + 1) & self.mask;
     }
 
     pub fn clear(&mut self) {
         self.buffer.fill(0.0);
     }
+}
 
-    /// read() of two lines at once, each lane the delay of its line (the same operations as read, in each lane)
+impl Lines<4> {
+    /// a sample of each line (what is too small to sound as 0: F32x4::flush)
     #[inline(always)]
-    pub fn read_pair(a: &DelayLine, b: &DelayLine, delay: F64x2) -> F64x2 {
-        let pos = F64x2::new(a.index as f64, b.index as f64) - F64x2::splat(2.0).max(delay);
-        let i = pos.floor();
-        let t = pos - i;
-        // (i is a whole number: ToInt32(i + k) is ToInt32(i) + k modulo 2^32, the index the TS masks)
-        let (ia, ib) = (int32(i.lo()), int32(i.hi()));
-        let (ba, bb) = (&a.buffer, &b.buffer);
-        let (ma, mb) = (a.mask as i32, b.mask as i32);
-        let at = |k: i32| {
-            F64x2::new(
-                ba[(ia.wrapping_add(k) & ma) as usize],
-                bb[(ib.wrapping_add(k) & mb) as usize],
-            )
+    pub fn write(&mut self, value: F32x4) {
+        value.flush().store(&mut self.buffer[4 * self.index as usize..]);
+        self.step();
+    }
+
+    /// Schroeder allpasses of gliding delays, four at once: these lines as theirs
+    #[inline(always)]
+    pub fn allpass(&mut self, input: F32x4, delay: [F64x2; 2], gain: F32x4) -> F32x4 {
+        let delayed = self.read(delay);
+        let sum = input + gain * delayed;
+        self.write(sum);
+        delayed - gain * sum
+    }
+}
+
+/// Four delay lines in f32, each a ring of its own (`Lines<4>` keeps their samples side by side), so four samples
+/// in a row of a line are one load: its reads and writes go four samples of time in the lanes (read4, write4)
+/// where those of `Lines<4>` go four lines. A read is the one of `Lines::read`, sample by sample: the same place,
+/// the same hermite, the same bits. The lines are written together (`advance`); the first GUARD samples of a ring
+/// are kept after its end too, so the taps of a read never wrap
+pub struct Rows {
+    buffer: Vec<f32>,
+    stride: usize,
+    size: usize,
+    mask: i32,
+    index: i32,
+}
+
+const GUARD: usize = 8;
+
+impl Rows {
+    pub fn new(max_delay: f64) -> Rows {
+        let size = power_of_two_above(max_delay + 4.0);
+        Rows {
+            buffer: vec![0.0; 4 * (size + GUARD)],
+            stride: size + GUARD,
+            size,
+            mask: size as i32 - 1,
+            index: 0,
+        }
+    }
+
+    /// line `row` at four samples in a row, the first `ahead` writes from now, each at its delay: what
+    /// `Lines::read` gives one after the other (if what they read is written: delay > 5 of what their group
+    /// writes, more than `ahead` + 5 of what is written after)
+    #[inline(always)]
+    pub fn read4(&self, row: usize, ahead: usize, delay: [F64x2; 2]) -> F32x4 {
+        let first = (self.index + ahead as i32) & self.mask;
+        let two = F64x2::splat(2.0);
+        if first + 3 <= self.mask {
+            let at = first as f64;
+            let (lo, hi) = (
+                F64x2::new(at, at + 1.0) - two.max(delay[0]),
+                F64x2::new(at + 2.0, at + 3.0) - two.max(delay[1]),
+            );
+            let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
+            let i = floor_lo.lo() as i32;
+            // their places one after the other (delays that glide: almost always): the taps of all four in a
+            // row of the ring, from the one before the first
+            let in_a_row = floor_lo.hi() as i32 == i.wrapping_add(1)
+                && floor_hi.lo() as i32 == i.wrapping_add(2)
+                && floor_hi.hi() as i32 == i.wrapping_add(3);
+            if in_a_row {
+                let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
+                let from = row * self.stride + (i.wrapping_sub(1) & self.mask) as usize;
+                let taps = &self.buffer[from..from + 7];
+                return hermite4(
+                    F32x4::load(taps),
+                    F32x4::load(&taps[1..]),
+                    F32x4::load(&taps[2..]),
+                    F32x4::load(&taps[3..]),
+                    t,
+                );
+            }
+        }
+        self.read_each(row, first, delay)
+    }
+
+    // read4 where its samples are not in a row (the index wraps in the group, a delay jumps or is not a number):
+    // each on its own. Rare: a function of its own, not in the loops of read4
+    #[inline(never)]
+    fn read_each(&self, row: usize, first: i32, delay: [F64x2; 2]) -> F32x4 {
+        let two = F64x2::splat(2.0);
+        let index = |k: i32| ((first + k) & self.mask) as f64;
+        let (lo, hi) = (
+            F64x2::new(index(0), index(1)) - two.max(delay[0]),
+            F64x2::new(index(2), index(3)) - two.max(delay[1]),
+        );
+        let (floor_lo, floor_hi) = (lo.floor(), hi.floor());
+        let t = F32x4::from_f64(lo - floor_lo, hi - floor_hi);
+        let i = [
+            floor_lo.lo() as i32,
+            floor_lo.hi() as i32,
+            floor_hi.lo() as i32,
+            floor_hi.hi() as i32,
+        ];
+        let at = |j: i32| {
+            let sample =
+                |k: usize| self.buffer[row * self.stride + (i[k].wrapping_add(j) & self.mask) as usize];
+            F32x4::new(sample(0), sample(1), sample(2), sample(3))
         };
-        let prev = at(-1);
-        let x0 = at(0);
-        let x1 = at(1);
-        let next = at(2);
-        hermite(prev, x0, x1, next, t)
+        hermite4(at(-1), at(0), at(1), at(2), t)
+    }
+
+    /// four samples in a row of line `row`, the first `ahead` writes from now (what is too small to sound as 0)
+    #[inline(always)]
+    pub fn write4(&mut self, row: usize, ahead: usize, value: F32x4) {
+        let value = value.flush();
+        let first = ((self.index + ahead as i32) & self.mask) as usize;
+        if first >= GUARD && first + 4 <= self.size {
+            let from = row * self.stride + first;
+            value.store(&mut self.buffer[from..from + 4]);
+            return;
+        }
+        self.write_each(row, first, value);
+    }
+
+    // write4 at the ends of the ring (its guard, its wrap): each sample on its own
+    #[inline(never)]
+    fn write_each(&mut self, row: usize, first: usize, value: F32x4) {
+        let line = &mut self.buffer[row * self.stride..(row + 1) * self.stride];
+        for (k, sample) in value.lanes().into_iter().enumerate() {
+            let place = (first + k) & (self.size - 1);
+            line[place] = sample;
+            if place < GUARD {
+                line[self.size + place] = sample;
+            }
+        }
+    }
+
+    /// a sample of line `row`, `ahead` writes from now
+    #[inline(always)]
+    pub fn write1(&mut self, row: usize, ahead: usize, value: f32) {
+        let place = ((self.index + ahead as i32) & self.mask) as usize;
+        let sample = if value.abs() < TINY { 0.0 } else { value };
+        self.buffer[row * self.stride + place] = sample;
+        if place < GUARD {
+            self.buffer[row * self.stride + self.size + place] = sample;
+        }
+    }
+
+    /// a sample of each line, `ahead` writes from now
+    #[inline(always)]
+    pub fn write(&mut self, ahead: usize, value: F32x4) {
+        let place = ((self.index + ahead as i32) & self.mask) as usize;
+        for (row, sample) in value.flush().lanes().into_iter().enumerate() {
+            self.buffer[row * self.stride + place] = sample;
+            if place < GUARD {
+                self.buffer[row * self.stride + self.size + place] = sample;
+            }
+        }
+    }
+
+    /// `frames` samples of every line are written: the next ones come after them
+    #[inline(always)]
+    pub fn advance(&mut self, frames: usize) {
+        self.index = (self.index + frames as i32) & self.mask;
+    }
+
+    pub fn clear(&mut self) {
+        self.buffer.fill(0.0);
+    }
+}
+
+impl Lines<1> {
+    #[inline(always)]
+    pub fn write(&mut self, value: f32) {
+        self.buffer[self.index as usize] = if value.abs() < TINY { 0.0 } else { value };
+        self.step();
     }
 }
 
@@ -124,41 +303,6 @@ impl StereoDelayLine {
     }
 }
 
-/// createAllpass: Schroeder allpass of a gliding delay
-pub struct Allpass {
-    line: DelayLine,
-}
-
-impl Allpass {
-    pub fn new(max_delay: f64) -> Allpass {
-        Allpass {
-            line: DelayLine::new(max_delay),
-        }
-    }
-
-    #[inline(always)]
-    pub fn process(&mut self, input: f64, delay: f64, gain: f64) -> f64 {
-        let delayed = self.line.read(delay);
-        let sum = input + gain * delayed;
-        self.line.write(sum);
-        delayed - gain * sum
-    }
-
-    pub fn clear(&mut self) {
-        self.line.clear();
-    }
-
-    /// process() of two allpasses at once, each lane its own (the same operations in each lane)
-    #[inline(always)]
-    pub fn process_pair(a: &mut Allpass, b: &mut Allpass, input: F64x2, delay: F64x2, gain: F64x2) -> F64x2 {
-        let delayed = DelayLine::read_pair(&a.line, &b.line, delay);
-        let sum = input + gain * delayed;
-        a.line.write(sum.lo());
-        b.line.write(sum.hi());
-        delayed - gain * sum
-    }
-}
-
 /// createFixedAllpass of both channels in the lanes: an allpass of a fixed delay, rounded to whole samples (one
 /// delay, one gain: the diffusers of a reverb), each lane the allpass of its channel
 pub struct StereoFixedAllpass {
@@ -190,43 +334,6 @@ impl StereoFixedAllpass {
 
     pub fn clear(&mut self) {
         self.buffer.fill(F64x2::default());
-    }
-}
-
-/// createDcBlocker: one pole highpass y = x - x[n-1] + r·y[n-1]
-pub struct DcBlocker {
-    r: f64,
-    x1: f64,
-    y1: f64,
-}
-
-impl DcBlocker {
-    pub fn new(cutoff: f64, sample_rate: f64) -> DcBlocker {
-        DcBlocker {
-            r: exp((-2.0 * PI * cutoff) / sample_rate),
-            x1: 0.0,
-            y1: 0.0,
-        }
-    }
-
-    /// data[0..frames) in place
-    pub fn process_block(&mut self, data: &mut [f64], frames: usize) {
-        let r = self.r;
-        let mut x1 = self.x1;
-        let mut y1 = self.y1;
-        for value in data[..frames].iter_mut() {
-            let x = *value;
-            y1 = x - x1 + r * y1;
-            x1 = x;
-            *value = y1;
-        }
-        self.x1 = x1;
-        self.y1 = y1;
-    }
-
-    pub fn clear(&mut self) {
-        self.x1 = 0.0;
-        self.y1 = 0.0;
     }
 }
 
@@ -295,7 +402,6 @@ pub fn peak(data: &[f32]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsmath::min;
 
     // a deterministic noise within ±1 (xorshift)
     fn noise(seed: u64) -> impl FnMut() -> f64 {
@@ -308,95 +414,263 @@ mod tests {
         }
     }
 
-    fn bits(value: F64x2) -> [u64; 2] {
-        [value.lo().to_bits(), value.hi().to_bits()]
+    // a delay line in doubles: what a line of Lines reads, within the rounding of f32
+    struct Exact {
+        written: Vec<f64>,
     }
 
-    // the delays a reverb reads: fractional, under 2 (read at 2), past the index (wrapped around the ring), up
-    // to the length of each line
-    fn delays(next: &mut impl FnMut() -> f64, max: f64) -> f64 {
-        (next() + 1.0) / 2.0 * max
+    impl Exact {
+        fn read(&self, delay: f64) -> f64 {
+            let pos = self.written.len() as f64 - max(delay, 2.0);
+            let i = pos.floor();
+            let t = pos - i;
+            let at = |k: f64| {
+                let place = i + k;
+                // (before the first sample, or the one being written: read at a whole delay of 2, weighed 0)
+                if place < 0.0 || place as usize >= self.written.len() {
+                    0.0
+                } else {
+                    self.written[place as usize]
+                }
+            };
+            let (prev, x0, x1, next) = (at(-1.0), at(0.0), at(1.0), at(2.0));
+            let c1 = 0.5 * (x1 - prev);
+            let c2 = prev - 2.5 * x0 + 2.0 * x1 - 0.5 * next;
+            let c3 = 0.5 * (next - prev) + 1.5 * (x0 - x1);
+            ((c3 * t + c2) * t + c1) * t + x0
+        }
+    }
+
+    // the delays a reverb reads: fractional, under 2 (read at 2), up to the length of the lines
+    fn delays(next: &mut impl FnMut() -> f64, step: usize, max: f64) -> [F64x2; 2] {
+        let mut delay = || {
+            if step.is_multiple_of(7) {
+                1.25
+            } else {
+                (next() + 1.0) / 2.0 * max
+            }
+        };
+        [F64x2::new(delay(), delay()), F64x2::new(delay(), delay())]
+    }
+
+    fn close(read: F32x4, exact: [f64; 4]) {
+        for (ours, exact) in read.lanes().iter().zip(exact) {
+            assert!((*ours as f64 - exact).abs() < 2e-6, "{ours} != {exact}");
+        }
     }
 
     #[test]
-    fn a_pair_of_lines_reads_each_as_read() {
+    fn four_lines_read_each_at_its_delay() {
         let mut next = noise(1);
-        let (mut a, mut b) = (DelayLine::new(300.0), DelayLine::new(1100.5));
+        let mut lines = Lines::<4>::new(1100.5);
+        let mut exact: [Exact; 4] = core::array::from_fn(|_| Exact { written: Vec::new() });
         for step in 0..5000 {
-            a.write(next());
-            b.write(next());
-            let delay = F64x2::new(delays(&mut next, 300.0), delays(&mut next, 1100.5));
-            let delay = if step % 7 == 0 {
-                F64x2::new(1.25, 0.0)
-            } else {
-                delay
-            };
-            let pair = DelayLine::read_pair(&a, &b, delay);
-            assert_eq!(
-                bits(pair),
-                [a.read(delay.lo()).to_bits(), b.read(delay.hi()).to_bits()]
-            );
-            // one line in both lanes (the early reflections of a reverb)
-            let same = DelayLine::read_pair(&a, &a, delay.map(|d| min(d, 300.0)));
-            assert_eq!(
-                bits(same),
-                [
-                    a.read(min(delay.lo(), 300.0)).to_bits(),
-                    a.read(min(delay.hi(), 300.0)).to_bits()
-                ]
+            let values: [f64; 4] = core::array::from_fn(|_| next() as f32 as f64);
+            lines.write(F32x4::new(
+                values[0] as f32,
+                values[1] as f32,
+                values[2] as f32,
+                values[3] as f32,
+            ));
+            for (line, value) in exact.iter_mut().zip(values) {
+                line.written.push(value);
+            }
+            let delay = delays(&mut next, step, 1100.5);
+            let of = [delay[0].lo(), delay[0].hi(), delay[1].lo(), delay[1].hi()];
+            close(
+                lines.read(delay),
+                core::array::from_fn(|lane| exact[lane].read(of[lane])),
             );
         }
     }
 
+    // Rows against Lines<4>, to the bit: the samples of a line four in a row (delays that glide, jump, sit at the
+    // clamp, are not numbers; over the wrap of the ring and of its index), an allpass in groups of four
+    #[test]
+    fn rows_read_and_write_as_four_lines_do() {
+        let mut next = noise(5);
+        let (mut lines, mut allpasses) = (Lines::<4>::new(300.0), Lines::<4>::new(300.0));
+        let (mut rows, mut turned) = (Rows::new(300.0), Rows::new(300.0));
+        let bits = |values: [f32; 4]| values.map(f32::to_bits);
+        let mut glide: [f64; 4] = [40.3, 7.0, 150.9, 299.0];
+        for group in 0..3000 {
+            // the delays of the four samples of each line: gliding, with a jump or a NaN now and then
+            let delays: [[f64; 4]; 4] = core::array::from_fn(|row| {
+                core::array::from_fn(|k| {
+                    glide[row] += 0.37 * next();
+                    glide[row] = glide[row].clamp(6.5, 299.5);
+                    match (group + row) % 97 {
+                        13 if k == 2 => 250.0 * (next() + 1.0) / 2.0 + 6.0,
+                        29 => f64::NAN,
+                        _ => glide[row],
+                    }
+                })
+            });
+            let inputs: [[f32; 4]; 4] = core::array::from_fn(|_| core::array::from_fn(|_| next() as f32));
+            // sample after sample, four lines in the lanes
+            let mut read = [[0.0f32; 4]; 4];
+            let mut passed = [[0.0f32; 4]; 4];
+            for k in 0..4 {
+                let delay = [
+                    F64x2::new(delays[0][k], delays[1][k]),
+                    F64x2::new(delays[2][k], delays[3][k]),
+                ];
+                let delayed = lines.read(delay);
+                let out = allpasses.allpass(delayed, delay, F32x4::splat(0.5)).lanes();
+                for row in 0..4 {
+                    read[row][k] = delayed.lanes()[row];
+                    passed[row][k] = out[row];
+                }
+                lines.write(F32x4::new(inputs[0][k], inputs[1][k], inputs[2][k], inputs[3][k]));
+            }
+            // line after line, four samples in the lanes
+            for row in 0..4 {
+                let delay = [
+                    F64x2::new(delays[row][0], delays[row][1]),
+                    F64x2::new(delays[row][2], delays[row][3]),
+                ];
+                let delayed = rows.read4(row, 0, delay);
+                assert_eq!(bits(delayed.lanes()), bits(read[row]), "group {group} line {row}");
+                let behind = turned.read4(row, 0, delay);
+                let sum = delayed + F32x4::splat(0.5) * behind;
+                turned.write4(row, 0, sum);
+                let out = behind - F32x4::splat(0.5) * sum;
+                assert_eq!(
+                    bits(out.lanes()),
+                    bits(passed[row]),
+                    "allpass, group {group} line {row}"
+                );
+            }
+            for k in 0..4 {
+                rows.write(
+                    k,
+                    F32x4::new(inputs[0][k], inputs[1][k], inputs[2][k], inputs[3][k]),
+                );
+            }
+            rows.advance(4);
+            turned.advance(4);
+        }
+    }
+
+    #[test]
+    fn rows_hold_no_denormals() {
+        let mut rows = Rows::new(64.0);
+        rows.write4(1, 0, F32x4::new(1e-30, -1e-39, 0.5, -1e-26));
+        rows.write(4, F32x4::splat(1e-38));
+        rows.write1(2, 5, 1e-40);
+        assert!(rows.buffer.iter().all(|x| *x == 0.0 || x.abs() >= TINY));
+        assert_eq!(rows.buffer.iter().filter(|x| **x != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn one_line_reads_at_four_delays() {
+        let mut next = noise(2);
+        let mut line = Lines::<1>::new(300.0);
+        let mut exact = Exact { written: Vec::new() };
+        for step in 0..3000 {
+            let value = next() as f32;
+            line.write(value);
+            exact.written.push(value as f64);
+            let delay = delays(&mut next, step, 300.0);
+            let of = [delay[0].lo(), delay[0].hi(), delay[1].lo(), delay[1].hi()];
+            close(
+                line.read(delay),
+                core::array::from_fn(|lane| exact.read(of[lane])),
+            );
+        }
+    }
+
+    // what is too small to sound is written as 0 (no denormals in the lines), a NaN stays
+    #[test]
+    fn the_lines_hold_no_denormals() {
+        let mut lines = Lines::<4>::new(16.0);
+        lines.write(F32x4::new(1e-30, -1e-39, 0.5, f32::NAN));
+        let read = lines.read([F64x2::splat(1.0), F64x2::splat(1.0)]).lanes();
+        // (a delay under 2 reads at 2: the samples before the write, 0)
+        assert_eq!(read[..3], [0.0, 0.0, 0.0]);
+        lines.write(F32x4::splat(0.0));
+        let read = lines.read([F64x2::splat(2.0), F64x2::splat(2.0)]).lanes();
+        assert_eq!(read[..3], [0.0, 0.0, 0.5]);
+        assert!(read[3].is_nan());
+        let mut line = Lines::<1>::new(16.0);
+        line.write(-1e-39);
+        line.write(0.0);
+        assert!(line.read([F64x2::splat(2.0); 2]).lanes()[0].to_bits() == 0);
+    }
+
+    // four allpasses of whole delays: each the allpass of its delay and gain
+    #[test]
+    fn four_allpasses_are_an_allpass_each() {
+        let mut next = noise(3);
+        let mut lines = Lines::<4>::new(64.0);
+        let delays = [5.0, 17.0, 31.0, 60.0];
+        let gains = [0.5f32, -0.7, 0.3, 0.62];
+        let mut rings: [Vec<f32>; 4] = core::array::from_fn(|_| Vec::new());
+        for _ in 0..2000 {
+            let input: [f32; 4] = core::array::from_fn(|_| next() as f32);
+            let out = lines
+                .allpass(
+                    F32x4::load(&input),
+                    [F64x2::new(delays[0], delays[1]), F64x2::new(delays[2], delays[3])],
+                    F32x4::load(&gains),
+                )
+                .lanes();
+            for lane in 0..4 {
+                let ring = &mut rings[lane];
+                let delayed = if ring.len() >= delays[lane] as usize {
+                    ring[ring.len() - delays[lane] as usize]
+                } else {
+                    0.0
+                };
+                let sum = input[lane] + gains[lane] * delayed;
+                ring.push(sum);
+                assert!((out[lane] - (delayed - gains[lane] * sum)).abs() < 1e-6);
+            }
+        }
+    }
+
+    // a stereo line reads each channel at the delay, as a line of its own
     #[test]
     fn a_stereo_line_is_a_line_per_lane() {
         let mut next = noise(2);
         let mut stereo = StereoDelayLine::new(700.0);
-        let (mut left, mut right) = (DelayLine::new(700.0), DelayLine::new(700.0));
+        let (mut left, mut right) = (Exact { written: Vec::new() }, Exact { written: Vec::new() });
         for _ in 0..3000 {
-            let delay = delays(&mut next, 700.0);
+            let delay = (next() + 1.0) / 2.0 * 700.0;
             let read = stereo.read(delay);
-            assert_eq!(
-                bits(read),
-                [left.read(delay).to_bits(), right.read(delay).to_bits()]
-            );
+            // (its place in the ring is a smaller number than the one of the reference: the fraction rounds apart)
+            assert!((read.lo() - left.read(delay)).abs() < 1e-11);
+            assert!((read.hi() - right.read(delay)).abs() < 1e-11);
             let (l, r) = (next(), next());
             stereo.write(F64x2::new(l, r));
-            left.write(l);
-            right.write(r);
+            left.written.push(l);
+            right.written.push(r);
         }
     }
 
-    #[test]
-    fn a_pair_of_allpasses_is_an_allpass_per_lane() {
-        let mut next = noise(3);
-        let (mut a, mut b) = (Allpass::new(400.0), Allpass::new(900.0));
-        let (mut pa, mut pb) = (Allpass::new(400.0), Allpass::new(900.0));
-        let gain = F64x2::new(0.5, -0.7);
-        for _ in 0..4000 {
-            let input = F64x2::new(next(), next());
-            let delay = F64x2::new(delays(&mut next, 400.0), delays(&mut next, 900.0));
-            let pair = Allpass::process_pair(&mut pa, &mut pb, input, delay, gain);
-            let lo = a.process(input.lo(), delay.lo(), gain.lo());
-            let hi = b.process(input.hi(), delay.hi(), gain.hi());
-            assert_eq!(bits(pair), [lo.to_bits(), hi.to_bits()]);
-        }
-    }
-
-    // a Schroeder allpass of a whole delay d >= 2 reads the sample written d steps ago: a fixed allpass of d
+    // a Schroeder allpass of a whole delay reads the sample written that many steps ago
     #[test]
     fn a_stereo_fixed_allpass_is_an_allpass_of_its_whole_delay_per_lane() {
         let mut next = noise(4);
         for delay in [2.0, 3.4, 37.0, 241.6] {
             let mut stereo = StereoFixedAllpass::new(delay);
-            let whole = round(delay);
-            let (mut left, mut right) = (Allpass::new(whole), Allpass::new(whole));
+            let whole = round(delay) as usize;
+            let mut rings: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
             let gain = 0.62;
             for _ in 0..2000 {
-                let (l, r) = (next(), next());
-                let out = stereo.process(F64x2::new(l, r), F64x2::splat(gain));
-                assert_eq!(out.lo(), left.process(l, whole, gain));
-                assert_eq!(out.hi(), right.process(r, whole, gain));
+                let input = [next(), next()];
+                let out = stereo.process(F64x2::new(input[0], input[1]), F64x2::splat(gain));
+                for (lane, out) in [out.lo(), out.hi()].into_iter().enumerate() {
+                    let ring = &mut rings[lane];
+                    let delayed = if ring.len() >= whole {
+                        ring[ring.len() - whole]
+                    } else {
+                        0.0
+                    };
+                    let sum = input[lane] + gain * delayed;
+                    ring.push(sum);
+                    assert_eq!(out, delayed - gain * sum);
+                }
             }
         }
     }

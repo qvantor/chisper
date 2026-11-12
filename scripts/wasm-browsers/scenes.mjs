@@ -369,20 +369,22 @@ export { buildNoiseLevels } from './apps/chisper/src/app/synth/common/wavetable/
 export { VOICE_PARAMETERS } from './apps/chisper/src/app/synth/common/wavetable/wavetable-osc-params';
 export { lfoTable } from './apps/chisper/src/app/synth/common/lfo/lfo-curve';
 `;
-let loaded = null;
-const load = async () => {
-  if (loaded) return loaded;
-  const dsp = await loadApp({ contents: ENTRY, name: 'wasm-browsers' });
+const CORES = 'tmp/wasm';
+const loaded = new Map();
+// the facades of the app and the cores of `cores` (a folder of .wasm, by default the build of this tree)
+const load = async (cores = CORES) => {
+  if (loaded.has(cores)) return loaded.get(cores);
+  const dsp = loaded.get(CORES)?.dsp ?? (await loadApp({ contents: ENTRY, name: 'wasm-browsers' }));
   const wasm = Object.fromEntries(
     ['limiter', 'reverb', 'distortion', 'wavetable-osc'].map((name) => [
       name,
       new WebAssembly.Instance(
-        new WebAssembly.Module(fs.readFileSync(path.join(root, `tmp/wasm/${name}.wasm`)))
+        new WebAssembly.Module(fs.readFileSync(path.resolve(root, cores, `${name}.wasm`)))
       ).exports,
     ])
   );
-  loaded = { dsp, wasm };
-  return loaded;
+  loaded.set(cores, { dsp, wasm });
+  return loaded.get(cores);
 };
 
 // the LFOs of an oscillator scene as a state at once (null: none), their tables as arrays (the page makes them
@@ -414,8 +416,8 @@ export const sceneLevels = async (scene) => {
 
 // the voices of an oscillator scene in Node: the params of a block as the browser gives them (one value, or 128
 // where the gate changes in the block)
-const nodeOscRender = async (scene) => {
-  const { dsp, wasm } = await load();
+const nodeOscRender = async (scene, cores) => {
+  const { dsp, wasm } = await load(cores);
   const scope = dsp.createOscScope(wasm['wavetable-osc']);
   const store = dsp.createTableStoreWasm(scope);
   Object.entries(await sceneLevels(scene)).forEach(([table, levels]) => store.set(table, 1, levels));
@@ -455,10 +457,11 @@ const nodeOscRender = async (scene) => {
   return { output };
 };
 
-// the input of a scene and the output of its wasm core in Node, block by block
-export const nodeRender = async (scene) => {
-  if (scene.kind === 'osc') return nodeOscRender(scene);
-  const { dsp, wasm } = await load();
+// the input of a scene and the output of its wasm core in Node, block by block (`cores`: the cores of another
+// folder, the null test)
+export const nodeRender = async (scene, cores) => {
+  if (scene.kind === 'osc') return nodeOscRender(scene, cores);
+  const { dsp, wasm } = await load(cores);
   const input = scene.input?.() ?? signal(scene.frames, scene.amplitude);
   const core = scene.create(dsp, wasm);
   const output = [new Float32Array(scene.frames), new Float32Array(scene.frames)];

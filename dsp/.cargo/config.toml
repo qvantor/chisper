@@ -1,6 +1,6 @@
-# one build with wasm SIMD (Safari 16.4+): the lanes of the stereo and of the FIR phases. No relaxed-simd and no
-# fast-math: every value is worked out in the order of operations of the TS cores (or of a change of the sound
-# since, its goldens updated). A stack of 64 KiB (the cores keep their state on the heap); __stack_pointer
+# one build with wasm SIMD (Safari 16.4+): the lanes of the stereo, of the FIR taps, of the lines of the reverb and
+# of the samples of a voice. No relaxed-simd and no fast-math: every value is worked out in the order its code
+# states, the same bits in every browser (a change of the sound updates its goldens). A stack of 64 KiB (the cores keep their state on the heap); __stack_pointer
 # exported: a trap leaves it moved, the JS wrapper puts it back
 [target.wasm32-unknown-unknown]
 rustflags = [
