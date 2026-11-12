@@ -1,5 +1,6 @@
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { client, LIST_BROWSER_CACHE, LIST_CDN_CACHE } from '../utils';
+import { client } from '../utils';
+import { BROWSER_REVALIDATE, LIST_CDN_CACHE } from '../utils/cdn-cache';
 import handler from '../functions/get-noises-list.mjs';
 import { caller } from './helpers';
 
@@ -48,7 +49,7 @@ it('lists the noise bucket as a tree of its folders, a leaf its key and size', a
   expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
   // kept by the CDN: a visit doesn't run the function
   expect(response.headers.get('Netlify-CDN-Cache-Control')).toBe(LIST_CDN_CACHE);
-  expect(response.headers.get('Cache-Control')).toBe(LIST_BROWSER_CACHE);
+  expect(response.headers.get('Cache-Control')).toBe(BROWSER_REVALIDATE);
   expect(response.tree).toEqual([
     {
       name: 'Analog',

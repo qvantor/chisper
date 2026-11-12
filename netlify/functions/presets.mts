@@ -22,6 +22,7 @@ import type {
   SavePresetResponse,
   UpdatePresetResponse,
 } from '../../libs/preset-schema/src';
+import { cachedHeaders, clipTag, PRESET_CDN_CACHE, presetTag, purgeTags } from '../utils/cdn-cache';
 import { db } from '../utils/db';
 import { matchesEditToken, newEditToken } from '../utils/edit-token';
 import { envNumber } from '../utils/env';
@@ -61,10 +62,11 @@ const parsePresetBody = async <T extends { name: string; data: unknown }>(
   return { ...parsed.data, data, hash: presetHash(data) };
 };
 
+// in lower case, as the DB gives it: Postgres takes a uuid in any case, the tags of the CDN are those of the DB
 const parseId = (id: string) => {
   const parsed = presetIdSchema.safeParse(id);
   if (!parsed.success) throw new HttpError(404, 'Preset not found');
-  return parsed.data;
+  return parsed.data.toLowerCase();
 };
 
 const savePreset = async (req: Request, context: Context) => {
@@ -110,8 +112,8 @@ const savePreset = async (req: Request, context: Context) => {
 };
 
 // overwrites sound and name (and the clip it opens with, when the request names one or null), links to the preset
-// play the updated sound
-const updatePreset = async (id: string, req: Request) => {
+// play the updated sound (the answer doesn't wait for the purge of the cached one)
+const updatePreset = async (id: string, req: Request, context: Context) => {
   const presetId = parseId(id);
   const { name, editToken, data, hash, clipId } = await parsePresetBody(req, updatePresetRequestSchema);
 
@@ -125,13 +127,13 @@ const updatePreset = async (id: string, req: Request) => {
     throw new HttpError(403, 'You can only edit presets saved from this browser');
   if (preset.throttled) throw new HttpError(429, 'Too many updates, try again in a few seconds');
 
+  let updated: { clipId: string | null } | undefined;
   try {
-    const [updated] = await sql<{ clipId: string | null }[]>`
+    [updated] = await sql<{ clipId: string | null }[]>`
       UPDATE presets SET name = ${name}, data = ${sql.json(data)}, hash = ${hash}, updated_at = now()
         ${clipId === undefined ? sql`` : sql`, clip_id = ${clipId}`}
       WHERE id = ${presetId}
       RETURNING clip_id AS "clipId"`;
-    return json({ id: presetId, name, clipId: updated?.clipId ?? null } as UpdatePresetResponse);
   } catch (error) {
     // renaming own preset (e.g. changing case) is the same row, so it never conflicts
     if (isUniqueViolation(error, 'presets_name_key')) throw nameTakenError(name);
@@ -140,6 +142,8 @@ const updatePreset = async (id: string, req: Request) => {
     const existing = await findByHash(hash);
     return json({ error: `This sound is already saved as “${existing?.name}”`, ...existing }, 409);
   }
+  context.waitUntil(purgeTags([presetTag(presetId)]));
+  return json({ id: presetId, name, clipId: updated?.clipId ?? null } as UpdatePresetResponse);
 };
 
 // the author opened the preset (the client sends the edit token it keeps): cleanup counts the 90 days of an
@@ -167,7 +171,9 @@ interface PresetRow extends Omit<Preset, 'clip'> {
   clipData: Omit<Clip, 'name'> | null;
 }
 
-// with the clip it opens with (its name in it, as GET /api/clips/:id gives it)
+// with the clip it opens with (its name in it, as GET /api/clips/:id gives it). Kept by the CDN under the tags of the
+// preset and of its clip: an update of either, a preset hidden by reports or deleted by cleanup purge them
+// (PRESET_CDN_CACHE). A missing or hidden preset is a 404 never cached
 const getPreset = async (id: string) => {
   const [row] = await db()<PresetRow[]>`
     SELECT p.id, p.name, p.data, p.created_at AS "createdAt",
@@ -178,8 +184,8 @@ const getPreset = async (id: string) => {
   const { clipId, clipName, clipData, ...preset } = row;
   const clip =
     clipId !== null && clipData !== null ? { id: clipId, clip: clipOfRow(clipName, clipData) } : null;
-  // not cached: the author can overwrite the preset
-  return json({ ...preset, clip } as Preset);
+  const tags = [presetTag(preset.id), ...(clip ? [clipTag(clip.id)] : [])];
+  return json({ ...preset, clip } as Preset, 200, cachedHeaders(PRESET_CDN_CACHE, tags));
 };
 
 // every featured preset (curated) comes first, whatever its score, the rest are popular presets by score
@@ -263,13 +269,16 @@ const reportPreset = async (id: string, context: Context) => {
   if (!preset) throw new HttpError(404, 'Preset not found');
 
   await sql`INSERT INTO reports (preset_id, ip_hash) VALUES (${presetId}, ${ipHash}) ON CONFLICT DO NOTHING`;
-  await sql`
+  const hidden = await sql`
     UPDATE presets SET hidden = true
     WHERE id = ${presetId} AND NOT hidden
       AND (SELECT count(*) FROM reports WHERE preset_id = ${presetId}) >= ${envNumber(
         'REPORT_HIDE_THRESHOLD',
         5
-      )}`;
+      )}
+    RETURNING id`;
+  // the CDN keeps answering it until purged
+  if (hidden.length > 0) context.waitUntil(purgeTags([presetTag(presetId)]));
   return empty();
 };
 
@@ -291,7 +300,7 @@ export default async (req: Request, context: Context) => {
       if (req.method === 'GET') return await getNameAvailable(url);
     } else if (!action) {
       if (req.method === 'GET') return await getPreset(id);
-      if (req.method === 'PUT') return await updatePreset(id, req);
+      if (req.method === 'PUT') return await updatePreset(id, req, context);
     } else if (action === 'report') {
       if (req.method === 'POST') return await reportPreset(id, context);
     } else if (action === 'opened') {

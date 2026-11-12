@@ -1,15 +1,19 @@
+import { purgeCache } from '@netlify/functions';
 import { PRESET_NAME_MAX_LENGTH, presetDataSchema, presetHash } from '../../libs/preset-schema/src';
+import { BROWSER_REVALIDATE, PRESET_CDN_CACHE } from '../utils/cdn-cache';
 import { sha256 } from '../utils/http';
 import { verifyTurnstile } from '../utils/turnstile';
 import handler, { config } from '../functions/presets.mjs';
 import { createFakeSql, JsonValue, pgError } from './fake-sql';
-import { caller, ID, IP_HASH, IP_SALT, OTHER_ID } from './helpers';
+import { caller, context, ID, IP_HASH, IP_SALT, OTHER_ID, request } from './helpers';
 
 const mockSql = createFakeSql();
 jest.mock('../utils/db', () => ({ db: () => mockSql.sql }));
 jest.mock('../utils/turnstile', () => ({ verifyTurnstile: jest.fn() }));
+jest.mock('@netlify/functions', () => ({ purgeCache: jest.fn() }));
 
 const verifyTurnstileMock = verifyTurnstile as jest.Mock;
+const purgeCacheMock = purgeCache as jest.Mock;
 
 const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 
@@ -45,6 +49,7 @@ beforeEach(() => {
   mockSql.respond(Q.countPresets, [{ count: 0 }]);
   mockSql.respond(Q.countReports, [{ count: 0 }]);
   verifyTurnstileMock.mockReset().mockResolvedValue(true);
+  purgeCacheMock.mockReset().mockResolvedValue(undefined);
   process.env.IP_HASH_SALT = IP_SALT;
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -272,6 +277,47 @@ describe('PUT /api/presets/:id', () => {
     expect(query.text).toContain('updated_at = now()');
     expect(query.text).not.toContain('clip_id =');
     expect(query.text).toContain('RETURNING clip_id AS "clipId"');
+    // the CDN answers the updated preset
+    expect(purgeCacheMock).toHaveBeenCalledTimes(1);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
+  });
+
+  it('purges the tag of the id in lower case, as the DB gives it, whatever the case of the URL', async () => {
+    editable({});
+    mockSql.respond(Q.update, [{ clipId: null }]);
+    const { status, body } = await update(undefined, ID.toUpperCase());
+    expect(status).toBe(200);
+    expect(body).toEqual({ id: ID, name: 'New name', clipId: null });
+    expect(mockSql.find(Q.update)[0].values[3]).toBe(ID);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
+  });
+
+  it('succeeds when the purge of the cache fails, logging it', async () => {
+    editable({});
+    mockSql.respond(Q.update, [{ clipId: null }]);
+    purgeCacheMock.mockRejectedValue(new Error('purge failed'));
+    const { status, body } = await update();
+    expect(status).toBe(200);
+    expect(body).toEqual({ id: ID, name: 'New name', clipId: null });
+    expect(console.error).toHaveBeenCalledWith('Cache purge failed', [`preset-${ID}`], expect.any(Error));
+  });
+
+  it('answers without waiting for the purge, handed to the runtime', async () => {
+    editable({});
+    mockSql.respond(Q.update, [{ clipId: null }]);
+    // the purge API hangs until the end of the test
+    let answerPurge: () => void = () => undefined;
+    purgeCacheMock.mockReturnValue(new Promise<void>((resolve) => (answerPurge = resolve)));
+    const waitUntil = jest.fn();
+    const body = { name: 'New name', data, editToken: EDIT_TOKEN };
+    const response = await handler(request('PUT', `/api/presets/${ID}`, body), { ...context, waitUntil });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: ID, name: 'New name', clipId: null });
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
+    answerPurge();
+    await waitUntil.mock.calls[0][0];
   });
 
   it.each([
@@ -286,6 +332,7 @@ describe('PUT /api/presets/:id', () => {
     const [query] = mockSql.find(Q.update);
     expect(query.text).toContain('updated_at = now() , clip_id = $4 WHERE id = $5');
     expect(query.values.slice(3)).toEqual([clipId, ID]);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
   });
 
   it('rejects a clip that is not saved with 400', async () => {
@@ -294,6 +341,7 @@ describe('PUT /api/presets/:id', () => {
     const { status, body } = await update({ name: 'New name', data, editToken: EDIT_TOKEN, clipId: CLIP_ID });
     expect(status).toBe(400);
     expect(body).toEqual({ error: 'Clip not found' });
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('returns 404 for an invalid id without a query', async () => {
@@ -307,6 +355,7 @@ describe('PUT /api/presets/:id', () => {
     editable({ hidden: true });
     expect((await update()).status).toBe(404);
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -319,12 +368,14 @@ describe('PUT /api/presets/:id', () => {
     expect(status).toBe(403);
     expect(body).toEqual({ error: 'You can only edit presets saved from this browser' });
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('allows one update per 5 seconds', async () => {
     editable({ throttled: true });
     expect((await update()).status).toBe(429);
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('rejects a name of another preset with 409', async () => {
@@ -333,6 +384,7 @@ describe('PUT /api/presets/:id', () => {
     const { status, body } = await update();
     expect(status).toBe(409);
     expect(body).toEqual({ error: 'Name “New name” is already taken' });
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('rejects a sound of another preset with 409 and returns that preset', async () => {
@@ -348,12 +400,14 @@ describe('PUT /api/presets/:id', () => {
       clipId: null,
     });
     expect(mockSql.find(Q.findByHash)[0].values).toEqual([presetHash(data)]);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('fails with 500 on other database errors', async () => {
     editable({});
     mockSql.respond(Q.update, new Error('deadlock'));
     expect((await update()).status).toBe(500);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -366,6 +420,7 @@ describe('PUT /api/presets/:id', () => {
     editable({});
     expect((await update(body)).status).toBe(400);
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 });
 
@@ -413,12 +468,16 @@ describe('GET /api/presets/:id', () => {
   const noClip = { clipId: null, clipName: null, clipData: null };
   const clipData = { bpm: 128, length: 3840, notes: [[0, 480, 60, 100]] };
 
-  it('returns a visible preset without caching', async () => {
+  it('returns a visible preset, kept by the CDN under its tag', async () => {
     mockSql.respond(Q.get, [{ ...row, ...noClip }]);
     const { status, body, headers } = await call('GET', `/api/presets/${ID}`);
     expect(status).toBe(200);
     expect(body).toEqual({ ...row, clip: null });
-    expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(headers.get('Cache-Control')).toBe(BROWSER_REVALIDATE);
+    expect(headers.get('Netlify-CDN-Cache-Control')).toBe(PRESET_CDN_CACHE);
+    expect(headers.get('Netlify-Cache-Tag')).toBe(`preset-${ID}`);
+    // a day, a minute stale at most: one deleted, hidden or not purged is never answered the week of a list
+    expect(PRESET_CDN_CACHE).toBe('public, durable, s-maxage=86400, stale-while-revalidate=60');
 
     const [query] = mockSql.find(Q.get);
     expect(query.values).toEqual([ID]);
@@ -428,17 +487,21 @@ describe('GET /api/presets/:id', () => {
 
   it('returns the clip it opens with, its name in it', async () => {
     mockSql.respond(Q.get, [{ ...row, clipId: CLIP_ID, clipName: 'Riff', clipData }]);
-    const { body } = await call('GET', `/api/presets/${ID}`);
+    const { body, headers } = await call('GET', `/api/presets/${ID}`);
     expect(body).toEqual({ ...row, clip: { id: CLIP_ID, clip: { ...clipData, name: 'Riff' } } });
+    // an update of the clip purges the presets that open with it
+    expect(headers.get('Netlify-Cache-Tag')).toBe(`preset-${ID},clip-${CLIP_ID}`);
 
     mockSql.respond(Q.get, [{ ...row, clipId: CLIP_ID, clipName: null, clipData }]);
     expect((await call('GET', `/api/presets/${ID}`)).body.clip).toEqual({ id: CLIP_ID, clip: clipData });
   });
 
-  it('returns 404 for a missing preset', async () => {
-    const { status, body } = await call('GET', `/api/presets/${ID}`);
+  it('returns 404 for a missing or hidden preset, never cached', async () => {
+    const { status, body, headers } = await call('GET', `/api/presets/${ID}`);
     expect(status).toBe(404);
     expect(body).toEqual({ error: 'Preset not found' });
+    expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(headers.get('Netlify-CDN-Cache-Control')).toBeNull();
   });
 
   it('returns 404 for an invalid id without a query', async () => {
@@ -649,6 +712,34 @@ describe('POST /api/presets/:id/report', () => {
     const [hide] = mockSql.find(Q.hide);
     expect(hide.values).toEqual([ID, ID, 5]);
     expect(hide.text).toContain('AND NOT hidden');
+    expect(hide.text).toContain('RETURNING id');
+    // under the threshold: nothing hidden, nothing purged
+    expect(purgeCacheMock).not.toHaveBeenCalled();
+  });
+
+  it('purges the cached preset once reports hide it', async () => {
+    mockSql.respond(Q.exists, [{ id: ID }]);
+    mockSql.respond(Q.hide, [{ id: ID }]);
+    expect((await report()).status).toBe(204);
+    expect(purgeCacheMock).toHaveBeenCalledTimes(1);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
+  });
+
+  it('purges the tag of the id in lower case, as the DB gives it, whatever the case of the URL', async () => {
+    mockSql.respond(Q.exists, [{ id: ID }]);
+    mockSql.respond(Q.hide, [{ id: ID }]);
+    expect((await report(ID.toUpperCase())).status).toBe(204);
+    expect(mockSql.find(Q.hide)[0].values).toEqual([ID, ID, 5]);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`preset-${ID}`] });
+  });
+
+  it('hides the preset when the purge of the cache fails, logging it', async () => {
+    mockSql.respond(Q.exists, [{ id: ID }]);
+    mockSql.respond(Q.hide, [{ id: ID }]);
+    purgeCacheMock.mockRejectedValue(new Error('purge failed'));
+    expect((await report()).status).toBe(204);
+    expect(mockSql.find(Q.hide)).toHaveLength(1);
+    expect(console.error).toHaveBeenCalledWith('Cache purge failed', [`preset-${ID}`], expect.any(Error));
   });
 
   it('takes the threshold from REPORT_HIDE_THRESHOLD', async () => {

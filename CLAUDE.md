@@ -105,12 +105,15 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
 - **Persisted state**: extend the model's `modelToSnap`/`applySnap` **and** `presetDataSchema` in
   `libs/preset-schema` (unknown keys are stripped silently). `applySnap` must handle falsy values (`!== undefined`)
   and missing keys mean defaults. A new field changes every preset hash: DB presets get it by a migration after
-  deploy, not legacy code.
+  deploy, not legacy code, then `netlify api purgeCache` (the CDN cached the old presets again between the two).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), the knob
   ids of `targets.rs` / `VOICE_MODULES` (a new module goes last; `voice-modules.spec` holds them).
 - **Netlify**: function specs live in `netlify/tests/`, never in `netlify/functions/` (every file there is
   deployed). Functions import `libs/preset-schema` by relative path (esbuild doesn't know the tsconfig aliases).
-  Netlify doesn't typecheck functions: `npm run typecheck` does.
+  Netlify doesn't typecheck functions: `npm run typecheck` does. `GET /api/presets/:id` is kept a day (and a minute
+  stale) by the CDN under the tags `preset-<id>`/`clip-<id>` (`utils/cdn-cache.ts`): a new write that changes or
+  deletes that answer purges its tag (`context.waitUntil(purgeTags(…))`, a scheduled function awaits it); presets
+  changed by hand in the DB need `netlify api purgeCache`.
 
 ## Specs
 

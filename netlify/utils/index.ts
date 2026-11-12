@@ -1,4 +1,5 @@
 import { S3Client } from '@aws-sdk/client-s3';
+import { cachedHeaders, LIST_CDN_CACHE } from './cdn-cache';
 import { json } from './http';
 
 // the buckets of the tables (R2_BUCKET) and of the noise samples (R2_NOISES_BUCKET), Cloudflare R2 through its S3
@@ -20,19 +21,9 @@ export const getHeaders = () => {
   };
 };
 
-// the CDN keeps a list a day in its shared (durable) cache, a deploy clears it: every start of the synth asks for both
-// lists, the function runs about once a day for the whole site, not once a visit. A day stale it is still answered
-// while the CDN asks the function again. The browser asks the CDN every time
-export const LIST_CDN_CACHE = 'public, durable, s-maxage=86400, stale-while-revalidate=604800';
-export const LIST_BROWSER_CACHE = 'public, max-age=0, must-revalidate';
-
-// the tree of a list, cached (LIST_CDN_CACHE)
+// the tree of a list, kept by the CDN (LIST_CDN_CACHE): an upload shows after a deploy or within a day
 export const listResponse = (tree: unknown) =>
-  json(tree, 200, {
-    ...getHeaders(),
-    'Cache-Control': LIST_BROWSER_CACHE,
-    'Netlify-CDN-Cache-Control': LIST_CDN_CACHE,
-  });
+  json(tree, 200, { ...getHeaders(), ...cachedHeaders(LIST_CDN_CACHE) });
 
 // the answer of a list that failed (R2 unreachable, its variables missing): logged, no error or trace sent (Netlify
 // would answer a function that threw with its message and stack), never cached (no-store of `json`)
