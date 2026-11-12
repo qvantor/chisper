@@ -28,6 +28,7 @@ import {
   setLatencyMode,
   switchToNormalLatency,
 } from '../common/latency/latency';
+import { ManualLink } from './manual-link';
 
 const { colors } = theme;
 
@@ -195,6 +196,9 @@ export const SettingsButton = () => {
               </Count>
             </PopoverGroup>
           )}
+          <PopoverGroup>
+            <ManualLink />
+          </PopoverGroup>
         </>
       }
       open={open}

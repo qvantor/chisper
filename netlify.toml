@@ -41,3 +41,20 @@
   from = "/files/noises/*"
   to = "https://noises.chisper.qvantor.org/:splat"
   status = 200
+
+# the folders of the manual (apps/site) have no page of their own: each opens its hub, the Getting started of its
+# language (Netlify takes a path with and without its trailing slash alike)
+[[redirects]]
+  from = "/manual/"
+  to = "/manual/getting-started/"
+  status = 301
+
+[[redirects]]
+  from = "/es/manual/"
+  to = "/es/manual/primeros-pasos/"
+  status = 301
+
+[[redirects]]
+  from = "/de/anleitung/"
+  to = "/de/anleitung/erste-schritte/"
+  status = 301

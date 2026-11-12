@@ -1,5 +1,5 @@
 export { RxHandle } from './rx-handle';
-export { ABOUT_PATH, ABOUT_TITLE, Header, HeaderSection } from './header';
+export { ABOUT_PATH, ABOUT_TITLE, Header, HeaderSection, MANUAL_PATH } from './header';
 export { ToastAsk, Toasts } from './toast';
 export { NoteValueKeys } from './note-value-keys';
 export { OctaveControl } from './octave-control';

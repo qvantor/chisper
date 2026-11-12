@@ -40,6 +40,13 @@ describe('SettingsButton', () => {
     expect(screen.getByRole('button', { name: 'Settings' }).classList.contains('active')).toBe(true);
   });
 
+  it('links to the manual, in a new tab', async () => {
+    await open();
+    const link = screen.getByRole('link', { name: 'Manual' });
+    expect(link).toHaveAttribute('href', '/manual/getting-started/');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
   // the tempo is set on the strip of the roll, its MIDI Clock in the Midi popover
   it('has no tempo and no MIDI Clock', async () => {
     await open();

@@ -1,0 +1,209 @@
+---
+title: 'How to Use Chisper: Getting Started with the Online Synth'
+h1: 'Getting started with Chisper'
+description: 'Play the free online synth with your computer keyboard, a MIDI keyboard or touch, open presets, learn the screen and save a sound to share, no account.'
+nav: 'Getting started'
+updated: 2026-11-12
+preset: biting-brass-keys
+image: synth-map
+---
+
+Chisper is a wavetable synthesizer that runs in your browser. Open [chisper.qvantor.org](/), click anywhere and play
+the letter keys of your computer keyboard: <kbd>Z</kbd> is C3, <kbd>Q</kbd> is C4. A popular preset is already
+loaded; turn any knob to change it, then save the result as a preset with a link anyone can open. No download, no
+account.
+
+This page takes you through the first ten minutes: starting the sound, playing it, finding presets, the parts of
+the screen, the first knobs to turn and saving a sound of your own.
+
+## Step 1: open Chisper and start the sound
+
+Open [chisper.qvantor.org](/) in Chrome, Edge, Firefox or Safari (16.4 or later), on a computer, a Chromebook or a
+phone. Every start opens a random preset from the Popular list, so the first sound is a surprise; its name is in
+the header.
+
+Browsers keep a page silent until you touch it, so the sound starts with your first click, tap or key press
+anywhere on the page. There is no start button to look for.
+
+<Note>
+
+A MIDI keyboard alone doesn't wake the sound up: the browser waits for the page itself to be clicked, tapped or
+typed on. If you play only MIDI, click the page once first.
+
+</Note>
+
+## Step 2: play it
+
+### How do I play a synth with my computer keyboard?
+
+Two rows of letters are two octaves of a piano. The bottom row starts at <kbd>Z</kbd> = C3 and goes up the white
+keys <kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> <kbd>M</kbd>, with the black keys
+on the row above it (<kbd>S</kbd> <kbd>D</kbd>, <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd>). The top row starts an
+octave higher at <kbd>Q</kbd> = C4, its black keys on the digits (<kbd>2</kbd> <kbd>3</kbd>, <kbd>5</kbd> <kbd>6</kbd>
+and <kbd>7</kbd>), and runs up to <kbd>]</kbd> = G5.
+
+<KeyboardMap />
+
+- <kbd>↓</kbd> and <kbd>↑</kbd> move both rows down or up an octave, from octave 0 to octave 6. The browser
+  remembers where you left them. The box left of the on-screen keys shows the octave (C3) and has the same arrows.
+- The keys go by their place on the keyboard, not by their letter: on a German keyboard the key
+  labelled <kbd>Y</kbd> plays C3 (it sits where <kbd>Z</kbd> is), on a French one <kbd>W</kbd> does.
+- Nothing plays while <kbd>Ctrl</kbd> or <kbd>⌘</kbd> is held or while you type in a text field, so shortcuts and
+  the preset search make no noise.
+- Every note from the computer keyboard has the same velocity (100). For soft and hard notes, use a
+  [MIDI keyboard](/manual/midi-keyboard-setup/).
+
+### The on-screen piano and the pitch wheel
+
+The bottom row of the screen is a piano: as many octaves as the window fits (up to five), starting an octave below
+the computer keyboard. Click the keys, or on a touch screen play them with several fingers and slide across them for
+a glissando.
+
+Left of it is the pitch wheel. Drag it up or down to bend the notes; it springs back when you let go. The **Up** and
+**Down** boxes beside it set how far it bends, in semitones (0 to 24, 2 by default), and the preset keeps them.
+
+## Step 3: pick a preset
+
+<Figure name='presets' alt='The Presets dialog of Chisper: the Popular tab, the search field and a list of presets, each with the number of its listeners' narrow>
+
+Click the name of the preset in the header to open the dialog. A click on a row plays that preset at once and the
+dialog stays open, so you can go through them one after another.
+
+</Figure>
+
+- **Popular** lists the featured presets and the ones listeners stay with; the number beside a preset is how many
+  listeners stayed with it.
+- **All** lists every preset, sorted by **New**, **A–Z** or **Popular**. Typing in *Search all presets* searches
+  them all by name.
+- **◀ ▶** beside the name in the header step through the list you were in (the popular presets, or your last
+  search), so you don't even need the dialog.
+- The circular arrow, **Init preset**, loads *Init*: a plain sound of one oscillator with the rest switched off.
+  Your own sounds start here.
+- A **\*** after the name means you have changed the sound since it was opened or saved.
+- Every preset has a link of its own (`chisper.qvantor.org/?preset=…`): the address bar shows it as soon as you
+  pick one.
+
+## What is on the screen?
+
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='The whole screen of Chisper on a computer with its parts numbered: the header; the sub, the oscillators, the noise and the filter in the top row; the envelopes, LFOs, velocity and voicing under them; the keys at the bottom'>
+
+1. **Logo**: opens this site in a new tab. The synth keeps playing in its own.
+2. **Spectrum**: the frequencies coming out of the synth right now, low on the left, high on the right.
+3. **OSC | FX**: switches the top row between the sources of the sound and the effects (distortion, delay and
+   reverb, in any order you drag them into).
+4. **Presets**: the name, ◀ ▶ and the circular arrow of *Init*; under them **Save**, **Share**, **Midi** (your
+   [MIDI keyboard](/manual/midi-keyboard-setup/)) and the gear (the latency of the sound, this manual).
+5. **Master**: the volume of everything, −40 to +12 dB, with a meter beside it. A limiter after it keeps the peaks
+   from clipping.
+6. **Sub**: a sub oscillator for weight in the low end: a sine or one of five other simple shapes, up to four
+   octaves away from the note.
+7. **Osc 1**: the first [wavetable oscillator](/manual/wavetables/). The table and its arrows on top, the pitch
+   (**Oct**, **Semi**, **Fine**), the wave that plays, and **Gain**, **Wave**, **Detune** and **Blend** under it.
+8. **Osc 2**: the second one, the same in every way; *Init* has it off.
+9. **Noise**: a noise oscillator in every voice: white, pink and brown noise, hats, vinyl crackle and more, looped
+   or played once.
+10. **Filter**: a filter in every voice, eight types, with **Cutoff**, **Res** and **Gain**.
+11. **ENV 1–3**: [envelopes](/manual/modulation-envelopes-lfo/). ENV 1 is the volume of every note.
+12. **LFO 1–4**: [LFOs](/manual/modulation-envelopes-lfo/) that move any knob you drag them onto.
+13. **VELO**: what the velocity of a note does.
+14. **Voicing**: **Poly** and how many notes play at once (1 to 12, 8 by default), **Legato** and
+    **Portamento**.
+15. **Pitch wheel** and the octave of the computer keyboard.
+16. **Keys**: the on-screen piano.
+17. **Clip**: the loop of the piano roll. A click opens the roll over the synth, ▶ plays the clip.
+
+</InterfaceMap>
+
+A part with a box in its title bar can be switched off and on: click the title. *Init* starts with Osc 1 on and
+Osc 2, Noise, Sub and Filter off.
+
+## First knobs: do it, hear it
+
+A knob turns when you drag it: up or right raises it, down or left lowers it. Its value shows while you hold it.
+Right-click a knob (on a touch screen, hold it) for its menu; **Default** there puts it back. A double-click does
+nothing, so reach for the menu.
+
+Load *Init* (the circular arrow by the name), hold a note with one hand and turn with the other.
+
+### Wave
+
+*Init* plays the table *Basic Shapes*: nine basic waves. Turn **Wave** on Osc 1 and the tone steps from one wave to
+the next; the strip under the wave shows where you are (Wave 3/9). On a table of 256 frames the same turn is a
+smooth sweep, and that sweep is what wavetable synthesis is about.
+
+### Detune and Blend
+
+Every oscillator plays a unison of voices on each note: *Init* has two (**Unison** under the wave, up to 8).
+**Detune** (0 to 100, 5 by default) spreads them in pitch: turn it up and the note gets wider and more chorused.
+**Blend** sets the level of the centre voices against the side ones, 75% by default.
+
+### Cutoff
+
+Switch the Filter on with a click on its title. It is a lowpass with its cutoff at 440 Hz by default (the knob
+shows the hertz without the unit). Turn **Cutoff** down and the sound gets darker, up and it opens; raise **Res**
+and a whistle rises at the cutoff.
+
+## Exercise: your first sound from scratch
+
+<Try title='From Init to a supersaw lead in five moves' preset='supersaw-lead'>
+
+1. Load *Init* (the circular arrow by the name) and hold <kbd>Q</kbd>.
+2. Set **Unison** on Osc 1 to 8 and turn **Detune** to about 30.
+3. Turn **Wave** to the last wave of *Basic Shapes*.
+4. Switch the Filter on and bring **Cutoff** down to about 1000.
+5. Raise **Res** a little.
+
+You should hear a single thin tone turn into a wide lead, then lose its brightest edge as the filter closes. The
+preset below is that sound finished: 8 voices at Detune 30 on a saw table, an envelope opening the filter on every
+note.
+
+</Try>
+
+## How do I save and share a sound without an account?
+
+1. Press **Save** (or <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
+2. Give it a name of up to 40 characters. Names are unique, capitals or not: a taken one says so as you type.
+3. Press **Save**. The dialog shows the link of your preset and **Copy link**.
+
+Whoever opens the link hears your sound: every knob, every modulation and every effect. **Share** in the header
+copies the link of the preset again later. It plays the sound as it was saved, so save again before you share a
+change.
+
+There is no account: the browser you saved from keeps a key to the preset, and that browser can overwrite it later
+(**Save** then offers **Save** and **Save as new**). Another browser, another device or cleared site data can't
+overwrite it, only save a new one.
+
+If the piano roll has notes, the dialog also offers **Default clip**: the preset then opens with that melody, and
+its link plays it too.
+
+<Note>
+
+A preset is removed 90 days after you last saved or opened it, unless by then at least two people have each played
+it for a minute. From then on it stays.
+
+</Note>
+
+## Chisper on a phone
+
+<Figure name='phone-keys' alt='Chisper on a phone in the Keys mode: the synth above two rows of keys, the octave keys and the pitch wheel' phone>
+
+The Keys mode of a phone: the synth on top, two rows of keys under it.
+
+</Figure>
+
+Phones and tablets get a layout of their own (a large tablet on its side shows the full screen of a computer). Its
+header has the same presets, **Save** and **Share**, the screens **OSC**, **FX** and **CLIP**, and two modes:
+
+- **Keys** (the default): a small live view of the synth over two rows of keys, C4 over C3, one octave each held
+  upright and two on its side. Each row has octave keys of its own; the pitch wheel is at the side.
+- **Synth**: the parts of the synth one under the other (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO,
+  Voicing) to scroll through; **CLIP** opens the piano roll on the whole screen.
+
+On an iPhone or iPad the sound plays even with the silent switch on.
+
+## Where next
+
+- [Modulation: envelopes, LFOs and velocity](/manual/modulation-envelopes-lfo/): make any knob move by itself.
+- [Wavetables](/manual/wavetables/): the library, tables of your own from WAV and audio files, drawing a wave.
+- [MIDI keyboards, Chromebooks and iPads](/manual/midi-keyboard-setup/): setup, playing from a DAW in sync, latency
+  and what to do when there is no sound.

@@ -1,0 +1,16 @@
+---
+// a table of the text, scrolled sideways on a narrow screen rather than squeezed
+---
+
+<div class='table'>
+  <table {...Astro.props}>
+    <slot />
+  </table>
+</div>
+
+<style>
+  .table {
+    margin: 24px 0;
+    overflow-x: auto;
+  }
+</style>

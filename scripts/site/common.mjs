@@ -4,8 +4,9 @@ import { execFileSync } from 'node:child_process';
 
 const { SITE, presetUrl } = await import('../../apps/site/src/i18n/locales.ts');
 const { DEMOS } = await import('../../apps/site/src/data/demos.ts');
+const { MANUAL_PRESETS } = await import('../../apps/site/src/manual/presets.ts');
 
-export { DEMOS, SITE };
+export { DEMOS, MANUAL_PRESETS, SITE };
 
 // the preset of a clip (data/demos.ts)
 export const presetOf = (slug) => {

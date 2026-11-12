@@ -1,0 +1,45 @@
+---
+import OpenPreset from './OpenPreset.astro';
+import { MESSAGES } from '../../i18n';
+import type { PresetKey } from '../../manual/open-preset';
+import { langOf } from '../../manual/pages';
+
+interface Props {
+  title: string;
+  // a preset where the result can be heard made
+  preset?: PresetKey;
+}
+
+// an exercise: what to do, step by step, and what to hear (the slot), a preset that has it done
+const { title, preset } = Astro.props;
+const m = MESSAGES[langOf(Astro.url.pathname)];
+---
+
+<section class='try'>
+  <p class='label'>{m.manual.tryIt}</p>
+  <h3>{title}</h3>
+  <div class='steps'>
+    <slot />
+  </div>
+  {preset && <OpenPreset preset={preset} />}
+</section>
+
+<style>
+  .try {
+    --tint: var(--second-accent);
+
+    margin: 32px 0;
+    padding: 20px 22px 22px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--raised);
+  }
+
+  .try h3 {
+    margin: 10px 0 6px;
+  }
+
+  .steps {
+    margin-bottom: 16px;
+  }
+</style>

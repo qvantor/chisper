@@ -1,0 +1,166 @@
+---
+title: 'Wavetables: Import WAV Tables, Make One from Audio, Draw'
+h1: 'Wavetables: import, make from audio, draw'
+description: 'How wavetables work in Chisper: 2048-sample frames, up to 256 of them, the clm marker. Import a WAV wavetable, make one from an audio file or draw a wave.'
+nav: 'Wavetables'
+updated: 2026-11-12
+preset: ufo-drone
+image: editor-audio
+---
+
+A wavetable is a row of single-cycle waves (frames), usually 2048 samples each and up to 256 in a table. An
+oscillator of Chisper plays one frame at a time, and its **Wave** knob moves through them, so the tone changes as you
+turn it or as an envelope or LFO turns it for you. Pick a table from the library, import a WAV wavetable you
+already have (other synths and wavetable packs use the same format), turn any short audio file into a table, or
+draw a wave by hand.
+
+## What is a wavetable?
+
+A single cycle of a wave repeated over and over is a tone: its shape is its timbre. A wavetable lines up many such
+cycles, from a sine to a saw, from one vowel to another, from a clean tone to a growl, and the oscillator plays the
+one at the position of **Wave**.
+
+- **A frame** is one cycle, 2048 samples in most tables. It plays at the pitch of the note, whatever its length in
+  samples.
+- **A table** holds up to 256 frames. **Wave** picks one; the strip under the wave shows where you are
+  (*Wave 33/256*).
+- **A morph table** has few frames but plays as 256: Chisper fills the gaps with crossfades of the frames on either
+  side, so a turn of **Wave** sweeps smoothly from one to the next. A table says it is one in the marker of its file
+  (below), and every table made from an audio file is one.
+- **No clicks:** when **Wave** moves, a voice fades into the new frame over one cycle of its note (5 ms at most).
+
+<Figure name='oscillator' alt='Osc 1 of Chisper on the table Spectral Gyro at frame 33 of 256: the table name with its arrows, Oct, Semi and Fine, the wave of that frame, Wave 33/256, Phase, Phase rand, Unison 3, and the Gain, Wave, Detune and Blend knobs' narrow>
+
+An oscillator: the table on top, the frame that plays in the middle, **Wave** under it.
+
+</Figure>
+
+## The library
+
+The name of the table sits between **◀ ▶** at the top of each oscillator. The arrows step through every table of
+the library, folder after folder; a click on the name opens the browser.
+
+<Figure name='wavetable-browser' alt='The wavetable browser of Chisper: folders on the left with the number of tables in each, the tables of the Spectral folder on the right with their sizes' narrow>
+
+Folders on the left (with how many tables each holds), the tables of the open folder on the right.
+
+</Figure>
+
+Use the arrow keys too: <kbd>↑</kbd> <kbd>↓</kbd> within a column, <kbd>→</kbd> <kbd>←</kbd> between the folders
+and the tables. *Init* plays *Basic Shapes* from the Basics folder. Tables download when you pick them; the bar
+under the name shows the download.
+
+## The wavetable editor
+
+Click the pencil at the top left of the wave of an oscillator. The editor fills the screen; on its left are two
+tabs, **Manual** (the highlighter: draw) and **Audio file** (the speaker: import and make), and the cross at the
+top closes it.
+
+What you change plays at once: there is no Apply button and no undo. Picking another table in the oscillator
+replaces your work.
+
+Both tabs have the strip of frames on top: click a frame (or turn its **Wave** knob) to edit it; the oscillator
+moves to it too.
+
+### How do I draw a wave?
+
+<Figure name='editor-draw' alt='The Manual tab of the wavetable editor: the strip of the frames of the table on top, the frame being edited on a grid, the Wave, Grid X and Grid Y knobs on the left'>
+
+The Manual tab: the frames on top, the frame you edit on its grid.
+
+</Figure>
+
+Press on the chart and drag. Every column of the grid you pass over takes the height under the pointer, snapped to
+the grid. A mouse, a finger or a pen all draw.
+
+- **Grid X**: the number of columns, 4 to 256 (16 by default). Few columns give steps and squares; many give
+  detail.
+- **Grid Y**: how finely the height snaps: 2, 5, 10 or 20 steps from the middle to the top (5 by default).
+- **+** at the end of the strip adds a copy of the current frame at the end of the table, up to 256 frames.
+
+<Tip>
+
+Draw a few frames that differ a little, then turn **Wave** with an LFO or an envelope: even a rough drawing moves
+like a real wavetable.
+
+</Tip>
+
+### How do I import a WAV wavetable?
+
+1. Open the **Audio file** tab.
+2. Drop the file onto it, or press **Choose a file**.
+3. The table plays at once, the editor shows its frames on the Manual tab, and a message says how many it has.
+
+A file is taken as a wavetable when:
+
+- it is a WAV with a `clm` marker, the marker of the wavetables of other synths: its frame size and whether it is
+  a morph table are read from it; **or**
+- it is a WAV of whole 2048-sample frames, 1 to 256 of them (many wavetable packs have no marker).
+
+The file may be 8, 16, 24 or 32-bit PCM or 32 or 64-bit float, mono or stereo (the left channel is used). Its
+sample rate doesn't matter: the frames are read as they are, never resampled. Of a table with a marker and more
+than 256 frames, the first 256 play, and the message says so.
+
+### How do I make a wavetable from an audio file?
+
+<Figure name='editor-audio' alt='The Audio file tab of the wavetable editor with a bass sound loaded: the frames cut from it on top, the sound with the cut windows marked, the current frame below, the W Count, Size and Phase knobs'>
+
+An audio file cut into 32 frames: the windows are marked on the sound, the frame you picked is below.
+
+</Figure>
+
+Any other audio file is cut into frames: drop it or press **Choose a file** (WAV, MP3, OGG, FLAC, M4A, whatever your
+browser plays), up to 12 seconds long. Or try one of the examples: *Square Wave*, *707 Kick*, *Bass sound*.
+
+- **W Count**: how many frames to cut, 1 to 64 (32 by default), evenly spaced over the whole file.
+- **Size**: the length of each frame, 16 to 2048 samples (512 by default). The frame becomes one cycle, so a
+  shorter Size plays a shorter piece of the sound at the pitch of the note.
+- **Phase**: shifts all the cuts later, by up to one step between two of them.
+- The folder key under the knobs goes back to the drop screen for another file.
+
+The result is a morph table: it plays as 256 crossfaded frames, so turning **Wave** sweeps through the sound from
+its start to its end.
+
+**What makes a good source?** One note held at a steady pitch: a sung vowel, a bass note, a synth pad. Chisper
+doesn't look for the pitch, it cuts where the knobs say, so a frame loops cleanly only when it holds whole cycles of
+the sound. At 44.1 kHz a frame of 512 samples is exactly one cycle of 86 Hz (a little under F2), one of 1024 is
+one cycle of 43 Hz: a note near those pitches, or an octave above them, gives the cleanest frames. A drum hit or a
+noisy texture works too, as a rougher, grittier table.
+
+<Note>
+
+The audio file stays loaded while the page is open, and going back to the **Audio file** tab cuts it into the
+oscillator again, over anything you drew since. Press the folder key first if you want to keep your drawing.
+
+</Note>
+
+## Where does my own table live?
+
+Only in the oscillator of the page you made it in. A preset saves the name of a library table, not your frames:
+after a reload, and for anyone who opens your preset or its link, the library table plays instead.
+
+That is why the logo of the synth opens this site in a new tab: the synth keeps your table in its own.
+
+## Why isn't my file accepted?
+
+- **"… is not an audio file"**: its type and name are neither audio nor `.wav`, `.aiff`, `.flac`, `.mp3` and the
+  like. A dropped file that isn't audio isn't taken at all.
+- **"… is longer than 12 seconds"**: trim the audio; only a WAV wavetable may be longer.
+- **"… can't be read as audio"**: your browser can't decode it (a rare codec, a damaged file). Convert it to WAV.
+- A table of the library that doesn't load stops its bar under the name; the oscillator keeps the table it had.
+  *Not enough memory for the table* or *The table failed to build* say the same, with **Retry**.
+
+## Exercise: make your own wavetable
+
+<Try title='A table from a kick drum' preset='ufo-drone'>
+
+1. Open the editor of Osc 1 (the pencil) and the **Audio file** tab, then press **707 Kick**.
+2. Set **W Count** to 8 and close the editor.
+3. Turn **Wave** of Osc 1 all the way up, to the last frame.
+4. Drag the **ENV 2** tab onto **Wave** and drag its dot down to −100%.
+5. Play a few notes.
+
+You should hear every note start on the hard click of the kick and slide into its low tail as ENV 2 falls back to
+zero: a pitched, punchy hit made of a drum. The preset below sweeps two tables with envelopes for an ambient drone.
+
+</Try>

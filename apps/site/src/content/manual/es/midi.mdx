@@ -1,0 +1,196 @@
+---
+title: 'Teclado MIDI en el navegador: ajustes, Chromebook, iPad y soluciones'
+h1: 'Teclado MIDI, Chromebook, iPad: configuración y solución de problemas'
+description: 'Conecta un teclado MIDI o tu DAW a Chisper con MIDI Clock, toca en Chromebook, iPad o móvil, elige la latencia y arregla la falta de sonido o los chasquidos.'
+nav: 'MIDI y dispositivos'
+updated: 2026-11-12
+preset: theremin
+image: midi
+---
+
+Conecta un teclado MIDI USB a un ordenador, un Chromebook o un móvil Android, abre el sintetizador online Chisper
+en Chrome, Edge, Opera o Firefox y permite el acceso MIDI cuando el navegador lo pida: el teclado suena al momento,
+con la velocidad de cada nota (la fuerza con la que pulsas la tecla) y pitch bend. Safari, y cualquier navegador de iPhone y iPad, no tiene Web MIDI: ahí, toca las teclas
+de la pantalla o el teclado del ordenador. Un DAW toca Chisper igual, a través de un puerto MIDI virtual, y su MIDI
+Clock marca el tempo.
+
+## ¿Qué navegadores y dispositivos funcionan?
+
+<CompatTable />
+
+Todos los navegadores necesitan WebAssembly SIMD y AudioWorklet, el motor del sonido: Chrome y Edge 91 o posterior,
+Firefox 89 o posterior, Safari 16.4 o posterior. **Elegir latencia** es el ajuste que se explica más abajo: solo
+Chromium en ordenador lo admite.
+
+## ¿Cómo conecto un teclado MIDI?
+
+1. Conecta el teclado, antes o después de abrir Chisper: aparece en los dos casos.
+2. Abre [chisper.qvantor.org](/). El navegador pregunta si el sitio puede usar tus dispositivos MIDI: permítelo.
+   Chrome y Edge lo preguntan en una ventanita junto a la barra de direcciones; Firefox te pide que añadas un
+   pequeño complemento de permiso del sitio para MIDI.
+3. Chisper elige el primer teclado que encuentra y te lo dice (*… connected*). ¡A tocar!
+
+El sonido arranca con tu primer clic, toque o pulsación de tecla en la página: si hasta ahora solo has tocado por
+MIDI, haz clic una vez en la página.
+
+## El menú Midi
+
+<Figure name='midi' alt='El menú MIDI de Chisper: la luz IN, un teclado elegido en Input, los botones de Channel All y de 1 a 16, y la luz de Sync to MIDI Clock esperando un reloj' narrow>
+
+**Midi** en la cabecera: la entrada, su canal y el reloj.
+
+</Figure>
+
+- **Input**: tus dispositivos. Haz clic en uno para tocar desde él; un punto en el botón **Midi** indica que hay
+  uno elegido. Un dispositivo que conectes más tarde aparece aquí, y el que elegiste vuelve solo cuando lo conectas
+  de nuevo. La pestaña conserva tu elección al recargar.
+- **Channel**: **All** (por defecto) o uno de 1 a 16. El botón de un canal se ilumina mientras suena una nota en
+  él, así que ves por qué canal envía tu teclado.
+- **IN** se ilumina mientras mantienes pulsada una tecla: la forma más rápida de comprobar que llegan las notas.
+- **Sync to MIDI Clock**: mira más abajo.
+
+Al cambiar la entrada o el canal se sueltan las notas que se mantenían en el anterior.
+
+## ¿Qué lee Chisper del MIDI?
+
+- **Notas y velocidad.** La velocidad es la fuente [VELO](/es/manual/modulacion-envolventes-lfo/): por defecto fija
+  el volumen de cada nota. La misma nota mantenida en dos canales es una sola voz.
+- **Pitch bend**, hasta donde marquen los recuadros **Up** y **Down** junto a la rueda de pitch (de 0 a 24
+  semitonos, 2 por defecto; el preset los guarda).
+- **MIDI Clock** de un DAW o de una caja de ritmos, con Start, Stop, Continue y Song Position. Con **Sync to MIDI
+  Clock** activado (por defecto), el tempo de Chisper sigue al reloj tras un pulso de este: la luz pasa de *Waiting
+  for a clock* al tempo (*120 BPM*), y el recuadro de tempo del piano roll muestra **EXT**. Medio segundo sin reloj
+  y Chisper vuelve a su propio tempo. Stop detiene el piano roll donde está; los LFO siguen en marcha.
+
+Todavía no se leen: Control Change (la rueda de modulación, un pedal de sustain, perillas y faders), aftertouch ni
+cambios de programa. Chisper no envía MIDI.
+
+## ¿Cómo toco Chisper desde un DAW y lo sincronizo con la canción?
+
+Chisper recibe MIDI de cualquier programa, no solo de un teclado: un DAW como Ableton Live, Logic Pro, FL Studio,
+Cubase, Reaper o Bitwig puede tocarlo desde una pista MIDI y marcarle el tempo con MIDI Clock. El DAW envía a un
+puerto MIDI virtual, y el navegador ve ese puerto como un dispositivo MIDI más.
+
+1. **Crea un puerto MIDI virtual.** En un Mac, abre *Configuración de Audio MIDI* (*Audio MIDI Setup*), elige
+   *Ventana → Mostrar estudio MIDI*, haz doble clic en *Driver IAC* y marca *El dispositivo está conectado*. En
+   Windows, instala un driver de puertos virtuales gratuito como loopMIDI y añade un puerto.
+2. **Envía el DAW a ese puerto.** Pon la salida MIDI de una pista en ese puerto y envía MIDI Clock al mismo puerto.
+   Los nombres cambian de un DAW a otro (aquí, los menús en inglés): en Ableton Live, *Settings → Link, Tempo &
+   MIDI* y **Sync** en la salida del puerto; en Logic Pro, *File → Project Settings → Synchronization → MIDI* y
+   *Transmit MIDI Clock*; en FL Studio, *Options → MIDI settings*, el puerto de salida con *Send master sync*.
+3. **Elígelo en Chisper.** Abre **Midi**, elige el puerto (*IAC Driver Bus 1*, *loopMIDI Port*) como **Input** y
+   deja **Sync to MIDI Clock** activado. Haz clic una vez en la página: el MIDI por sí solo no arranca el sonido.
+4. **Dale a play en el DAW.** La luz muestra su tempo y el recuadro de tempo del piano roll muestra **EXT**. Todo
+   LFO, tiempo de envolvente y delay en BPM sigue a la canción, y las notas de la pista tocan Chisper.
+
+- Start, Stop, Continue y Song Position también llegan. Pulsa Play en el piano roll de Chisper mientras manda el
+  reloj: el clip espera al Start del DAW y luego suena a tempo con la canción, desde donde arranque el DAW.
+- Con el botón del ancla de un LFO activado, un LFO en Free se mantiene sobre los tiempos de la canción.
+- Chisper escucha una sola entrada. Para tocar también tu teclado, deja que el DAW lo reciba y lo reenvíe por el
+  mismo puerto (en Windows es la forma de hacerlo de todos modos: un dispositivo suele estar abierto en un solo
+  programa).
+- El sonido sale del navegador un poco después de que el DAW envíe una nota: el navegador recibe el MIDI entre sus
+  otras tareas y añade la latencia de su audio (Low la acorta). La mayoría de los DAW pueden adelantar un poco una
+  pista para compensarlo. Ten Chisper en una ventana propia junto al DAW, no en una pestaña oculta: los navegadores
+  ralentizan las pestañas ocultas.
+- Chisper no envía audio al DAW. Para grabarlo ahí, lleva la salida del navegador al DAW con un driver de audio de
+  bucle (BlackHole en Mac, VB-CABLE en Windows), o graba la salida de tu interfaz de audio.
+
+## Tocar sin teclado MIDI
+
+Las letras del teclado del ordenador son dos filas de un piano, <kbd>Z</kbd> = C3 y <kbd>Q</kbd> = C4,
+y <kbd>↓</kbd> <kbd>↑</kbd> las mueven una octava (de 0 a 6). Tocan según el sitio de cada tecla, no según su letra,
+así que las mismas teclas tocan en QWERTY, QWERTZ y AZERTY. Todas las notas tienen velocidad 100.
+
+<KeyboardMap />
+
+En una pantalla táctil, las teclas de la parte de abajo se tocan con varios dedos a la vez, y deslizar el dedo por
+ellas toca un glissando. Más en [Primeros pasos](/es/manual/primeros-pasos/).
+
+## ¿Funciona Chisper en un Chromebook?
+
+Sí. Chrome en un Chromebook es Chrome en un ordenador: los teclados MIDI por USB, la elección de latencia, el
+teclado del ordenador y el piano en pantalla funcionan. No hay nada que instalar, así que Chisper sirve de
+sintetizador en los Chromebooks de clase y del trabajo donde no puedes añadir software, y no necesita las
+aplicaciones de Linux de ChromeOS.
+
+## ¿Funciona Chisper en un iPhone o un iPad?
+
+Sí, en Safari para iOS y iPadOS 16.4 o posterior (todos los navegadores de un iPhone o un iPad usan el motor de
+Safari, así que Chrome ahí es lo mismo). El sonido se oye incluso con el interruptor de silencio activado.
+
+En iOS no hay Web MIDI, así que ahí un teclado MIDI no puede tocar Chisper: usa las dos filas de teclas de la
+disposición para móvil (el modo **Keys**) o, en un iPad, el piano en pantalla. Dibujar una onda en el
+[editor de wavetables](/es/manual/wavetables/) funciona con el dedo o con un Apple Pencil.
+
+En Android, Chrome tiene Web MIDI: un teclado MIDI USB conectado con un adaptador USB-C toca igual que en un
+ordenador.
+
+## Latencia: Auto, Low y Normal
+
+<Figure name='settings' alt='El menú Settings de Chisper: Latency con Auto (en Low), Low y Normal, la nota Switches to Normal if the sound crackles, y el número de cortes desde que se abrió la página' narrow>
+
+El engranaje de la cabecera: la latencia y cuántos cortes ha tenido el sonido desde que se abrió la página. Debajo
+está el enlace a este manual.
+
+</Figure>
+
+La latencia es el tiempo que pasa entre pulsar una tecla y oírla. **Low** responde más rápido; **Normal** da más
+margen al ordenador, así que el sonido se mantiene estable en uno lento. En Chrome en un Mac, el navegador toca 128
+muestras cada vez en Low y 256 en Normal.
+
+- **Auto** (por defecto) empieza en Low donde el navegador puede contar los cortes (Chrome y Edge recientes) y, si
+  no, en Normal, y muestra bajo su nombre lo que ha elegido.
+- Si en Low el sonido se corta en tres segundos distintos dentro de un mismo minuto, Chisper pregunta *The sound
+  crackles. Switch to Normal for a steady sound?* (el sonido cruje, ¿pasar a Normal para que sea estable?), y a
+  partir de ahí Auto se queda en Normal. La nota bajo los botones dice entonces *Low crackled on this computer*; su
+  enlace **Try low again** hace que Auto vuelva a empezar en Low.
+- Un cambio recarga la página; la pestaña conserva el sonido y la entrada MIDI.
+- Solo Chromium en ordenador (Chrome, Edge, Opera, Chrome en un Chromebook) deja que una página elija. Safari,
+  Firefox y los móviles fijan la latencia por su cuenta, y el menú dice *This browser sets the latency itself*.
+
+## Solución de problemas
+
+### No hay sonido
+
+- **Haz clic en la página, tócala o pulsa una tecla** una vez: los navegadores solo arrancan el sonido entonces, y
+  una nota MIDI no cuenta.
+- Revisa la perilla **Master** (del todo abajo es −∞) y el volumen de la pestaña, del sistema y de la salida por la
+  que escuchas.
+- *Oscillators can't play: Not supported by this browser*: al navegador le falta AudioWorklet, Web Workers,
+  MessageChannel o WebAssembly SIMD. Actualízalo (Safari 16.4 o posterior) o usa Chrome, Edge o Firefox.
+- *Oscillators can't play: Needs HTTPS or localhost*: abre [https://chisper.qvantor.org](/).
+- *Failed to load* bajo los osciladores, o *No sound: the master limiter failed*: pulsa **Retry**. Un preset que se
+  está abriendo también se queda en silencio un momento, hasta que llegan sus tablas.
+
+### Chasquidos y cortes
+
+- Elige **Normal** en la latencia (Chrome y Edge en ordenador).
+- Menos voces gastan menos: baja **Unison** o el número de voces de **Poly**.
+- Cierra otras pestañas y aplicaciones pesadas, y enchufa el portátil a la corriente: el ahorro de energía puede
+  ralentizar el motor de sonido.
+
+### Mi teclado MIDI no aparece o no funciona
+
+- El menú Midi dice *MIDI isn't available: no Web MIDI in this browser, or access was denied.* O el navegador no
+  tiene Web MIDI (Safari, cualquier navegador de iOS) o se denegó el permiso MIDI: permite los dispositivos MIDI
+  para chisper.qvantor.org en la configuración del sitio del navegador y recarga.
+- Dice *No MIDI device connected. Plug one in, it shows up here.* Prueba con otro cable (algunos cables USB solo
+  sirven para cargar) y otro puerto, y comprueba que el teclado está encendido y en su modo USB MIDI.
+- En Windows, a menudo un dispositivo MIDI solo puede estar abierto en un programa a la vez: cierra tu DAW o
+  cualquier otra aplicación musical que use el teclado y recarga la página.
+- Llegan notas (la luz **IN** se enciende) pero no suena nada: pon **Channel** en **All**, o en el canal cuyo botón
+  se ilumina.
+
+## Ejercicio: toca con la rueda de pitch
+
+<Try title='Un theremin con pitch bend' preset='theremin'>
+
+1. Abre el preset de abajo y conecta tu teclado.
+2. Mantén una nota y mueve la rueda de pitch de tu teclado hacia arriba y de vuelta.
+3. Toca una melodía lenta, empezando cada nota antes de que acabe la anterior.
+
+Deberías oír cada nota deslizarse hacia la siguiente (un preset mono con legato y un portamento de 150 ms) y el
+bend subir la nota y devolverla a su sitio.
+
+</Try>

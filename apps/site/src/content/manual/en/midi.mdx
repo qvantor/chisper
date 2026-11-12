@@ -1,0 +1,191 @@
+---
+title: 'MIDI Keyboard in the Browser: Setup, Chromebook, iPad and Fixes'
+h1: 'MIDI keyboard, Chromebook, iPad: setup and troubleshooting'
+description: 'Connect a MIDI keyboard or your DAW to Chisper with MIDI Clock sync, play on a Chromebook, iPad or phone, set the latency, fix no sound or a missing device.'
+nav: 'MIDI and devices'
+updated: 2026-11-12
+preset: theremin
+image: midi
+---
+
+Plug a USB MIDI keyboard into a computer, a Chromebook or an Android phone, open Chisper in Chrome, Edge, Opera or
+Firefox and allow MIDI when the browser asks: the keyboard plays at once, with velocity and pitch bend. Safari, and
+every browser on iPhone and iPad, has no Web MIDI: play the keys on the screen or the computer keyboard there. A
+DAW plays Chisper the same way through a virtual MIDI port, its MIDI Clock leading the tempo.
+
+## Which browsers and devices work?
+
+<CompatTable />
+
+Every browser needs WebAssembly SIMD and AudioWorklet, the engine of the sound: Chrome and Edge 91 or later,
+Firefox 89 or later, Safari 16.4 or later. **Latency choice** is the setting below: only Chromium on a computer
+takes it.
+
+## How do I connect a MIDI keyboard?
+
+1. Plug the keyboard in, before or after you open Chisper: it shows up either way.
+2. Open [chisper.qvantor.org](/). The browser asks whether the site may use your MIDI devices: allow it. Chrome
+   and Edge ask in a small window by the address bar; Firefox asks you to add a small site permission add-on for
+   MIDI.
+3. Chisper picks the first keyboard it finds and says so (*… connected*). Play.
+
+The sound starts with your first click, tap or key press on the page: if you have played only MIDI so far, click
+the page once.
+
+## The Midi menu
+
+<Figure name='midi' alt='The MIDI menu of Chisper: the IN lamp, a keyboard selected under Input, the Channel keys All and 1 to 16, and the Sync to MIDI Clock lamp waiting for a clock' narrow>
+
+**Midi** in the header: the input, its channel and the clock.
+
+</Figure>
+
+- **Input**: your devices. Click one to play from it; a dot on the **Midi** key shows one is chosen. A device
+  plugged in later shows up here, and the one you chose comes back by itself when you plug it in again. The tab
+  keeps your choice through a reload.
+- **Channel**: **All** (the default) or one of 1 to 16. A channel key lights up while a note plays on it, so you see
+  which channel your keyboard sends.
+- **IN** lights up while you hold a key: the quickest check that notes arrive.
+- **Sync to MIDI Clock**: see below.
+
+Changing the input or the channel lets go of the notes held on the old one.
+
+## What does Chisper read from MIDI?
+
+- **Notes and velocity.** Velocity is the [VELO](/manual/modulation-envelopes-lfo/) source: by default it sets the
+  volume of each note. The same note held on two channels is one voice.
+- **Pitch bend**, as far as the **Up** and **Down** boxes beside the pitch wheel say (0 to 24 semitones, 2 by
+  default; the preset keeps them).
+- **MIDI Clock** from a DAW or a drum machine, with Start, Stop, Continue and Song Position. With **Sync to MIDI
+  Clock** on (the default), the tempo of Chisper follows the clock after one beat of it: the lamp goes from
+  *Waiting for a clock* to the tempo (*120 BPM*), and the tempo box of the piano roll shows **EXT**. Half a second
+  without a clock and Chisper keeps its own tempo again. Stop stops the piano roll where it is; the LFOs keep
+  running.
+
+Not read yet: Control Change (the mod wheel, a sustain pedal, knobs and faders), aftertouch and program changes.
+Chisper sends no MIDI out.
+
+## How do I play Chisper from a DAW and sync it to the song?
+
+Chisper takes MIDI from any program, not only from a keyboard: a DAW such as Ableton Live, Logic Pro, FL Studio,
+Cubase, Reaper or Bitwig can play it from a MIDI track and lead its tempo with MIDI Clock. The DAW sends to a
+virtual MIDI port, and the browser sees that port as one more MIDI device.
+
+1. **Make a virtual MIDI port.** On a Mac, open *Audio MIDI Setup*, choose *Window → Show MIDI Studio*,
+   double-click *IAC Driver* and check *Device is online*. On Windows, install a free virtual port driver such as
+   loopMIDI and add a port.
+2. **Send the DAW to it.** Set the MIDI output of a track to that port and send MIDI Clock to the same port. The
+   names differ from DAW to DAW: in Ableton Live, *Settings → Link, Tempo & MIDI* and **Sync** on the output of the
+   port; in Logic Pro, *File → Project Settings → Synchronization → MIDI* and *Transmit MIDI Clock*; in FL Studio,
+   *Options → MIDI settings*, the output port with *Send master sync*.
+3. **Pick it in Chisper.** Open **Midi**, choose the port (*IAC Driver Bus 1*, *loopMIDI Port*) as the **Input**
+   and keep **Sync to MIDI Clock** on. Click the page once: MIDI alone doesn't start the sound.
+4. **Press play in the DAW.** The lamp shows its tempo and the tempo box of the piano roll shows **EXT**. Every
+   LFO, envelope time and delay set in BPM follows the song, and the notes of the track play Chisper.
+
+- Start, Stop, Continue and Song Position come along. Press Play in the piano roll of Chisper while the clock
+  leads: the clip waits for the Start of the DAW, then plays in time with the song, from where the DAW starts.
+- With the anchor key of an LFO on, a Free LFO stays on the beats of the song.
+- Chisper listens to one input. To play your keyboard too, let the DAW take it and pass it on through the same port
+  (on Windows that is the way anyway: a device is often open in one program only).
+- The sound comes out of the browser a little after the DAW sends a note: the browser takes MIDI in between its
+  other work and adds the latency of its audio (Low keeps it short). Most DAWs can send a track a little early to
+  make up for it. Keep Chisper in a window of its own beside the DAW, not in a hidden tab: browsers slow hidden
+  tabs down.
+- Chisper sends no audio to the DAW. To record it there, route the output of the browser into the DAW with a
+  loopback audio driver (BlackHole on a Mac, VB-CABLE on Windows), or record the output of your audio interface.
+
+## Playing without a MIDI keyboard
+
+The letters of the computer keyboard are two rows of a piano, <kbd>Z</kbd> = C3 and <kbd>Q</kbd> = C4, and the
+arrows <kbd>↓</kbd> <kbd>↑</kbd> move them by an octave (0 to 6). They play by the place of a key, not its letter,
+so the same keys play on QWERTY, QWERTZ and AZERTY. Every note has velocity 100.
+
+<KeyboardMap />
+
+On a touch screen, the keys at the bottom of the screen play with several fingers at once, and sliding across them
+plays a glissando. More in [Getting started](/manual/getting-started/).
+
+## Does Chisper work on a Chromebook?
+
+Yes. Chrome on a Chromebook is Chrome on a computer: MIDI keyboards over USB, the latency choice, the computer
+keyboard and the on-screen piano all work. There is nothing to install, so Chisper runs on school and work
+Chromebooks where you can't add software, and it doesn't need the Linux apps of ChromeOS.
+
+## Does Chisper work on an iPhone or iPad?
+
+Yes, in Safari on iOS and iPadOS 16.4 or later (every browser of an iPhone or iPad uses the engine of Safari, so
+Chrome there is the same). The sound plays even with the silent switch on.
+
+There is no Web MIDI on iOS, so a MIDI keyboard can't play Chisper there: use the two rows of keys of the phone
+layout (the **Keys** mode), or the on-screen piano on an iPad. Drawing a wave in the
+[wavetable editor](/manual/wavetables/) works with a finger or an Apple Pencil.
+
+On Android, Chrome has Web MIDI: a USB MIDI keyboard through a USB-C adapter plays as on a computer.
+
+## Latency: Auto, Low and Normal
+
+<Figure name='settings' alt='The Settings menu of Chisper: Latency with Auto (on Low), Low and Normal, the note Switches to Normal if the sound crackles, and the count of dropouts since the page opened' narrow>
+
+The gear in the header: the latency and how many dropouts the sound has had since the page opened. Under them is
+the link to this manual.
+
+</Figure>
+
+Latency is the time between pressing a key and hearing it. **Low** answers faster; **Normal** gives the computer
+more room, so the sound stays steady on a slow one. In Chrome on a Mac the browser plays 128 samples at a time at
+Low and 256 at Normal.
+
+- **Auto** (the default) starts at Low where the browser can count dropouts (recent Chrome and Edge), else at
+  Normal, and shows what it picked under its name.
+- If the sound drops out in three different seconds within a minute at Low, Chisper asks *The sound crackles.
+  Switch to Normal for a steady sound?*, and Auto keeps Normal from then on. The note under the keys then
+  says *Low crackled on this computer*; its link **Try low again** makes Auto start at Low again.
+- A change reloads the page; the tab keeps the sound and the MIDI input.
+- Only Chromium on a computer (Chrome, Edge, Opera, Chrome on a Chromebook) lets a page choose. Safari, Firefox
+  and phones set the latency themselves, and the menu says *This browser sets the latency itself*.
+
+## Troubleshooting
+
+### No sound
+
+- **Click the page, tap it or press a key** once: browsers start the sound only then, and a MIDI note doesn't
+  count.
+- Check the **Master** knob (all the way down is −∞) and the volume of the tab, of the system and of the output
+  you listen to.
+- *Oscillators can't play: Not supported by this browser*: the browser lacks one of AudioWorklet, Web Workers,
+  MessageChannel or WebAssembly SIMD. Update it (Safari 16.4 or later) or use Chrome, Edge or Firefox.
+- *Oscillators can't play: Needs HTTPS or localhost*: open [https://chisper.qvantor.org](/).
+- *Failed to load* under the oscillators, or *No sound: the master limiter failed*: press **Retry**. A preset
+  being opened is silent for a moment too, until its tables arrive.
+
+### Crackles and dropouts
+
+- Choose **Normal** in the latency (Chrome and Edge on a computer).
+- Fewer voices cost less: lower **Unison** or the number of **Poly** voices.
+- Close other heavy tabs and apps, and plug a laptop in: power saving can slow the sound engine down.
+
+### My MIDI keyboard doesn't show up
+
+- The Midi menu says *MIDI isn't available: no Web MIDI in this browser, or access was denied.* Either the browser
+  has no Web MIDI (Safari, any browser on iOS) or the MIDI permission was refused: allow MIDI devices for
+  chisper.qvantor.org in the site settings of the browser and reload.
+- It says *No MIDI device connected. Plug one in, it shows up here.* Try another cable (some USB cables only
+  charge) and another port, and check that the keyboard is on and in its USB MIDI mode.
+- On Windows, a MIDI device can often be open in only one program at a time: close your DAW or any other music
+  app that uses the keyboard, then reload the page.
+- Notes arrive (the **IN** lamp lights) but nothing plays: set **Channel** to **All**, or to the channel whose key
+  lights up.
+
+## Exercise: play with the pitch wheel
+
+<Try title='Bend a theremin' preset='theremin'>
+
+1. Open the preset below and connect your keyboard.
+2. Hold a note, move the pitch wheel of your keyboard up and back.
+3. Play a slow melody, each note before the last one ends.
+
+You should hear every note glide into the next (a mono preset with legato and a 150 ms portamento) and the bend
+lift the note and bring it back.
+
+</Try>

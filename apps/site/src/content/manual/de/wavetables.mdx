@@ -1,0 +1,177 @@
+---
+title: 'Wavetable erstellen: WAV importieren, aus Audio machen, zeichnen'
+h1: 'Wavetables: importieren, aus Audio erstellen, zeichnen'
+description: 'Wavetables in Chisper: Frames mit 2048 Samples, bis zu 256, der clm-Marker. WAV-Wavetables importieren, Wavetable aus einer Audiodatei erstellen oder zeichnen.'
+nav: 'Wavetables'
+updated: 2026-11-12
+preset: ufo-drone
+image: editor-audio
+---
+
+Eine Wavetable ist eine Reihe von Einzelzyklus-Wellen (Frames), meist mit je 2048 Samples und bis zu 256 in einer
+Tabelle. Ein Oszillator von Chisper spielt immer einen Frame, und sein Regler **Wave** fährt durch sie hindurch:
+Der Klang ändert sich, wenn du ihn drehst oder eine Hüllkurve oder ein LFO das für dich tut. Wähl eine Tabelle aus
+der Bibliothek, importiere eine WAV-Wavetable, die du schon hast (andere Synths und Wavetable-Packs nutzen dasselbe
+Format), mach aus jeder kurzen Audiodatei eine Tabelle oder zeichne eine Welle von Hand.
+
+## Was ist eine Wavetable?
+
+Ein einzelner Zyklus einer Welle, immer wieder wiederholt, ist ein Ton: Seine Form ist seine Klangfarbe. Eine
+Wavetable reiht viele solcher Zyklen aneinander, von einem Sinus zu einem Sägezahn, von einem Vokal zum anderen,
+von einem sauberen Ton zu einem Growl, und der Oszillator spielt den Zyklus an der Position von **Wave**.
+
+- **Ein Frame** ist ein Zyklus, in den meisten Tabellen 2048 Samples. Er spielt in der Tonhöhe der Note, egal wie
+  viele Samples er lang ist.
+- **Eine Tabelle** fasst bis zu 256 Frames. **Wave** wählt einen; der Streifen unter der Welle zeigt, wo du bist
+  (*Wave 33/256*).
+- **Eine Morph-Tabelle** hat wenige Frames, spielt aber wie 256: Chisper füllt die Lücken mit Überblendungen der
+  Frames links und rechts davon, sodass eine Drehung an **Wave** fließend von einem zum nächsten fährt. Ob eine
+  Tabelle eine ist, steht im Marker ihrer Datei (siehe unten), und jede aus einer Audiodatei gemachte Tabelle ist
+  eine.
+- **Keine Klicks:** Wenn sich **Wave** bewegt, blendet eine Stimme über einen Zyklus ihrer Note (höchstens 5 ms) in
+  den neuen Frame über.
+
+<Figure name='oscillator' alt='Osc 1 von Chisper auf der Tabelle Spectral Gyro bei Frame 33 von 256: der Tabellenname mit seinen Pfeilen, Oct, Semi und Fine, die Welle dieses Frames, Wave 33/256, Phase, Phase rand, Unison 3 und die Regler Gain, Wave, Detune und Blend' narrow>
+
+Ein Oszillator: oben die Tabelle, in der Mitte der Frame, der gerade spielt, darunter **Wave**.
+
+</Figure>
+
+## Die Bibliothek
+
+Der Name der Tabelle steht zwischen **◀ ▶** oben an jedem Oszillator. Die Pfeile blättern durch alle Tabellen der
+Bibliothek, Ordner für Ordner; ein Klick auf den Namen öffnet den Wavetable-Browser.
+
+<Figure name='wavetable-browser' alt='Der Wavetable-Browser von Chisper: links Ordner mit der Zahl ihrer Tabellen, rechts die Tabellen des Ordners Spectral mit ihren Größen' narrow>
+
+Links die Ordner (mit der Zahl der Tabellen darin), rechts die Tabellen des geöffneten Ordners.
+
+</Figure>
+
+Auch die Pfeiltasten funktionieren: <kbd>↑</kbd> <kbd>↓</kbd> innerhalb einer Spalte, <kbd>→</kbd> <kbd>←</kbd>
+zwischen den Ordnern und den Tabellen. *Init* spielt *Basic Shapes* aus dem Ordner Basics. Tabellen werden
+geladen, wenn du sie auswählst; der Balken unter dem Namen zeigt den Download.
+
+## Der Wavetable-Editor
+
+Klick auf den Stift oben links an der Welle eines Oszillators. Der Editor füllt den Bildschirm; links hat er zwei
+Tabs, **Manual** (der Textmarker: zeichnen) und **Audio file** (der Lautsprecher: importieren und erstellen), und
+das Kreuz oben schließt ihn.
+
+Was du änderst, spielt sofort: Es gibt keinen Übernehmen-Knopf und kein Rückgängig. Wählst du im Oszillator eine
+andere Tabelle, ersetzt sie deine Arbeit.
+
+Beide Tabs haben oben den Streifen der Frames: Klick auf einen Frame (oder dreh am Regler **Wave**), um ihn zu
+bearbeiten; der Oszillator springt auch dorthin.
+
+### Wie zeichne ich eine Welle?
+
+<Figure name='editor-draw' alt='Der Tab Manual des Wavetable-Editors: oben der Streifen mit den Frames der Tabelle, der bearbeitete Frame auf einem Raster, links die Regler Wave, Grid X und Grid Y'>
+
+Der Tab Manual: oben die Frames, darunter der Frame, den du bearbeitest, auf seinem Raster.
+
+</Figure>
+
+Drück auf das Diagramm und zieh. Jede Spalte des Rasters, über die du fährst, nimmt die Höhe unter dem Zeiger an,
+am Raster eingerastet. Maus, Finger und Stift zeichnen gleichermaßen.
+
+- **Grid X**: die Zahl der Spalten, 4 bis 256 (Standard 16). Wenige Spalten ergeben Stufen und Rechtecke, viele
+  ergeben Details.
+- **Grid Y**: wie fein die Höhe einrastet: 2, 5, 10 oder 20 Stufen von der Mitte bis oben (Standard 5).
+- **+** am Ende des Streifens hängt eine Kopie des aktuellen Frames ans Ende der Tabelle an, bis zu 256 Frames.
+
+<Tip>
+
+Zeichne ein paar Frames, die sich ein wenig unterscheiden, und lass dann einen LFO oder eine Hüllkurve an **Wave**
+drehen: Selbst eine grobe Zeichnung bewegt sich wie eine echte Wavetable.
+
+</Tip>
+
+### Wie importiere ich eine WAV-Wavetable?
+
+1. Öffne den Tab **Audio file**.
+2. Zieh die Datei darauf, oder drück **Choose a file**.
+3. Die Tabelle spielt sofort, der Editor zeigt ihre Frames im Tab Manual, und eine Meldung sagt, wie viele es sind.
+
+Eine Datei wird als Wavetable genommen, wenn:
+
+- sie eine WAV-Datei mit einem `clm`-Marker ist, dem Marker der Wavetables anderer Synths: Ihre Framegröße und ob
+  sie eine Morph-Tabelle ist, werden daraus gelesen; **oder**
+- sie eine WAV-Datei aus ganzen Frames von 2048 Samples ist, 1 bis 256 davon (viele Wavetable-Packs haben keinen
+  Marker).
+
+Die Datei darf 8-, 16-, 24- oder 32-Bit-PCM oder 32- oder 64-Bit-Float sein, mono oder stereo (genutzt wird der
+linke Kanal). Ihre Samplerate spielt keine Rolle: Die Frames werden gelesen, wie sie sind, nie umgerechnet. Hat
+eine Tabelle mit Marker mehr als 256 Frames, spielen die ersten 256, und die Meldung sagt das.
+
+### Wie erstelle ich eine Wavetable aus einer Audiodatei?
+
+<Figure name='editor-audio' alt='Der Tab Audio file des Wavetable-Editors mit einem geladenen Bass-Sound: oben die daraus geschnittenen Frames, der Sound mit markierten Schnittfenstern, darunter der aktuelle Frame, die Regler W Count, Size und Phase'>
+
+Eine Audiodatei, in 32 Frames geschnitten: Die Fenster sind auf dem Sound markiert, darunter der ausgewählte
+Frame.
+
+</Figure>
+
+Jede andere Audiodatei wird in Frames geschnitten: Zieh sie hinein oder drück **Choose a file** (WAV, MP3, OGG,
+FLAC, M4A, alles, was dein Browser abspielt), bis zu 12 Sekunden lang. Oder probier eines der Beispiele:
+*Square Wave*, *707 Kick*, *Bass sound*.
+
+- **W Count**: wie viele Frames geschnitten werden, 1 bis 64 (Standard 32), gleichmäßig über die ganze Datei
+  verteilt.
+- **Size**: die Länge jedes Frames, 16 bis 2048 Samples (Standard 512). Der Frame wird zu einem Zyklus, eine
+  kürzere Size spielt also ein kürzeres Stück des Sounds in der Tonhöhe der Note.
+- **Phase**: verschiebt alle Schnitte nach hinten, um bis zu einen Schritt zwischen zwei von ihnen.
+- Die Ordnertaste unter den Reglern führt zurück zum Drop-Bildschirm, für eine andere Datei.
+
+Das Ergebnis ist eine Morph-Tabelle: Sie spielt wie 256 überblendete Frames, eine Drehung an **Wave** fährt also
+durch den Sound, von seinem Anfang bis zu seinem Ende.
+
+**Was ist eine gute Quelle?** Eine Note, auf gleichbleibender Tonhöhe gehalten: ein gesungener Vokal, ein Basston,
+ein Synth-Pad. Chisper sucht nicht nach der Tonhöhe, es schneidet dort, wo die Regler es sagen: Ein Frame loopt
+also nur sauber, wenn er ganze Zyklen des Sounds enthält. Bei 44,1 kHz sind 512 Samples genau ein Zyklus von 86 Hz
+(knapp unter F2), 1024 genau ein Zyklus von 43 Hz: Eine Note nahe dieser Tonhöhen oder eine Oktave darüber ergibt
+die saubersten Frames. Ein Drum-Hit oder eine rauschige Textur funktioniert auch, als rauere, körnigere Tabelle.
+
+<Note>
+
+Die Audiodatei bleibt geladen, solange die Seite offen ist, und gehst du zurück zum Tab **Audio file**, wird sie
+erneut in den Oszillator geschnitten, über alles, was du seitdem gezeichnet hast. Drück vorher die Ordnertaste,
+wenn du deine Zeichnung behalten willst.
+
+</Note>
+
+## Wo liegt meine eigene Tabelle?
+
+Nur im Oszillator der Seite, auf der du sie gemacht hast. Ein Preset speichert den Namen einer Tabelle aus der
+Bibliothek, nicht deine Frames: Nach einem Neuladen, und für jeden, der dein Preset oder seinen Link öffnet, spielt
+stattdessen die Tabelle aus der Bibliothek.
+
+Deshalb öffnet das Logo des Synths diese Website in einem neuen Tab: Der Synth behält deine Tabelle in seinem.
+
+## Warum wird meine Datei nicht angenommen?
+
+- **"… is not an audio file"**: Ihr Typ und ihr Name sind weder Audio noch `.wav`, `.aiff`, `.flac`, `.mp3` und
+  Ähnliches. Eine hineingezogene Datei, die kein Audio ist, wird gar nicht erst angenommen.
+- **"… is longer than 12 seconds"**: Kürze das Audio; nur eine WAV-Wavetable darf länger sein.
+- **"… can't be read as audio"**: Dein Browser kann sie nicht dekodieren (ein seltener Codec, eine beschädigte
+  Datei). Wandle sie in WAV um.
+- Eine Tabelle der Bibliothek, die nicht lädt, stoppt ihren Balken unter dem Namen; der Oszillator behält seine
+  bisherige Tabelle. *Not enough memory for the table* oder *The table failed to build* sagen dasselbe, mit
+  **Retry**.
+
+## Übung: eine eigene Wavetable erstellen
+
+<Try title='Eine Tabelle aus einer Kickdrum' preset='ufo-drone'>
+
+1. Öffne den Editor von Osc 1 (der Stift) und den Tab **Audio file**, dann drück **707 Kick**.
+2. Stell **W Count** auf 8 und schließ den Editor.
+3. Dreh **Wave** von Osc 1 ganz auf, bis zum letzten Frame.
+4. Zieh den Tab **ENV 2** auf **Wave** und zieh seinen Punkt auf −100 % herunter.
+5. Spiel ein paar Noten.
+
+Du solltest hören, wie jede Note auf dem harten Klick der Kick beginnt und in ihren tiefen Ausklang gleitet,
+während ENV 2 auf null zurückfällt: ein gestimmter, druckvoller Hit, aus einer Drum gemacht. Das Preset unten fährt
+mit Hüllkurven durch zwei Tabellen, für einen Ambient-Drone.
+
+</Try>

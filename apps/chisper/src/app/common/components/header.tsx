@@ -44,6 +44,8 @@ const Small = styled.small`
 // on in its own with what no snapshot keeps: a table drawn or imported in the editor)
 export const ABOUT_PATH = '/wavetable-synth/';
 export const ABOUT_TITLE = 'About Chisper';
+// its manual, the English Getting started (the hub of the manual of apps/site), in a new tab too
+export const MANUAL_PATH = '/manual/getting-started/';
 
 // a full-height header section, divided from the previous one by a line
 export const HeaderSection = styled.div`

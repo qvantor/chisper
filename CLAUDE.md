@@ -289,6 +289,15 @@ section names stay English). The root `/` is the synth; the build merges the sit
 (`scripts/site/merge.mjs`). Demo clips in `src/data/demos.ts` (mp3 not in git), images and video from production by
 `scripts/site/*.mjs`. The only JS: players, the video, the canvas art (`src/art/`, pure math).
 
+The manual: pages and their path per language in `src/manual/pages.ts` (the sitemap and hreflang pair them, the
+synth's `MANUAL_PATH` opens the hub), texts in `src/content/manual/<lang>/<page>.mdx` (a missing language fails the
+build; MDX is not run through Prettier: it breaks a paragraph at a line that starts with a tag), components in
+`components/manual/`, pictures in `src/assets/manual/` (`screens.mjs --only=manual`, with `synth-map.json`, the
+places of the parts of the synth; `--only=editor --url=…` for a change of the editor not yet on production), presets
+besides the clips' in `src/manual/presets.ts` (`check-presets.mjs`). Every fact is the code's: a change of what the
+synth shows or does updates the manual in the three languages in the same PR. `tests/manual.test.mjs` checks the
+pages as built.
+
 ### Libs
 
 - `math`: number, vector, typed-array helpers, FFT utilities, biquads (`@chisper/math/biquad` avoids pulling the

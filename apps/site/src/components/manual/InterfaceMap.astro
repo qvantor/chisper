@@ -1,0 +1,98 @@
+---
+import { Picture } from 'astro:assets';
+import map from '../../assets/manual/synth-map.json';
+import { figureOf } from '../../manual/figures';
+
+interface Props {
+  // the parts of the synth in the order of their numbers (the ids of synth-map.json)
+  parts: string[];
+  alt: string;
+}
+
+// the whole synth with a number on each of its parts, a paragraph on each under it (the slot: an ordered list in
+// the order of the numbers); the numbers are HTML over the picture (where screens.mjs measured each part as it shot
+// it), sharp at any width and in any language
+const { parts, alt } = Astro.props;
+const image = figureOf('synth-map');
+const boxes: Record<string, number[]> = map.parts;
+const percent = (value: number, of: number) => `${((value / of) * 100).toFixed(3)}%`;
+const marks = parts.map((id, index) => {
+  const box = boxes[id];
+  if (!box) throw new Error(`No part ${id} on the map of the synth (synth-map.json)`);
+  const [x, y, width, height] = box;
+  return {
+    id,
+    number: index + 1,
+    style: `left: ${percent(x, map.width)}; top: ${percent(y, map.height)}; width: ${percent(width, map.width)}; height: ${percent(height, map.height)}`,
+  };
+});
+---
+
+<figure class='map'>
+  <div class='shot'>
+    <Picture
+      src={image}
+      alt={alt}
+      formats={['avif', 'webp']}
+      widths={[760, 1440, image.width].filter(
+        (width, i, all) => width <= image.width && all.indexOf(width) === i
+      )}
+      sizes='(min-width: 1120px) 760px, 100vw'
+    />
+    {marks.map(({ id, number, style }) => (
+      <div class='part' style={style} data-part={id} aria-hidden='true'>
+        <span class='mark'>{number}</span>
+      </div>
+    ))}
+  </div>
+  <figcaption class='legend'>
+    <slot />
+  </figcaption>
+</figure>
+
+<style>
+  .map {
+    margin: 28px 0;
+  }
+
+  .shot {
+    position: relative;
+    border-radius: var(--radius-m);
+    overflow: hidden;
+    box-shadow: var(--raised);
+  }
+
+  .part {
+    position: absolute;
+    box-shadow: inset 0 0 0 2px rgb(52 152 219 / 70%);
+    border-radius: var(--radius-s);
+  }
+
+  /* at the top right of a part: its title stays readable */
+  .mark {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--second-accent);
+    color: var(--dark);
+    font: 700 12px/1 var(--font);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 35%);
+  }
+
+  .legend {
+    margin-top: 16px;
+  }
+
+  @media (max-width: 560px) {
+    .mark {
+      width: 18px;
+      height: 18px;
+      font-size: 10px;
+    }
+  }
+</style>

@@ -1,1 +1,1 @@
-export { MouseInteractive } from './mouse-interactive';
+export { PointerInteractive } from './pointer-interactive';

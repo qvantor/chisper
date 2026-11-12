@@ -1,60 +1,29 @@
 import React from 'react';
-import { Vector2D, number, vector2d } from '@chisper/math';
+import { number, vector2d } from '@chisper/math';
 import { LineChart, YAxis, Line } from '../line-chart';
 import { theme } from '../common/constants';
-import { MouseInteractive } from './components';
+import { PointerInteractive } from './components';
+
+const DOMAIN_Y = vector2d.fromValues(1, -1);
 
 interface Props {
   wave: number[];
+  // a column of the grid (0..2^rate − 1) set to a level (−1..1)
   onChange?: (value: [number, number]) => void;
   rate?: number;
   precisionY?: number;
 }
 
-// @todo improve performance
+// a wave drawn on a grid of 2^rate columns and precisionY rows a half: a mouse, a finger or a pen (no scroll or
+// zoom of the page under it while it draws)
 export const WaveDrawer = ({ rate = 4, precisionY = 10, wave, onChange }: Props) => {
-  const { domainX, domainY } = React.useMemo(() => {
-    const domainX = vector2d.fromValues(0, wave.length - 1);
-    const domainY = vector2d.fromValues(1, -1);
-    return { domainX, domainY };
-  }, [wave.length]);
-
-  const [mouse, setMouse] = React.useState<Vector2D | null>(null);
-  const [isMouseDown, setIsMouseDown] = React.useState(false);
-
-  const updateWave = React.useCallback((mouseValue: Vector2D) => onChange?.(mouseValue), [onChange]);
-  const onMouseDown = React.useCallback(() => {
-    if (!mouse) return;
-    updateWave(mouse);
-    setIsMouseDown(true);
-  }, [updateWave, mouse]);
-  const onMouseLeave = React.useCallback(() => {
-    setMouse(null);
-    setIsMouseDown(false);
-  }, []);
-
-  React.useEffect(() => {
-    if (!mouse || !isMouseDown) return;
-    updateWave(mouse);
-  }, [mouse, isMouseDown, updateWave]);
+  const domainX = React.useMemo(() => vector2d.fromValues(0, wave.length - 1), [wave.length]);
+  const columns = React.useMemo<[number, number]>(() => [0, number.powerOfTwo(rate)], [rate]);
 
   return (
-    <LineChart
-      onMouseDown={onMouseDown}
-      onMouseLeave={onMouseLeave}
-      onMouseUp={onMouseLeave}
-      domainX={domainX}
-      domainY={domainY}
-    >
+    <LineChart domainX={domainX} domainY={DOMAIN_Y} style={onChange ? { touchAction: 'none' } : undefined}>
       <YAxis ticks={precisionY * 2} />
-      {onChange && (
-        <MouseInteractive
-          mouse={mouse}
-          setMouse={setMouse}
-          precisionY={precisionY}
-          customDomainX={[0, number.powerOfTwo(rate)]}
-        />
-      )}
+      {onChange && <PointerInteractive precisionY={precisionY} customDomainX={columns} onDraw={onChange} />}
       <Line data={wave} style={{ fill: theme.colors.accent, fillOpacity: 0.2 }} />
     </LineChart>
   );

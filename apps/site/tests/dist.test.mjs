@@ -6,17 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { JSDOM } from 'jsdom';
-
-const ROOT = join(import.meta.dirname, '../../..');
-const DIST = join(ROOT, 'dist/apps/site');
-const SITE = 'https://chisper.qvantor.org';
-
-const PAGES = {
-  en: { path: '/wavetable-synth/', ogLocale: 'en_US' },
-  es: { path: '/es/sintetizador-wavetable/', ogLocale: 'es_ES' },
-  de: { path: '/de/wavetable-synthesizer/', ogLocale: 'de_DE' },
-};
-const LANGS = Object.keys(PAGES);
+import { DIST, LANGS, MANUAL, MANUAL_PAGES, PAGES, ROOT, SITE, attr, hrefs, pageAt } from './pages.mjs';
 const CLIPS = [
   'acid-bass',
   'warehouse-lead',
@@ -108,13 +98,7 @@ const TEXTS = {
   ],
 };
 
-const pageOf = (lang) => {
-  const file = join(DIST, PAGES[lang].path, 'index.html');
-  assert.ok(existsSync(file), `${file} built`);
-  return new JSDOM(readFileSync(file, 'utf8')).window.document;
-};
-
-const attr = (document, selector, name) => document.querySelector(selector)?.getAttribute(name);
+const pageOf = (lang) => pageAt(PAGES[lang].path);
 
 // a path of the site (/_astro/…, /demos/…, /og/…) is a file of the build; the synth's are not ours
 const isOwn = (url) => url.startsWith('/') && !url.startsWith('//') && url !== '/' && !url.startsWith('/?');
@@ -226,6 +210,42 @@ describe('every version of the page', () => {
         // the favicon is the synth's
         for (const url of own.filter((url) => url !== '/favicon.ico'))
           assert.ok(existsSync(fileOf(url)), url);
+      });
+
+      it('leads to the manual: sections and answers to their pages, the header and the footer to all of it', () => {
+        const more = [...document.querySelectorAll('.feature a.manual-link')].map((link) => [
+          link.closest('section').id,
+          link.getAttribute('href'),
+        ]);
+        assert.deepEqual(more, [
+          ['wavetables', MANUAL.wavetables[lang]],
+          ['modulation', MANUAL.modulation[lang]],
+          ['playing', MANUAL.midi[lang]],
+          ['editor', MANUAL.wavetables[lang]],
+        ]);
+        for (const link of document.querySelectorAll('.feature a.manual-link, #faq a.manual-link')) {
+          assert.ok(link.querySelector('svg.book'));
+          assert.ok(link.querySelector('.page-name').textContent.trim().length > 5);
+        }
+        assert.deepEqual(hrefs(document.querySelectorAll('#faq details a.manual-link')), [
+          MANUAL.midi[lang],
+          MANUAL.midi[lang],
+          MANUAL['getting-started'][lang],
+          MANUAL.wavetables[lang],
+          MANUAL['getting-started'][lang],
+        ]);
+        assert.equal(attr(document, 'header a.manual', 'href'), MANUAL['getting-started'][lang]);
+        assert.deepEqual(
+          hrefs(document.querySelectorAll('footer nav')[0].querySelectorAll('a')),
+          MANUAL_PAGES.map((page) => MANUAL[page][lang])
+        );
+      });
+
+      it('leads back to itself from the logo of its header and of its footer', () => {
+        assert.deepEqual(hrefs(document.querySelectorAll('header a.logo, footer a.logo')), [
+          PAGES[lang].path,
+          PAGES[lang].path,
+        ]);
       });
 
       it('links GitHub, Instagram and YouTube by their icons, each named', () => {
@@ -371,27 +391,36 @@ describe('the build', () => {
     assert.equal(existsSync(join(DIST, 'assets')), false);
   });
 
-  it('has a sitemap of the synth and the versions linked to each other', () => {
+  it('has a sitemap of the synth and every page, each linked to its versions', () => {
     assert.match(readFileSync(join(DIST, 'sitemap-index.xml'), 'utf8'), /sitemap-0\.xml/);
     const sitemap = new JSDOM(readFileSync(join(DIST, 'sitemap-0.xml'), 'utf8'), { contentType: 'text/xml' })
       .window.document;
     const urls = [...sitemap.getElementsByTagName('url')];
+    const groups = [
+      Object.fromEntries(LANGS.map((lang) => [lang, PAGES[lang].path])),
+      ...MANUAL_PAGES.map((page) => MANUAL[page]),
+    ];
     assert.deepEqual(
       urls.map((url) => url.getElementsByTagName('loc')[0].textContent).sort(),
-      [`${SITE}/`, ...LANGS.map((lang) => `${SITE}${PAGES[lang].path}`)].sort()
+      [`${SITE}/`, ...groups.flatMap((group) => LANGS.map((lang) => `${SITE}${group[lang]}`))].sort()
     );
     for (const url of urls) {
       const loc = url.getElementsByTagName('loc')[0].textContent;
-      const links = [...url.getElementsByTagName('xhtml:link')].map((link) => link.getAttribute('hreflang'));
-      assert.deepEqual(links, loc === `${SITE}/` ? [] : LANGS);
+      const links = [...url.getElementsByTagName('xhtml:link')].map((link) => [
+        link.getAttribute('hreflang'),
+        link.getAttribute('href'),
+      ]);
+      const group = groups.find((paths) => LANGS.some((lang) => `${SITE}${paths[lang]}` === loc));
+      assert.deepEqual(links, group ? LANGS.map((lang) => [lang, `${SITE}${group[lang]}`]) : [], loc);
     }
   });
 });
 
 describe('the synth', () => {
-  it('links the English version (About)', () => {
+  it('links the English version (About) and the English Getting started of the manual', () => {
     const source = readFileSync(join(ROOT, 'apps/chisper/src/app/common/components/header.tsx'), 'utf8');
     assert.equal(source.match(/ABOUT_PATH = '([^']+)'/)?.[1], PAGES.en.path);
+    assert.equal(source.match(/MANUAL_PATH = '([^']+)'/)?.[1], MANUAL['getting-started'].en);
   });
 
   // its page (/) is the one links to the site lead to: a title of its searches and the app as structured data
@@ -469,6 +498,6 @@ describe('robots.txt of the synth', () => {
   });
 
   it('names the sitemap', () => {
-    assert.match(robots, new RegExp(`^Sitemap: ${SITE}/sitemap-index\\.xml$`, 'm'));
+    assert.ok(robots.split(/\r?\n/).includes(`Sitemap: ${SITE}/sitemap-index.xml`), robots);
   });
 });

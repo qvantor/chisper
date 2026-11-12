@@ -19,7 +19,7 @@ export { Fader } from './fader';
 export { Tooltip } from './tooltip';
 export { WaveDrawer } from './wave-drawer';
 export { Analyser } from './analyser';
-export { FileDrop } from './file-drop';
+export { FileDrop, AUDIO_ACCEPT, isAudioFile } from './file-drop';
 export { Tabs } from './tabs';
 export { PianoKeyboard } from './piano-keyboard';
 export { PitchWheel, PITCH_WHEEL_WIDTH } from './pitch-wheel';

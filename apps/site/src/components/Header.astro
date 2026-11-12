@@ -1,21 +1,32 @@
 ---
+import BookIcon from './BookIcon.astro';
 import Logo from './Logo.astro';
 import type { Messages } from '../i18n';
+import { LOCALES, type Lang } from '../i18n/locales';
+import { MANUAL_HUB, manualPath } from '../manual/pages';
 
 interface Props {
+  lang: Lang;
   m: Messages;
 }
 
-// the wordmark and the key into the synth; the languages are in the footer (and in the alternates of the head)
-const { m } = Astro.props;
+// the wordmark (back to the landing of the language), the manual and the key into the synth; the languages are in
+// the footer (and in the alternates of the head)
+const { lang, m } = Astro.props;
 ---
 
 <header class='header'>
   <div class='column bar'>
-    <Logo />
-    <a class='key key-glow open' href='/'>
-      {m.openSynth}
-    </a>
+    <Logo href={LOCALES[lang].path} />
+    <nav class='links'>
+      <a class='key key-ghost manual' href={manualPath(MANUAL_HUB, lang)}>
+        <BookIcon />
+        {m.manual.name}
+      </a>
+      <a class='key key-glow open' href='/'>
+        {m.openSynth}
+      </a>
+    </nav>
   </div>
 </header>
 
@@ -39,13 +50,25 @@ const { m } = Astro.props;
     min-height: 68px;
   }
 
+  .links {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .manual,
   .open {
     min-height: 40px;
     padding: 0 16px;
     font-size: 12px;
   }
 
-  /* a phone: the wordmark alone (the first section has the key) */
+  .manual :global(.book) {
+    font-size: 17px;
+    color: var(--accent);
+  }
+
+  /* a phone: the wordmark and the manual (the first section has the key) */
   @media (max-width: 560px) {
     .open {
       display: none;

@@ -1,0 +1,256 @@
+---
+title: 'Synth Modulation: Envelopes, LFOs and Velocity on Any Knob'
+h1: 'Modulation: envelopes, LFOs and velocity'
+description: 'Drag an envelope, an LFO or velocity onto any knob of Chisper: ADSR with curves, tempo-synced LFOs, sidechain pumps, drawn LFO shapes, 64 routes.'
+nav: 'Modulation'
+updated: 2026-11-12
+preset: zesty-drive-bass
+image: modulation-drag
+---
+
+Modulation makes a knob move by itself. In Chisper you drag the tab of a source (an envelope, ENV 1–3, an LFO,
+LFO 1–4, or the velocity of the notes, VELO) onto any knob; the knob then moves with that source on every note,
+up or around its own value, as far as the amount you set. A preset holds up to 64 such routes, four on one knob.
+
+Envelopes shape each note from the moment you press it to after you let go: a pluck, a swell, a filter sweep. LFOs
+repeat a shape over and over, free or in time with the tempo: vibrato, a wobble, a sidechain pump, a gate. Velocity
+gives every note its own level, louder or brighter the harder you play.
+
+## The sources
+
+The sources are the tabs of the bottom row of the synth, each with a color of its own:
+
+- **ENV 1**, **ENV 2**, **ENV 3** (bottom left): three envelopes. ENV 1 is also the volume of every note.
+- **LFO 1** to **LFO 4** (bottom centre): four LFOs.
+- **VELO** (bottom right, beside Voicing): the velocity of each note.
+
+The dot of a tab counts the routes of that source. The tab you clicked last is the selected one: knobs show its
+routes, and only its routes can be changed on them.
+
+## How do I add a modulation?
+
+<Figure name='modulation-drag' alt='LFO 1 dragged from its tab onto the Res knob of the filter: the knobs that take a route have red rings, the label LFO 1 follows the pointer' >
+
+Drag a tab and the knobs that take it light up in its color; the one under the pointer is the one it lands on.
+
+</Figure>
+
+1. Press the tab of a source and drag it (a mouse, a finger or a pen).
+2. Every knob that takes that source lights up. Move onto the one you want.
+3. Let go. The route is there at +50%, and the tab you dragged is selected.
+
+Knobs of the other top screen take routes too: hold the dragged tab over **OSC | FX** in the header for a moment
+and the screen switches. On a phone, the column scrolls by itself when you drag near its top or bottom edge.
+
+Dropping a source onto a knob that already has it changes nothing; drag its dot instead (below).
+
+## Reading a modulated knob
+
+- A knob that can take routes has a grey ring around it.
+- The route of the selected tab is an arc in its color, from the value of the knob to where the source takes it.
+- A small dot at the top left of the knob has a slice for each of its routes, under a little sine sign.
+- While notes sound, a second, paler mark moves around the knob: where all its routes put it right now. Knobs of
+  the effects keep moving with an LFO even with no note held.
+
+## Amount, unipolar and bipolar
+
+The amount is how far a source moves a knob, from −100% to +100% of the knob's range. Drag the dot of the knob up
+or down to set it, in steps of 1%. A negative amount moves the knob down. On knobs that work in octaves, such as
+**Cutoff**, the amount reads in octaves: +50% on Cutoff is about 5.5 octaves.
+
+A route is either:
+
+- **Unipolar** (**Uni**): the knob goes up from its value by amount × the level of the source (0 to 1). An envelope
+  at its top, a note at full velocity: the whole amount.
+- **Bipolar** (**Bi**): the knob swings around its value, half the amount above and half below. Right for
+  vibrato or a pan that moves left and right.
+
+An LFO dropped onto a knob whose range is centred on zero (**Pan**, **Pitch**, **Fine**, the sub's **Crs**, the
+Gain of the filter) starts bipolar; every other route starts unipolar.
+
+| Gesture | What it does |
+|---|---|
+| Drag a tab onto a knob | Adds a route at +50% |
+| Drag the dot of a knob up or down | Sets the amount of the selected tab's route |
+| <kbd>Shift</kbd>-click the dot | Unipolar ↔ bipolar |
+| <kbd>Shift</kbd>+<kbd>Alt</kbd>-click the knob | Unipolar ↔ bipolar |
+| Right-click the knob, or hold it on a touch screen | The menu of the knob: every route, Default, Clear modulation |
+
+## The menu of a knob: switch off, remove, clear
+
+<Figure name='knob-menu' alt='The menu of the Cutoff knob: its route from ENV 2 at +3.9 octaves with the Uni and Bi keys, a lamp and a cross, Default and Clear modulation' narrow>
+
+Right-click a knob (on a touch screen, hold it, or hold its dot) and every route of the knob is in one list.
+
+</Figure>
+
+Each route has its source, its amount (drag it right or up to raise it), **Uni | Bi**, a lamp and **×**. The lamp
+switches the route off without losing its amount: compare the sound with and without it. **×** removes it.
+**Default** puts the knob back to its default value, **Clear modulation** removes all its routes. A knob without
+routes says *Drag a source tab here to add a modulation*.
+
+## How many routes, and what can be modulated?
+
+- **64 routes** in a preset and **4 sources** on one knob. A knob with four, or a preset with 64, no longer lights
+  up. A route you switched off still counts.
+- **Osc 1** and **Osc 2**: Gain, Wave, Detune, Blend, Pitch (on the **Semi** box) and Fine. **Oct** takes none.
+- **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
+- **Filter**: Cutoff, Res, Gain. A route stays on a knob the filter type doesn't use, and works again when you
+  pick a type that does.
+- **Effects**: every knob and the Mix of each effect (Drive, Tone and Level of the distortion; Time, Feedback,
+  Freq, Q and Pan of the delay; the knobs and faders of the reverb). Their switches take none.
+- **LFO 1–4**: Rate, Delay, Rise, Smooth and Phase, moved by an envelope or the velocity. An LFO can't move an
+  LFO.
+- The knobs of the envelopes, of VELO, **Oct** and the switches take no routes.
+
+## Envelopes: ENV 1, ENV 2, ENV 3
+
+<Figure name='envelopes' alt='The envelope section of Chisper on ENV 2: the curve that falls to Sustain 58 in a second and releases to zero, the dot of the last note on it, the Attack, Hold, Decay, Sustain and Release knobs and the BPM key'>
+
+The envelopes, bottom left. The dot runs along the curve with the last note you played.
+
+</Figure>
+
+An envelope is the shape of a note in time. When you press a key it rises (**Attack**), stays at its top
+(**Hold**), falls (**Decay**) to the level it keeps while the key is held (**Sustain**), and after you let go it
+falls to nothing (**Release**).
+
+**ENV 1 is the volume** of every note, always: the voices go through it after the filter. It is also a source, so
+the same shape can move any other knob. **ENV 2** and **ENV 3** move only what you drag them onto, and start as a
+pluck: a quick attack, a decay to zero in half a second.
+
+| Knob | Range | ENV 1 | ENV 2 and ENV 3 |
+|---|---|---|---|
+| Attack | 0 to 32 s | 5 ms | 5 ms |
+| Hold | 0 to 32 s | 100 ms | 0 |
+| Decay | 0 to 32 s | 0 | 0.5 s |
+| Sustain | 0 to 100 | 100 | 0 |
+| Release | 0 to 32 s | 5 ms | 0.3 s |
+
+The time knobs give most of their travel to short times, where a few milliseconds are heard.
+
+**Curves.** Attack, Decay and Release bend: drag the point in the middle of a stage up or down. Near the middle it
+snaps back to a straight line; <kbd>↑</kbd> <kbd>↓</kbd> move a focused point in small steps; a double-click puts
+the stage back to its default curve. A stage that is very short or doesn't change level has no point.
+
+**BPM.** The **BPM** key right of Release turns the times into note values: Off, then 1/512 of a bar up to 32 bars,
+at the tempo of the piano roll. Sustain stays a level. Switching BPM on picks the nearest note value at the current
+tempo; switching it off keeps the time.
+
+A note reads its envelopes when it starts, so a change of a knob is heard from the next note on.
+
+## LFOs: LFO 1 to LFO 4
+
+<Figure name='lfo' alt='The LFO section of Chisper: the Kick shape that starts at the top and falls to zero, the shape select on Kick, the mode Retrig, the BPM, anchor, triplet and dotted keys and the Rate, Delay, Rise, Smooth and Phase knobs'>
+
+An LFO, bottom centre: its shape, the shape select, the mode, the tempo keys and its knobs.
+
+</Figure>
+
+An LFO (low frequency oscillator) plays a shape over and over, too slowly to hear as a pitch: you hear it as
+movement. Its level goes from 0 at the bottom of the chart to 1 at the top.
+
+### Shapes
+
+The select under the chart has ready shapes in four groups:
+
+- **Basic**: Sine, Triangle, Saw up, Saw down, Square.
+- **Sidechain**: Pump, Pump soft, Pump hard, Pump ×2, Pump ×4, Kick. The pumps dip at the start of the cycle and
+  swell back: the duck of a sidechain compressor, without a compressor. Kick starts at the top and falls.
+  On a route with a negative amount it ducks the same way.
+- **Rhythm**: Gate ×4, Gate ×8, Gate ×16, Offbeat, Dotted 3-3-2, Trance A, Trance B, Stutter, Pluck ×4.
+- **Steps**: Up ×4, Down ×4, Up-down, Random ×8.
+
+### How do I draw my own LFO shape?
+
+Every shape is a line through points, and you can edit any of them; the select then says *Custom*.
+
+- **Add a point:** press on the line (a pale point shows where it goes) and drag it straight away.
+- **Move a point:** drag it. It stays between its neighbours; drop it onto a neighbour for a hard step.
+- **Remove a point:** double-click it. The first point can't be removed, and a shape keeps at least two.
+- **Bend a segment:** drag the point in its middle up or down; double-click it to make it straight again.
+- Up to 64 points.
+
+### Mode and knobs
+
+- **Retrig** (the default): every note starts the shape from the beginning, after its **Delay**.
+- **Free**: the LFO runs on its own and all notes share it.
+
+| Knob | Range | Default | What it does |
+|---|---|---|---|
+| Rate | 10 ms to 32 s | 0.5 s | How long one cycle takes (shown as a time; 0.5 s is 2 Hz). Right is faster. |
+| Delay | 0 to 32 s | 0 | How long the LFO waits after the note starts, at the level of its first point |
+| Rise | 0 to 32 s | 0 | How long it takes to fade in from that level to the full shape |
+| Smooth | 0 to 0.5 s | 0 | Rounds off the steps of the shape |
+| Phase | 0° to 360° | 0° | Where in the shape it starts |
+
+### Tempo sync and MIDI Clock
+
+- **BPM** sets Rate, Delay and Rise in note values instead of seconds: Rate from 1/256 to 32 bars, 1/4 by
+  default. A value shorter than 10 ms at the tempo is left out: at 120 BPM the shortest is 1/128.
+  1/256 is there up to 93 BPM.
+- The last two keys add triplets (⅔ as long, 1/8T) and dotted values (1.5× as long, 1/8D) to the steps of Rate.
+  They don't change the value Rate is at: turn the knob to one of the new steps.
+- The anchor keeps a Free LFO on the beats of the tempo, so a pump lands where a kick would. It is on by default
+  and works in Free mode only.
+- The tempo is the one of the piano roll (its strip: drag it, or double-click and type, 30 to 240). It isn't saved
+  in presets: the browser keeps it.
+- A MIDI Clock from your DAW or a drum machine can lead the tempo; the tempo box then shows **EXT**. See
+  [MIDI keyboards and devices](/manual/midi-keyboard-setup/).
+
+## Velocity: VELO
+
+The VELO section (bottom right) shows how the velocity of a note (how hard you press a key, 1 to 127) becomes a
+level from 0 to 1: drag the middle point of the curve to bend it, double-click it to make it straight again. The dot
+on the curve is the last note you played.
+
+By default velocity sets the volume: **Amp** at 100% makes a note at velocity 64 about 6 dB quieter than one at 127.
+Turn **Amp** down to 0 and every note plays as loud as the others, whatever the velocity.
+
+VELO is a source like the others: drag it onto **Cutoff** and hard notes are brighter too. A note keeps its
+velocity for as long as it sounds.
+
+<Note>
+
+The computer keyboard and the on-screen piano play every note at velocity 100. To play with velocity, use a
+[MIDI keyboard](/manual/midi-keyboard-setup/).
+
+</Note>
+
+## Three exercises
+
+<Try title='A pluck: ENV 2 on the Cutoff' preset='zesty-drive-bass'>
+
+1. Load *Init* (the circular arrow by the preset name) and switch the Filter on with a click on its title.
+2. Turn **Cutoff** down to about 200.
+3. Drag the **ENV 2** tab onto **Cutoff**.
+4. Play a few short notes. Then shorten **Decay** of ENV 2 and play again.
+
+You should hear every note start bright and close in half a second, the sound of a pluck; a shorter Decay makes it
+snappier. The preset below does the same to a resonant bass, almost four octaves of sweep on every note.
+
+</Try>
+
+<Try title='A sidechain pump: LFO on the Gain' preset='pumping-house-chords'>
+
+1. Load *Init* and turn **Gain** of Osc 1 all the way down.
+2. On LFO 1, pick **Pump** in the shape select (Sidechain) and set the mode to **Free**.
+3. Switch **BPM** on; Rate is 1/4, one pump a beat.
+4. Drag the **LFO 1** tab onto **Gain** of Osc 1, then drag its dot up to about +80%.
+5. Hold a chord.
+
+You should hear the chord duck on every beat and swell back, the pumping of house and EDM, locked to the tempo.
+
+</Try>
+
+<Try title='A wobble: LFO on the Cutoff' preset='dubstep-wobble'>
+
+1. Load *Init*, switch the Filter on and turn **Cutoff** down to about 200 and **Res** up a little.
+2. Switch **BPM** on for LFO 1 and set **Rate** to 1/8.
+3. Drag **LFO 1** onto **Cutoff** and set the amount to about +40%.
+4. Hold a low note, then switch the triplet key on and turn Rate to 1/8T.
+
+You should hear the filter open and close on every eighth note: a wobble bass. The preset below goes further: the
+LFO moves the wave and the drive too, and ENV 2 changes its speed as the note goes on.
+
+</Try>

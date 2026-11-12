@@ -12,7 +12,12 @@ const Root = styled.div`
   padding: 20px 20px 20px 0;
 `;
 
-export const AudiofileWavetable = () => {
+interface Props {
+  // back to the drop screen, for another file
+  onAnotherFile: () => void;
+}
+
+export const AudiofileWavetable = ({ onAnotherFile }: Props) => {
   const [{ $waveTable, $position, $wave, $morph }, { setPosition }] = useOscillatorContext();
   return (
     <Root>
@@ -23,7 +28,7 @@ export const AudiofileWavetable = () => {
         $morph={$morph}
         setPosition={setPosition}
       />
-      <AudiofileWavePicker />
+      <AudiofileWavePicker onAnotherFile={onAnotherFile} />
       <WavePreview />
     </Root>
   );

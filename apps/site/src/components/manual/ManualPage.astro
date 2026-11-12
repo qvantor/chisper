@@ -1,0 +1,421 @@
+---
+import '../../styles/global.css';
+import { Font, getImage } from 'astro:assets';
+import { render } from 'astro:content';
+import Footer from '../Footer.astro';
+import Head from '../Head.astro';
+import Header from '../Header.astro';
+import CompatTable from './CompatTable.astro';
+import Figure from './Figure.astro';
+import InterfaceMap from './InterfaceMap.astro';
+import KeyboardMap from './KeyboardMap.astro';
+import Note from './Note.astro';
+import OpenPreset from './OpenPreset.astro';
+import Table from './Table.astro';
+import Tip from './Tip.astro';
+import Try from './Try.astro';
+import synth from '../../assets/synth.png';
+import { MESSAGES } from '../../i18n';
+import { LOCALES, type Lang } from '../../i18n/locales';
+import { manualEntries, manualNav } from '../../manual/entries';
+import { figureOf } from '../../manual/figures';
+import { MANUAL_HUB, manualPath, manualPaths, neighbours, type ManualPage } from '../../manual/pages';
+import { manualJsonLd, type Crumb } from '../../seo/manual-json-ld';
+
+interface Props {
+  lang: Lang;
+  page: ManualPage;
+}
+
+// the components the texts of the manual use without importing them
+const components = {
+  CompatTable,
+  Figure,
+  InterfaceMap,
+  KeyboardMap,
+  Note,
+  OpenPreset,
+  Tip,
+  Try,
+  table: Table,
+};
+
+// a page of the manual: where it is (breadcrumbs), the pages of the manual beside it (its own headings under its
+// name), its text, the pages before and after it
+const { lang, page } = Astro.props;
+const m = MESSAGES[lang];
+const entry = (await manualEntries(lang))[page];
+const { title, h1, description, nav, updated, preset, image } = entry.data;
+const { Content, headings } = await render(entry);
+const path = manualPath(page, lang);
+const paths = manualPaths(page);
+const pages = await manualNav(lang);
+const sections = headings.filter((heading) => heading.depth === 2);
+const around = neighbours(page);
+const pager = (['prev', 'next'] as const).flatMap((rel) => {
+  const link = pages.find(({ id }) => id === around[rel]);
+  return link ? [{ ...link, rel, label: m.manual[rel] }] : [];
+});
+
+// the site, the manual (its hub), the page (the hub is the manual itself)
+const crumbs: Crumb[] = [
+  { name: 'Chisper', path: LOCALES[lang].path },
+  { name: m.manual.name, path: manualPath(MANUAL_HUB, lang) },
+  ...(page === MANUAL_HUB ? [] : [{ name: nav, path }]),
+];
+// the screenshot of the synth (the same file as the landing's) and the picture of the page
+const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
+const picture = image ? await getImage({ src: figureOf(image), format: 'webp', width: 1200 }) : screenshot;
+const date = updated.toISOString().slice(0, 10);
+---
+
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <Head
+      lang={lang}
+      title={title}
+      description={description}
+      paths={paths}
+      ogType='article'
+      ogImageAlt={m.meta.ogImageAlt}
+      structured={manualJsonLd({
+        lang,
+        path,
+        headline: h1,
+        description,
+        updated,
+        image: picture.src,
+        screenshot: screenshot.src,
+        crumbs,
+      })}
+    />
+    <Font cssVariable='--font-inter-tight' preload />
+  </head>
+  <body>
+    <Header lang={lang} m={m} />
+    <main class='column manual'>
+      <nav class='crumbs' aria-label={m.manual.breadcrumbs}>
+        <ol>
+          {crumbs.map((crumb, index) =>
+            index < crumbs.length - 1 ? (
+              <li>
+                <a href={crumb.path}>{crumb.name}</a>
+              </li>
+            ) : (
+              <li aria-current='page'>{crumb.name}</li>
+            )
+          )}
+        </ol>
+      </nav>
+      <div class='layout'>
+        <nav class='side' aria-label={m.manual.nav}>
+          <ol class='pages'>
+            {pages.map(({ id, href, name }) => (
+              <li>
+                <a href={href} aria-current={id === page ? 'page' : undefined}>
+                  {name}
+                </a>
+                {id === page && sections.length > 0 && (
+                  <ol class='sections' aria-label={m.manual.onThisPage}>
+                    {sections.map((heading) => (
+                      <li>
+                        <a href={`#${heading.slug}`}>{heading.text}</a>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </li>
+            ))}
+          </ol>
+        </nav>
+        <article class='article'>
+          <header class='intro'>
+            <h1>{h1}</h1>
+            <OpenPreset preset={preset} />
+          </header>
+          <div class='prose'>
+            <Content components={components} />
+          </div>
+          <footer class='end'>
+            <p class='updated'>
+              {m.manual.updated}:{' '}
+              <time datetime={date}>
+                {new Intl.DateTimeFormat(lang, { dateStyle: 'long', timeZone: 'UTC' }).format(updated)}
+              </time>
+            </p>
+            <nav class='pager' aria-label={m.manual.nav}>
+              {pager.map(({ rel, label, href, name }) => (
+                <a class:list={['turn', rel]} rel={rel} href={href}>
+                  <span class='direction'>{label}</span>
+                  <span class='name'>{name}</span>
+                </a>
+              ))}
+            </nav>
+          </footer>
+        </article>
+      </div>
+    </main>
+    <Footer lang={lang} m={m} paths={paths} />
+  </body>
+</html>
+
+<style>
+  .manual {
+    padding-top: 24px;
+    padding-bottom: 72px;
+  }
+
+  .crumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .crumbs li + li::before {
+    content: '›';
+    margin-right: 6px;
+    color: var(--text-muted);
+  }
+
+  .crumbs a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  .crumbs a:hover {
+    color: var(--text);
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 760px);
+    gap: 48px;
+    margin-top: 24px;
+  }
+
+  .side {
+    position: sticky;
+    top: 92px;
+    align-self: start;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+  }
+
+  .pages,
+  .sections {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pages > li + li {
+    margin-top: 6px;
+  }
+
+  .pages a {
+    display: block;
+    padding: 6px 10px;
+    border-radius: var(--radius-m);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .pages a:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  .pages a[aria-current='page'] {
+    color: var(--text);
+    font-weight: 600;
+    background: var(--surface);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .sections {
+    margin: 4px 0 8px 10px;
+    border-left: 1px solid var(--line-strong);
+  }
+
+  .sections a {
+    padding: 4px 10px;
+    font-size: 14px;
+  }
+
+  .intro {
+    display: grid;
+    justify-items: start;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  h1 {
+    font-size: 40px;
+    line-height: 1.1;
+  }
+
+  .end {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+
+  .updated {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .pager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  .turn {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--raised);
+    text-decoration: none;
+  }
+
+  .turn:hover {
+    background: var(--surface-high);
+  }
+
+  .next {
+    grid-column: 2;
+    text-align: right;
+  }
+
+  .direction {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .name {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* the text of a page: its markdown */
+  .prose {
+    font-size: 17px;
+    line-height: 1.65;
+  }
+
+  .prose :global(h2) {
+    margin: 48px 0 14px;
+    font-size: 28px;
+    line-height: 1.2;
+    scroll-margin-top: 90px;
+  }
+
+  .prose :global(h3) {
+    margin: 32px 0 10px;
+    font-size: 20px;
+    line-height: 1.3;
+    scroll-margin-top: 90px;
+  }
+
+  .prose :global(p),
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin: 0 0 14px;
+  }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    padding-left: 22px;
+  }
+
+  .prose :global(li + li) {
+    margin-top: 6px;
+  }
+
+  .prose :global(li > p) {
+    margin: 0;
+  }
+
+  .prose :global(strong) {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .prose :global(code),
+  .prose :global(kbd) {
+    padding: 1px 6px;
+    border-radius: var(--radius-s);
+    background: var(--surface-high);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88em;
+  }
+
+  .prose :global(kbd) {
+    box-shadow: inset 0 -1px 0 var(--line-strong);
+  }
+
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .prose :global(thead th) {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 860px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+    }
+
+    /* the pages above the text, without the headings of this one */
+    .side {
+      position: static;
+      max-height: none;
+    }
+
+    .sections {
+      display: none;
+    }
+
+    .pages {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pages > li + li {
+      margin-top: 0;
+    }
+
+    h1 {
+      font-size: 32px;
+    }
+  }
+</style>
