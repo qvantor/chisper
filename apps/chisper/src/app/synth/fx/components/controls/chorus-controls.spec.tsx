@@ -61,9 +61,26 @@ describe('ChorusControls', () => {
       expect([...places].sort((a, b) => a - b)).toEqual(places);
     };
     order(taps, ['Delay 1', 'Delay 2', 'Feedback']);
-    order(post, ['Cutoff', 'HP', 'Level']);
+    order(post, ['Cutoff', 'Level']);
     // the type of the filter beside its cutoff
     expect(post).toContainElement(filter);
+    // its key alone is all of its plate (as BPM of an envelope)
+    expect(filter).toHaveClass('stack');
+    expect(within(filter).getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('the screen of the taps is first in their group: it watches the meter of the chorus while it is on', () => {
+    const watch = jest.fn(() => jest.fn());
+    const { show } = setup({ meter: { watch } });
+    const taps = screen.getByRole('group', { name: 'Taps' });
+    const tapsScreen = within(taps).getByTestId('chorus-screen');
+    expect(tapsScreen.compareDocumentPosition(within(taps).getByText('Delay 1'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(watch).toHaveBeenCalledTimes(1);
+    show({ meter: { watch }, on: false });
+    expect(watch.mock.results[0].value).toHaveBeenCalledTimes(1);
+    expect(within(taps).getByTestId('chorus-screen-deactivated')).toBeInTheDocument();
   });
 
   it('every knob shows its param and sets it, with its range and its default', () => {
@@ -92,7 +109,9 @@ describe('ChorusControls', () => {
     const { user, setParam, show } = setup();
     const key = () => screen.getByRole('button', { name: 'High pass' });
     expect(key()).toHaveAttribute('aria-pressed', 'false');
-    expect(key()).toHaveTextContent('HP');
+    // its icon: the response of a high pass
+    expect(key().textContent).toBe('');
+    expect(key().querySelectorAll('svg path')).toHaveLength(1);
     await user.click(key());
     expect(setParam).toHaveBeenLastCalledWith('hpf', 1);
     show({ params: { ...params, hpf: 1 } });

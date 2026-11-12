@@ -363,3 +363,47 @@ fn the_filter_holds_at_any_cutoff() {
         }
     }
 }
+
+// the meter: the LFO as it is (it went on by its rate over the samples rendered, asleep or not) and the knobs
+// that place the taps, held to their ranges
+#[test]
+fn the_meter_is_the_lfo_and_the_knobs_of_the_taps() {
+    let rate = 44100.0;
+    let mut chorus = Chorus::new(rate, &taps(7.0, 3.0, 13.0, 2.0));
+    assert_eq!(
+        chorus.meter(),
+        Meter {
+            phase: 0.0,
+            rate: 2.0,
+            d1: 7.0,
+            d2: 3.0,
+            depth: 13.0,
+            cut: 20000.0,
+        }
+    );
+    // asleep
+    let silence = (vec![0.0; 128], vec![0.0; 128]);
+    for _ in 0..10 {
+        render(&mut chorus, &silence, &mut || 128);
+    }
+    assert!(chorus.idle());
+    let asleep = 2.0 * 1280.0 / rate;
+    assert!((chorus.meter().phase - asleep).abs() < 1e-12);
+    // awake: a segment at a time
+    let input = program(1280, 3);
+    render(&mut chorus, &input, &mut || 128);
+    assert!(!chorus.idle());
+    let phase = chorus.meter().phase;
+    assert!((phase - 2.0 * asleep).abs() < 1e-12 && phase < 1.0);
+    // a knob out of its range is where the taps have it
+    let mut changes = [0.0; PARAMS];
+    changes[RATE] = 50.0;
+    changes[D1] = -1.0;
+    changes[DEPTH] = 40.0;
+    chorus.set(1 << RATE | 1 << D1 | 1 << DEPTH, &changes);
+    let meter = chorus.meter();
+    assert_eq!(
+        (meter.rate, meter.d1, meter.d2, meter.depth),
+        (20.0, 0.0, 3.0, 26.0)
+    );
+}

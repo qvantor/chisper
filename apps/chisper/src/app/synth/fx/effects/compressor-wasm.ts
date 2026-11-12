@@ -1,6 +1,6 @@
 import { paramsCore, ParamsCoreExports } from '../../common/wasm/stereo-core';
 import type { CompressorDspParams, CompressorOptions } from './compressor-params';
-import type { FxMeterValues } from './types';
+import type { CompressorMeterValues } from './compressor-params';
 
 // the Rust core of the compressor (dsp/compressor, compressor.wasm): a highpass, then one band (the louder channel
 // against the threshold, the reduction smoothed by the attack and the release) or three (crossovers, the mean
@@ -41,13 +41,13 @@ export const createCompressorWasm = (
     params
   );
   // what meter() gives, the same object every time: nothing is made on the audio thread
-  const gains: FxMeterValues['gains'] = [0, 0, 0];
-  const values: FxMeterValues = { gains, input: 0 };
+  const gains: CompressorMeterValues['gains'] = [0, 0, 0];
+  const values: CompressorMeterValues = { gains, input: 0 };
   // (assigned: `idle` of the dsp stays a getter)
   return Object.assign(dsp, {
     // the gains of the bands and the peak of the input of the last block (its values hold until the next call:
     // who keeps them copies them)
-    meter: (): FxMeterValues => {
+    meter: (): CompressorMeterValues => {
       exports.fx_meter(handle);
       const buffer = command();
       gains[0] = buffer[0];

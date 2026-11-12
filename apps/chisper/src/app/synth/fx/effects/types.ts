@@ -59,16 +59,10 @@ export interface FxCore {
   meter?: FxMeter;
 }
 
-// the gains of the bands of a compressor (dB: under 0 a reduction, over it a boost of its upward compression)
-// and the peak of its input
-export interface FxMeterValues {
-  gains: [number, number, number];
-  input: number;
-}
-
-// watch(listener): the values about 30 times a second until the function it returns is called
-export interface FxMeter {
-  watch: (listener: (values: FxMeterValues) => void) => () => void;
+// watch(listener): the values of the effect (CompressorMeterValues of compressor-params.ts, ChorusMeterValues of
+// chorus-params.ts) about 30 times a second until the function it returns is called
+export interface FxMeter<Values = unknown> {
+  watch: (listener: (values: Values) => void) => () => void;
 }
 
 // a built-in preset of the effect: sets mix and every param, added/on/order are not touched

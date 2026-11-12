@@ -15,8 +15,8 @@
 //! slope of the line), a sample alone its lane of that four: how a block is cut never changes a sample. The filter is doubles (its
 //! integrators at a low cutoff). A short delay with a feedback is a flanger: the same lines.
 //!
-//! The C ABI of a stereo core and fx_set, fx_clear, fx_idle; the params of fx_new and fx_set come through
-//! fx_command (chorus-wasm.ts)
+//! The C ABI of a stereo core and fx_set, fx_clear, fx_idle, fx_meter (what a screen draws its taps of); the
+//! params of fx_new and fx_set come through fx_command (chorus-wasm.ts)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -126,6 +126,18 @@ impl Passes {
     }
 }
 
+/// What a screen draws the taps of: the LFO (cycles) and the knobs that place them, as the core has them now
+/// (`chorusTaps` of chorus-params.ts is `targets` of them), and the cutoff of the filter (the glow of the screen)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Meter {
+    pub phase: f64,
+    pub rate: f64,
+    pub d1: f64,
+    pub d2: f64,
+    pub depth: f64,
+    pub cut: f64,
+}
+
 pub struct Chorus {
     sample_rate: f64,
     values: [Smoothed; PARAMS],
@@ -188,6 +200,17 @@ impl Chorus {
 
     fn value(&self, key: usize) -> f64 {
         self.values[key].value
+    }
+
+    pub fn meter(&self) -> Meter {
+        Meter {
+            phase: self.phase,
+            rate: clamp(self.value(RATE), 0.0, MAX_RATE),
+            d1: clamp(self.value(D1), 0.0, MAX_DELAY),
+            d2: clamp(self.value(D2), 0.0, MAX_DELAY),
+            depth: clamp(self.value(DEPTH), 0.0, MAX_DEPTH),
+            cut: clamp(self.value(CUT), 20.0, 20000.0),
+        }
     }
 
     /// params by key (the bits of `present`); an idle chorus takes them at once
@@ -513,6 +536,28 @@ pub unsafe extern "C" fn fx_clear(chorus: *mut Chorus) {
 #[no_mangle]
 pub unsafe extern "C" fn fx_idle(chorus: *mut Chorus) -> bool {
     (*chorus).idle()
+}
+
+/// the meter into the command buffer: the LFO (cycles), then the rate, the delays, the depth and the cutoff as
+/// they are
+///
+/// # Safety
+/// `chorus` comes from fx_new and was not freed
+#[no_mangle]
+pub unsafe extern "C" fn fx_meter(chorus: *mut Chorus) {
+    let meter = (*chorus).meter();
+    let values = [
+        meter.phase,
+        meter.rate,
+        meter.d1,
+        meter.d2,
+        meter.depth,
+        meter.cut,
+    ];
+    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
+    for (k, value) in values.iter().enumerate() {
+        *command.add(k) = *value;
+    }
 }
 
 #[cfg(test)]

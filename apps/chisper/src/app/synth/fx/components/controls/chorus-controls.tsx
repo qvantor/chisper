@@ -1,7 +1,11 @@
 import React from 'react';
-import { SwitchKey } from '@chisper/ui-kit';
+import { styled } from 'styled-components';
+import { HighPassIcon, SwitchKey } from '@chisper/ui-kit';
 import { chorus, chorusDivisionHz, chorusDivisionOf, chorusStepsOf } from '../../effects/chorus';
+import type { ChorusMeterValues } from '../../effects/chorus-params';
 import { ChorusParam } from '../../effects/chorus-presets';
+import type { FxMeter } from '../../effects/types';
+import { ChorusScreen } from './chorus-screen';
 import { ControlsGroup, LastGroups } from './group';
 import { ParamHandle } from './param-handle';
 import { DivisionHandle, KeysPlate, TempoKeys } from './tempo-keys';
@@ -9,27 +13,37 @@ import { FxControlsProps } from './types';
 
 const { params: defs } = chorus;
 
-// memoized: the controls render on every move of a knob, a key is a tooltip
+// the key of the high pass alone on its plate: its icon (the response of the filter) as large as a plate of this
+// size takes
+const FilterPlate = styled(KeysPlate)`
+  && svg {
+    width: 26px;
+    height: 26px;
+  }
+`;
+
+// the high pass alone on its plate, all of it (as BPM beside Release of an envelope). Memoized: the controls
+// render on every move of a knob, a key is a tooltip
 const FilterKey = React.memo(
   ({ on, high, setParam }: Pick<FxControlsProps, 'on' | 'setParam'> & { high: boolean }) => (
-    <KeysPlate aria-label='Filter type' disabled={!on} disabledHint='Turn on the chorus'>
+    <FilterPlate aria-label='Filter type' disabled={!on} disabledHint='Turn on the chorus' stack>
       <SwitchKey
-        label='HP'
+        icon={<HighPassIcon />}
         name='High pass'
         hint='The filter cuts the lows of the wet signal, not its highs'
         on={high}
         onChange={(value) => setParam('hpf', +value)}
       />
-    </KeysPlate>
+    </FilterPlate>
   )
 );
 
 type ChorusKnob = Exclude<ChorusParam, 'sync' | 'div' | 'trip' | 'dot' | 'hpf'>;
 
-// three groups left to right: the LFO (rate, with BPM over TRIP and DOT beside it, depth) | the taps (delay 1,
-// delay 2, feedback) | post (the filter of the wet signal with its type beside it, the level); the mix is the
+// three groups left to right: the LFO (rate, with BPM over TRIP and DOT beside it, depth) | the taps (their
+// screen, where they move and are dragged, delay 1, delay 2, feedback) | post (the filter of the wet signal with its type beside it, the level); the mix is the
 // common one of FxPanel, which lays the groups out. In BPM Rate is a division of the tempo
-export const ChorusControls = ({ params, setParam, on, out }: FxControlsProps) => {
+export const ChorusControls = ({ params, setParam, on, out, meter }: FxControlsProps) => {
   const sync = params['sync'] >= 0.5;
   // Rate in BPM: a cycle of the LFO a division (8 bar … 1/32, by TRIP and DOT), right faster
   const division = (
@@ -69,6 +83,12 @@ export const ChorusControls = ({ params, setParam, on, out }: FxControlsProps) =
         {handle('depth')}
       </ControlsGroup>
       <ControlsGroup caption='Taps' disabled={!on}>
+        <ChorusScreen
+          params={params}
+          setParam={setParam}
+          meter={meter as FxMeter<ChorusMeterValues> | undefined}
+          active={on}
+        />
         {handle('d1')}
         {handle('d2')}
         {handle('fb')}

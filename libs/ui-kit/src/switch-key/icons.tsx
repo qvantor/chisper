@@ -154,6 +154,13 @@ export const FollowIcon = () => (
   </Icon>
 );
 
+// a high pass: the response of the filter, the lows down its slope at the left, flat from its cutoff on
+export const HighPassIcon = () => (
+  <Icon>
+    <path d='M1.5 13.5c3.4 0 3.4-9.5 6.6-9.5h6.4' {...LINE} />
+  </Icon>
+);
+
 // the shapes of the sub: one cycle each across the key
 export const SineIcon = () => (
   <Icon>

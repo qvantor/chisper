@@ -1,5 +1,4 @@
 import type { LfosState } from '../../common/lfo/lfo-curve';
-import type { FxMeterValues } from './types';
 // the params, the options and the messages of the compressor (its Rust core, dsp/compressor: compressor-wasm.ts),
 // no signal processing here
 
@@ -38,10 +37,17 @@ export interface CompressorMessage {
   meter?: boolean;
 }
 
+// the gains of the bands (dB: under 0 a reduction, over it a boost of its upward compression) and the peak of its
+// input
+export interface CompressorMeterValues {
+  gains: [number, number, number];
+  input: number;
+}
+
 // worklet → main thread, about 30 times a second while the meter is asked for and something sounds: the gain of
 // the low, mid and high bands (all three the one of the one band circuit) and the peak of the input
 export interface CompressorMeterMessage {
-  meter: FxMeterValues;
+  meter: CompressorMeterValues;
 }
 
 // the laws of the knobs, as measured: the threshold of the one band circuit (dB of a peak at the output of the

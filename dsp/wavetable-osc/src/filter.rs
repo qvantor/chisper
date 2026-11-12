@@ -465,8 +465,16 @@ pub fn run_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
                     }
                 }
             }
-            ic1 = ic1.flush();
-            ic2 = ic2.flush();
+            // (the state of a voice is flushed where its own span ends, as `run` does: at the end of a span of
+            // the other it would go to 0 a few samples sooner, other bits)
+            let ends = [p.active && e == p.next, q.active && e == q.next];
+            let flush = |ic: F32x4| {
+                let (kept, flushed) = (ic.lanes(), ic.flush().lanes());
+                let lane = |k: usize| if ends[k >> 1] { flushed[k] } else { kept[k] };
+                F32x4::new(lane(0), lane(1), lane(2), lane(3))
+            };
+            ic1 = flush(ic1);
+            ic2 = flush(ic2);
         }
         s = e;
     }
@@ -622,6 +630,64 @@ mod tests {
                         bits(&alone[k]),
                         bits(&paired[k]),
                         "{ranges:?} {moving} channel {k}"
+                    );
+                }
+                for k in 0..2 {
+                    assert_eq!(one[k].state, two[k].state);
+                }
+            }
+        }
+    }
+
+    // a still voice whose state rings under TINY next to one whose cutoff moves (its spans end inside the span
+    // of the first): the state of the first is flushed at the end of its own span only
+    #[test]
+    fn a_state_under_tiny_is_flushed_at_the_spans_of_its_own_voice() {
+        let n = 200;
+        let cutoff: Vec<f32> = (0..n).map(|i| 9000.0 - 30.0 * i as f32).collect();
+        for amplitude in [1e-24f32, 1e-23, 1e-22] {
+            for still in 0..2 {
+                let input: [Vec<f32>; 4] = core::array::from_fn(|k| {
+                    if k / 2 == still {
+                        let mut channel = vec![0.0; n];
+                        channel[0] = amplitude * (1 + k % 2) as f32;
+                        channel
+                    } else {
+                        noise(n, k as u32 + 1)
+                    }
+                });
+                let filters = || {
+                    [
+                        filter_of(FilterType::Lowpass, 700.0, 12.0, 0.0),
+                        filter_of(FilterType::Lowpass, 700.0, 12.0, 0.0),
+                    ]
+                };
+                let moved = |k: usize| [(k != still).then_some(cutoff.as_slice()), None, None];
+                let mut alone = input.clone();
+                let mut one = filters();
+                for (k, filter) in one.iter_mut().enumerate() {
+                    let (left, right) = alone[2 * k..2 * k + 2].split_at_mut(1);
+                    run(&mut filter.pass(0, n, moved(k)), &mut left[0], &mut right[0]);
+                }
+                // (the case is there: the voice alone comes under TINY inside its span and plays on)
+                assert!(alone[2 * still][1..]
+                    .iter()
+                    .any(|x| *x != 0.0 && x.abs() < dsp_core::simd::TINY));
+                let mut paired = input.clone();
+                let mut two = filters();
+                {
+                    let [f0, f1] = &mut two;
+                    let [l0, r0, l1, r1] = &mut paired;
+                    let mut p = f0.pass(0, n, moved(0));
+                    let mut q = f1.pass(0, n, moved(1));
+                    run_pair([&mut p, &mut q], [[l0, r0], [l1, r1]], n);
+                }
+                for k in 0..4 {
+                    let bits = |channel: &Vec<f32>| channel.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                    assert_eq!(
+                        bits(&alone[k]),
+                        bits(&paired[k]),
+                        "{amplitude} still {still} channel {k}"
                     );
                 }
                 for k in 0..2 {

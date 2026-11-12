@@ -1,6 +1,6 @@
 import { installWorkletScope } from '../../../../test-utils/worklet-scope';
 import { CHORUS_PROCESSOR } from '../../common/processors';
-import { ChorusDspParams } from './chorus-params';
+import { ChorusDspParams, ChorusMeterMessage } from './chorus-params';
 
 const processors = installWorkletScope(48000);
 
@@ -91,6 +91,105 @@ describe('chorus wasm worklet', () => {
     // a node made while it is not active starts so
     const started = rendered(create({ params: PARAMS, inactive: true }));
     expect(levelAt(started, 20.24)).toBeLessThan(0.01);
+  });
+
+  describe('its meter', () => {
+    // the LFO at 2 Hz: a block of 128 at 48 kHz is this much of a cycle
+    const METERED = { ...PARAMS, rate: 2, d1: 7, d2: 3, depth: 13 };
+    const BLOCK = (2 * 128) / 48000;
+    // what it posted, copied as a port copies it (the processor posts the same message every time), and as given
+    const metered = (processorOptions: object) => {
+      const processor = create(processorOptions);
+      const posts = jest.fn();
+      const given: unknown[] = [];
+      (processor.port as unknown as { postMessage: (message: unknown) => void }).postMessage = (message) => {
+        given.push(message);
+        posts(JSON.parse(JSON.stringify(message)));
+      };
+      const run = (blocks: number, level: number) => {
+        for (let i = 0; i < blocks; i++) {
+          const input = Float32Array.from({ length: 128 }, (_, n) => level * Math.sin((i * 128 + n) / 9));
+          processor.process([[input]], [[new Float32Array(128), new Float32Array(128)]]);
+        }
+      };
+      const meters = () => posts.mock.calls.map(([message]) => (message as ChorusMeterMessage).meter);
+      return {
+        processor,
+        posts,
+        given,
+        meters,
+        sound: (blocks: number) => run(blocks, 0.5),
+        quiet: (blocks: number) => run(blocks, 0),
+      };
+    };
+
+    it('posts the LFO of the core and the knobs of its taps about 30 times a second, only while asked', () => {
+      const { processor, posts, meters, sound } = metered({ params: METERED });
+      sound(40);
+      expect(posts).not.toHaveBeenCalled();
+      processor.port.onmessage({ data: { meter: true } });
+      // a second of blocks
+      sound(375);
+      expect(posts.mock.calls.length).toBeGreaterThanOrEqual(27);
+      expect(posts.mock.calls.length).toBeLessThanOrEqual(30);
+      expect(meters().at(-1)).toMatchObject({ rate: 2, d1: 7, d2: 3, depth: 13, cut: 20000, idle: false });
+      // the LFO as it is then: 13 blocks on from a message to the next (the 40 before it among them)
+      meters().forEach(({ phase }, i) => {
+        const cycles = (40 + 13 * (i + 1)) * BLOCK;
+        expect(phase).toBeCloseTo(cycles - Math.floor(cycles), 9);
+      });
+      // the knobs as the core has them now
+      processor.port.onmessage({ data: { params: { d1: 9, rate: 0.5 } } });
+      sound(13);
+      expect(meters().at(-1)).toMatchObject({ rate: 0.5, d1: 9 });
+      processor.port.onmessage({ data: { meter: false } });
+      posts.mockClear();
+      sound(40);
+      expect(posts).not.toHaveBeenCalled();
+    });
+
+    it('at rest it is posted once (its LFO goes on), then again from the next sound or for a new watcher', () => {
+      const { processor, posts, meters, sound, quiet } = metered({ params: METERED, meter: true });
+      // (never woken: idle from the start)
+      quiet(375);
+      expect(posts).toHaveBeenCalledTimes(1);
+      expect(meters()[0]).toMatchObject({ rate: 2, idle: true });
+      expect(meters()[0].phase).toBeCloseTo(13 * BLOCK, 9);
+      processor.port.onmessage({ data: { meter: true } });
+      quiet(40);
+      expect(posts).toHaveBeenCalledTimes(2);
+      expect(meters()[1].idle).toBe(true);
+      sound(40);
+      expect(posts.mock.calls.length).toBeGreaterThan(2);
+      expect(meters().at(-1)?.idle).toBe(false);
+    });
+
+    it('makes nothing for it on the audio thread: the same message every time, its values those of then', () => {
+      const { given, meters, sound } = metered({ params: METERED, meter: true });
+      sound(375);
+      expect(given.length).toBeGreaterThan(20);
+      expect(new Set(given).size).toBe(1);
+      expect(new Set(given.map((message) => (message as ChorusMeterMessage).meter)).size).toBe(1);
+      expect(new Set(meters().map(({ phase }) => phase)).size).toBeGreaterThan(20);
+    });
+
+    it('the knobs the routes move are told as moved', () => {
+      const { processor, meters, sound } = metered({ params: METERED, meter: true });
+      processor.port.onmessage({
+        data: {
+          mod: {
+            note: {
+              start: 0,
+              release: null,
+              envelopes: [0, 1, 2].map(() => ({ attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 })),
+            },
+            routes: [{ source: 1, param: 'depth', amount: 0.5, min: 0, max: 26 }],
+          },
+        },
+      });
+      sound(40);
+      expect(meters().at(-1)?.depth).toBeGreaterThan(13);
+    });
   });
 
   it('ends once stopped', () => {

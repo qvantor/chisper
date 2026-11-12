@@ -11,7 +11,7 @@ import {
   chorusRateBounds,
   chorusStepsOf,
 } from './chorus';
-import { depthMs, levelGain } from './chorus-params';
+import { ChorusMeterValues, depthMs, levelGain } from './chorus-params';
 import { CHORUS_KEYS } from './chorus-wasm';
 import { WORKLETS_PATH } from './load-worklet';
 
@@ -32,8 +32,12 @@ const setup = () => {
   // the input connects to the worklet node once it is created
   const node = () => (input.connect as jest.Mock).mock.calls[0]?.[0] as WorkletNodeStub | undefined;
   const messages = () => node()?.port.postMessage.mock.calls.map(([message]) => message);
-  return { audioCtx, core, input, output, node, messages };
+  // a message of the processor
+  const receive = (data: unknown) => node()?.port.onmessage?.({ data } as MessageEvent);
+  return { audioCtx, core, input, output, node, messages, receive };
 };
+
+const METER: ChorusMeterValues = { phase: 0.25, rate: 2, d1: 5, d2: 0, depth: 26, cut: 1000, idle: false };
 
 const SCHEMA_DEFAULTS = Object.fromEntries(
   Object.entries(FX_PARAMS.chorus).map(([key, { default: value }]) => [key, value])
@@ -138,12 +142,57 @@ describe('chorus', () => {
     expect(node()?.options).toMatchObject({ numberOfInputs: 1, outputChannelCount: [2], channelCount: 2 });
   });
 
-  it('mixes inside: no latency, no linear mix of the slot, no meter', () => {
+  it('mixes inside: no latency, no linear mix of the slot', () => {
     const { core } = setup();
     expect(core.mixInside).toBe(true);
     expect(core.latency).toBeUndefined();
     expect(core.linearMix).toBeUndefined();
-    expect(core.meter).toBeUndefined();
+  });
+
+  it('its meter: asked of the processor while watched, each watcher gets its values', async () => {
+    const { core, messages, receive } = setup();
+    await flush();
+    const [first, second] = [jest.fn(), jest.fn()];
+    const stopFirst = core.meter?.watch(first);
+    expect(messages()).toEqual([{ meter: true }]);
+    const stopSecond = core.meter?.watch(second);
+    expect(messages()).toHaveLength(1);
+    receive({ meter: METER });
+    expect(first).toHaveBeenCalledWith(METER);
+    expect(second).toHaveBeenCalledWith(METER);
+    // another message of the processor is not a meter
+    receive({ other: 1 });
+    receive(null);
+    expect(first).toHaveBeenCalledTimes(1);
+    stopFirst?.();
+    // (left twice: once)
+    stopFirst?.();
+    expect(messages()).toHaveLength(1);
+    receive({ meter: METER });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(2);
+    stopSecond?.();
+    expect(messages()).toEqual([{ meter: true }, { meter: false }]);
+  });
+
+  it('a meter watched before the module loads: the node starts with it on', async () => {
+    const { core, node } = setup();
+    const stop = core.meter?.watch(jest.fn());
+    await flush();
+    expect(node()?.options.processorOptions).toEqual({ params: DEFAULTS, meter: true });
+    stop?.();
+    expect(node()?.port.postMessage).toHaveBeenCalledWith({ meter: false });
+  });
+
+  it('a destroyed one tells its watchers nothing', async () => {
+    const { core, node } = setup();
+    await flush();
+    const watcher = jest.fn();
+    core.meter?.watch(watcher);
+    const stub = node();
+    core.destroy();
+    stub?.port.onmessage?.({ data: { meter: METER } } as MessageEvent);
+    expect(watcher).not.toHaveBeenCalled();
   });
 
   it('starts the processor with the defaults, the mix among them', async () => {

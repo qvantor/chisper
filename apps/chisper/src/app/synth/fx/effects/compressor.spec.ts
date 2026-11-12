@@ -7,7 +7,7 @@ import { COMPRESSOR_MODES } from './compressor-modes';
 import { bandThresholdsDb, levelGain, makeupGain, thresholdDb } from './compressor-params';
 import { COMPRESSOR_KEYS } from './compressor-wasm';
 import { WORKLETS_PATH } from './load-worklet';
-import type { FxMeterValues } from './types';
+import type { CompressorMeterValues } from './compressor-params';
 
 interface WorkletNodeStub extends AudioWorkletNode {
   name: string;
@@ -31,7 +31,7 @@ const setup = () => {
   return { audioCtx, core, input, output, node, messages, receive };
 };
 
-const METER: FxMeterValues = { gains: [-3, -6, 2], input: 0.5 };
+const METER: CompressorMeterValues = { gains: [-3, -6, 2], input: 0.5 };
 
 describe('compressor', () => {
   it('the laws of its knobs: the threshold, the makeup and the level in dB, the times in ms', () => {

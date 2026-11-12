@@ -2,19 +2,11 @@ import React from 'react';
 import { styled } from 'styled-components';
 import cls from 'classnames';
 import hexToRgba from 'hex-to-rgba';
-import { number, Vector2D } from '@chisper/math';
-import {
-  Deactivated,
-  singlePointerTracker,
-  theme,
-  Tooltip,
-  useCanvas,
-  useElementSize,
-  ValueTooltip,
-  valueScale,
-} from '@chisper/ui-kit';
+import { Vector2D } from '@chisper/math';
+import { Deactivated, theme, Tooltip, useCanvas, useElementSize, ValueTooltip } from '@chisper/ui-kit';
 import { compressor } from '../../effects/compressor';
-import type { FxMeter, FxMeterValues } from '../../effects/types';
+import type { CompressorMeterValues } from '../../effects/compressor-params';
+import type { FxMeter } from '../../effects/types';
 import {
   bandBars,
   bandZones,
@@ -31,11 +23,11 @@ import {
   xGain,
   yFreq,
 } from './compressor-screen-geometry';
+import { SCREEN_COLOR, ScreenCanvas, ScreenGrip, ScreenLayer, ScreenPlot } from './screen-grip';
 
 // css px of the screen between the windows of the bands (one band: as wide as the display it is in)
 export const SCREEN_SIZE: Size = [150, 80];
-// the lines and the points, as on the other charts of the synth
-const COLOR = theme.colors.accent;
+const COLOR = SCREEN_COLOR;
 // the bars of what the compressor does: down a reduction, up a boost; the alpha where a bar starts and at its
 // tip, the px of the bright edge there
 const bar = (color: string) => ({ color, start: hexToRgba(color, 0.08), end: hexToRgba(color, 0.6) });
@@ -43,9 +35,6 @@ const REDUCTION = bar(theme.colors.secondAccent);
 const BOOST = bar(theme.colors.accent);
 const BAR_EDGE = 1.5;
 const DOT_RADIUS = 2.5;
-// the share of its travel a key moves a point by
-const KEY_STEP = 0.02;
-const KEY_DIRECTIONS: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
 
 const { params: defs } = compressor;
 // the params of the bands: the crossovers, the gains (the low band first, as the rows of the screen from its
@@ -68,186 +57,16 @@ const Root = styled.div`
   overflow: hidden;
 `;
 
-// the size of the screen is read from it
-const Plot = styled.div`
-  position: absolute;
-  inset: 0;
-`;
-
-const Layer = styled.svg`
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-`;
+const Plot = ScreenPlot;
+const Layer = ScreenLayer;
 
 // what moves: under the lines and the points of the three bands (its bars), over the curve of one band (its dot
 // is on the curve, not behind it)
-const Canvas = styled.canvas`
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-
+const Canvas = styled(ScreenCanvas)`
   &.front {
     z-index: 1;
   }
 `;
-
-// what is dragged on the screen: a crossover up and down all along its line (a grip at its right, where the bars
-// of the reductions never reach), the gain of a band sideways by the point at the end of its line
-const GripRoot = styled.div`
-  position: absolute;
-  touch-action: none;
-  outline: none;
-
-  &::after {
-    content: '';
-    position: absolute;
-    box-sizing: border-box;
-    border: 1.5px solid ${COLOR};
-    background: ${theme.colors.primaryDark};
-    transition: background 150ms;
-  }
-
-  &.y {
-    left: 0;
-    right: 0;
-    height: 12px;
-    margin-top: -6px;
-    cursor: ns-resize;
-  }
-
-  &.y::after {
-    right: 3px;
-    top: 3px;
-    width: 10px;
-    height: 6px;
-    border-radius: 2px;
-  }
-
-  &.x {
-    width: 20px;
-    height: 20px;
-    margin: -10px 0 0 -10px;
-    cursor: ew-resize;
-  }
-
-  &.x::after {
-    left: 6px;
-    top: 6px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
-  &:hover::after,
-  &.active::after,
-  &:focus-visible::after {
-    background: ${COLOR};
-  }
-
-  &.disabled {
-    cursor: default;
-    pointer-events: none;
-  }
-`;
-
-interface GripProps {
-  param: BandParam;
-  value: number;
-  // where it is, css px of the screen
-  x: number;
-  y: number;
-  // the axis it is dragged along: a crossover up the frequencies, a gain across
-  axis: 'x' | 'y';
-  size: Size;
-  setParam: (key: string, value: number) => void;
-  // a pointer holds it, or let it go (null)
-  onHold: (held: BandParam | null) => void;
-  disabled: boolean;
-  // where a value it is set to stops within its range (a crossover at the other one)
-  limit?: (param: BandParam, value: number) => number;
-}
-
-// a param set on the screen: dragged along its axis it follows the pointer, the arrows move it, a double click
-// sets its default
-const Grip = React.memo((props: GripProps) => {
-  const { param, value, x, y, axis, size, setParam, onHold, disabled, limit } = props;
-  const def = defs[param];
-  const { name, label, min, max, precision = 1, mode = 'linear', formatValue } = def;
-  const [active, setActive] = React.useState(false);
-  const [trackPointer] = React.useState(singlePointerTracker);
-  const last = React.useRef(value);
-  const text = formatValue?.(value);
-
-  const emit = (next: number) => {
-    const within = number.thresholds(number.round(next, precision), min, max);
-    const rounded = limit ? limit(param, within) : within;
-    if (rounded === last.current) return;
-    last.current = rounded;
-    setParam(param, rounded);
-  };
-  // a change from the value it has now (a key, a double click)
-  const emitFromNow = (next: number) => {
-    last.current = value;
-    emit(next);
-  };
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    last.current = value;
-    // the px of the pointer are those of the viewport: the screen may be scaled (the mini view of a phone)
-    const plot = e.currentTarget.parentElement;
-    const scale = (plot?.offsetWidth && plot.getBoundingClientRect().width / plot.offsetWidth) || 1;
-    const along = (pointer: { clientX: number; clientY: number }) =>
-      axis === 'x' ? pointer.clientX : pointer.clientY;
-    const valueAt = (px: number) => (axis === 'y' ? yFreq(px, size) : xGain(px, size));
-    const from = along(e);
-    const place = axis === 'x' ? x : y;
-    const tracked = trackPointer(
-      e,
-      (move) => emit(valueAt(place + (along(move) - from) / scale)),
-      () => {
-        setActive(false);
-        onHold(null);
-      }
-    );
-    if (!tracked) return;
-    setActive(true);
-    onHold(param);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const direction = KEY_DIRECTIONS[e.key];
-    if (!direction) return;
-    e.preventDefault();
-    const scale = valueScale(mode).domain([min, max]).range([0, 1]);
-    emitFromNow(scale.invert(number.thresholds(scale(value) + direction * KEY_STEP, 0, 1)));
-  };
-
-  return (
-    <GripRoot
-      className={cls(axis, { active, disabled })}
-      style={{ left: x, top: y }}
-      role='slider'
-      tabIndex={disabled ? -1 : 0}
-      aria-label={name ?? label}
-      aria-orientation={axis === 'x' ? 'horizontal' : 'vertical'}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={value}
-      aria-valuetext={typeof text === 'string' ? text : undefined}
-      aria-disabled={disabled || undefined}
-      {...(!disabled && {
-        onPointerDown,
-        onKeyDown,
-        onDoubleClick: () => emitFromNow(def.default),
-      })}
-    />
-  );
-});
 
 const path = (points: Vector2D[]) => points.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join('');
 
@@ -373,7 +192,7 @@ interface Props {
   // every param of the compressor
   params: Record<string, number>;
   setParam: (key: string, value: number) => void;
-  meter?: FxMeter;
+  meter?: FxMeter<CompressorMeterValues>;
   // three bands, else one
   multi: boolean;
   active: boolean;
@@ -392,9 +211,14 @@ export const CompressorScreen = ({ params, setParam, meter, multi, active }: Pro
   const { xlow, xhigh } = params;
   const zones = React.useMemo(() => bandZones(xlow, xhigh, size), [xlow, xhigh, size]);
   const limit = React.useMemo(() => bandLimit(xlow, xhigh), [xlow, xhigh]);
+  // the value at a place of the screen: a crossover up the frequencies, a gain across
+  const valuesAt = React.useMemo(
+    () => ({ x: (px: number) => xGain(px, size), y: (px: number) => yFreq(px, size) }),
+    [size]
+  );
 
   const draw = React.useCallback(
-    (values: FxMeterValues | null) => {
+    (values: CompressorMeterValues | null) => {
       const context = begin();
       if (!context || !size[0]) return;
       if (multi) {
@@ -415,7 +239,7 @@ export const CompressorScreen = ({ params, setParam, meter, multi, active }: Pro
 
   // the values shown last are drawn again as the screen changes (a crossover dragged, its size), the meter is
   // watched once
-  const last = React.useRef<FxMeterValues | null>(null);
+  const last = React.useRef<CompressorMeterValues | null>(null);
   const drawing = React.useRef(draw);
   React.useEffect(() => {
     drawing.current = draw;
@@ -434,15 +258,18 @@ export const CompressorScreen = ({ params, setParam, meter, multi, active }: Pro
     };
   }, [meter, active]);
 
+  // what is dragged on the screen: a crossover up and down all along its line (a grip at its right, where the
+  // bars of the reductions never reach), the gain of a band sideways by the point at the end of its line
   const grip = (key: BandParam, x: number, y: number, axis: 'x' | 'y') => (
-    <Grip
+    <ScreenGrip
       key={key}
       param={key}
+      def={defs[key]}
       value={bandValue(key, params)}
       x={x}
       y={y}
       axis={axis}
-      size={size}
+      valueAt={valuesAt[axis]}
       setParam={setParam}
       onHold={setHeld}
       disabled={!active}

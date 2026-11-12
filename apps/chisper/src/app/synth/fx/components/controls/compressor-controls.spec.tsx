@@ -4,7 +4,8 @@ import { FX_PARAMS } from '@chisper/preset-schema';
 import { mapValues } from 'lodash';
 import { theme } from '@chisper/ui-kit';
 import { cssColor, drawn, svgPath, withElementSize } from '@chisper/ui-kit/test-utils';
-import type { FxMeter, FxMeterValues } from '../../effects/types';
+import type { CompressorMeterValues } from '../../effects/compressor-params';
+import { createMeterStub } from '../../../../../test-utils/fx-meter-stub';
 import { CompressorControls } from './compressor-controls';
 import { SCREEN_SIZE } from './compressor-screen';
 import {
@@ -21,22 +22,7 @@ import {
 const params = mapValues(FX_PARAMS.compressor, (param) => param.default);
 const [WIDTH, HEIGHT] = SCREEN_SIZE;
 
-// a meter the spec feeds: its watchers, how many times it was watched and left
-const createMeter = () => {
-  const listeners = new Set<(values: FxMeterValues) => void>();
-  const stop = jest.fn();
-  const meter: FxMeter = {
-    watch: jest.fn((listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-        stop();
-      };
-    }),
-  };
-  const send = (values: FxMeterValues) => act(() => listeners.forEach((listener) => listener(values)));
-  return { meter, send, stop, listeners };
-};
+const createMeter = () => createMeterStub<CompressorMeterValues>();
 
 const setup = (props: Partial<React.ComponentProps<typeof CompressorControls>> = {}) => {
   const setParam = jest.fn();
@@ -457,7 +443,7 @@ describe('CompressorControls', () => {
       const before = container.innerHTML;
       // the bar of the reduction and its edge (empty) before any value, no dot
       expect(drawn(canvasOf())).toHaveLength(2);
-      const values: FxMeterValues = { gains: [-12, -12, -12], input: 0.5 };
+      const values: CompressorMeterValues = { gains: [-12, -12, -12], input: 0.5 };
       send(values);
       const marks = singleMarks(values, SCREEN_SIZE);
       const [reduction, edge, dot] = drawn(canvasOf());
@@ -475,7 +461,7 @@ describe('CompressorControls', () => {
     it('three bands: a bar in each, down a reduction, up a boost; drawn again where a crossover moves them', () => {
       const { meter, send } = createMeter();
       const { rerender, container } = setup({ meter, params: { ...params, multi: 1 } });
-      const values: FxMeterValues = { gains: [6, -6, 24], input: 1 };
+      const values: CompressorMeterValues = { gains: [6, -6, 24], input: 1 };
       const before = container.innerHTML;
       send(values);
       expect(container.innerHTML).toBe(before);

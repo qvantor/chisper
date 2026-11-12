@@ -201,7 +201,10 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the first: not the bits of
   `read4`), a sample alone its lane of that four: how a block is cut changes no sample. Deliberate differences: its
   LFO never stops in a silence, a tap keeps the highs the one of the Audio Unit loses over 12 kHz, its phase is not
-  kept in a preset.
+  kept in a preset. Its screen (`chorus-screen.tsx`) draws the taps and drags their delays and the depth: the core tells
+  its LFO and the knobs of the taps as it has them (`fx_meter`, posted as the meter of the compressor is, only while
+  watched: `meter-report.ts` in the worklets, `createFxMeter` on the main thread), between two posts the main thread
+  moves the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
 - Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
   destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
   module fails, the app works without that effect; until `ready` a slot passes only the dry signal.

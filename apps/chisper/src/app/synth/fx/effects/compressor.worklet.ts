@@ -2,13 +2,9 @@ import bytes from '@chisper/wasm/compressor.wasm';
 import { COMPRESSOR_PROCESSOR } from '../../common/processors';
 import { prewarmStereo } from '../../common/wasm/stereo-core';
 import { instantiateCore } from '../../common/wasm/wasm-core';
-import type {
-  CompressorDspParams,
-  CompressorMessage,
-  CompressorMeterMessage,
-  CompressorOptions,
-} from './compressor-params';
+import type { CompressorDspParams, CompressorMessage, CompressorOptions } from './compressor-params';
 import { CompressorExports, createCompressorWasm } from './compressor-wasm';
+import { meterReport, watchMeter, withMeter } from './meter-report';
 import { registerStereoProcessor } from './stereo-processor';
 
 // the audio worklet module of the compressor with its Rust core (dsp/compressor), bundled by esbuild (`npm run
@@ -16,9 +12,6 @@ import { registerStereoProcessor } from './stereo-processor';
 // AudioWorkletGlobalScope: no window, document or React
 
 declare const sampleRate: number;
-
-// the meter, about this many times a second while it is watched
-const METER_RATE = 30;
 
 const WARM: CompressorDspParams = {
   multi: 0,
@@ -53,32 +46,13 @@ registerStereoProcessor(
   COMPRESSOR_PROCESSOR,
   (rate, { processorOptions }) => {
     const options = processorOptions as CompressorOptions;
-    // (the frames since the last message; nothing is read off the core while no one watches. `rested`: the meter
-    // of a core at rest was posted, nothing moves until a sound. `message`: the one posted every time, the port
-    // copies it, its meter is the values of the core)
-    const dsp = createCompressorWasm(core, rate, options);
-    const message: CompressorMeterMessage = { meter: dsp.meter() };
-    return Object.assign(dsp, { metering: !!options.meter, waited: 0, rested: false, message });
+    return withMeter(createCompressorWasm(core, rate, options), !!options.meter);
   },
   (dsp, { params, meter }: CompressorMessage) => {
     if (params) dsp.set(params);
-    if (meter !== undefined) {
-      dsp.metering = meter;
-      dsp.waited = 0;
-      dsp.rested = false;
-    }
+    if (meter !== undefined) watchMeter(dsp, meter);
   },
   // the knobs the envelopes move (fx-modulation.ts)
   (dsp, values) => dsp.set(values),
-  (dsp, frames): CompressorMeterMessage | null => {
-    if (!dsp.metering) return null;
-    dsp.waited += frames;
-    if (dsp.waited < sampleRate / METER_RATE) return null;
-    dsp.waited = 0;
-    const { idle } = dsp;
-    if (idle && dsp.rested) return null;
-    dsp.rested = idle;
-    dsp.meter();
-    return dsp.message;
-  }
+  (dsp, frames) => meterReport(dsp, frames, sampleRate)
 );

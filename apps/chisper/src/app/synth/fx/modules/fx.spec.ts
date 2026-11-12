@@ -522,9 +522,11 @@ describe('fx', () => {
       expect(findFxPreset('compressor', model.$effects.value.compressor)).toBeUndefined();
     });
 
-    it('its meter is the one of its core, the other effects have none', () => {
+    it('its meter is the one of its core (the chorus has its own), the other effects have none', () => {
       const { model } = setup();
       expect(model.slots.compressor.meter?.watch).toEqual(expect.any(Function));
+      expect(model.slots.chorus.meter?.watch).toEqual(expect.any(Function));
+      expect(model.slots.chorus.meter).not.toBe(model.slots.compressor.meter);
       expect(model.slots.delay.meter).toBeUndefined();
       expect(model.slots.distortion.meter).toBeUndefined();
       expect(model.slots.reverb.meter).toBeUndefined();
@@ -586,7 +588,6 @@ describe('fx', () => {
       expect(lastGain(dry)).toBe(0);
       expect(lastGain(wet)).toBe(1);
       // (the mix goes to the core: create-fx-slot.spec, chorus.spec)
-      expect(model.slots.chorus.meter).toBeUndefined();
     });
 
     it('passes the changed params to the effect, falsy ones included', async () => {

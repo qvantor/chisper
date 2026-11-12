@@ -9,6 +9,6 @@ export interface FxControlsProps {
   sampleRate: number;
   // the common Out group of FxPanel, goes into LastGroups after the last group of the effect
   out?: React.ReactNode;
-  // what the effect shows of its work (a compressor: its gains), absent: nothing
+  // what the effect shows of its work (a compressor: its gains, a chorus: its taps), absent: nothing
   meter?: FxMeter;
 }

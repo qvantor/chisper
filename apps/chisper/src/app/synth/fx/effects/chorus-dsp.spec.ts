@@ -1,6 +1,7 @@
 import {
   CHORUS_DEFAULTS,
   CHORUS_TAPS,
+  chorusCore,
   CLICK_MIDDLE,
   clickInto,
   mainTaps,
@@ -10,7 +11,8 @@ import {
   tapsOf,
 } from '../../../../test-utils/chorus-render';
 import { dB, toneOf } from '../../../../test-utils/measures';
-import { depthMs, levelGain } from './chorus-params';
+import { chorusTaps, depthMs, levelGain, MAX_TAP_MS, TAP_FOLLOW_MS } from './chorus-params';
+import { createChorusWasm } from './chorus-wasm';
 
 // the Rust core of the chorus (dsp/chorus) through its facade: its taps, its LFO, its feedback, its filter, its
 // mix, its rest. chorus-measured.spec.ts holds it to the Audio Unit, chorus-goldens.spec.ts to its bits
@@ -53,6 +55,56 @@ describe('chorus dsp', () => {
     expect(left[1]).toBeCloseTo(20 + TAP_LATENCY_MS, 1);
     expect(right[0]).toBeCloseTo(TAP_LATENCY_MS + travel / 2, 1);
     expect(right[1]).toBeCloseTo(20 + TAP_LATENCY_MS + travel / 2, 1);
+  });
+
+  it('its meter: the LFO as it is (it goes on at rest) and the knobs of the taps as the core has them', () => {
+    const dsp = createChorusWasm(chorusCore(), RATE, {
+      params: { ...CHORUS_TAPS, rate: 2, d1: 7, d2: 3, depth: 13 },
+    });
+    expect(dsp.meter()).toEqual({ phase: 0, rate: 2, d1: 7, d2: 3, depth: 13, cut: 20000, idle: true });
+    const block = () =>
+      [0, 1, 2, 3].map(() => new Float32Array(128)) as [
+        Float32Array,
+        Float32Array,
+        Float32Array,
+        Float32Array,
+      ];
+    for (let i = 0; i < 100; i++) dsp.process(...block());
+    const values = dsp.meter();
+    expect(values.phase).toBeCloseTo((2 * 12800) / RATE, 9);
+    expect(values.idle).toBe(true);
+    // the same object every time, the knobs held to their ranges
+    dsp.set({ rate: 50, d1: -1, depth: 40, cut: 700 });
+    expect(dsp.meter()).toBe(values);
+    expect(values).toMatchObject({ rate: 20, d1: 0, d2: 3, depth: 26, cut: 700 });
+    const [inL, inR, outL, outR] = block();
+    inL.fill(0.25);
+    dsp.process(inL, inR, outL, outR);
+    expect(dsp.meter().idle).toBe(false);
+    dsp.free();
+  });
+
+  it('chorusTaps places the taps where the core has them at a phase of its LFO (past the latency of a tap)', () => {
+    expect(MAX_TAP_MS).toBe(20 + depthMs(26));
+    expect(TAP_FOLLOW_MS).toBe(20);
+    // (no two taps of a channel ever near each other)
+    const knobs = { depth: 4, d1: 18, d2: 0 };
+    // at rest for 0, a sixth and 0.4 of a cycle of 1 Hz when the click comes
+    [0, 1 / 6, 0.4].forEach((phase) => {
+      const [left, right] = taps(
+        { ...knobs, rate: phase ? 1 : 0 },
+        phase ? Math.round(phase * RATE) - AT : 0
+      );
+      // (the LFO stands, or moves a tap by less than 0.2 ms over the delay it is heard at)
+      const expected = chorusTaps(phase, knobs).map((ms) => ms + TAP_LATENCY_MS);
+      const measured = [...left, ...right];
+      expect(measured).toHaveLength(4);
+      measured.forEach((ms, tap) => expect(Math.abs(ms - expected[tap])).toBeLessThan(0.6));
+    });
+    // into an array of its own: nothing is made
+    const kept = [0, 0, 0, 0];
+    expect(chorusTaps(0, knobs, kept)).toBe(kept);
+    expect(kept).toEqual([depthMs(4), 18, depthMs(4) / 2, 18 + depthMs(4) / 2]);
   });
 
   it('the LFO goes on while it rests: a rest of half a cycle swaps the taps of a channel', () => {

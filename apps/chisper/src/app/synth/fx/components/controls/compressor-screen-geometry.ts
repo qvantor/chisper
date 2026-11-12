@@ -1,7 +1,6 @@
 import { number, Vector2D } from '@chisper/math';
 import { FX_PARAMS } from '@chisper/preset-schema';
-import { thresholdDb } from '../../effects/compressor-params';
-import type { FxMeterValues } from '../../effects/types';
+import { CompressorMeterValues, thresholdDb } from '../../effects/compressor-params';
 
 // The screen of the compressor in css px, [width, height] (the level of the output is at the master knob).
 // One band: the curve of the output over the input (dB), a dot on it where the signal is, the reduction as a bar
@@ -66,7 +65,7 @@ export const transferCurve = (thresh: number, ratio: number, size: Size): Vector
 // the attack and the release), none in silence. The bar stops at the end of its range, the dot goes on down the
 // plot with the whole reduction
 export const singleMarks = (
-  values: FxMeterValues | null,
+  values: CompressorMeterValues | null,
   size: Size
 ): { reduction: Rect; dot: Vector2D | null } => {
   const [width] = size;
@@ -128,7 +127,11 @@ export const bandZones = (xlow: number, xhigh: number, size: Size) => {
 
 // what moves in three bands: a bar in the row of each band from the line of 0 dB, to the left its reduction, to
 // the right its boost
-export const bandBars = (values: FxMeterValues | null, zones: ReturnType<typeof bandZones>, size: Size) => {
+export const bandBars = (
+  values: CompressorMeterValues | null,
+  zones: ReturnType<typeof bandZones>,
+  size: Size
+) => {
   const middle = gainX(0, size);
   return {
     middle,
