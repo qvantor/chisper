@@ -31,9 +31,12 @@
 //   sample): one band (the law of the threshold, the ratio, the attack and the release, the link of the channels,
 //   the makeup, the level, the mix, the highpass) and three bands (the crossovers, the curves of each band down
 //   and up, their detector on a mono sine, their release)
+// - chorus.json: the chorus of its effect rack on clicks and noise of ours: the delays of its four taps by its
+//   knobs, how its LFO moves them (trains of clicks: where each comes out), the feedback, the filter, the laws of
+//   the mix and the level, the level of the mono sum
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor` renders
-// some of them
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus`
+// renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -1721,18 +1724,21 @@ if (runs('sub')) {
   }
 }
 
-// --- compressor ---
-if (runs('compressor')) {
-  // 44.1 kHz: the noise oscillator plays a sample of ours as it is (no resampling), one-shot, osc A off
-  const R = 44100;
+// --- the effect rack ---
+// a stand of an effect of the rack: samples of ours (44.1 kHz: the noise oscillator plays them as they are, no
+// resampling, one-shot, osc A off) through the rack with the effect `fx` ({ module, type, params, kept } of
+// state.mjs; null: an empty rack, the dry signal)
+const RACK_RATE = 44100;
+const rackStand = (tag) => {
+  const R = RACK_RATE;
   const samples = [];
   const NOISE = { 'A Enable': 0, 'Noise Enable': 1, 'Noise Level': 1, 'Env 1 Attack': 0, 'Env 1 Sustain': 1 };
   const sampleOf = (name, channels) => {
-    const file = join(noisesFolder(), 'User', `chisper-test-comp-${name}.wav`);
+    const file = join(noisesFolder(), 'User', `chisper-test-${tag}-${name}.wav`);
     writeSample(file, channels);
     samples.push(file);
     return {
-      path: `User/chisper-test-comp-${name}.wav`,
+      path: `User/chisper-test-${tag}-${name}.wav`,
       frames: channels[0].length,
       channels: channels.length,
       rate: R,
@@ -1746,24 +1752,16 @@ if (runs('compressor')) {
   let laneSample = null;
   let laneJobs = [];
   const played = new Map();
-  // a sample through the rack with a compressor of the plain params `comp` (null: an empty rack, the dry signal),
-  // rendered once
-  const play = (sample, comp) => {
-    const key = `${sample.path} ${JSON.stringify(comp)}`;
-    if (!played.has(key)) played.set(key, render(sample, comp));
-    return played.get(key);
-  };
-  const render = (sample, comp) => {
+  const render = (sample, fx) => {
     if (laneSample !== sample.path) {
       const before = laneJobs;
       lane = lane.then(() => Promise.allSettled(before));
       laneSample = sample.path;
       laneJobs = [];
     }
-    const name = `comp-${renders++}`;
+    const name = `${tag}-${renders++}`;
     const state = join(work, `state-${name}.bin`);
-    const fx = comp === null ? null : [{ module: 'FXComp', type: 5, params: comp }];
-    writeFileSync(state, editedState(init, [], [], sample, fx));
+    writeFileSync(state, editedState(init, [], [], sample, fx && [fx]));
     const seconds = sample.frames / R + 0.3;
     const once = (attempt) =>
       hostRender(`${name}-${attempt}`, {
@@ -1773,7 +1771,8 @@ if (runs('compressor')) {
         params: NOISE,
         notes: [{ note: 72, on: 0.05, off: seconds - 0.02 }],
       });
-    const same = ([a], [b]) => a.every((value, i) => Math.abs(value - b[i]) < 1e-5);
+    const same = (a, b) =>
+      a.every((channel, c) => channel.every((value, i) => Math.abs(value - b[c][i]) < 1e-5));
     // rendered until two renders in a row agree (now and then a render is of another state: one in a hundred)
     const job = lane.then(async () => {
       let [before, last] = [await once(0), await once(1)];
@@ -1786,6 +1785,23 @@ if (runs('compressor')) {
     laneJobs.push(job);
     return job;
   };
+  // a sample through the rack, rendered once
+  const play = (sample, fx) => {
+    const key = `${sample.path} ${JSON.stringify(fx)}`;
+    if (!played.has(key)) played.set(key, render(sample, fx));
+    return played.get(key);
+  };
+  return { sampleOf, play, remove: () => samples.splice(0).forEach((file) => rmSync(file, { force: true })) };
+};
+
+// --- compressor ---
+if (runs('compressor')) {
+  const R = RACK_RATE;
+  const stand = rackStand('comp');
+  const { sampleOf } = stand;
+  // a sample through the rack with a compressor of the plain params `comp` (null: an empty rack, the dry signal)
+  const play = (sample, comp) =>
+    stand.play(sample, comp === null ? null : { module: 'FXComp', type: 5, params: comp });
   const MULTI = { kParamMultiband: 1 };
   // a program of a sine of both channels in quadrature: [dB, seconds] one after another
   const program = (hz, segments, mono = false) => {
@@ -2133,6 +2149,263 @@ if (runs('compressor')) {
       JSON.stringify({ output: result.output, link: result.single.link })
     );
   } finally {
-    samples.forEach((file) => rmSync(file, { force: true }));
+    stand.remove();
+  }
+}
+
+// --- chorus ---
+if (runs('chorus')) {
+  const R = RACK_RATE;
+  const stand = rackStand('chorus');
+  const { sampleOf } = stand;
+  // a sample through the rack with a chorus of the plain params `chorus` (null: an empty rack, the dry signal)
+  const play = (sample, chorus) =>
+    stand.play(sample, chorus === null ? null : { module: 'FXChorus', type: 3, params: chorus });
+  const round = (v, digits = 3) => +v.toFixed(digits);
+  const ms = (samples) => round((samples / R) * 1000);
+  // clicks every `period` s for `seconds` (one with no period) after a quiet tone (the rack awake), a tail after.
+  // The tone goes on under a train: in a silence between two clicks the chorus sleeps and its LFO stops (with
+  // no feedback its taps then move slower, and unevenly)
+  const AT = Math.round(0.4 * R);
+  const clicks = (seconds, period = 0) => {
+    const x = new Float64Array(AT + Math.round((seconds + 0.2) * R));
+    const quiet = period ? x.length : AT - Math.round(0.05 * R);
+    for (let i = 0; i < quiet; i++)
+      x[i] = 1e-3 * Math.sin((2 * Math.PI * 1000 * i) / R) * Math.min(1, (quiet - i) / 2000);
+    const step = Math.round(period * R);
+    for (let i = 0; i < (step ? seconds * R : 1); i += step || 1) x[AT + i] += 0.5;
+    return x;
+  };
+  // where the click of the dry render at `at` comes out of a wet channel: its correlation with the dry click
+  // over the lags [-8, to), the peaks above `floor` of the dry one (parabolic): [lag in samples, gain]
+  const tapsOf = (wet, dry, at, to, floor) => {
+    const W = 24;
+    let auto = 0;
+    for (let i = -W; i <= W; i++) auto += dry[at + i] ** 2;
+    const lags = Float64Array.from({ length: to + 8 }, (_, k) => {
+      let sum = 0;
+      for (let i = -W; i <= W; i++) sum += dry[at + i] * (wet[at + k - 8 + i] ?? 0);
+      return sum / auto;
+    });
+    const found = [];
+    for (let k = 1; k < lags.length - 1; k++) {
+      const [a, b, c] = [Math.abs(lags[k - 1]), Math.abs(lags[k]), Math.abs(lags[k + 1])];
+      if (b <= floor || b < a || b <= c) continue;
+      const shift = (a - c) / (2 * (a - 2 * b + c));
+      found.push([k - 8 + shift, lags[k] - 0.25 * (lags[k - 1] - lags[k + 1]) * shift]);
+    }
+    return found;
+  };
+  // the knobs at which the taps are read: all of the wet signal, the filter open, no feedback
+  const OPEN = { kParamWet: 100, kParamFilt: 20000, kParamFeedback: 0 };
+  const STILL = { ...OPEN, kParamDepth: 0 };
+  try {
+    const click = sampleOf('click', [clicks(1.2)]);
+    const [dry] = await play(click, null);
+    let at = 0;
+    for (let i = 0; i < dry.length; i++) if (Math.abs(dry[i]) > Math.abs(dry[at])) at = i;
+    const tapped = async (chorus, floor = 0.1, to = Math.round(0.1 * R)) => {
+      const wet = await play(click, chorus);
+      return wet.map((channel) => tapsOf(channel, dry, at, to, floor));
+    };
+    // the delays of the taps by the knobs Delay 1 and Delay 2 (the depth at 0): of each channel, ms
+    const delays = Promise.all(
+      [
+        [5, 0],
+        [0, 0],
+        [1, 0],
+        [2, 0],
+        [10, 0],
+        [20, 0],
+        [30, 0],
+        [10, 3],
+        [20, 10],
+        [20, 30],
+      ].map(async ([first, second]) => {
+        const [l, r] = await tapped({ ...STILL, kParamDelay: first, kParamDelay2: second });
+        return [first, second, l.map(([lag]) => ms(lag)), r.map(([lag]) => ms(lag))];
+      })
+    );
+    // a fresh chorus against one with its defaults written: the difference of the renders, dB under the first
+    const DEFAULTS = {
+      kParamRate: 20 * 0.25 ** 4,
+      kParamDelay: 5,
+      kParamDelay2: 0,
+      kParamDepth: 26,
+      kParamFeedback: 9.5,
+      kParamFilt: 1000,
+      kParamWet: 50,
+      kParamLevelOut: 0.5,
+    };
+    const fresh = Promise.all([play(click, {}), play(click, DEFAULTS)]).then(([[a], [b]]) => {
+      let [signal, difference] = [0, 0];
+      for (let i = 0; i < a.length; i++) {
+        signal += a[i] ** 2;
+        difference += (a[i] - b[i]) ** 2;
+      }
+      return { ...DEFAULTS, apart: round(10 * Math.log10(difference / signal + 1e-20), 1) };
+    });
+    // the LFO: trains of clicks, where the taps of each channel bring out each click (ms, in order)
+    const moving = async ({ seconds, period, ...knobs }) => {
+      const sample = sampleOf(`train-${seconds}-${period}`, [clicks(seconds, period)]);
+      const [[dryTrain], wet] = await Promise.all([play(sample, null), play(sample, { ...OPEN, ...knobs })]);
+      const step = Math.round(period * R);
+      const rows = [];
+      for (let k = 0; k * step < seconds * R - step; k++) {
+        const [l, r] = wet.map((channel) =>
+          tapsOf(channel, dryTrain, at + k * step, step - 60, 0.12).map(([lag]) => ms(lag))
+        );
+        rows.push([round((k * step) / R, 4), l, r]);
+      }
+      return { ...knobs, taps: rows };
+    };
+    const FAR = { kParamDelay: 20, kParamDelay2: 0 };
+    const trains = async () => {
+      const rows = [];
+      // (one train after another: each is a sample of its own)
+      for (const job of [
+        { seconds: 12.8, period: 0.1 },
+        { seconds: 3, period: 0.025, kParamRate: 1.013, kParamDepth: 1, ...FAR },
+        { seconds: 2, period: 0.025, kParamRate: 5.03, kParamDepth: 1, ...FAR },
+        { seconds: 1, period: 0.025, kParamRate: 19.9, kParamDepth: 1, ...FAR },
+        { seconds: 1.2, period: 0.025, kParamRate: 40, kParamDepth: 1, ...FAR },
+        { seconds: 4, period: 0.05, kParamRate: 0.5, kParamDepth: 5, ...FAR },
+        { seconds: 4.2, period: 0.1, kParamRate: 0.5, kParamDepth: 50, kParamDelay: 20, kParamDelay2: 0 },
+        { seconds: 0.5, period: 0.05, kParamRate: 0, kParamDepth: 2, ...FAR },
+      ])
+        rows.push(await moving(job));
+      return rows;
+    };
+    // the feedback: the repeats of a click ([ms, gain] of the left channel), both taps at 10 ms, then apart
+    const BOTH = { ...STILL, kParamDelay: 10, kParamDelay2: 10 };
+    const repeats = async (chorus) =>
+      (await tapped(chorus, 0.03, Math.round(0.056 * R)))[0].map(([lag, gain]) => [ms(lag), round(gain, 4)]);
+    const feedback = Promise.all(
+      [-50, 25, 50, 75, 95, 100].map(async (value) => [
+        value,
+        await repeats({ ...BOTH, kParamFeedback: value }),
+      ])
+    );
+    const loops = repeats({ ...BOTH, kParamDelay2: 7, kParamFeedback: 50 });
+    // the response of the wet signal against the dry one: dB at each of the frequencies
+    const N = 1 << 15;
+    const transform = (x) => {
+      const fft = new FFT(N);
+      const bins = fft.createComplexArray();
+      fft.realTransform(
+        bins,
+        Array.from({ length: N }, (_, i) => x[at - 64 + i])
+      );
+      return bins;
+    };
+    const base = transform(dry);
+    const FREQUENCIES = Array.from({ length: 41 }, (_, i) => round(25 * 2 ** (i / 4.25), 1));
+    const response = async (chorus) => {
+      const bins = transform((await play(click, chorus))[0]);
+      return FREQUENCIES.map((hz) => {
+        const k = Math.round((hz * N) / R);
+        return round(
+          dB(Math.hypot(bins[2 * k], bins[2 * k + 1]) / Math.hypot(base[2 * k], base[2 * k + 1])),
+          2
+        );
+      });
+    };
+    // the filter: both taps at 0 ms (one arrival), low and high pass by the knob
+    const ZERO = { kParamWet: 100, kParamFeedback: 0, kParamDepth: 0, kParamDelay: 0, kParamDelay2: 0 };
+    const CUTOFFS = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    const filter = Promise.all(
+      [
+        ['low', {}],
+        ['high', { kParamFiltMode: 1 }],
+      ].map(async ([name, mode]) => [
+        name,
+        await Promise.all(
+          CUTOFFS.map(async (hz) => [hz, await response({ ...ZERO, ...mode, kParamFilt: hz })])
+        ),
+      ])
+    );
+    const comb = Promise.all(
+      [50, 95].map(async (value) => [value, await response({ ...BOTH, kParamFeedback: value })])
+    );
+    // the mix: the gain of the dry click and of the wet one (both taps at 10 ms), the level: dB against 0.5
+    const parts = async (chorus) => {
+      const [found] = await tapped(chorus, 0.005, Math.round(0.012 * R));
+      const gain = (ms) => found.find(([lag]) => Math.abs(lag / R - ms / 1000) < 1e-4)?.[1] ?? 0;
+      return [gain(0), gain(10.12)];
+    };
+    const mix = Promise.all(
+      [0, 12.5, 25, 37.5, 50, 62.5, 75, 87.5, 100].map(async (value) => {
+        const [dryGain, wetGain] = await parts({ ...BOTH, kParamWet: value });
+        return [value / 100, round(dryGain, 4), round(wetGain, 4)];
+      })
+    );
+    const level = Promise.all(
+      [0.1, 0.25, 0.5, 0.75, 1].map(async (knob) => {
+        const [dryGain, wetGain] = await parts({ ...BOTH, kParamWet: 50, kParamLevelOut: knob });
+        return [knob, round(dB(dryGain)), round(dB(wetGain))];
+      })
+    );
+    // the mono sum of a fresh chorus on white noise (seeded: x = x * 1664525 + 1013904223 mod 2^32, its top
+    // 24 bits as -0.25..0.25) over a cycle of its LFO: the level of a channel and of the half sum against the dry
+    const SECONDS = 13.2;
+    let seed = 1;
+    const noise = Float64Array.from({ length: Math.round(SECONDS * R) }, () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return ((seed >>> 8) / (1 << 24) - 0.5) * 0.5;
+    });
+    const levels = ([[dryNoise], [l, r]]) => {
+      const on = dryNoise.findIndex((v) => Math.abs(v) > 1e-6);
+      const power = (of) => {
+        let sum = 0;
+        for (let i = on + Math.round(0.2 * R); i < on + Math.round(13 * R); i++) sum += of(i) ** 2;
+        return sum;
+      };
+      const reference = power((i) => dryNoise[i]);
+      return {
+        seconds: SECONDS,
+        left: round(dB(Math.sqrt(power((i) => l[i]) / reference))),
+        right: round(dB(Math.sqrt(power((i) => r[i]) / reference))),
+        sum: round(dB(Math.sqrt(power((i) => (l[i] + r[i]) / 2) / reference))),
+      };
+    };
+    const result = {
+      about:
+        'The chorus of the effect rack of the Audio Unit on samples of ours played by its noise oscillator ' +
+        '(44.1 kHz), its plain params named as its state has them (kParamRate Hz, kParamDelay and kParamDelay2 ' +
+        'ms, kParamDepth 0..26, kParamFeedback %, kParamFilt Hz, kParamFiltMode 1 a high pass, kParamWet %, ' +
+        'kParamLevelOut a knob 0..1). delays: [Delay 1, Delay 2, the taps of the left channel (ms after the ' +
+        'dry click), of the right one] at the depth 0. fresh: the defaults of its knobs and how far a render ' +
+        'with them written is from the one of a fresh chorus (dB under it). lfo: trains of clicks (the knobs ' +
+        'of each, the rest fresh, the mix 100 %, the filter open, no feedback; a tone of 1 kHz at 0.001 under ' +
+        'the clicks, fading out over their last 2000 samples: the chorus awake): taps [the time of a click (s after the ' +
+        'first), where the left channel brings it out (ms, in order), the right one]. feedback: [%, the ' +
+        'repeats of a click [ms, gain]] with both delays 10 ms, loops the same with Delay 2 at 7 ms and 50 %. ' +
+        'filter: low and high pass, [the knob (Hz), the gain of the wet signal (dB against the dry click) at ' +
+        'each of frequencies] with both taps at 0 ms and no feedback. comb: [feedback %, the same gains] with both delays ' +
+        '10 ms. mix: [the knob 0..1, the gain of the dry click, the gain of the wet one (two taps at once)], ' +
+        'level: [the knob, the dry gain (dB), the wet gain (dB)] at the mix 50 %. mono: a fresh chorus on ' +
+        'white noise (x = x * 1664525 + 1013904223 mod 2^32 from 1, its top 24 bits as -0.25..0.25) over 0.2..13 ' +
+        's: the level of each channel and of the half sum (dB against the dry noise). ' +
+        'scripts/renders/run.mjs --only=chorus',
+      rate: R,
+      delays: await delays,
+      fresh: await fresh,
+      feedback: await feedback,
+      loops: await loops,
+      frequencies: FREQUENCIES,
+      filter: Object.fromEntries(await filter),
+      comb: await comb,
+      mix: await mix,
+      level: await level,
+    };
+    // a sample after another, never two at once and never back to one (a host has played the sample of the
+    // renders before it, twice alike): the click first, then each train, then the noise
+    result.lfo = await trains();
+    const hiss = sampleOf('noise', [noise]);
+    result.mono = levels(await Promise.all([play(hiss, null), play(hiss, {})]));
+    writeFileSync(join(out, 'chorus.json'), `${JSON.stringify(result, null, 1)}\n`);
+    console.log('dsp/measurements: chorus', JSON.stringify({ fresh: result.fresh, mono: result.mono }));
+  } finally {
+    stand.remove();
   }
 }

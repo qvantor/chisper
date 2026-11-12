@@ -138,3 +138,6 @@ export const rateDivisions = (trip: boolean, dot: boolean) =>
 // the steps of Time of the delay: 1/64 … 1 bar, with TRIP and DOT their triplets and dotted ones
 export const delayDivisions = (trip: boolean, dot: boolean) =>
   divisionSteps({ longest: '1 bar', shortest: '1/64', trip, dot });
+// the steps of Rate of the chorus: 1/32 … 8 bar a cycle of its LFO, with TRIP and DOT their triplets and dotted ones
+export const chorusDivisions = (trip: boolean, dot: boolean) =>
+  divisionSteps({ longest: '8 bar', shortest: '1/32', trip, dot });

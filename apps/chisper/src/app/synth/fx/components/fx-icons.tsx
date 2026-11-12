@@ -60,9 +60,19 @@ const CompressorIcon = () => (
   </Icon>
 );
 
+// one wave and its copies a little later, fainter: the voices of a chorus, never quite together
+const ChorusIcon = () => (
+  <Icon>
+    <path d='M-1.5 12 Q2 0 5.5 12 T12.5 12 T19.5 12 T26.5 12' opacity='0.35' />
+    <path d='M-3 12 Q0.5 0 4 12 T11 12 T18 12 T25 12' opacity='0.6' />
+    <path d='M-5 12 Q-1.5 0 2 12 T9 12 T16 12 T23 12 T30 12' />
+  </Icon>
+);
+
 // shown in the effects list
 export const FX_ICONS: Record<FxType, React.ComponentType> = {
   distortion: DistortionIcon,
+  chorus: ChorusIcon,
   delay: DelayIcon,
   compressor: CompressorIcon,
   reverb: ReverbIcon,

@@ -1,0 +1,22 @@
+[package]
+name = "chorus"
+description = "The chorus worklet core: four taps moved by an LFO, each with a feedback of its own"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+wasm-rt = { path = "../wasm-rt" }
+jsmath = { path = "../jsmath" }
+dsp-core = { path = "../dsp-core" }
+
+[features]
+# the counters of the perf build (as __PERF__ of the TS)
+perf = []

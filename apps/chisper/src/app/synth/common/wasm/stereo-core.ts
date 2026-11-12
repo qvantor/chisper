@@ -54,6 +54,51 @@ export const stereoCore = (exports: StereoCoreExports, handle: number) => {
   };
 };
 
+// a stereo core with keyed params (dsp/distortion, dsp/compressor, dsp/chorus)
+export interface ParamsCoreExports extends StereoCoreExports {
+  // the buffer of the params of fx_new and fx_set: the bits of the keys fx_set changes, then the params
+  fx_command: () => number;
+  fx_new: (sampleRate: number) => number;
+  fx_set: (handle: number) => void;
+  fx_idle: (handle: number) => number;
+}
+
+// the dsp of a core of `params` (`keys` in its order): set() changes those given, idle says it has nothing to play;
+// its `handle` and `command` (its buffer) for what else it exports
+export const paramsCore = <K extends string>(
+  exports: ParamsCoreExports,
+  sampleRate: number,
+  keys: readonly K[],
+  params: Record<K, number>
+) => {
+  const view = createView(exports, Float64Array);
+  // (a static of the core: it never moves)
+  const at = exports.fx_command();
+  const command = () => view(at, keys.length + 1);
+  const options = command();
+  keys.forEach((key, i) => (options[1 + i] = params[key]));
+  const handle = exports.fx_new(sampleRate);
+  const dsp = {
+    ...stereoCore(exports, handle),
+    set: (changes: Partial<Record<K, number>>) => {
+      const buffer = command();
+      let present = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const value = changes[keys[i]];
+        if (value === undefined) continue;
+        present |= 1 << i;
+        buffer[1 + i] = value;
+      }
+      buffer[0] = present;
+      exports.fx_set(handle);
+    },
+    get idle() {
+      return exports.fx_idle(handle) !== 0;
+    },
+  };
+  return { dsp, handle, command };
+};
+
 // the functions of a block compile lazily, on their first call: a dsp made while the module loads renders a few
 // blocks of an impulse (a silent input would leave an effect idle; over the ceiling of the limiter) and is freed,
 // so the first processor doesn't compile them in its constructor and its first block (the limiter 0.5 ms, the

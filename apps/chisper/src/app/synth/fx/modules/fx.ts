@@ -19,7 +19,7 @@ import { urlSnapshotPlugin } from '../../../app';
 import { createFxSlot, FX_REGISTRY, FxSlot, FxStatus, isFxUsable } from '../effects';
 import { FxModulation, FxNote, FxRoute, isLfoSource } from '../effects/fx-modulation';
 import { createFxMod } from '../effects/fx-mod';
-import { delayTime, delayTimeBounds } from '../effects/delay';
+import { delayTime } from '../effects/delay';
 import { slotLines } from '../effects/fx-mod-params';
 
 // the source VELO (MOD_SOURCES)
@@ -54,12 +54,10 @@ const defaultFxState = (type: FxType): FxState => ({
 const defaultEffects = () =>
   Object.fromEntries(FX_TYPES.map((type) => [type, defaultFxState(type)])) as Record<FxType, FxState>;
 
-// the bounds of the routes to the knobs of an effect at a tempo, by param: Time of the delay in BPM within its
-// divisions (the others: the ranges of their knobs)
-const fxBounds = (type: FxType, params: Record<string, number>, bpm: number) => {
-  const time = type === 'delay' ? delayTimeBounds(params, bpm) : undefined;
-  return time ? { time } : {};
-};
+// the bounds of the routes to the knobs of an effect at a tempo, by param: Time of the delay and Rate of the chorus
+// in BPM within their divisions (the others: the ranges of their knobs)
+const fxBounds = (type: FxType, params: Record<string, number>, bpm: number) =>
+  FX_REGISTRY[type].bounds?.(params, bpm) ?? {};
 
 // the routes to the knobs of an effect, in the units of its params (within `bounds`); an amount of 0 and a route
 // switched off are left out. With a route of an LFO those of the note to the knobs of the LFOs too (within

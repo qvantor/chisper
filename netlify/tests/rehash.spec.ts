@@ -7,15 +7,15 @@ const stored = (data: unknown, id: string) => {
   return { id, hash: presetHash(normalized), data: normalized };
 };
 
-// the same preset as a schema before the compressor stored it: no compressor, its old order, another hash
+// the same preset as a schema before the chorus stored it: no chorus, its old order, another hash
 const before = (data: unknown, id: string) => {
   const { fx, ...rest } = normalizePreset(data);
-  const { compressor, o, ...effects } = fx;
-  expect(compressor).toBeDefined();
+  const { chorus, o, ...effects } = fx;
+  expect(chorus).toBeDefined();
   return {
     id,
     hash: `old-${id}`,
-    data: { ...rest, fx: { ...effects, o: o.filter((type) => type !== 'compressor') } },
+    data: { ...rest, fx: { ...effects, o: o.filter((type) => type !== 'chorus') } },
   };
 };
 
@@ -27,7 +27,7 @@ describe('rehashPresets', () => {
     expect(rehashPresets(rows)).toEqual({ changes: [], invalid: [], collisions: [] });
   });
 
-  it('a preset from before the compressor gets it with its defaults, in its place, and its new hash', () => {
+  it('a preset from before the chorus gets it with its defaults, in its place, and its new hash', () => {
     const row = before(SOUND, 'b');
     const { changes, invalid, collisions } = rehashPresets([row]);
     expect(invalid).toEqual([]);
@@ -38,8 +38,8 @@ describe('rehashPresets', () => {
     expect(hash).toBe(stored(SOUND, 'b').hash);
     expect(data).toEqual(stored(SOUND, 'b').data);
     const { fx } = data as ReturnType<typeof normalizePreset>;
-    expect(fx.o).toEqual(['compressor', 'reverb', 'delay', 'distortion']);
-    expect(fx.compressor).toMatchObject({ a: false, on: true, mix: 1, multi: 0, thresh: 0.5, ratio: 4 });
+    expect(fx.o).toEqual(['chorus', 'compressor', 'reverb', 'delay', 'distortion']);
+    expect(fx.chorus).toMatchObject({ a: false, on: true, mix: 0.5, rate: 0.078, depth: 26, fb: 0.095 });
     // the sound itself is kept
     expect(fx.reverb).toMatchObject({ a: true, decay: 3 });
   });
@@ -75,7 +75,7 @@ describe('rehashPresets', () => {
   });
 
   it('presets that become one sound are reported: their hash is unique in the table', () => {
-    // the same sound saved twice by schemas apart: one with the compressor at its defaults, one without it
+    // the same sound saved twice by schemas apart: one with the chorus at its defaults, one without it
     const rows = [stored(SOUND, 'new'), before(SOUND, 'old'), before({}, 'other')];
     const { collisions, changes } = rehashPresets(rows);
     expect(collisions).toEqual([['new', 'old']]);

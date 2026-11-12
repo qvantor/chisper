@@ -44,6 +44,7 @@ describe('FxPanel', () => {
 
   it.each([
     ['distortion', ['drive', 'tone', 'level', 'mix']],
+    ['chorus', ['rate', 'depth', 'd1', 'd2', 'fb', 'cut', 'level', 'mix']],
     ['delay', ['pan', 'time', 'fb', 'freq', 'q', 'mix']],
     // (one band: no values of the bands)
     ['compressor', ['thresh', 'ratio', 'attack', 'release', 'gain', 'level', 'mix']],

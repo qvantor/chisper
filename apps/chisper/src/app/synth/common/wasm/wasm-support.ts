@@ -5,6 +5,7 @@ export const WASM_MODULES: readonly string[] = [
   'reverb',
   'distortion',
   'compressor',
+  'chorus',
   'wavetable-osc',
 ];
 

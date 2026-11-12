@@ -119,6 +119,25 @@ const COMPRESSOR_DEFAULTS = {
   level: 0.5,
 };
 
+// half of it wet: a fresh chorus, in Hz
+const CHORUS_DEFAULTS = {
+  a: false,
+  on: true,
+  mix: 0.5,
+  rate: 0.078,
+  sync: 0,
+  div: divisionIndex('8 bar'),
+  trip: 0,
+  dot: 0,
+  d1: 5,
+  d2: 0,
+  depth: 26,
+  fb: 0.095,
+  cut: 1000,
+  hpf: 0,
+  level: 0.5,
+};
+
 const reversed = (value: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(
     Object.entries(value)
@@ -481,19 +500,63 @@ describe('normalizePreset', () => {
   it('fills fx defaults: every effect in the order, none in the chain', () => {
     const { fx } = normalizePreset({ ...preset, fx: undefined });
     expect(fx).toEqual({
-      o: ['distortion', 'delay', 'compressor', 'reverb'],
+      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
       distortion: DISTORTION_DEFAULTS,
+      chorus: CHORUS_DEFAULTS,
       delay: DELAY_DEFAULTS,
       compressor: COMPRESSOR_DEFAULTS,
       reverb: REVERB_DEFAULTS,
     });
   });
 
+  it('fills chorus defaults for a preset saved before the chorus, puts it after the distortion', () => {
+    expect(preset.fx).not.toHaveProperty('chorus');
+    const normalized = normalizePreset(preset).fx;
+    expect(normalized.chorus).toEqual(CHORUS_DEFAULTS);
+    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay']);
+  });
+
+  it('keeps the chorus params and accepts their limits, falsy ones included', () => {
+    const least = { rate: 0, sync: 0, div: 0, trip: 0, dot: 0, d1: 0, d2: 0, depth: 0, fb: 0 };
+    const most = {
+      rate: 20,
+      sync: 1,
+      div: divisionIndex('1/32'),
+      trip: 1,
+      dot: 1,
+      d1: 20,
+      d2: 20,
+      depth: 26,
+    };
+    [
+      { a: true, on: false, mix: 0, ...least, cut: 20, hpf: 0, level: 0 },
+      { a: true, on: true, mix: 1, ...most, fb: 0.95, cut: 20000, hpf: 1, level: 1 },
+    ].forEach((chorus) =>
+      expect(normalizePreset({ ...preset, fx: { ...preset.fx, chorus } }).fx.chorus).toEqual(chorus)
+    );
+  });
+
+  it.each([
+    ['a rate past its top', { rate: 21 }],
+    ['a negative rate', { rate: -1 }],
+    ['a delay past 20 ms', { d1: 20.5 }],
+    ['a negative delay', { d2: -1 }],
+    ['a depth past its top', { depth: 27 }],
+    ['a feedback past its top', { fb: 0.96 }],
+    ['a cutoff under its range', { cut: 10 }],
+    ['a filter that is neither', { hpf: 2 }],
+    ['a fractional BPM', { sync: 0.5 }],
+    ['a division that is none', { div: 999 }],
+    ['a level past its knob', { level: 1.1 }],
+  ])('rejects a chorus with %s', (_, chorus) => {
+    expect(() => normalizePreset({ ...preset, fx: { ...preset.fx, chorus } })).toThrow();
+  });
+
   it('fills compressor defaults for a preset saved before the compressor, puts it before the reverb', () => {
     expect(preset.fx).not.toHaveProperty('compressor');
     const normalized = normalizePreset(preset).fx;
     expect(normalized.compressor).toEqual(COMPRESSOR_DEFAULTS);
-    expect(normalized.o).toEqual(['distortion', 'compressor', 'reverb', 'delay']);
+    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay']);
   });
 
   it('keeps the compressor params and accepts their limits, falsy ones included', () => {
@@ -536,7 +599,7 @@ describe('normalizePreset', () => {
     const { reverb, ...fx } = preset.fx;
     expect(reverb).toBeDefined();
     const normalized = normalizePreset({ ...preset, fx: { ...fx, o: ['delay'] } }).fx;
-    expect(normalized.o).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+    expect(normalized.o).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
     expect(normalized.reverb).toEqual(REVERB_DEFAULTS);
     expect(normalized.delay).toEqual(preset.fx.delay);
   });
@@ -545,7 +608,7 @@ describe('normalizePreset', () => {
     expect(preset.fx).not.toHaveProperty('distortion');
     const normalized = normalizePreset(preset).fx;
     expect(normalized.distortion).toEqual(DISTORTION_DEFAULTS);
-    expect(normalized.o).toEqual(['distortion', 'compressor', 'reverb', 'delay']);
+    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay']);
     expect(normalized.delay).toEqual(preset.fx.delay);
     expect(normalized.reverb).toEqual(preset.fx.reverb);
   });
@@ -602,20 +665,28 @@ describe('normalizePreset', () => {
   it('drops unknown and duplicate effects from the order, a missing one takes its default place', () => {
     const order = (o: string[]) => normalizePreset({ ...preset, fx: { ...preset.fx, o } }).fx.o;
     // e.g. a preset saved by a newer client with more effect types
-    expect(order(['chorus', 'reverb', 'delay', 'delay'])).toEqual([
+    expect(order(['phaser', 'reverb', 'delay', 'delay'])).toEqual([
       'distortion',
+      'chorus',
       'compressor',
       'reverb',
       'delay',
     ]);
-    expect(order([])).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+    expect(order([])).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
     // before the first effect that comes after it by default, at the end if none does
-    expect(order(['reverb'])).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
-    expect(order(['delay', 'distortion'])).toEqual(['delay', 'distortion', 'compressor', 'reverb']);
-    expect(order(['reverb', 'distortion'])).toEqual(['delay', 'compressor', 'reverb', 'distortion']);
-    expect(order(['reverb', 'compressor', 'delay', 'distortion'])).toEqual([
+    expect(order(['reverb'])).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
+    expect(order(['delay', 'distortion'])).toEqual(['chorus', 'delay', 'distortion', 'compressor', 'reverb']);
+    expect(order(['reverb', 'distortion'])).toEqual([
+      'chorus',
+      'delay',
+      'compressor',
+      'reverb',
+      'distortion',
+    ]);
+    expect(order(['reverb', 'compressor', 'chorus', 'delay', 'distortion'])).toEqual([
       'reverb',
       'compressor',
+      'chorus',
       'delay',
       'distortion',
     ]);
@@ -884,8 +955,9 @@ describe('fxSnapSchema', () => {
 
   it.each([undefined, null, 'x', [], {}])('falls back to the defaults for %p', (snap) => {
     expect(fxSnapSchema.parse(snap)).toEqual({
-      o: ['distortion', 'delay', 'compressor', 'reverb'],
+      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
       distortion: DISTORTION_DEFAULTS,
+      chorus: CHORUS_DEFAULTS,
       delay: defaults,
       compressor: COMPRESSOR_DEFAULTS,
       reverb: REVERB_DEFAULTS,
@@ -921,10 +993,22 @@ describe('fxSnapSchema', () => {
     };
     const distortion = { a: true, on: false, mix: 0, mode: 0, drive: 0, tone: 500, level: 0 };
     const compressor = { ...COMPRESSOR_DEFAULTS, a: true, on: false, mix: 0, thresh: 0, gain: 0, level: 0 };
-    const o = ['reverb', 'compressor', 'delay', 'distortion'];
-    expect(fxSnapSchema.parse({ o, distortion, delay, compressor, reverb })).toEqual({
+    const chorus = {
+      ...CHORUS_DEFAULTS,
+      a: true,
+      on: false,
+      mix: 0,
+      rate: 0,
+      d1: 0,
+      depth: 0,
+      fb: 0,
+      level: 0,
+    };
+    const o = ['reverb', 'compressor', 'delay', 'chorus', 'distortion'];
+    expect(fxSnapSchema.parse({ o, distortion, chorus, delay, compressor, reverb })).toEqual({
       o,
       distortion,
+      chorus,
       delay,
       compressor,
       reverb,
@@ -936,11 +1020,20 @@ describe('fxSnapSchema', () => {
     const reverb = { decay: 100, damp: 'x', bass: 0, sep: -1, era: 1.6, tail: 1 };
     const distortion = { mode: 0.6, drive: 100, tone: 'x', level: -30 };
     const compressor = { multi: 0.6, thresh: 2, ratio: 0, attack: 'x', release: 5000, xlow: 1, low: -99 };
+    const chorus = { rate: 99, sync: 0.6, d1: -3, d2: 'x', depth: 40, fb: 2, cut: 1, hpf: 7, level: NaN };
     expect(
-      fxSnapSchema.parse({ o: 'delay', distortion, delay: { ...delay, extra: 1 }, compressor, reverb })
+      fxSnapSchema.parse({
+        o: 'delay',
+        distortion,
+        chorus,
+        delay: { ...delay, extra: 1 },
+        compressor,
+        reverb,
+      })
     ).toEqual({
-      o: ['distortion', 'delay', 'compressor', 'reverb'],
+      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
       distortion: { ...DISTORTION_DEFAULTS, mode: 1, drive: 12, level: -24 },
+      chorus: { ...CHORUS_DEFAULTS, rate: 20, sync: 1, d1: 0, depth: 26, fb: 0.95, cut: 20, hpf: 1 },
       compressor: {
         ...COMPRESSOR_DEFAULTS,
         multi: 1,

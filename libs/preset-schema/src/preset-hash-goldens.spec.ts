@@ -100,8 +100,25 @@ const FULL = {
   },
   v: { leg: true, port: 0.12, max: 1, bd: 12, bu: 0 },
   fx: {
-    o: ['reverb', 'compressor', 'distortion'],
+    o: ['reverb', 'compressor', 'chorus', 'distortion'],
     distortion: { a: true, on: false, mix: 0.6, mode: 1, drive: 4, tone: 8000, level: -6 },
+    chorus: {
+      a: true,
+      on: true,
+      mix: 0.4,
+      rate: 1.25,
+      sync: 1,
+      div: 20,
+      trip: 1,
+      dot: 0,
+      d1: 8.5,
+      d2: 3,
+      depth: 4.2,
+      fb: 0.3,
+      cut: 5200,
+      hpf: 1,
+      level: 0.55,
+    },
     compressor: {
       a: true,
       on: true,
@@ -179,11 +196,11 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: '033df439facc60d126b73789f0fb62d64f77ffefd4605d1bd7f1d8bbf32f35c2',
-  full: '1c9157dba0246f6c0d612978b7b441b33e263c7adae4a771182a2bfcfff77233',
-  legacy: '46ca81859d0690166bbff66ab8c28be4d64062b498e46af02b438ad392e26b9a',
-  partial: '54b5b91c882ec6d9947214f2dcdf81a013408e7c98295c57ab57352960602e71',
-  'fx order without a type': '0e83c972ae84e4df53b405fc052a10739e465cd080f9d9dc96b640bf591c9d01',
+  empty: '1cfc87b42c2e08558d86fbe7d0c8712509b7e934cdfed698d737f299feb5dd34',
+  full: '560754f60bdfb96327ad59296f2e67790e6b55b0ef69ed683f059c4adc6f6a3d',
+  legacy: '126ab49b241583ff05929c9bcc0de420466c2f53080446c66ea12b2c765f4a57',
+  partial: '6b6460905aa4beaaf5bd62336440f3a74c5b59729562deee5a251f3eafb21dca',
+  'fx order without a type': 'eb468b78ec6395fca38418d40d586ee2cc96402efb9d13848dd60ee18edd342e',
 };
 
 // not presets: the schema rejects them
@@ -234,9 +251,9 @@ const FX_SNAPS: Record<string, unknown> = {
 };
 
 const FX_SNAP_HASHES: Record<string, string> = {
-  null: 'ff1116fd4ea169ac4facf7b8bb01acf2d605d01c0b37a8f9fdf2f6d2ab9e93aa',
-  garbage: '21f457ae09fe084883bccc52da7086307284be1f5b53532ccc8de10e6747f8e0',
-  full: 'c698c4540b5492142af1960b7cd7f7ffca981b079c7ae8f95cc3b7aa960070a4',
+  null: '3efdcdea164f4693316d0c640c2febe1b3028a40495ef1b43f18e98719fdd4c6',
+  garbage: '96f796247c27ac9bf0505cf74b680bf6b3112a171274aff504f203986bcd79f4',
+  full: '41d735751f9421ce37de6a17d58d983d27217a4c3ab6b61834ebc210571df060',
 };
 
 // key order aside: the values of the output

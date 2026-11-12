@@ -1,0 +1,86 @@
+import React from 'react';
+import { SwitchKey } from '@chisper/ui-kit';
+import { chorus, chorusDivisionHz, chorusDivisionOf, chorusStepsOf } from '../../effects/chorus';
+import { ChorusParam } from '../../effects/chorus-presets';
+import { ControlsGroup, LastGroups } from './group';
+import { ParamHandle } from './param-handle';
+import { DivisionHandle, KeysPlate, TempoKeys } from './tempo-keys';
+import { FxControlsProps } from './types';
+
+const { params: defs } = chorus;
+
+// memoized: the controls render on every move of a knob, a key is a tooltip
+const FilterKey = React.memo(
+  ({ on, high, setParam }: Pick<FxControlsProps, 'on' | 'setParam'> & { high: boolean }) => (
+    <KeysPlate aria-label='Filter type' disabled={!on} disabledHint='Turn on the chorus'>
+      <SwitchKey
+        label='HP'
+        name='High pass'
+        hint='The filter cuts the lows of the wet signal, not its highs'
+        on={high}
+        onChange={(value) => setParam('hpf', +value)}
+      />
+    </KeysPlate>
+  )
+);
+
+type ChorusKnob = Exclude<ChorusParam, 'sync' | 'div' | 'trip' | 'dot' | 'hpf'>;
+
+// three groups left to right: the LFO (rate, with BPM over TRIP and DOT beside it, depth) | the taps (delay 1,
+// delay 2, feedback) | post (the filter of the wet signal with its type beside it, the level); the mix is the
+// common one of FxPanel, which lays the groups out. In BPM Rate is a division of the tempo
+export const ChorusControls = ({ params, setParam, on, out }: FxControlsProps) => {
+  const sync = params['sync'] >= 0.5;
+  // Rate in BPM: a cycle of the LFO a division (8 bar … 1/32, by TRIP and DOT), right faster
+  const division = (
+    <DivisionHandle
+      target='chorus.rate'
+      def={defs.rate}
+      divDef={defs.div}
+      steps={chorusStepsOf(params)}
+      division={chorusDivisionOf(params)}
+      valueOf={chorusDivisionHz}
+      setParam={setParam}
+      disabled={!on}
+    />
+  );
+  const handle = (key: ChorusKnob) => (
+    <ParamHandle
+      def={defs[key]}
+      value={params[key]}
+      onChange={(value) => setParam(key, value)}
+      disabled={!on}
+      target={`chorus.${key}`}
+    />
+  );
+  return (
+    <>
+      <ControlsGroup caption='LFO' disabled={!on}>
+        {sync ? division : handle('rate')}
+        <TempoKeys
+          of='Rate'
+          effect='chorus'
+          on={on}
+          sync={sync}
+          trip={params['trip'] >= 0.5}
+          dot={params['dot'] >= 0.5}
+          setParam={setParam}
+        />
+        {handle('depth')}
+      </ControlsGroup>
+      <ControlsGroup caption='Taps' disabled={!on}>
+        {handle('d1')}
+        {handle('d2')}
+        {handle('fb')}
+      </ControlsGroup>
+      <LastGroups>
+        <ControlsGroup caption='Post' disabled={!on}>
+          {handle('cut')}
+          <FilterKey on={on} high={params['hpf'] >= 0.5} setParam={setParam} />
+          {handle('level')}
+        </ControlsGroup>
+        {out}
+      </LastGroups>
+    </>
+  );
+};

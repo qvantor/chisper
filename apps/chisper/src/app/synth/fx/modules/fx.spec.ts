@@ -32,6 +32,7 @@ const REVERB_DEFAULTS = mapValues(FX_PARAMS.reverb, (param) => param.default);
 const MS = { sync: 0, div: FX_PARAMS.delay.div.default, trip: 0, dot: 0 };
 const DISTORTION_DEFAULTS = mapValues(FX_PARAMS.distortion, (param) => param.default);
 const COMPRESSOR_DEFAULTS = mapValues(FX_PARAMS.compressor, (param) => param.default);
+const CHORUS_DEFAULTS = mapValues(FX_PARAMS.chorus, (param) => param.default);
 const defaultReverb = () => ({ mix: FX_MIX_PARAM.default, params: REVERB_DEFAULTS });
 
 const lastGain = (node: GainNode) => (node.gain.setTargetAtTime as jest.Mock).mock.lastCall?.[0];
@@ -372,6 +373,7 @@ describe('fx', () => {
     const chain = (reverb: FxStatus) =>
       getChain(['reverb', 'delay'], model.$effects.value, {
         distortion: 'ready',
+        chorus: 'ready',
         delay: 'ready',
         compressor: 'ready',
         reverb,
@@ -385,22 +387,23 @@ describe('fx', () => {
   it('move reorders the effects', () => {
     const { model, actions } = setup();
     actions.move(0, 0);
-    expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
-    actions.move(3, 0);
-    expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay', 'compressor']);
+    expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
+    actions.move(4, 0);
+    expect(model.$order.value).toEqual(['reverb', 'distortion', 'chorus', 'delay', 'compressor']);
     actions.move(1, 2);
-    expect(model.$order.value).toEqual(['reverb', 'delay', 'distortion', 'compressor']);
+    expect(model.$order.value).toEqual(['reverb', 'chorus', 'distortion', 'delay', 'compressor']);
   });
 
   describe('distortion', () => {
     it('is first in the chain by default', async () => {
       const { model, actions, synthCore } = setup();
-      const { distortion, delay, compressor, reverb } = model.slots;
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+      const { distortion, chorus, delay, compressor, reverb } = model.slots;
+      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
       FX_TYPES.forEach((type) => actions.setAdded(type, true));
       await flush();
       expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(distortion.input);
-      expect(distortion.output.connect).toHaveBeenLastCalledWith(delay.input);
+      expect(distortion.output.connect).toHaveBeenLastCalledWith(chorus.input);
+      expect(chorus.output.connect).toHaveBeenLastCalledWith(delay.input);
       expect(delay.output.connect).toHaveBeenLastCalledWith(compressor.input);
       expect(compressor.output.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
@@ -560,6 +563,126 @@ describe('fx', () => {
     });
   });
 
+  describe('chorus', () => {
+    it('is after the distortion and before the delay by default', async () => {
+      const { model, actions, synthCore } = setup();
+      const { distortion, chorus, delay } = model.slots;
+      (['distortion', 'chorus', 'delay'] as const).forEach((type) => actions.setAdded(type, true));
+      await flush();
+      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(distortion.input);
+      expect(distortion.output.connect).toHaveBeenLastCalledWith(chorus.input);
+      expect(chorus.output.connect).toHaveBeenLastCalledWith(delay.input);
+    });
+
+    it('mixes inside its core: the slot passes the core alone at any mix', async () => {
+      const { model, actions } = setup();
+      const { dry, wet, dryDelay } = model.slots.chorus;
+      expect(dryDelay).toBeUndefined();
+      actions.setAdded('chorus', true);
+      await flush();
+      expect(lastGain(dry)).toBe(0);
+      expect(lastGain(wet)).toBe(1);
+      actions.setMix('chorus', 0);
+      expect(lastGain(dry)).toBe(0);
+      expect(lastGain(wet)).toBe(1);
+      // (the mix goes to the core: create-fx-slot.spec, chorus.spec)
+      expect(model.slots.chorus.meter).toBeUndefined();
+    });
+
+    it('passes the changed params to the effect, falsy ones included', async () => {
+      const { model, actions } = setup();
+      const setParam = jest.spyOn(model.slots.chorus, 'setParam');
+      actions.setAdded('chorus', true);
+      await flush();
+      setParam.mockClear();
+      actions.setParam('chorus', 'depth', 0);
+      actions.setParam('chorus', 'hpf', 1);
+      actions.setParam('chorus', 'fb', 0);
+      expect(setParam.mock.calls).toEqual([
+        ['depth', 0],
+        ['hpf', 1],
+        ['fb', 0],
+      ]);
+    });
+
+    it('BPM takes the division nearest to a cycle of Rate at the tempo, HZ the rate of its division', () => {
+      const { model, actions } = setup();
+      const params = () => model.$effects.value.chorus.params;
+      // a cycle of 2 s at 120: a bar
+      actions.setParam('chorus', 'rate', 0.5);
+      actions.setParam('chorus', 'sync', 1);
+      expect(params()).toMatchObject({ sync: 1, div: divisionIndex('1 bar'), rate: 0.5 });
+      // on again: nothing changes
+      actions.setParam('chorus', 'sync', 1);
+      expect(params()['div']).toBe(divisionIndex('1 bar'));
+      actions.setParam('chorus', 'div', divisionIndex('1/4'));
+      actions.setParam('chorus', 'sync', 0);
+      expect(params()).toMatchObject({ sync: 0, div: divisionIndex('1/4'), rate: 2 });
+      // TRIP: the triplets among its steps; off again, a triplet is its straight division
+      actions.setParam('chorus', 'sync', 1);
+      actions.setParam('chorus', 'trip', 1);
+      actions.setParam('chorus', 'div', divisionIndex('1/4T'));
+      actions.setParam('chorus', 'trip', 0);
+      expect(params()).toMatchObject({ trip: 0, div: divisionIndex('1/4') });
+      // an LFO that stands: the longest division; 1/32 is 16 Hz at 120, at 300 the top of Rate
+      actions.setParam('chorus', 'sync', 0);
+      actions.setParam('chorus', 'rate', 0);
+      actions.setParam('chorus', 'sync', 1);
+      expect(params()['div']).toBe(divisionIndex('8 bar'));
+    });
+
+    it('in BPM its rate follows the tempo of the transport', async () => {
+      const { model, actions, transport } = setup();
+      const setTempo = jest.spyOn(model.slots.chorus, 'setTempo');
+      actions.setAdded('chorus', true);
+      await flush();
+      transport[1].setBpm(90);
+      expect(setTempo).toHaveBeenLastCalledWith(90);
+    });
+
+    it('a fresh chorus matches the default preset, its presets are found back', () => {
+      const { model, actions } = setup();
+      expect(findFxPreset('chorus', model.$effects.value.chorus)?.id).toBe('default');
+      actions.applyPreset('chorus', 'tempo-sweep');
+      expect(findFxPreset('chorus', model.$effects.value.chorus)?.id).toBe('tempo-sweep');
+      expect(model.$effects.value.chorus.params['sync']).toBe(1);
+      actions.setParam('chorus', 'fb', 0.5);
+      expect(findFxPreset('chorus', model.$effects.value.chorus)).toBeUndefined();
+    });
+
+    it('round-trips its snapshot, falsy values included, missing keys are defaults', () => {
+      const { model, actions } = setup();
+      actions.setAdded('chorus', true);
+      actions.setOn('chorus', false);
+      actions.setMix('chorus', 0);
+      ['rate', 'd1', 'depth', 'fb', 'level'].forEach((key) => actions.setParam('chorus', key, 0));
+      actions.setParam('chorus', 'hpf', 1);
+      actions.setParam('chorus', 'd2', 7);
+      const snapshot = getSnapshot();
+      expect(snapshot['fx']).toMatchObject({
+        chorus: { a: true, on: false, mix: 0, rate: 0, d1: 0, depth: 0, fb: 0, level: 0, hpf: 1, d2: 7 },
+      });
+
+      actions.applyPreset('chorus', 'tempo-sweep');
+      actions.setOn('chorus', true);
+      applySnapshot(snapshot);
+      expect(model.$effects.value.chorus).toEqual({
+        added: true,
+        on: false,
+        mix: 0,
+        params: { ...CHORUS_DEFAULTS, rate: 0, d1: 0, depth: 0, fb: 0, level: 0, hpf: 1, d2: 7 },
+      });
+
+      applySnapshot({ fx: { chorus: { a: true, sync: 1, div: divisionIndex('1/8') } } });
+      expect(model.$effects.value.chorus).toEqual({
+        added: true,
+        on: true,
+        mix: 0.5,
+        params: { ...CHORUS_DEFAULTS, sync: 1, div: divisionIndex('1/8') },
+      });
+    });
+  });
+
   describe('two effects', () => {
     it('wires the added effects in the chain order', () => {
       const { model, actions, synthCore } = setup();
@@ -570,7 +693,7 @@ describe('fx', () => {
       expect(delay.output.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
 
-      actions.move(3, 0);
+      actions.move(4, 0);
       expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(delay.input);
       expect(delay.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
@@ -613,6 +736,7 @@ describe('fx', () => {
       const { model, synthCore } = setup();
       expect(model.$status.value).toEqual({
         distortion: 'loading',
+        chorus: 'loading',
         delay: 'ready',
         compressor: 'loading',
         reverb: 'loading',
@@ -620,12 +744,14 @@ describe('fx', () => {
       await flush();
       expect(model.$status.value).toEqual({
         distortion: 'ready',
+        chorus: 'ready',
         delay: 'ready',
         compressor: 'ready',
         reverb: 'ready',
       });
       const addModule = synthCore.audioCtx.audioWorklet.addModule as jest.Mock;
       expect(workletLoads(addModule, 'distortion')).toBe(1);
+      expect(workletLoads(addModule, 'chorus')).toBe(1);
       expect(workletLoads(addModule, 'compressor')).toBe(1);
       expect(workletLoads(addModule, 'reverb')).toBe(1);
     });
@@ -669,6 +795,7 @@ describe('fx', () => {
       const { model, actions, synthCore } = setup();
       expect(model.$status.value).toEqual({
         distortion: 'unsupported',
+        chorus: 'unsupported',
         delay: 'ready',
         compressor: 'unsupported',
         reverb: 'unsupported',
@@ -822,8 +949,9 @@ describe('fx', () => {
       actions.setMix('delay', 0.5);
       actions.setParam('delay', 'fb', 0.2);
       expect(getSnapshot()['fx']).toEqual({
-        o: ['distortion', 'delay', 'compressor', 'reverb'],
+        o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
         distortion: { a: false, on: true, mix: 1, ...DISTORTION_DEFAULTS },
+        chorus: { a: false, on: true, mix: 0.5, ...CHORUS_DEFAULTS },
         compressor: { a: false, on: true, mix: 1, ...COMPRESSOR_DEFAULTS },
         delay: {
           a: true,
@@ -843,7 +971,7 @@ describe('fx', () => {
 
     it('round-trips the reverb, falsy values included, missing keys are defaults', () => {
       const { model, actions } = setup();
-      actions.move(3, 0);
+      actions.move(4, 0);
       actions.setAdded('reverb', true);
       actions.setOn('reverb', false);
       actions.setMix('reverb', 0);
@@ -851,7 +979,7 @@ describe('fx', () => {
       actions.setParam('reverb', 'decay', 12);
       const snapshot = getSnapshot();
       expect(snapshot['fx']).toMatchObject({
-        o: ['reverb', 'distortion', 'delay', 'compressor'],
+        o: ['reverb', 'distortion', 'chorus', 'delay', 'compressor'],
         reverb: { a: true, on: false, mix: 0 },
       });
 
@@ -859,7 +987,7 @@ describe('fx', () => {
       actions.setOn('reverb', true);
       actions.move(1, 0);
       applySnapshot(snapshot);
-      expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay', 'compressor']);
+      expect(model.$order.value).toEqual(['reverb', 'distortion', 'chorus', 'delay', 'compressor']);
       expect(model.$effects.value.reverb).toEqual({
         added: true,
         on: false,
@@ -934,14 +1062,14 @@ describe('fx', () => {
 
     it('drops unknown and duplicate effects from the order, a missing one takes its default place', () => {
       const { model } = setup();
-      applySnapshot({ fx: { o: ['chorus', 'reverb', 'delay', 'delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'compressor', 'reverb', 'delay']);
-      // a snapshot from before the distortion and the compressor: the first in front of the delay, the other of
-      // the reverb
+      applySnapshot({ fx: { o: ['phaser', 'reverb', 'delay', 'delay'] } });
+      expect(model.$order.value).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay']);
+      // a snapshot from before the distortion, the chorus and the compressor: the first two in front of the
+      // delay, the other of the reverb
       applySnapshot({ fx: { o: ['delay', 'reverb'] } });
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
       applySnapshot({ fx: { o: ['delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
       applySnapshot({ fx: { o: [] } });
       expect(model.$order.value).toEqual([...FX_TYPES]);
     });
@@ -1037,6 +1165,28 @@ describe('fx', () => {
       expect(setModulation.delay.mock.lastCall?.[0]?.routes).toEqual([{ ...time, min: 0.03125, max: 2 }]);
       transport[1].setBpm(60);
       expect(setModulation.delay.mock.lastCall?.[0]?.routes).toEqual([{ ...time, min: 0.0625, max: 4 }]);
+    });
+
+    it('bounds the routes to Rate of the chorus in BPM by its divisions at the tempo', async () => {
+      const { actions, modulation, $fxNote, setModulation, transport } = setupModulated();
+      await flush();
+      actions.setAdded('chorus', true);
+      $fxNote.next(note(1));
+      modulation[1].addRoute('env2', 'chorus.rate', 0.5);
+      // a route of a knob of a pow scale: a share of its travel
+      const rate = { param: 'rate', source: 1, scale: 'pow' };
+      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
+        { ...rate, amount: 0.5, min: 0, max: 20 },
+      ]);
+      actions.setParam('chorus', 'sync', 1);
+      // 8 bar … 1/32 a cycle at 120, at 60
+      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
+        { ...rate, amount: expect.closeTo(0.5 * (20 / 16) ** 0.25, 9), min: 1 / 16, max: 16 },
+      ]);
+      transport[1].setBpm(60);
+      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
+        { ...rate, amount: expect.closeTo(0.5 * (20 / 8) ** 0.25, 9), min: 1 / 32, max: 8 },
+      ]);
     });
 
     it('bounds the routes to the knobs of an LFO in BPM by its divisions at the tempo', async () => {

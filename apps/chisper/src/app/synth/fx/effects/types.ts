@@ -92,6 +92,9 @@ export interface FxDefinition<K extends string = string> {
     value: number,
     bpm: number
   ) => Record<string, number>;
+  // the bounds of the routes to its knobs at a tempo, by param (Time of the delay in BPM: within its divisions);
+  // absent or none for a param: the range of its knob
+  bounds?: (params: Record<string, number>, bpm: number) => Partial<Record<string, [number, number]>>;
   // (the knobs of native nodes follow their routes by the lines of `fxMod`)
   create: (audioCtx: BaseAudioContext, fxMod?: FxMod) => FxCore;
 }

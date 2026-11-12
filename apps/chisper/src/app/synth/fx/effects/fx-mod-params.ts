@@ -11,7 +11,7 @@ import type { FxNote, FxRoute } from './fx-modulation';
 export const DELAY_LINES = { time: 0, fb: 1, fbX: 2, panL: 3, panR: 4, freq: 5, q: 6 } as const;
 export const SLOT_LINES = 7;
 // the effects of the rack (FX_TYPES of the preset schema, not imported: it would bundle zod; a spec holds them equal)
-export const FX_SLOTS = 4;
+export const FX_SLOTS = 5;
 export const FX_MOD_LINES = SLOT_LINES + 2 * FX_SLOTS;
 export const slotLines = (slot: number) => ({ dry: SLOT_LINES + 2 * slot, wet: SLOT_LINES + 2 * slot + 1 });
 
