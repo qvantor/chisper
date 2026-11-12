@@ -1,5 +1,6 @@
 import { ListObjectsCommand } from '@aws-sdk/client-s3';
-import { client, LIST_BROWSER_CACHE, LIST_CDN_CACHE } from '../utils';
+import { client } from '../utils';
+import { BROWSER_REVALIDATE, LIST_CDN_CACHE } from '../utils/cdn-cache';
 import handler from '../functions/get-wavetables-list.mjs';
 import { caller } from './helpers';
 
@@ -41,15 +42,15 @@ it('lists the bucket', async () => {
     'access-control-allow-headers': 'Content-Type',
     'access-control-allow-methods': 'GET, OPTION',
     'content-type': 'application/json',
-    'cache-control': LIST_BROWSER_CACHE,
+    'cache-control': BROWSER_REVALIDATE,
     'netlify-cdn-cache-control': LIST_CDN_CACHE,
   });
   expect(response.tree).toEqual([]);
 });
 
-it('is kept a day in the shared cache of the CDN, a day stale still answered, the browser asks it every time', () => {
+it('is kept a day in the shared cache of the CDN, a week stale still answered, the browser asks it every time', () => {
   expect(LIST_CDN_CACHE).toBe('public, durable, s-maxage=86400, stale-while-revalidate=604800');
-  expect(LIST_BROWSER_CACHE).toBe('public, max-age=0, must-revalidate');
+  expect(BROWSER_REVALIDATE).toBe('public, max-age=0, must-revalidate');
 });
 
 it('builds a folder tree from the keys', async () => {

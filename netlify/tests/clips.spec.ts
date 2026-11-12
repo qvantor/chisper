@@ -1,3 +1,4 @@
+import { purgeCache } from '@netlify/functions';
 import {
   CLIP_LENGTH_MAX,
   CLIP_NAME_MAX_LENGTH,
@@ -9,13 +10,15 @@ import { sha256 } from '../utils/http';
 import { verifyTurnstile } from '../utils/turnstile';
 import handler, { config } from '../functions/clips.mjs';
 import { createFakeSql, JsonValue, pgError } from './fake-sql';
-import { caller, ID, IP_HASH, IP_SALT, OTHER_ID } from './helpers';
+import { caller, context, ID, IP_HASH, IP_SALT, OTHER_ID, request } from './helpers';
 
 const mockSql = createFakeSql();
 jest.mock('../utils/db', () => ({ db: () => mockSql.sql }));
 jest.mock('../utils/turnstile', () => ({ verifyTurnstile: jest.fn() }));
+jest.mock('@netlify/functions', () => ({ purgeCache: jest.fn() }));
 
 const verifyTurnstileMock = verifyTurnstile as jest.Mock;
+const purgeCacheMock = purgeCache as jest.Mock;
 
 // unsorted, a duplicate and a note past the end of the loop, a tempo off the grid: the stored clip is normalized
 const clip = {
@@ -54,6 +57,7 @@ beforeEach(() => {
   mockSql.reset();
   mockSql.respond(Q.count, [{ count: 0 }]);
   verifyTurnstileMock.mockReset().mockResolvedValue(true);
+  purgeCacheMock.mockReset().mockResolvedValue(undefined);
   process.env.IP_HASH_SALT = IP_SALT;
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -293,6 +297,44 @@ describe('PUT /api/clips/:id', () => {
     expect((stored as JsonValue).json).toEqual(normalized);
     expect(id).toBe(ID);
     expect(query.text).toContain('updated_at = now()');
+    // the CDN answers the presets that open with it with the new notes
+    expect(purgeCacheMock).toHaveBeenCalledTimes(1);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`clip-${ID}`] });
+  });
+
+  it('purges the tag of the id in lower case, as the DB gives it, whatever the case of the URL', async () => {
+    editable({});
+    const { status, body } = await update(undefined, ID.toUpperCase());
+    expect(status).toBe(200);
+    expect(body).toEqual({ id: ID });
+    expect(mockSql.find(Q.update)[0].values[3]).toBe(ID);
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`clip-${ID}`] });
+  });
+
+  it('succeeds when the purge of the cache fails, logging it', async () => {
+    editable({});
+    purgeCacheMock.mockRejectedValue(new Error('purge failed'));
+    const { status, body } = await update();
+    expect(status).toBe(200);
+    expect(body).toEqual({ id: ID });
+    expect(console.error).toHaveBeenCalledWith('Cache purge failed', [`clip-${ID}`], expect.any(Error));
+  });
+
+  it('answers without waiting for the purge, handed to the runtime', async () => {
+    editable({});
+    // the purge API hangs until the end of the test
+    let answerPurge: () => void = () => undefined;
+    purgeCacheMock.mockReturnValue(new Promise<void>((resolve) => (answerPurge = resolve)));
+    const waitUntil = jest.fn();
+    const body = { clip: { ...clip, name: 'New name' }, editToken: EDIT_TOKEN };
+    const response = await handler(request('PUT', `/api/clips/${ID}`, body), { ...context, waitUntil });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: ID });
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(purgeCacheMock).toHaveBeenCalledWith({ tags: [`clip-${ID}`] });
+    answerPurge();
+    await waitUntil.mock.calls[0][0];
   });
 
   it('clears the name', async () => {
@@ -313,6 +355,7 @@ describe('PUT /api/clips/:id', () => {
     expect(status).toBe(404);
     expect(body).toEqual({ error: 'Clip not found' });
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -325,6 +368,7 @@ describe('PUT /api/clips/:id', () => {
     expect(status).toBe(403);
     expect(body).toEqual({ error: 'You can only edit clips saved from this browser' });
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('allows one update per 5 seconds', async () => {
@@ -333,6 +377,7 @@ describe('PUT /api/clips/:id', () => {
     expect(status).toBe(429);
     expect(body).toEqual({ error: 'Too many updates, try again in a few seconds' });
     expect(mockSql.find(Q.update)).toHaveLength(0);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('rejects the notes of another clip with 409 and returns that clip', async () => {
@@ -343,12 +388,14 @@ describe('PUT /api/clips/:id', () => {
     expect(status).toBe(409);
     expect(body).toEqual({ error: 'These notes are already saved as another clip', id: OTHER_ID });
     expect(mockSql.find(Q.findByHash)[0].values).toEqual([clipHash(clip)]);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it('fails with 500 on other database errors', async () => {
     editable({});
     mockSql.respond(Q.update, new Error('deadlock'));
     expect((await update()).status).toBe(500);
+    expect(purgeCacheMock).not.toHaveBeenCalled();
   });
 
   it.each([

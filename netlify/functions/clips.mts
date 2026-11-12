@@ -8,6 +8,7 @@ import {
   updateClipRequestSchema,
 } from '../../libs/preset-schema/src';
 import type { Clip, ClipResponse, SaveClipResponse, UpdateClipResponse } from '../../libs/preset-schema/src';
+import { clipTag, purgeTags } from '../utils/cdn-cache';
 import { db } from '../utils/db';
 import { matchesEditToken, newEditToken } from '../utils/edit-token';
 import { errorResponse, getIpHash, HttpError, json, readJson } from '../utils/http';
@@ -40,10 +41,11 @@ const parseClipBody = async <T extends { clip: unknown }>(req: Request, schema: 
   return { ...parsed.data, name: name ?? null, data, hash: normalizedClipHash(data) };
 };
 
+// in lower case, as the DB gives it: Postgres takes a uuid in any case, the tags of the CDN are those of the DB
 const parseId = (id: string) => {
   const parsed = clipIdSchema.safeParse(id);
   if (!parsed.success) throw new HttpError(400, 'Invalid clip id');
-  return parsed.data;
+  return parsed.data.toLowerCase();
 };
 
 const saveClip = async (req: Request, context: Context) => {
@@ -74,8 +76,9 @@ const saveClip = async (req: Request, context: Context) => {
   return json({ id: concurrent.id, existed: true } as SaveClipResponse);
 };
 
-// overwrites the notes and the name, links to the clip play the updated one
-const updateClip = async (id: string, req: Request) => {
+// overwrites the notes and the name, links to the clip play the updated one, so do presets that open with it (the CDN
+// keeps them under the tag of the clip; the answer doesn't wait for its purge)
+const updateClip = async (id: string, req: Request, context: Context) => {
   const clipId = parseId(id);
   const { editToken, name, data, hash } = await parseClipBody(req, updateClipRequestSchema);
 
@@ -99,6 +102,7 @@ const updateClip = async (id: string, req: Request) => {
     const existing = await findByHash(hash);
     return json({ error: 'These notes are already saved as another clip', ...existing }, 409);
   }
+  context.waitUntil(purgeTags([clipTag(clipId)]));
   return json({ id: clipId } as UpdateClipResponse);
 };
 
@@ -142,7 +146,7 @@ export default async (req: Request, context: Context) => {
       if (req.method === 'POST') return await saveClip(req, context);
     } else {
       if (req.method === 'GET') return await getClip(id);
-      if (req.method === 'PUT') return await updateClip(id, req);
+      if (req.method === 'PUT') return await updateClip(id, req, context);
     }
     throw new HttpError(405, 'Method not allowed');
   } catch (error) {
