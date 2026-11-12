@@ -19,11 +19,18 @@ interface Props<T extends string> {
   className?: string;
 }
 
+const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
+
+// one dark plate as high as the charts beside it: the screen over the arrows, a line between them
 const Root = styled.div`
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 104px;
+  width: 84px;
+  height: 80px;
+  overflow: hidden;
+  border-radius: ${theme.borderRadius.m};
+  background: ${theme.colors.primaryDark};
 
   &.disabled {
     pointer-events: none;
@@ -33,14 +40,15 @@ const Root = styled.div`
 
 // a small dark screen, same as the selects
 const Display = styled.button`
+  flex: 1 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 3px;
-  padding: 6px 4px 5px;
+  padding: 0 4px;
   border: none;
-  border-radius: ${theme.borderRadius.m};
-  background: ${theme.colors.primaryDark};
+  background: transparent;
   box-shadow: inset 0 1px 4px rgb(0 0 0 / 60%);
   color: ${theme.colors.white};
   cursor: pointer;
@@ -52,6 +60,7 @@ const Display = styled.button`
 
   &:focus-visible {
     outline: 1px solid ${theme.colors.secondAccent};
+    outline-offset: -1px;
   }
 
   .disabled & {
@@ -93,22 +102,26 @@ const Dot = styled.span`
 `;
 
 const Arrows = styled.div`
+  flex: none;
   display: flex;
-  gap: 4px;
+  border-top: ${LINE};
 `;
 
 const Arrow = styled.button`
   flex: 1 1;
   display: flex;
   justify-content: center;
-  padding: 2px 0;
+  padding: 3px 0;
   border: none;
-  border-radius: ${theme.borderRadius.m};
-  background: ${theme.colors.primaryDark};
+  background: transparent;
   color: ${theme.colors.white};
   ${text10};
   cursor: pointer;
   transition: all 150ms;
+
+  & + & {
+    border-left: ${LINE};
+  }
 
   &:hover {
     background: ${theme.colors.primaryDarkHighContrast};

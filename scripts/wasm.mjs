@@ -21,6 +21,7 @@ const CORES = [
   // (its lines four samples of time in the lanes, each a ring of its own, the passes of a chunk: +2.2 KB)
   { crate: 'reverb', name: 'reverb', budget: 26000 },
   { crate: 'distortion', name: 'distortion', budget: 25500 },
+  { crate: 'compressor', name: 'compressor', budget: 22500 },
   // (the voices of one node: their timelines and their scope, +5.8 KB; the fades of a frame, +1.3 KB; the LFOs and
   // the routes of their knobs, +6.3 KB; the blend a param, its blocks that move it, +1.2 KB; the noise, its
   // samples and its windowed sincs, +5.7 KB; the sub, its loops of its own, +4.0 KB)

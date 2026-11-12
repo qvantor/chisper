@@ -26,7 +26,7 @@ const Out = styled(ControlsGroup)`
 // presets in the header, the controls come from the effect, mix and the on/off switch are common for every effect
 export const FxPanel = ({ type }: { type: FxType }) => {
   const [{ audioCtx }] = useSynthCore();
-  const [{ $effects }, { setOn, setMix, setParam, applyPreset }] = useFx();
+  const [{ $effects, slots }, { setOn, setMix, setParam, applyPreset }] = useFx();
   // only this effect's state (update() keeps the other effects' objects), so a knob of one panel doesn't
   // re-render the others
   const $effect = React.useMemo(
@@ -58,6 +58,7 @@ export const FxPanel = ({ type }: { type: FxType }) => {
             setParam={setEffectParam}
             on={on}
             sampleRate={audioCtx.sampleRate}
+            meter={slots[type].meter}
             out={
               <Out caption='Out' disabled={!on}>
                 <ParamHandle

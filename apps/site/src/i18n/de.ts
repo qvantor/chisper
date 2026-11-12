@@ -14,7 +14,7 @@ export const de: Messages = {
     h1: 'Chisper: kostenloser Wavetable-Synthesizer',
     lead: 'Chisper ist ein **kostenloser Wavetable-Synthesizer**, der im Browser läuft, auf dem Computer, einem Chromebook oder dem Smartphone: **ohne Download und ohne Konto**.',
     details:
-      '**Zwei Wavetable-Oszillatoren** mit **Supersaw-Unisono** aus bis zu 8 Stimmen, ein **Rausch-Oszillator**, ein eigenes Filter pro Stimme, drei Hüllkurven und vier LFOs, die du auf **jeden Regler** ziehst, Distortion, Delay und Reverb. Schließ ein MIDI-Keyboard an oder spiel auf der Computertastatur und nimm dein Spiel in der **Piano Roll** auf.',
+      '**Zwei Wavetable-Oszillatoren** mit **Supersaw-Unisono** aus bis zu 8 Stimmen, ein **Rausch-Oszillator**, ein eigenes Filter pro Stimme, drei Hüllkurven und vier LFOs, die du auf **jeden Regler** ziehst, Distortion, Delay, Kompressor und Reverb. Schließ ein MIDI-Keyboard an oder spiel auf der Computertastatur und nimm dein Spiel in der **Piano Roll** auf.',
     listen: 'Reinhören',
     screenshotAlt:
       'Der Synthesizer Chisper spielt Akkorde: Die Wellen beider Oszillatoren, die Punkte der Hüllkurven und des LFO, das Filter und das Spektrum bewegen sich',
@@ -102,9 +102,9 @@ export const de: Messages = {
       ],
     },
     effects: {
-      h2: 'Effekte: Distortion, Delay, Reverb',
+      h2: 'Effekte: Distortion, Delay, Kompressor, Reverb',
       text: [
-        'Mach den Sound im Synthesizer fertig: Distortion (Soft oder Hard Clip, mit Oversampling), ein Delay (normal oder Ping-Pong, mit Bandfilter im Feedback und Haas-Stereoversatz) und ein algorithmischer Reverb mit 16 Delay-Lines. Die Reihenfolge änderst du per Drag & Drop, jeder Effekt hat seinen Mix und eigene Presets. Ein Limiter auf dem Master verhindert Übersteuerung.',
+        'Mach den Sound im Synthesizer fertig: Distortion (Soft oder Hard Clip, mit Oversampling), ein Delay (normal oder Ping-Pong, mit Bandfilter im Feedback und Haas-Stereoversatz), ein Kompressor (ein Band oder drei Bänder, die nach unten und nach oben komprimiert werden: der dichte Sound moderner Bässe) und ein algorithmischer Reverb mit 16 Delay-Lines. Die Reihenfolge änderst du per Drag & Drop, jeder Effekt hat seinen Mix und eigene Presets. Ein Limiter auf dem Master verhindert Übersteuerung.',
       ],
     },
     playing: {

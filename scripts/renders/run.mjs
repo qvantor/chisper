@@ -26,8 +26,14 @@
 // - sub.json: the sub oscillator: the harmonics and a cycle of each shape, its level against the oscillator, the laws
 //   of Level and Pan, Octave and Coarse, the bend, portamento, the phase notes start at by Phase and Cont. Phase
 //   (apart, overlapping, mono), the aliasing of saw and square by note
+// - compressor.json: the compressor of its effect rack (state.mjs: an effect of the rack in the state) on samples of
+//   ours played by the noise oscillator (sines of both channels in quadrature: their level is hypot(L, R) at every
+//   sample): one band (the law of the threshold, the ratio, the attack and the release, the link of the channels,
+//   the makeup, the level, the mix, the highpass) and three bands (the crossovers, the curves of each band down
+//   and up, their detector on a mono sine, their release)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub` renders some of them
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor` renders
+// some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -1712,5 +1718,421 @@ if (runs('sub')) {
     );
   } finally {
     removeTables();
+  }
+}
+
+// --- compressor ---
+if (runs('compressor')) {
+  // 44.1 kHz: the noise oscillator plays a sample of ours as it is (no resampling), one-shot, osc A off
+  const R = 44100;
+  const samples = [];
+  const NOISE = { 'A Enable': 0, 'Noise Enable': 1, 'Noise Level': 1, 'Env 1 Attack': 0, 'Env 1 Sustain': 1 };
+  const sampleOf = (name, channels) => {
+    const file = join(noisesFolder(), 'User', `chisper-test-comp-${name}.wav`);
+    writeSample(file, channels);
+    samples.push(file);
+    return {
+      path: `User/chisper-test-comp-${name}.wav`,
+      frames: channels[0].length,
+      channels: channels.length,
+      rate: R,
+      params: { kParamOneShot: { f32: 1 } },
+    };
+  };
+  let renders = 0;
+  // renders of one sample run together, those of another wait for them (hosts loading different samples of the
+  // noise oscillator at once have played the sample of another)
+  let lane = Promise.resolve();
+  let laneSample = null;
+  let laneJobs = [];
+  const played = new Map();
+  // a sample through the rack with a compressor of the plain params `comp` (null: an empty rack, the dry signal),
+  // rendered once
+  const play = (sample, comp) => {
+    const key = `${sample.path} ${JSON.stringify(comp)}`;
+    if (!played.has(key)) played.set(key, render(sample, comp));
+    return played.get(key);
+  };
+  const render = (sample, comp) => {
+    if (laneSample !== sample.path) {
+      const before = laneJobs;
+      lane = lane.then(() => Promise.allSettled(before));
+      laneSample = sample.path;
+      laneJobs = [];
+    }
+    const name = `comp-${renders++}`;
+    const state = join(work, `state-${name}.bin`);
+    const fx = comp === null ? null : [{ module: 'FXComp', type: 5, params: comp }];
+    writeFileSync(state, editedState(init, [], [], sample, fx));
+    const seconds = sample.frames / R + 0.3;
+    const once = (attempt) =>
+      hostRender(`${name}-${attempt}`, {
+        rate: R,
+        seconds,
+        state,
+        params: NOISE,
+        notes: [{ note: 72, on: 0.05, off: seconds - 0.02 }],
+      });
+    const same = ([a], [b]) => a.every((value, i) => Math.abs(value - b[i]) < 1e-5);
+    // rendered until two renders in a row agree (now and then a render is of another state: one in a hundred)
+    const job = lane.then(async () => {
+      let [before, last] = [await once(0), await once(1)];
+      for (let attempt = 2; !same(before, last); attempt++) {
+        if (attempt > 5) throw new Error(`the renders of ${name} never agree`);
+        [before, last] = [last, await once(attempt)];
+      }
+      return last;
+    });
+    laneJobs.push(job);
+    return job;
+  };
+  const MULTI = { kParamMultiband: 1 };
+  // a program of a sine of both channels in quadrature: [dB, seconds] one after another
+  const program = (hz, segments, mono = false) => {
+    const total = Math.round(segments.reduce((sum, [, seconds]) => sum + seconds, 0) * R);
+    const channels = [new Float64Array(total), new Float64Array(total)];
+    let i = 0;
+    for (const [level, seconds] of segments) {
+      const a = 10 ** (level / 20);
+      for (let k = 0; k < Math.round(seconds * R); k++, i++) {
+        const phase = (2 * Math.PI * hz * i) / R;
+        channels[0][i] = a * Math.sin(phase);
+        channels[1][i] = a * (mono ? Math.sin(phase) : Math.cos(phase));
+      }
+    }
+    return channels;
+  };
+  const envelope = ([l, r]) => Float64Array.from(l, (v, i) => Math.hypot(v, r[i]));
+  const round = (v, digits = 3) => +v.toFixed(digits);
+  try {
+    // the first sound of a render (the note on) and the level of the dry output against the sample
+    const steady = sampleOf('steady', program(1000, [[-20, 1]]));
+    const dryOf = async (sample) => envelope(await play(sample, null));
+    const steadyDry = await dryOf(steady);
+    const on = steadyDry.findIndex((v) => v > 1e-6);
+    const output = steadyDry[on + R / 2] / 0.1;
+    // the gain (dB) of a render against the dry one at seconds of the sample
+    const gainAt = (wet, dry, seconds) => {
+      const i = on + Math.round(seconds * R);
+      return round(dB(wet[i] / dry[i]));
+    };
+    // --- one band ---
+    // steps up and down of 1 kHz: -40 dB 0.4 s, -9 dB 1.2 s, -40 dB 1.6 s
+    const step = sampleOf(
+      'step',
+      program(1000, [
+        [-40, 0.4],
+        [-9, 1.2],
+        [-40, 1.6],
+      ])
+    );
+    const stepDry = await dryOf(step);
+    const stepped = async (comp) => envelope(await play(step, comp));
+    // the peak is read: the attack 1 ms, the release 1 s, the threshold knob 0.7
+    const PEAK = { kParamThresh: 0.7, kParamAttack: 1, kParamRelease: 1000 };
+    const TIMES = [0.25, 0.5, 1, 2, 3, 5, 8, 12, 20, 30, 50, 80, 120, 200, 400];
+    const trace = (wet, from) => TIMES.map((ms) => [ms, gainAt(wet, stepDry, from + ms / 1000)]);
+    // the threshold by its knob: the reduction of a level held
+    const threshold = Promise.all(
+      [0.3, 0.4, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1].map(async (knob) => {
+        const wet = await stepped({ ...PEAK, kParamThresh: knob });
+        return [knob, gainAt(wet, stepDry, 1.5), gainAt(wet, stepDry, 0.35)];
+      })
+    );
+    const ratio = Promise.all(
+      [1, 1.5, 2, 3, 4, 8, 20].map(async (value) => {
+        return [value, gainAt(await stepped({ ...PEAK, kParamRatio: value }), stepDry, 1.5)];
+      })
+    );
+    const attack = Promise.all(
+      [1, 10, 100].map(async (ms) => {
+        const wet = await stepped({ ...PEAK, kParamAttack: ms });
+        return [ms, trace(wet, 0.4)];
+      })
+    );
+    const release = Promise.all(
+      [10, 100, 1000].map(async (ms) => {
+        const wet = await stepped({ ...PEAK, kParamRelease: ms });
+        return [ms, [[0, gainAt(wet, stepDry, 1.59)], ...trace(wet, 1.6)]];
+      })
+    );
+    // a fresh compressor: its attack and its release
+    const fresh = stepped({ kParamThresh: 0.7 }).then((wet) => ({
+      held: gainAt(wet, stepDry, 1.5),
+      attack: trace(wet, 0.4),
+      release: trace(wet, 1.6),
+    }));
+    const makeup = Promise.all(
+      [2, 4, 16, 31].map(async (plain) => [
+        round((plain - 1) / 30, 4),
+        gainAt(await stepped({ kParamMakeup: plain, kParamThresh: 0 }), stepDry, 0.35),
+      ])
+    );
+    const level = Promise.all(
+      [0.25, 0.5, 0.75, 1].map(async (knob) => [
+        knob,
+        gainAt(await stepped({ kParamLevelOut: knob, kParamThresh: 0 }), stepDry, 0.35),
+      ])
+    );
+    const mix = Promise.all(
+      [0, 25, 50, 75, 100].map(async (wet) => [
+        wet / 100,
+        gainAt(await stepped({ ...PEAK, kParamWet: wet }), stepDry, 1.5),
+      ])
+    );
+    // the link of the channels: the gain of the left one with the right one as loud, a quarter of it, silent
+    const tones = (a, b) =>
+      [0, 1].map((c) =>
+        Float64Array.from({ length: 1.5 * R }, (_, i) => (c ? b : a) * Math.sin((2 * Math.PI * 1000 * i) / R))
+      );
+    const PEAK_LEVEL = 10 ** (-9 / 20);
+    const link = Promise.all(
+      [
+        ['both', 1],
+        ['quarter', 0.25],
+        ['left', 0],
+      ].map(async ([name, right]) => {
+        const sample = sampleOf(`link-${name}`, tones(PEAK_LEVEL, PEAK_LEVEL * right));
+        const [[dry], [wet]] = await Promise.all([play(sample, null), play(sample, PEAK)]);
+        // (tone reads at RATE: the frequency as it is there)
+        const read = (x) => tone(x, (1000 * RATE) / R, on + Math.round(0.8 * R), 8192).amplitude;
+        return [name, round(dB(read(wet) / read(dry)))];
+      })
+    );
+    // the highpass: sines with no compression (the threshold at 0 dB), the gain and the phase against the dry one
+    const highpass = Promise.all(
+      [5, 10, 20, 40, 100, 1000].map(async (hz) => {
+        const sample = sampleOf(`hp-${hz}`, [
+          Float64Array.from({ length: 3 * R }, (_, i) => 0.25 * Math.sin((2 * Math.PI * hz * i) / R)),
+        ]);
+        const [[dry], [wet]] = await Promise.all([play(sample, null), play(sample, { kParamThresh: 0 })]);
+        const read = (x) => tone(x, (hz * RATE) / R, on + Math.round(0.8 * R), 2 * R);
+        const [a, b] = [read(dry), read(wet)];
+        return [hz, round(dB(b.amplitude / a.amplitude)), round(((b.phase - a.phase + 540) % 360) - 180, 1)];
+      })
+    );
+
+    // --- three bands ---
+    // the levels of a band, held 0.6 s each (after 1.2 s at the lowest): the gain at the end of each
+    const LEVELS = Array.from({ length: 19 }, (_, k) => -72 + 4 * k);
+    const ladder = (hz, mono = false) =>
+      program(hz, [[-72, 1.2], ...LEVELS.map((value) => [value, 0.6])], mono);
+    const BANDS = [
+      ['low', 60],
+      ['mid', 1000],
+      ['high', 8000],
+    ];
+    const CURVES = {
+      fresh: MULTI,
+      'thresh 0.7': { ...MULTI, kParamThresh: 0.7 },
+      'ratio 20': { ...MULTI, kParamRatio: 20 },
+      'below 0.5': { ...MULTI, kParamRatioBelow: 0.5 },
+      'below 1': { ...MULTI, kParamRatioBelow: 1 },
+      'below 1, thresh 0.7': { ...MULTI, kParamRatioBelow: 1, kParamThresh: 0.7 },
+    };
+    const curves = Promise.all(
+      BANDS.map(async ([name, hz]) => {
+        const sample = sampleOf(`ladder-${name}`, ladder(hz));
+        const dry = await dryOf(sample);
+        const rows = await Promise.all(
+          Object.entries(CURVES).map(async ([knobs, comp]) => {
+            const wet = envelope(await play(sample, comp));
+            return [knobs, LEVELS.map((_, k) => gainAt(wet, dry, 1.2 + (k + 0.95) * 0.6))];
+          })
+        );
+        return [name, { hz, gains: Object.fromEntries(rows) }];
+      })
+    );
+    // the detector of a band on a mono sine (both channels alike): the gain of its fundamental by level
+    const monoSample = sampleOf('ladder-mono', ladder(220, true));
+    const mono = Promise.all(
+      ['fresh', 'thresh 0.7', 'below 1'].map(async (knobs) => {
+        const comp = CURVES[knobs];
+        const [[dry], [wet]] = await Promise.all([play(monoSample, null), play(monoSample, comp)]);
+        const read = (x, k) =>
+          tone(x, (220 * RATE) / R, on + Math.round((1.2 + (k + 0.6) * 0.6) * R), Math.round(0.2 * R))
+            .amplitude;
+        return [knobs, LEVELS.map((_, k) => round(dB(read(wet, k) / read(dry, k))))];
+      })
+    );
+    // the release of a band: a step down of 1 kHz and of 8 kHz (0 dB 0.8 s after -40 dB 0.4 s, then -40 dB)
+    const fall = (hz) =>
+      program(hz, [
+        [-40, 0.4],
+        [0, 0.8],
+        [-40, 3.2],
+      ]);
+    const midFall = sampleOf('fall-mid', fall(1000));
+    const FALL = [20, 50, 100, 200, 400, 800, 1500, 2500];
+    const falls = Promise.all(
+      BANDS.slice(1).map(async ([name, hz]) => {
+        const sample = name === 'mid' ? midFall : sampleOf(`fall-${name}`, fall(hz));
+        const dry = await dryOf(sample);
+        const rows = await Promise.all(
+          [10, 90, 1000].map(async (ms) => {
+            const wet = envelope(await play(sample, { ...MULTI, kParamRelease: ms }));
+            return [
+              ms,
+              [[0, gainAt(wet, dry, 1.19)], ...FALL.map((t) => [t, gainAt(wet, dry, 1.2 + t / 1000)])],
+            ];
+          })
+        );
+        return [name, rows];
+      })
+    );
+    // the attack of a band does not follow the knob: the gain after a step up at Attack 1 and 1000 ms
+    const RISE = [2, 3, 5, 7, 10, 15, 20, 30, 50, 100];
+    const rise = Promise.all(
+      [1, 1000].map(async (ms) => {
+        const dry = await dryOf(midFall);
+        const wet = envelope(await play(midFall, { ...MULTI, kParamAttack: ms }));
+        return [ms, RISE.map((t) => [t, gainAt(wet, dry, 0.4 + t / 1000)])];
+      })
+    );
+    // a hit of 1 kHz at 0 dB and at -40 dB after a second of a tone at -72 dB (the bands at the ceiling of their
+    // gain before it): the gain at each of its first samples, then by ms (after a silence from the start of a
+    // render the first sound fades in over some 2.4 ms, which no silence after a sound brings back: `gaps`)
+    const HIT_AT = 1;
+    const HIT_SAMPLES = 32;
+    const HIT_MS = [1, 2, 3, 5, 10, 20, 50, 100, 200];
+    const onset = Promise.all(
+      [
+        ['0 dB', 0],
+        ['-40 dB', -40],
+      ].map(async ([name, hit], index) => {
+        const sample = sampleOf(
+          `onset-${index}`,
+          program(1000, [
+            [-72, HIT_AT],
+            [hit, 0.3],
+          ])
+        );
+        const dry = await dryOf(sample);
+        const first = on + Math.round(HIT_AT * R);
+        const rows = await Promise.all(
+          [0.75, 1].map(async (below) => {
+            const wet = envelope(await play(sample, { ...MULTI, kParamRatioBelow: below }));
+            return [
+              `below ${below}`,
+              {
+                samples: Array.from({ length: HIT_SAMPLES }, (_, k) =>
+                  round(dB(wet[first + k] / dry[first + k]))
+                ),
+                trace: HIT_MS.map((ms) => [ms, gainAt(wet, dry, HIT_AT + ms / 1000)]),
+              },
+            ];
+          })
+        );
+        return [name, Object.fromEntries(rows)];
+      })
+    );
+    // the silence that puts the bands to sleep: a hit at 0 dB after a tone at 0 dB and a silence of so many
+    // seconds, Below 1
+    const gaps = Promise.all(
+      [0.05, 0.2, 1, 4].map(async (gap) => {
+        const sample = sampleOf(
+          `gap-${gap}`,
+          program(1000, [
+            [0, 0.3],
+            [-Infinity, gap],
+            [0, 0.3],
+          ])
+        );
+        const dry = await dryOf(sample);
+        const wet = envelope(await play(sample, { ...MULTI, kParamRatioBelow: 1 }));
+        return [gap, HIT_MS.map((ms) => [ms, gainAt(wet, dry, 0.3 + gap + ms / 1000)])];
+      })
+    );
+    // the crossovers: an impulse (after a quiet tone: the rack awake) with no compression (the ratio 1), the
+    // response of all bands, of each alone (the others at -24 dB), at a mix of a half, moved
+    const N = 1 << 16;
+    const click = new Float64Array(Math.round(0.4 * R) + N + 1000);
+    for (let i = 0; i < Math.round(0.35 * R); i++)
+      click[i] =
+        1e-3 * Math.sin((2 * Math.PI * 1000 * i) / R) * Math.min(1, (Math.round(0.35 * R) - i) / 2000);
+    click[Math.round(0.4 * R)] = 0.5;
+    const impulse = sampleOf('impulse', [click]);
+    const [clickDry] = await play(impulse, null);
+    let peak = 0;
+    for (let i = 0; i < clickDry.length; i++) if (Math.abs(clickDry[i]) > Math.abs(clickDry[peak])) peak = i;
+    const transform = (x) => {
+      const fft = new FFT(N);
+      const bins = fft.createComplexArray();
+      fft.realTransform(
+        bins,
+        Array.from({ length: N }, (_, i) => x[peak - 64 + i])
+      );
+      return bins;
+    };
+    const base = transform(clickDry);
+    const FREQUENCIES = [
+      20, 30, 40, 60, 80, 100, 131, 160, 200, 300, 500, 1000, 1800, 2500, 3200, 5000, 8000, 14000,
+    ];
+    const response = async (comp) => {
+      const bins = transform((await play(impulse, comp))[0]);
+      return FREQUENCIES.map((hz) => {
+        const k = Math.round((hz * N) / R);
+        const power = base[2 * k] ** 2 + base[2 * k + 1] ** 2;
+        const re = (bins[2 * k] * base[2 * k] + bins[2 * k + 1] * base[2 * k + 1]) / power;
+        const im = (bins[2 * k + 1] * base[2 * k] - bins[2 * k] * base[2 * k + 1]) / power;
+        return [round(dB(Math.hypot(re, im)), 2), round((Math.atan2(im, re) * 180) / Math.PI, 1)];
+      });
+    };
+    const FLAT = { ...MULTI, kParamRatio: 1 };
+    const QUIET = -24;
+    const crossover = Promise.all(
+      Object.entries({
+        all: FLAT,
+        low: { ...FLAT, kParamGain1: QUIET, kParamGain2: QUIET },
+        mid: { ...FLAT, kParamGain0: QUIET, kParamGain2: QUIET },
+        high: { ...FLAT, kParamGain0: QUIET, kParamGain1: QUIET },
+        'mix 0.5': { ...FLAT, kParamWet: 50 },
+        'mid + 12 dB, mix 0.5': { ...FLAT, kParamGain1: 12, kParamWet: 50 },
+        'low 500 Hz, high 5000 Hz, mid alone': {
+          ...FLAT,
+          kParamXoverLow: 500,
+          kParamXoverHi: 5000,
+          kParamGain0: QUIET,
+          kParamGain2: QUIET,
+        },
+      }).map(async ([name, comp]) => [name, await response(comp)])
+    );
+
+    const result = {
+      about:
+        'The compressor of the effect rack of the Audio Unit (alone in the rack; osc A off, the noise oscillator plays samples of ours one-shot at 44.1 kHz, the rate of the renders: sines of both channels in quadrature, their level hypot(L, R) at every sample; a gain is the level of a render over the one of the dry render, the rack empty, dB). `output`: the dry output over the sample (the rack is before Main Vol); `levels`: dB of a sample, add 20 log10(output) for the level at the output. `single` (one band, a step of 1 kHz from -40 to -9 dB and back): `threshold` [knob, gain at -9 dB, gain at -40 dB] with the attack 1 ms and the release 1 s (the peak is read); `ratio` [ratio, gain at -9 dB] at the threshold knob 0.7; `attack` and `release` [ms of the knob, [ms after the step, gain]] (the release from the gain at 0); `fresh` the same at the knobs of a fresh one (threshold 0.7); `makeup` and `level` [knob, gain] with no compression (at -40 dB: the rack clips an output over full scale); `mix` [mix, gain]; `link` the gain of the left channel with the right one as loud, a quarter of it, silent; `highpass` [Hz, dB, degrees] with no compression. `multi` (three bands): `curves` by band (a sine of its `hz`) and knobs: the gain at each of `levels` held 0.6 s; `mono` the same on a sine of 220 Hz alike in both channels (its fundamental); `falls` [ms of the release, [ms after a step from 0 to -40 dB, gain]] of the mid (1 kHz) and the high (8 kHz) band; `rise` [ms of the attack knob, [ms after a step from -40 to 0 dB of 1 kHz, gain]]; `onset` a hit of 1 kHz at 0 dB and at -40 dB after a second of a tone at -72 dB, by Below: the gain at each of its first `samples`, then its `trace` [ms after it, gain]; `gaps` [seconds of a silence between two tones of 1 kHz at 0 dB, [ms after the second one starts, gain]] at Below 1; `crossover` the response [dB, degrees] at `frequencies` with no compression: all bands, each alone (the others at -24 dB), at a mix of a half, with the crossovers moved; scripts/renders/run.mjs --only=compressor',
+      rate: R,
+      output: round(output, 5),
+      single: {
+        threshold: await threshold,
+        ratio: await ratio,
+        attack: await attack,
+        release: await release,
+        fresh: await fresh,
+        makeup: await makeup,
+        level: await level,
+        mix: await mix,
+        link: Object.fromEntries(await link),
+        highpass: await highpass,
+      },
+      multi: {
+        levels: LEVELS,
+        curves: Object.fromEntries(await curves),
+        mono: Object.fromEntries(await mono),
+        falls: Object.fromEntries(await falls),
+        rise: await rise,
+        onset: Object.fromEntries(await onset),
+        gaps: await gaps,
+        frequencies: FREQUENCIES,
+        crossover: Object.fromEntries(await crossover),
+      },
+    };
+    writeFileSync(join(out, 'compressor.json'), `${JSON.stringify(result, null, 1)}\n`);
+    console.log(
+      'dsp/measurements: compressor',
+      JSON.stringify({ output: result.output, link: result.single.link })
+    );
+  } finally {
+    samples.forEach((file) => rmSync(file, { force: true }));
   }
 }

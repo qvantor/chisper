@@ -36,16 +36,31 @@ describe('FxPanel', () => {
     expect(fx[0].$effects.value.delay.on).toBe(true);
   });
 
+  // what takes a route in a panel, sorted
+  const targetsOf = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-mod-target]'), (element) =>
+      element.getAttribute('data-mod-target')
+    ).sort();
+
   it.each([
     ['distortion', ['drive', 'tone', 'level', 'mix']],
     ['delay', ['pan', 'time', 'fb', 'freq', 'q', 'mix']],
+    // (one band: no values of the bands)
+    ['compressor', ['thresh', 'ratio', 'attack', 'release', 'gain', 'level', 'mix']],
     ['reverb', ['lowcut', 'pre', 'size', 'decay', 'damp', 'bass', 'er', 'sep', 'depth', 'mix']],
   ] as const)('%s: every knob and fader takes the envelopes, the switches do not', (type, knobs) => {
     const { container } = renderWithFx(<FxPanel type={type} />);
-    const targets = Array.from(container.querySelectorAll('[data-mod-target]')).map((element) =>
-      element.getAttribute('data-mod-target')
+    expect(targetsOf(container)).toEqual(knobs.map((knob) => `${type}.${knob}`).sort());
+  });
+
+  it('the compressor in three bands: the upward ratio in the place of the attack, the values of the bands', async () => {
+    const { container } = renderWithFx(<FxPanel type='compressor' />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Next' }));
+    expect(targetsOf(container)).toEqual(
+      ['thresh', 'ratio', 'below', 'release', 'gain', 'level', 'mix', 'xlow', 'xhigh', 'low', 'mid', 'high']
+        .map((knob) => `compressor.${knob}`)
+        .sort()
     );
-    expect(targets.sort()).toEqual(knobs.map((knob) => `${type}.${knob}`).sort());
   });
 
   it('a bypassed effect takes none', async () => {

@@ -45,12 +45,14 @@ const silent = (length: number) => {
 // keeps running until it is stopped: the fx slot drains an effect, the master lives as long as the synth.
 // An effect whose knobs follow the envelopes and the LFOs (fx-modulation.ts) gives `modulate`: the moved knobs
 // are set through it once per block (their params messages don't reach onMessage), its node options have the
-// knobs in processorOptions.params and the LFOs as they were then in processorOptions.lfos
+// knobs in processorOptions.params and the LFOs as they were then in processorOptions.lfos. `report` is asked
+// after every block for a message to the main thread (a meter), null: none
 export const registerStereoProcessor = <Dsp extends StereoDsp, Message extends object = StopMessage>(
   name: string,
   createDsp: (sampleRate: number, options: AudioWorkletNodeOptions) => Dsp,
   onMessage?: (dsp: Dsp, message: Message) => void,
-  modulate?: (dsp: Dsp, values: Record<string, number>) => void
+  modulate?: (dsp: Dsp, values: Record<string, number>) => void,
+  report?: (dsp: Dsp, frames: number) => object | null
 ) => {
   class StereoProcessor extends AudioWorkletProcessor {
     private dsp: Dsp;
@@ -95,6 +97,8 @@ export const registerStereoProcessor = <Dsp extends StereoDsp, Message extends o
       if (values && modulate) modulate(this.dsp, values);
       const inL = input[0] ?? silent(outL.length);
       this.dsp.process(inL, input[1] ?? inL, outL, outR);
+      const message = report?.(this.dsp, outL.length);
+      if (message) this.port.postMessage(message);
       return true;
     }
   }

@@ -3,7 +3,7 @@
 # as the TS cores do it (the specs compare the bits)
 [workspace]
 resolver = "2"
-members = ["jsmath", "jsmath-check", "wasm-rt", "dsp-core", "limiter", "reverb", "distortion", "wavetable-osc"]
+members = ["jsmath", "jsmath-check", "wasm-rt", "dsp-core", "limiter", "reverb", "distortion", "compressor", "wavetable-osc"]
 
 [workspace.package]
 version = "0.1.0"

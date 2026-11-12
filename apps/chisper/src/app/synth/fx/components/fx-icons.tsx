@@ -51,9 +51,19 @@ const DistortionIcon = () => (
   </Icon>
 );
 
+// the level of the output over the level of the input: the line of the dry signal (faint) and the curve that
+// leaves it at the threshold, flatter from there
+const CompressorIcon = () => (
+  <Icon>
+    <path d='M-1 25 L25 -1' opacity='0.35' />
+    <path d='M-1 25 L13 11 L25 7' />
+  </Icon>
+);
+
 // shown in the effects list
 export const FX_ICONS: Record<FxType, React.ComponentType> = {
   distortion: DistortionIcon,
   delay: DelayIcon,
+  compressor: CompressorIcon,
   reverb: ReverbIcon,
 };

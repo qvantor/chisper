@@ -100,8 +100,26 @@ const FULL = {
   },
   v: { leg: true, port: 0.12, max: 1, bd: 12, bu: 0 },
   fx: {
-    o: ['reverb', 'distortion'],
+    o: ['reverb', 'compressor', 'distortion'],
     distortion: { a: true, on: false, mix: 0.6, mode: 1, drive: 4, tone: 8000, level: -6 },
+    compressor: {
+      a: true,
+      on: true,
+      mix: 0.8,
+      multi: 1,
+      thresh: 0.62,
+      ratio: 8,
+      attack: 12.5,
+      release: 240,
+      gain: 0.1,
+      xlow: 110,
+      xhigh: 3200,
+      below: 0.4,
+      low: 3,
+      mid: -2,
+      high: 4.5,
+      level: 0.45,
+    },
     delay: {
       a: true,
       on: true,
@@ -161,11 +179,11 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: 'a4be13cd44c58862ef4dd5a4738f8d66e4cce5c479b096078c57e0442d1a9679',
-  full: '959ccf81725e306d9e49840ecb1ddd321fba1bdc95a6aae3cb2317187bf3e01d',
-  legacy: '653aecc644d0171379be9808ce1b16789bc90192f74591cc301ebb0ca9fc1738',
-  partial: '68246cd3382bdf4aa184e36c7c2b66069963efa68f1536f375b3f7ae84e00aae',
-  'fx order without a type': 'eb91ce005467e20136d2b0aa4f5fc966c761d4046543bfa403aaf2f13942e944',
+  empty: '033df439facc60d126b73789f0fb62d64f77ffefd4605d1bd7f1d8bbf32f35c2',
+  full: '1c9157dba0246f6c0d612978b7b441b33e263c7adae4a771182a2bfcfff77233',
+  legacy: '46ca81859d0690166bbff66ab8c28be4d64062b498e46af02b438ad392e26b9a',
+  partial: '54b5b91c882ec6d9947214f2dcdf81a013408e7c98295c57ab57352960602e71',
+  'fx order without a type': '0e83c972ae84e4df53b405fc052a10739e465cd080f9d9dc96b640bf591c9d01',
 };
 
 // not presets: the schema rejects them
@@ -216,9 +234,9 @@ const FX_SNAPS: Record<string, unknown> = {
 };
 
 const FX_SNAP_HASHES: Record<string, string> = {
-  null: 'f617937957dacfb0b2715c7f68ed1373859112e750776199f476d3108f00767b',
-  garbage: 'c63e1881c95a996f29e243c70c46daad4cb0b972178e0dc8169e2e4194409f76',
-  full: '2133ceaf184887400ca3786b80e2db366fe28db0af77ee1d1cface63eae4cf1c',
+  null: 'ff1116fd4ea169ac4facf7b8bb01acf2d605d01c0b37a8f9fdf2f6d2ab9e93aa',
+  garbage: '21f457ae09fe084883bccc52da7086307284be1f5b53532ccc8de10e6747f8e0',
+  full: 'c698c4540b5492142af1960b7cd7f7ffca981b079c7ae8f95cc3b7aa960070a4',
 };
 
 // key order aside: the values of the output

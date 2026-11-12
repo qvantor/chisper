@@ -14,7 +14,7 @@ export const es: Messages = {
     h1: 'Chisper: sintetizador wavetable gratis',
     lead: 'Chisper es un **sintetizador wavetable gratis** (de tablas de ondas) que funciona en el navegador, en el ordenador, un Chromebook o el móvil: **sin descargas ni cuenta**.',
     details:
-      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un **oscilador de ruido**, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, delay y reverb. Conecta un teclado MIDI o toca con el teclado del ordenador, y graba lo que tocas en el **piano roll**.',
+      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un **oscilador de ruido**, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, delay, compresor y reverb. Conecta un teclado MIDI o toca con el teclado del ordenador, y graba lo que tocas en el **piano roll**.',
     listen: 'Escúchalo',
     screenshotAlt:
       'El sintetizador Chisper tocando acordes: se mueven las ondas de los dos osciladores, los puntos de las envolventes y del LFO, el filtro y el espectro',
@@ -105,9 +105,9 @@ export const es: Messages = {
       ],
     },
     effects: {
-      h2: 'Efectos: distorsión, delay y reverb',
+      h2: 'Efectos: distorsión, delay, compresor y reverb',
       text: [
-        'Termina el sonido dentro del sintetizador: distorsión (soft o hard clip, con sobremuestreo), un delay (normal o ping-pong, con un filtro de banda en la realimentación y un desfase estéreo Haas) y una reverb algorítmica de 16 líneas. Arrástralos en cualquier orden; cada uno tiene su Mix y sus presets. Un limitador en el máster evita que la salida sature.',
+        'Termina el sonido dentro del sintetizador: distorsión (soft o hard clip, con sobremuestreo), un delay (normal o ping-pong, con un filtro de banda en la realimentación y un desfase estéreo Haas), un compresor (de una banda, o de tres bandas que se aprietan y se levantan: el sonido denso de los bajos modernos) y una reverb algorítmica de 16 líneas. Arrástralos en cualquier orden; cada uno tiene su Mix y sus presets. Un limitador en el máster evita que la salida sature.',
       ],
     },
     playing: {

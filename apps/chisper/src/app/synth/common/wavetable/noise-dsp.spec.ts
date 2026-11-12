@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import FFT from 'fft.js';
-import { frequencyOf, semitones } from '../../../../test-utils/measures';
+import { dB, frequencyOf, semitones } from '../../../../test-utils/measures';
 import { seeded } from '../../../../test-utils/seeded';
 import { VOICE_DEFAULTS } from '../../../../test-utils/voice-dsp';
 import { wasmCore } from '../../../../test-utils/wasm';
@@ -177,7 +177,6 @@ const amplitudeOf = (x: Float32Array, hz: number, rate: number, n = 16384) => {
   }
   return (2 * Math.hypot(re, im)) / sum;
 };
-const dB = (value: number) => 20 * Math.log10(value);
 // the amplitude spectrum (dB of a full-scale sine) of the last SIZE samples (Blackman-Harris: sidelobes -92 dB)
 const SIZE = 1 << 15;
 const WINDOW = Float64Array.from({ length: SIZE }, (_, i) => {

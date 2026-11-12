@@ -44,6 +44,11 @@ const WASM_CORES = [
     create: 'createDistortionWasm',
   },
   {
+    core: 'compressor',
+    facade: 'src/app/synth/fx/effects/compressor-wasm',
+    create: 'createCompressorWasm',
+  },
+  {
     core: 'wavetable-osc',
     facade: 'src/app/synth/common/wavetable/wavetable-osc-wasm',
     create: 'createOscScope, createTableStoreWasm, createVoiceSharedWasm, createVoiceWasm',
@@ -560,6 +565,24 @@ const createCases = (dsp) => {
     };
   };
   const input = noise(RATE, 0.5);
+  const hits = input.map((value, i) => (i % (RATE / 5) < RATE / 20 ? value : 0));
+  // (a threshold the noise is over)
+  const COMPRESSOR = {
+    multi: 0,
+    thresh: 0.6,
+    ratio: 4,
+    attack: 90,
+    release: 90,
+    gain: 0,
+    xlow: 131,
+    xhigh: 2500,
+    below: 0,
+    low: 0,
+    mid: 0,
+    high: 0,
+    level: 0.5,
+    mix: 1,
+  };
   const distortionParams = (mode) => ({ params: { mode, drive: 8, tone: 20000, level: 0 } });
   return {
     ...withTs(
@@ -693,6 +716,26 @@ const createCases = (dsp) => {
           )),
       dsp.createDistortionDsp &&
         ((mode) => effect(() => dsp.createDistortionDsp(RATE, distortionParams(mode)).process, input))
+    ),
+    // one band, then three (compressed down; down and up): over the noise, so they compress all the time; then
+    // hits of the noise after silences (50 ms every 200 ms): the gains of every sample of a hit, the bands lifted
+    // to the ceiling between them
+    ...withTs(
+      {
+        compressor: [{}],
+        'compressor multiband': [{ multi: 1 }],
+        'compressor multiband up': [{ multi: 1, below: 1 }],
+        'compressor multiband hits': [{ multi: 1, below: 1 }, hits],
+      },
+      dsp.wasm.compressor &&
+        ((params, source = input) =>
+          effect(
+            () =>
+              dsp.createCompressorWasm(dsp.wasm.compressor, RATE, { params: { ...COMPRESSOR, ...params } })
+                .process,
+            source
+          )),
+      null
     ),
     ...withTs(
       {

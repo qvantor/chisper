@@ -42,10 +42,15 @@ const withTables = (osc1, osc2) => ({
 // the heavy patch with every LFO on: LFO 1 on the wave of both oscillators (ENV 2 on its Rate), LFO 2 free on the
 // cutoff (bipolar) and the drive of the distortion, LFO 3 on the size and the early reflections (a fader) of the
 // reverb (its worklet), LFO 4 on the time and the bandpass of the delay (the lines of fx-mod, its chart); the sub on
-// (a saw an octave down), LFO 2 on its Coarse, LFO 4 on its level (the marks of its knobs)
+// (a saw an octave down), LFO 2 on its Coarse, LFO 4 on its level (the marks of its knobs); the compressor added
+// (three bands, down and up: its meter draws while its panel shows), LFO 3 on its threshold
 const withLfos = {
   ...heavy.snapshot,
   sub: { a: true, sh: 'saw', o: -1 },
+  fx: {
+    ...heavy.snapshot.fx,
+    compressor: { a: true, on: true, mix: 1, multi: 1, below: 0.5, ratio: 8 },
+  },
   lfo: {
     l1: { rate: 0.25 },
     l2: { rate: 0.5, mode: 'free' },
@@ -62,6 +67,7 @@ const withLfos = {
     'lfo4:delay.time': 0.1,
     'lfo2:distortion.drive': 0.3,
     'lfo3:reverb.er': 0.3,
+    'lfo3:compressor.thresh': 0.2,
     'lfo4:delay.freq': 0.2,
     'lfo2:sub.crs': { a: 0.05, bi: true },
     'lfo4:sub.level': 0.3,
@@ -197,7 +203,7 @@ try {
         Object.values(statuses.fx).every((status) => status === 'ready'),
         JSON.stringify(statuses.fx)
       );
-      const wanted = ['limiter', 'wavetable-osc', 'distortion', 'reverb', 'fx-mod'];
+      const wanted = ['limiter', 'wavetable-osc', 'distortion', 'compressor', 'reverb', 'fx-mod'];
       check(
         'the bundles load',
         wanted.every((bundle) => loaded.includes(bundle)),

@@ -1,7 +1,8 @@
+import { FX_TYPES } from '@chisper/preset-schema';
 import { FREE, lfoTable, LfoWire } from '../../common/lfo/lfo-curve';
 import { FxNote, FxRoute, routedValue } from './fx-modulation';
 import { createFxModLines } from './fx-mod-lines';
-import { DELAY_LINES, FX_MOD_LINES, mixGains, slotLines } from './fx-mod-params';
+import { DELAY_LINES, FX_MOD_LINES, FX_SLOTS, mixGains, SLOT_LINES, slotLines } from './fx-mod-params';
 
 const RATE = 48000;
 const BLOCK = 128;
@@ -22,6 +23,14 @@ const render = (lines: ReturnType<typeof createFxModLines>, from: number, blocks
 };
 
 describe('createFxModLines', () => {
+  it('has two lines for the mix of every effect of the rack, after those of the delay', () => {
+    expect(FX_SLOTS).toBe(FX_TYPES.length);
+    expect(FX_MOD_LINES).toBe(SLOT_LINES + 2 * FX_TYPES.length);
+    const lines = FX_TYPES.flatMap((_, slot) => Object.values(slotLines(slot)));
+    expect(lines).toEqual(Array.from({ length: 2 * FX_TYPES.length }, (_, i) => SLOT_LINES + i));
+    expect(Math.max(...Object.values(DELAY_LINES))).toBe(SLOT_LINES - 1);
+  });
+
   it('outputs the offset of a knob its routes move: the knob moved - the knob, at the points of a block', () => {
     const lines = createFxModLines(RATE);
     lines.setNote(note());

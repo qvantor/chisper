@@ -40,6 +40,30 @@ describe('registerStereoProcessor', () => {
     expect(silence).toEqual(new Float32Array(128));
   });
 
+  it('posts what report gives after a block, nothing when it gives null or there is no report', () => {
+    const dsp = { process: jest.fn() };
+    const report = jest.fn<object | null, [StereoDsp, number]>(() => null);
+    registerStereoProcessor('reporting', () => dsp, undefined, undefined, report);
+    const processor = new processors['reporting'](OPTIONS);
+    processor.port.postMessage = jest.fn();
+    const outputs = [[new Float32Array(128), new Float32Array(128)]];
+    processor.process([[]], outputs);
+    expect(report).toHaveBeenLastCalledWith(dsp, 128);
+    expect(processor.port.postMessage).not.toHaveBeenCalled();
+    report.mockReturnValueOnce({ meter: 1 });
+    processor.process([[]], outputs);
+    expect(processor.port.postMessage.mock.calls).toEqual([[{ meter: 1 }]]);
+    // stopped: no block, no report
+    processor.port.onmessage({ data: { stop: true } });
+    report.mockClear();
+    expect(processor.process([[]], outputs)).toBe(false);
+    expect(report).not.toHaveBeenCalled();
+    const { processor: plain, outputs: out } = setup();
+    plain.port.postMessage = jest.fn();
+    plain.process([[]], out);
+    expect(plain.port.postMessage).not.toHaveBeenCalled();
+  });
+
   it('passes the posted messages to the dsp', () => {
     const { processor, dsp, onMessage } = setup();
     processor.port.onmessage({ data: { a: 2 } });

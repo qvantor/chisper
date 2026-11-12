@@ -33,6 +33,40 @@ describe('createWorkletFx', () => {
     expect(statuses).toEqual(['loading', 'ready']);
   });
 
+  it('gives onMessage what the processor posts, not what a node dropped earlier does', async () => {
+    const audioCtx = new AudioContext();
+    (audioCtx.audioWorklet.addModule as jest.Mock).mockResolvedValue(undefined);
+    const nodes: WorkletNodeStub[] = [];
+    const onMessage = jest.fn();
+    const worklet = createWorkletFx(
+      audioCtx,
+      'test',
+      () => {
+        nodes.push(new AudioWorkletNode(audioCtx, 'test', {}) as WorkletNodeStub);
+        return nodes[nodes.length - 1];
+      },
+      onMessage
+    );
+    await flush();
+    nodes[0].port.onmessage?.({ data: { meter: 1 } } as MessageEvent);
+    expect(onMessage.mock.calls).toEqual([[{ meter: 1 }]]);
+    // the processor threw: its node is dropped, a retry makes another
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    nodes[0].onprocessorerror?.(new Event('processorerror') as ErrorEvent);
+    worklet.retry();
+    await flush();
+    expect(nodes).toHaveLength(2);
+    nodes[0].port.onmessage?.({ data: { meter: 2 } } as MessageEvent);
+    nodes[1].port.onmessage?.({ data: { meter: 3 } } as MessageEvent);
+    expect(onMessage.mock.calls).toEqual([[{ meter: 1 }], [{ meter: 3 }]]);
+  });
+
+  it('without onMessage the port of the node is left alone', async () => {
+    const { node } = setup();
+    await flush();
+    expect(node()?.port.onmessage).toBeNull();
+  });
+
   it('posts to the node, drops the messages posted before it exists', async () => {
     const { worklet, node } = setup();
     expect(() => worklet.post({ a: 1 })).not.toThrow();

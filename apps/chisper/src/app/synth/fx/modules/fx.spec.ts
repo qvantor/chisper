@@ -31,6 +31,7 @@ const REVERB_DEFAULTS = mapValues(FX_PARAMS.reverb, (param) => param.default);
 // the delay in MS, its division in BPM the default one
 const MS = { sync: 0, div: FX_PARAMS.delay.div.default, trip: 0, dot: 0 };
 const DISTORTION_DEFAULTS = mapValues(FX_PARAMS.distortion, (param) => param.default);
+const COMPRESSOR_DEFAULTS = mapValues(FX_PARAMS.compressor, (param) => param.default);
 const defaultReverb = () => ({ mix: FX_MIX_PARAM.default, params: REVERB_DEFAULTS });
 
 const lastGain = (node: GainNode) => (node.gain.setTargetAtTime as jest.Mock).mock.lastCall?.[0];
@@ -369,7 +370,12 @@ describe('fx', () => {
     actions.setAdded('delay', true);
     actions.setAdded('reverb', true);
     const chain = (reverb: FxStatus) =>
-      getChain(['reverb', 'delay'], model.$effects.value, { distortion: 'ready', delay: 'ready', reverb });
+      getChain(['reverb', 'delay'], model.$effects.value, {
+        distortion: 'ready',
+        delay: 'ready',
+        compressor: 'ready',
+        reverb,
+      });
     expect(chain('loading')).toEqual(['reverb', 'delay']);
     expect(chain('ready')).toEqual(['reverb', 'delay']);
     expect(chain('unsupported')).toEqual(['delay']);
@@ -379,23 +385,24 @@ describe('fx', () => {
   it('move reorders the effects', () => {
     const { model, actions } = setup();
     actions.move(0, 0);
-    expect(model.$order.value).toEqual(['distortion', 'delay', 'reverb']);
-    actions.move(2, 0);
-    expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay']);
+    expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
+    actions.move(3, 0);
+    expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay', 'compressor']);
     actions.move(1, 2);
-    expect(model.$order.value).toEqual(['reverb', 'delay', 'distortion']);
+    expect(model.$order.value).toEqual(['reverb', 'delay', 'distortion', 'compressor']);
   });
 
   describe('distortion', () => {
     it('is first in the chain by default', async () => {
       const { model, actions, synthCore } = setup();
-      const { distortion, delay, reverb } = model.slots;
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'reverb']);
+      const { distortion, delay, compressor, reverb } = model.slots;
+      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
       FX_TYPES.forEach((type) => actions.setAdded(type, true));
       await flush();
       expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(distortion.input);
       expect(distortion.output.connect).toHaveBeenLastCalledWith(delay.input);
-      expect(delay.output.connect).toHaveBeenLastCalledWith(reverb.input);
+      expect(delay.output.connect).toHaveBeenLastCalledWith(compressor.input);
+      expect(compressor.output.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
     });
 
@@ -448,6 +455,111 @@ describe('fx', () => {
     });
   });
 
+  describe('compressor', () => {
+    it('is after the delay and before the reverb by default', async () => {
+      const { model, actions, synthCore } = setup();
+      const { delay, compressor, reverb } = model.slots;
+      (['delay', 'compressor', 'reverb'] as const).forEach((type) => actions.setAdded(type, true));
+      await flush();
+      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(delay.input);
+      expect(delay.output.connect).toHaveBeenLastCalledWith(compressor.input);
+      expect(compressor.output.connect).toHaveBeenLastCalledWith(reverb.input);
+    });
+
+    it('mixes inside its core: the slot passes the core alone at any mix', async () => {
+      const { model, actions } = setup();
+      const { dry, wet, send, dryDelay } = model.slots.compressor;
+      expect(dryDelay).toBeUndefined();
+      actions.setAdded('compressor', true);
+      // loading: the dry signal alone, the core closed
+      expect(lastGain(dry)).toBe(1);
+      expect(lastGain(wet)).toBe(0);
+      expect(lastGain(send)).toBe(0);
+      await flush();
+      expect(lastGain(dry)).toBe(0);
+      expect(lastGain(wet)).toBe(1);
+      expect(lastGain(send)).toBe(1);
+      // (the mix goes to the core: create-fx-slot.spec, compressor.spec)
+      actions.setMix('compressor', 0.25);
+      expect(lastGain(dry)).toBe(0);
+      expect(lastGain(wet)).toBe(1);
+      actions.setMix('compressor', 0);
+      expect(lastGain(dry)).toBe(0);
+      expect(lastGain(wet)).toBe(1);
+      // bypassed: the dry signal alone, as any slot
+      actions.setOn('compressor', false);
+      expect(lastGain(dry)).toBe(1);
+      expect(lastGain(wet)).toBe(0);
+      expect(lastGain(send)).toBe(0);
+    });
+
+    it('passes the changed params to the effect', async () => {
+      const { model, actions } = setup();
+      const setParam = jest.spyOn(model.slots.compressor, 'setParam');
+      actions.setAdded('compressor', true);
+      await flush();
+      setParam.mockClear();
+      actions.setParam('compressor', 'multi', 1);
+      actions.setParam('compressor', 'thresh', 0);
+      actions.setParam('compressor', 'below', 0.5);
+      expect(setParam.mock.calls).toEqual([
+        ['multi', 1],
+        ['thresh', 0],
+        ['below', 0.5],
+      ]);
+    });
+
+    it('a fresh compressor matches the default preset, its presets are found back', () => {
+      const { model, actions } = setup();
+      expect(findFxPreset('compressor', model.$effects.value.compressor)?.id).toBe('default');
+      actions.applyPreset('compressor', 'ott');
+      expect(findFxPreset('compressor', model.$effects.value.compressor)?.id).toBe('ott');
+      expect(model.$effects.value.compressor.params['multi']).toBe(1);
+      actions.setParam('compressor', 'high', 1);
+      expect(findFxPreset('compressor', model.$effects.value.compressor)).toBeUndefined();
+    });
+
+    it('its meter is the one of its core, the other effects have none', () => {
+      const { model } = setup();
+      expect(model.slots.compressor.meter?.watch).toEqual(expect.any(Function));
+      expect(model.slots.delay.meter).toBeUndefined();
+      expect(model.slots.distortion.meter).toBeUndefined();
+      expect(model.slots.reverb.meter).toBeUndefined();
+    });
+
+    it('round-trips its snapshot, falsy values included, missing keys are defaults', () => {
+      const { model, actions } = setup();
+      actions.setAdded('compressor', true);
+      actions.setOn('compressor', false);
+      actions.setMix('compressor', 0);
+      actions.setParam('compressor', 'multi', 1);
+      ['thresh', 'gain', 'below', 'level'].forEach((key) => actions.setParam('compressor', key, 0));
+      actions.setParam('compressor', 'low', -6);
+      const snapshot = getSnapshot();
+      expect(snapshot['fx']).toMatchObject({
+        compressor: { a: true, on: false, mix: 0, multi: 1, thresh: 0, gain: 0, below: 0, level: 0, low: -6 },
+      });
+
+      actions.applyPreset('compressor', 'glue');
+      actions.setOn('compressor', true);
+      applySnapshot(snapshot);
+      expect(model.$effects.value.compressor).toEqual({
+        added: true,
+        on: false,
+        mix: 0,
+        params: { ...COMPRESSOR_DEFAULTS, multi: 1, thresh: 0, gain: 0, below: 0, level: 0, low: -6 },
+      });
+
+      applySnapshot({ fx: { compressor: { a: true, ratio: 12 } } });
+      expect(model.$effects.value.compressor).toEqual({
+        added: true,
+        on: true,
+        mix: 1,
+        params: { ...COMPRESSOR_DEFAULTS, ratio: 12 },
+      });
+    });
+  });
+
   describe('two effects', () => {
     it('wires the added effects in the chain order', () => {
       const { model, actions, synthCore } = setup();
@@ -458,7 +570,7 @@ describe('fx', () => {
       expect(delay.output.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
 
-      actions.move(2, 0);
+      actions.move(3, 0);
       expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(reverb.input);
       expect(reverb.output.connect).toHaveBeenLastCalledWith(delay.input);
       expect(delay.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
@@ -499,11 +611,22 @@ describe('fx', () => {
 
     it('delay is always ready, the worklet effects are ready once their modules have loaded', async () => {
       const { model, synthCore } = setup();
-      expect(model.$status.value).toEqual({ distortion: 'loading', delay: 'ready', reverb: 'loading' });
+      expect(model.$status.value).toEqual({
+        distortion: 'loading',
+        delay: 'ready',
+        compressor: 'loading',
+        reverb: 'loading',
+      });
       await flush();
-      expect(model.$status.value).toEqual({ distortion: 'ready', delay: 'ready', reverb: 'ready' });
+      expect(model.$status.value).toEqual({
+        distortion: 'ready',
+        delay: 'ready',
+        compressor: 'ready',
+        reverb: 'ready',
+      });
       const addModule = synthCore.audioCtx.audioWorklet.addModule as jest.Mock;
       expect(workletLoads(addModule, 'distortion')).toBe(1);
+      expect(workletLoads(addModule, 'compressor')).toBe(1);
       expect(workletLoads(addModule, 'reverb')).toBe(1);
     });
 
@@ -547,6 +670,7 @@ describe('fx', () => {
       expect(model.$status.value).toEqual({
         distortion: 'unsupported',
         delay: 'ready',
+        compressor: 'unsupported',
         reverb: 'unsupported',
       });
       actions.setAdded('delay', true);
@@ -698,8 +822,9 @@ describe('fx', () => {
       actions.setMix('delay', 0.5);
       actions.setParam('delay', 'fb', 0.2);
       expect(getSnapshot()['fx']).toEqual({
-        o: ['distortion', 'delay', 'reverb'],
+        o: ['distortion', 'delay', 'compressor', 'reverb'],
         distortion: { a: false, on: true, mix: 1, ...DISTORTION_DEFAULTS },
+        compressor: { a: false, on: true, mix: 1, ...COMPRESSOR_DEFAULTS },
         delay: {
           a: true,
           on: true,
@@ -718,7 +843,7 @@ describe('fx', () => {
 
     it('round-trips the reverb, falsy values included, missing keys are defaults', () => {
       const { model, actions } = setup();
-      actions.move(2, 0);
+      actions.move(3, 0);
       actions.setAdded('reverb', true);
       actions.setOn('reverb', false);
       actions.setMix('reverb', 0);
@@ -726,7 +851,7 @@ describe('fx', () => {
       actions.setParam('reverb', 'decay', 12);
       const snapshot = getSnapshot();
       expect(snapshot['fx']).toMatchObject({
-        o: ['reverb', 'distortion', 'delay'],
+        o: ['reverb', 'distortion', 'delay', 'compressor'],
         reverb: { a: true, on: false, mix: 0 },
       });
 
@@ -734,7 +859,7 @@ describe('fx', () => {
       actions.setOn('reverb', true);
       actions.move(1, 0);
       applySnapshot(snapshot);
-      expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay']);
+      expect(model.$order.value).toEqual(['reverb', 'distortion', 'delay', 'compressor']);
       expect(model.$effects.value.reverb).toEqual({
         added: true,
         on: false,
@@ -810,12 +935,13 @@ describe('fx', () => {
     it('drops unknown and duplicate effects from the order, a missing one takes its default place', () => {
       const { model } = setup();
       applySnapshot({ fx: { o: ['chorus', 'reverb', 'delay', 'delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'reverb', 'delay']);
-      // a snapshot from before the distortion: it goes first, in front of the delay
+      expect(model.$order.value).toEqual(['distortion', 'compressor', 'reverb', 'delay']);
+      // a snapshot from before the distortion and the compressor: the first in front of the delay, the other of
+      // the reverb
       applySnapshot({ fx: { o: ['delay', 'reverb'] } });
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'reverb']);
+      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
       applySnapshot({ fx: { o: ['delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'delay', 'reverb']);
+      expect(model.$order.value).toEqual(['distortion', 'delay', 'compressor', 'reverb']);
       applySnapshot({ fx: { o: [] } });
       expect(model.$order.value).toEqual([...FX_TYPES]);
     });

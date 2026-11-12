@@ -31,7 +31,7 @@ export const FILTER_TYPES = [
 ] as const;
 
 // effects of the fx rack, the order is the default chain order
-export const FX_TYPES = ['distortion', 'delay', 'reverb'] as const;
+export const FX_TYPES = ['distortion', 'delay', 'compressor', 'reverb'] as const;
 export type FxType = (typeof FX_TYPES)[number];
 
 // known types only, no duplicates (presets from a newer client may contain effect types this one doesn't
@@ -58,11 +58,12 @@ export interface ParamRange {
 // numeric fx params: knob ranges in the app, validation and defaults of presets
 // the dry/wet mix of an effect (0: dry, 1: wet); delay and reverb are mixed into the dry sound
 export const FX_MIX_PARAM: ParamRange = { min: 0, max: 1, default: 0.3 };
-// the mix of each effect, the default is the one of a freshly added effect: the distortion replaces the dry
-// sound
+// the mix of each effect, the default is the one of a freshly added effect: the distortion and the compressor
+// replace the dry sound
 export const FX_MIX_PARAMS: Record<FxType, ParamRange> = {
   distortion: { ...FX_MIX_PARAM, default: 1 },
   delay: FX_MIX_PARAM,
+  compressor: { ...FX_MIX_PARAM, default: 1 },
   reverb: FX_MIX_PARAM,
 };
 export const FX_PARAMS = {
@@ -96,6 +97,32 @@ export const FX_PARAMS = {
     // bandpass in the feedback loop
     freq: { min: 50, max: 17000, default: 1000 },
     q: { min: 0.01, max: 3, default: 0.01 },
+  },
+  // one band, or three bands compressed down and up; the knobs and their laws as measured on the Audio Unit
+  // (dsp/measurements/compressor.json), every key kept in both modes
+  compressor: {
+    // 0: one band, 1: three bands (the attack does nothing there, the threshold moves those of the bands)
+    multi: { min: 0, max: 1, default: 0, int: true },
+    // the threshold knob: 60 log10(1 - knob) dB, -120 dB at the top; in three bands the thresholds of the bands,
+    // those of its middle (-33.8, -30.2, -35.5 dB) with its square
+    thresh: { min: 0, max: 1, default: 0.5 },
+    ratio: { min: 1, max: 30, default: 4 },
+    // ms
+    attack: { min: 0.1, max: 1000, default: 90 },
+    release: { min: 0.1, max: 1000, default: 90 },
+    // the makeup gain knob: × 1 … × 32 (30 dB)
+    gain: { min: 0, max: 1, default: 0 },
+    // the crossovers of the three bands, Hz (the high one never under the low one)
+    xlow: { min: 20, max: 5000, default: 131 },
+    xhigh: { min: 300, max: 16000, default: 2500 },
+    // the ratio under the thresholds of the three bands (upward compression): dB added per dB under
+    below: { min: 0, max: 1, default: 0 },
+    // dB of each band
+    low: { min: -24, max: 24, default: 0 },
+    mid: { min: -24, max: 24, default: 0 },
+    high: { min: -24, max: 24, default: 0 },
+    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
+    level: { min: 0, max: 1, default: 0.5 },
   },
   // algorithmic reverb
   reverb: {
@@ -566,6 +593,13 @@ const fxSchema = z
         fxEffectShape(FX_PARAMS.delay, FX_MIX_PARAMS.delay, paramRange, (value) => z.boolean().default(value))
       )
       .prefault({}),
+    compressor: z
+      .object(
+        fxEffectShape(FX_PARAMS.compressor, FX_MIX_PARAMS.compressor, paramRange, (value) =>
+          z.boolean().default(value)
+        )
+      )
+      .prefault({}),
     reverb: z
       .object(
         fxEffectShape(FX_PARAMS.reverb, FX_MIX_PARAMS.reverb, paramRange, (value) =>
@@ -589,6 +623,7 @@ export const fxSnapSchema = z.preprocess(
     o: z.array(z.unknown()).catch([]).transform(normalizeFxOrder),
     distortion: lenientFxEffect(FX_PARAMS.distortion, FX_MIX_PARAMS.distortion),
     delay: lenientFxEffect(FX_PARAMS.delay, FX_MIX_PARAMS.delay),
+    compressor: lenientFxEffect(FX_PARAMS.compressor, FX_MIX_PARAMS.compressor),
     reverb: lenientFxEffect(FX_PARAMS.reverb, FX_MIX_PARAMS.reverb),
   })
 );
