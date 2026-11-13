@@ -51,6 +51,24 @@ export interface FxCore {
   // the mix is linear, an equal-power crossfade would be up to 3 dB louder in between; absent: equal power
   // (echoes and reverb add up like unrelated sounds)
   linearMix?: boolean;
+  // the core mixes the dry signal itself (its param `mix`, moved by its own routes): its wet signal is out of
+  // phase with the dry one of the slot (the crossovers of a compressor: a mix outside would notch at them), so the
+  // slot passes only the core while it is on
+  mixInside?: boolean;
+  // what it shows of its work, while someone watches (absent: nothing)
+  meter?: FxMeter;
+}
+
+// the gains of the bands of a compressor (dB: under 0 a reduction, over it a boost of its upward compression)
+// and the peak of its input
+export interface FxMeterValues {
+  gains: [number, number, number];
+  input: number;
+}
+
+// watch(listener): the values about 30 times a second until the function it returns is called
+export interface FxMeter {
+  watch: (listener: (values: FxMeterValues) => void) => () => void;
 }
 
 // a built-in preset of the effect: sets mix and every param, added/on/order are not touched

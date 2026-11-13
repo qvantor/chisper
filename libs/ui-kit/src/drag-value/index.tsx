@@ -2,18 +2,21 @@ import React from 'react';
 import { styled } from 'styled-components';
 import cls from 'classnames';
 import hexToRgba from 'hex-to-rgba';
+import { Tooltip } from 'antd';
 import { number } from '@chisper/math';
 import { text12 } from '../common/styles';
 import { theme } from '../common/constants';
 import { useElementSize } from '../common/hooks';
 import { MarkCanvas, useModulations } from '../common/utils/use-mod-mark';
 import { OFF_OPACITY } from '../common/utils/mod-routes';
+import { ScaleMode, valueScale } from '../common/utils';
 import type { HandleModulation } from '../handle';
 import { AMOUNT_DOT_SIZE, RoutesDot } from '../amount-dot';
 import { MOD_TARGET_ATTR } from '../mod-drag';
 import { modDragHighlight } from '../mod-drag/highlight';
 import { StepArrows } from '../draggable-number/step-arrows';
 import { useControlMenu } from '../control-menu';
+import { keyTip, SWITCH_KEY_TIP_DELAY, TIP_STYLES } from '../switch-key';
 
 interface DragValueProps {
   // shown before the value (none: '')
@@ -25,6 +28,8 @@ interface DragValueProps {
   max?: number;
   // steps per unit
   precision?: number;
+  // how its range spreads over its travel and the line of its routes (a frequency: log), linear by default
+  mode?: ScaleMode;
   // px of drag from min to max, as much as a knob
   travel?: number;
   // past one end it goes on from the other (an angle): max is min
@@ -47,6 +52,8 @@ interface DragValueProps {
   defaultValue?: number;
   // removes every route at once (the menu)
   onClearModulations?: () => void;
+  // what it changes: hovered a while (as a key of a plate), a tooltip tells its name and this; none while it is held
+  hint?: string;
   className?: string;
 }
 
@@ -107,14 +114,14 @@ const Arrows = styled(StepArrows)`
   color: ${theme.colors.primaryDarkHighContrast};
 `;
 
-// the range of the value, as wide as it
+// the range of the value, as wide as it (--drag-value-track: its color where the default is too strong)
 const Track = styled.div`
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: ${TRACK_HEIGHT}px;
-  background: ${hexToRgba(theme.colors.white, 0.2)};
+  background: var(--drag-value-track, ${hexToRgba(theme.colors.white, 0.2)});
   pointer-events: none;
 `;
 
@@ -186,6 +193,7 @@ export const DragValue = ({
   min = 0,
   max = 1,
   precision = 100,
+  mode = 'linear',
   travel = 200,
   cyclic = false,
   arrows = false,
@@ -196,13 +204,15 @@ export const DragValue = ({
   modTarget,
   defaultValue,
   onClearModulations,
+  hint,
   className,
 }: DragValueProps) => {
   const [active, setActive] = React.useState(false);
   const lastValue = React.useRef(value);
   const [trackRef, [trackWidth]] = useElementSize<HTMLDivElement>();
   const mark = React.useMemo(() => markCanvas(trackWidth), [trackWidth]);
-  const position = max > min ? (value - min) / (max - min) : 0;
+  const scale = React.useMemo(() => valueScale(mode).domain([min, max]).range([0, 1]), [mode, min, max]);
+  const position = max > min ? scale(value) : 0;
   const { mark: modMark, live, shown, spans } = useModulations(routes, false, position, mark);
   const [span] = spans;
   const toValue = (raw: number) => {
@@ -242,7 +252,7 @@ export const DragValue = ({
       e,
       (move) => {
         const diff = move.clientX - startX - (move.clientY - startY);
-        emit(toValue(value + (diff / travel) * (max - min)));
+        emit(toValue(scale.invert(position + diff / travel)));
       },
       () => hold(false)
     );
@@ -268,7 +278,7 @@ export const DragValue = ({
   const editable = !!onChange;
   // a plain whole number is as wide as the widest end of its range: it doesn't widen while dragged
   const wholeNumber = !formatValue && precision === 1;
-  return (
+  const root = (
     <Root
       ref={menu.anchorRef}
       className={cls(className, { editable, active })}
@@ -317,5 +327,17 @@ export const DragValue = ({
       {modTarget && <ModHighlight />}
       {menu.menu}
     </Root>
+  );
+  const tip = React.useMemo(() => keyTip(name, hint), [name, hint]);
+  if (!hint) return root;
+  return (
+    <Tooltip
+      mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000}
+      styles={TIP_STYLES}
+      title={tip}
+      {...(active && { open: false })}
+    >
+      {root}
+    </Tooltip>
   );
 };

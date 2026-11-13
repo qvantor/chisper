@@ -20,11 +20,12 @@ export const STEREO_WORKLET_OPTIONS: AudioWorkletNodeOptions = {
 // failed effect again. The effect keeps its params itself and passes them to the node it creates in
 // createNode (processorOptions), messages posted before the node exists are dropped. clear() empties the
 // state of the processor (a node created later starts empty). destroy() stops the processor, so the node can
-// be collected
+// be collected. onMessage gets what the processor posts (a meter)
 export const createWorkletFx = (
   audioCtx: BaseAudioContext,
   name: string,
-  createNode: () => AudioWorkletNode
+  createNode: () => AudioWorkletNode,
+  onMessage?: (data: unknown) => void
 ) => {
   const input = audioCtx.createGain();
   const output = audioCtx.createGain();
@@ -65,6 +66,11 @@ export const createWorkletFx = (
         current.onprocessorerror = (event) => {
           if (node === current) fail(event);
         };
+        if (onMessage) {
+          current.port.onmessage = ({ data }: MessageEvent<unknown>) => {
+            if (node === current) onMessage(data);
+          };
+        }
         input.connect(current).connect(output);
         $status.next('ready');
       })

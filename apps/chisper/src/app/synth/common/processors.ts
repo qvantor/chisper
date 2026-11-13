@@ -3,4 +3,5 @@
 export const LIMITER_PROCESSOR = 'chisper-limiter';
 export const REVERB_PROCESSOR = 'chisper-reverb';
 export const DISTORTION_PROCESSOR = 'chisper-distortion';
+export const COMPRESSOR_PROCESSOR = 'chisper-compressor';
 export const FX_MOD_PROCESSOR = 'chisper-fx-mod';

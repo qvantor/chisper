@@ -312,6 +312,24 @@ const OSC_SCENES = [
   }),
 ];
 
+// the knobs of a fresh compressor (FX_PARAMS.compressor and its mix)
+const COMPRESSOR = {
+  multi: 0,
+  thresh: 0.5,
+  ratio: 4,
+  attack: 90,
+  release: 90,
+  gain: 0,
+  xlow: 131,
+  xhigh: 2500,
+  below: 0,
+  low: 0,
+  mid: 0,
+  high: 0,
+  level: 0.5,
+  mix: 1,
+};
+
 export const SCENES = [
   {
     name: 'limiter, a chord 12 dB over',
@@ -350,6 +368,23 @@ export const SCENES = [
     create: (dsp, wasm) =>
       dsp.createDistortionWasm(wasm.distortion, RATE, { params: { mode, drive: 9, tone: 6000, level: -2 } }),
   })),
+  // one band deep under its threshold, then three bands pressed down and lifted: notes and silences (the gains
+  // move, the core goes idle and wakes)
+  ...[
+    ['one band, fast and deep', { multi: 0, thresh: 0.75, ratio: 8, attack: 2, release: 60, gain: 0.1 }],
+    ['three bands, down and up', { multi: 1, ratio: 20, below: 0.75, low: 4, mid: -2, high: 6, mix: 0.8 }],
+  ].map(([name, changes]) => {
+    const params = { ...COMPRESSOR, ...changes };
+    return {
+      name: `compressor, ${name}`,
+      module: 'compressor',
+      processor: 'chisper-compressor',
+      options: { ...STEREO, processorOptions: { params } },
+      frames: 2 * RATE,
+      input: () => notesAndSilences(2 * RATE),
+      create: (dsp, wasm) => dsp.createCompressorWasm(wasm.compressor, RATE, { params }),
+    };
+  }),
 ]
   .map((scene) => ({ rate: RATE, ...scene }))
   .concat(OSC_SCENES);
@@ -358,6 +393,7 @@ const ENTRY = `
 export { createLimiterWasm } from './apps/chisper/src/app/synth/common/limiter/limiter-wasm';
 export { createReverbWasm } from './apps/chisper/src/app/synth/fx/effects/reverb-wasm';
 export { createDistortionWasm } from './apps/chisper/src/app/synth/fx/effects/distortion-wasm';
+export { createCompressorWasm } from './apps/chisper/src/app/synth/fx/effects/compressor-wasm';
 export {
   createOscScope,
   createTableStoreWasm,
@@ -371,17 +407,20 @@ export { lfoTable } from './apps/chisper/src/app/synth/common/lfo/lfo-curve';
 `;
 const CORES = 'tmp/wasm';
 const loaded = new Map();
+// the cores of a folder of .wasm: the ones it has (a reference of the null test from before a core has none of it)
+const coreFile = (cores, name) => path.resolve(root, cores, `${name}.wasm`);
+export const hasCore = (name, cores = CORES) => fs.existsSync(coreFile(cores, name));
 // the facades of the app and the cores of `cores` (a folder of .wasm, by default the build of this tree)
 const load = async (cores = CORES) => {
   if (loaded.has(cores)) return loaded.get(cores);
   const dsp = loaded.get(CORES)?.dsp ?? (await loadApp({ contents: ENTRY, name: 'wasm-browsers' }));
   const wasm = Object.fromEntries(
-    ['limiter', 'reverb', 'distortion', 'wavetable-osc'].map((name) => [
-      name,
-      new WebAssembly.Instance(
-        new WebAssembly.Module(fs.readFileSync(path.resolve(root, cores, `${name}.wasm`)))
-      ).exports,
-    ])
+    [...new Set(SCENES.map(({ module }) => module))]
+      .filter((name) => hasCore(name, cores))
+      .map((name) => [
+        name,
+        new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(coreFile(cores, name)))).exports,
+      ])
   );
   loaded.set(cores, { dsp, wasm });
   return loaded.get(cores);

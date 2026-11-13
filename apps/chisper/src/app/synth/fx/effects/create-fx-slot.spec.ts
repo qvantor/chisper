@@ -137,6 +137,55 @@ describe('createFxSlot', () => {
     );
   });
 
+  describe('a core that mixes inside', () => {
+    const lastOf = (node: GainNode) => (node.gain.setTargetAtTime as jest.Mock).mock.lastCall?.[0];
+    const setupInside = () => {
+      const audioCtx = new AudioContext();
+      const core = { ...createCore(audioCtx), mixInside: true };
+      return { core, slot: createFxSlot(audioCtx, core) };
+    };
+
+    it('gets the mix as its param, falsy values included; the slot passes the core alone at any mix', () => {
+      const { core, slot } = setupInside();
+      [0.25, 1, 0].forEach((mix) => {
+        slot.setMix(mix, true);
+        expect(core.setParam).toHaveBeenLastCalledWith('mix', mix);
+        expect([lastOf(slot.dry), lastOf(slot.wet)]).toEqual([0, 1]);
+      });
+    });
+
+    it('bypassed or not ready: the dry signal alone, the core still knows the mix', () => {
+      const { core, slot } = setupInside();
+      slot.setMix(0.4, false);
+      expect(core.setParam).toHaveBeenLastCalledWith('mix', 0.4);
+      expect([lastOf(slot.dry), lastOf(slot.wet)]).toEqual([1, 0]);
+      slot.setMix(0.4, true);
+      expect([lastOf(slot.dry), lastOf(slot.wet)]).toEqual([0, 1]);
+    });
+
+    it('cleared: the gains at once at those of its state', () => {
+      const { slot } = setupInside();
+      slot.setMix(0.4, true);
+      slot.clear();
+      expect((slot.dry.gain.setValueAtTime as jest.Mock).mock.lastCall?.[0]).toBe(0);
+      expect((slot.wet.gain.setValueAtTime as jest.Mock).mock.lastCall?.[0]).toBe(1);
+    });
+
+    it('another core never gets the mix as a param', () => {
+      const audioCtx = new AudioContext();
+      const core = createCore(audioCtx);
+      createFxSlot(audioCtx, core).setMix(0.4, true);
+      expect(core.setParam).not.toHaveBeenCalled();
+    });
+
+    it('the meter of the slot is the one of its core, none without one', () => {
+      const audioCtx = new AudioContext();
+      const meter = { watch: jest.fn() };
+      expect(createFxSlot(audioCtx, { ...createCore(audioCtx), meter }).meter).toBe(meter);
+      expect(createFxSlot(audioCtx, createCore(audioCtx)).meter).toBeUndefined();
+    });
+  });
+
   describe('modulation', () => {
     const ENV = { attack: 0.1, hold: 0, decay: 0.1, sustain: 0.5, release: 0.2 };
     const note = { envelopes: [ENV, ENV, ENV], start: 1, release: null };
@@ -187,6 +236,22 @@ describe('createFxSlot', () => {
       expect(lineOf(7)?.[0]).toEqual({ routes: [mix], base: 0.5, map: 'wet' });
       slot.setModulation(null);
       expect(lineOf(7)?.[0]).toBeNull();
+      expect(core.setModulation).toHaveBeenLastCalledWith(null);
+    });
+
+    it('a core that mixes inside gets the routes of the mix with its own, no line moves the gains', () => {
+      const audioCtx = new AudioContext();
+      const core = { ...createCore(audioCtx), mixInside: true };
+      const fxMod = { set: jest.fn() };
+      const slot = createFxSlot(audioCtx, core, { fxMod: fxMod as unknown as FxMod, dry: 6, wet: 7 });
+      slot.setMix(0.5, true);
+      slot.setModulation({ note, routes: [mix, drive] });
+      expect(core.setModulation).toHaveBeenLastCalledWith({ note, routes: [mix, drive] });
+      fxMod.set.mock.calls.forEach(([, line]) => expect(line).toBeNull());
+      // the routes of the mix alone move the core too
+      slot.setModulation({ note, routes: [mix] });
+      expect(core.setModulation).toHaveBeenLastCalledWith({ note, routes: [mix] });
+      slot.setModulation(null);
       expect(core.setModulation).toHaveBeenLastCalledWith(null);
     });
 

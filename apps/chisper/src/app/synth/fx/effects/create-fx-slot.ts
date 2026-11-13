@@ -26,7 +26,9 @@ export type FxSlot = ReturnType<typeof createFxSlot>;
 // core → drain (muted) → destination: the core stays rendered while the slot is out of the chain, so its
 // loops drain (a disconnected delay freezes its buffer and replays the old tail when added back).
 // The routes of the mix move the gains by two lines of fx-mod (`mod`: the lines of the slot), the offsets of the
-// mix moved from the knob; the gains stay at the knob with their glides
+// mix moved from the knob; the gains stay at the knob with their glides.
+// A core that mixes inside (FxCore.mixInside) gets the mix as its param `mix` and the routes of it with its own:
+// while on, the slot passes the core alone (bypassed: the dry signal alone, as any slot)
 export const createFxSlot = (
   audioCtx: BaseAudioContext,
   core: FxCore,
@@ -38,7 +40,7 @@ export const createFxSlot = (
   const wet = audioCtx.createGain();
   const send = audioCtx.createGain();
   const drain = audioCtx.createGain();
-  const { latency = 0, linearMix = false } = core;
+  const { latency = 0, linearMix = false, mixInside = false } = core;
   const dryDelay = latency > 0 ? audioCtx.createDelay(latency) : undefined;
 
   dryDelay?.delayTime.setValueAtTime(latency, audioCtx.currentTime);
@@ -63,7 +65,10 @@ export const createFxSlot = (
   // in the chain and not bypassed: the send is open
   let active = false;
   // [dry, wet] of the knob (bypassed: only dry)
-  const gains = () => (mix.on ? mixGains(mix.value, linearMix) : [1, 0]);
+  const gains = () => {
+    if (!mix.on) return [1, 0];
+    return mixInside ? [0, 1] : mixGains(mix.value, linearMix);
+  };
   // the lines of the routes of the mix on the gains (while it is on)
   const follow = () => {
     if (!mod) return;
@@ -99,8 +104,11 @@ export const createFxSlot = (
     // the dry signal passes
     setMix: (value: number, on: boolean) => {
       mix = { value, on };
+      if (mixInside) core.setParam('mix', value);
       applyMix();
     },
+    // what the core shows of its work (absent: nothing)
+    meter: core.meter,
     // the LFOs of the last note (the core runs them)
     setLfos: (state: LfosState) => core.setLfos?.(state),
     // the tempo of the synth (a core in BPM follows it)
@@ -109,12 +117,12 @@ export const createFxSlot = (
     // the core (with the routes of the note to the knobs of the LFOs)
     setModulation: (modulation: FxModulation | null) => {
       const routes = modulation?.routes ?? [];
-      const next = routes.filter(({ param }) => param === 'mix');
+      const next = mixInside ? [] : routes.filter(({ param }) => param === 'mix');
       if (next.length > 0 || mixRoutes.length > 0) {
         mixRoutes = next;
         follow();
       }
-      const own = routes.filter(({ param }) => param !== 'mix');
+      const own = mixInside ? routes : routes.filter(({ param }) => param !== 'mix');
       const moved = own.some(({ param }) => !/^lfo[1-4]\./.test(param));
       core.setModulation(modulation && moved ? { note: modulation.note, routes: own } : null);
     },

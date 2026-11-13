@@ -7,7 +7,7 @@ import { LINKS, SYNTH_URL, absolute, pageUrl, type Lang } from '../i18n/locales'
 // its texts are in English, the language of its interface, and its description is the one of the JSON-LD of
 // apps/chisper/src/index.html (tests/dist.test.mjs holds them equal)
 export const APP_DESCRIPTION =
-  'Chisper is a free wavetable synthesizer that runs in the browser on a computer, a Chromebook or a phone: two wavetable oscillators with supersaw unison of up to 8 voices, a noise oscillator, a filter in every voice, three envelopes and four LFOs on any knob, distortion, delay and reverb, shareable presets, MIDI and a piano roll that imports and exports MIDI files.';
+  'Chisper is a free wavetable synthesizer that runs in the browser on a computer, a Chromebook or a phone: two wavetable oscillators with supersaw unison of up to 8 voices, a noise oscillator, a filter in every voice, three envelopes and four LFOs on any knob, distortion, delay, a compressor and reverb, shareable presets, MIDI and a piano roll that imports and exports MIDI files.';
 
 export const FEATURES = [
   'Two wavetable oscillators, tables of up to 256 frames',
@@ -16,7 +16,7 @@ export const FEATURES = [
   'A filter in every voice, 8 types',
   'Three envelopes, four LFOs and velocity routed to any knob',
   'Tempo sync and MIDI Clock',
-  'Distortion, delay and reverb in any order, a master limiter',
+  'Distortion, delay, a compressor and reverb in any order, a master limiter',
   'MIDI keyboards, pitch bend, the computer keyboard and an on-screen piano',
   'Poly and mono, legato and portamento',
   'Piano roll: a looped clip of up to 32 bars, recorded from MIDI or the keyboard, quantize and velocity, MIDI file import and export, clips shared by link',

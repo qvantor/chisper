@@ -140,7 +140,7 @@ export const SWITCH_KEY_TIP_DELAY = 1200;
 
 // the tooltip takes no pointer: moved onto it, the pointer leaves the key (the tooltip hides) and reaches the key
 // under it (in a column the tooltip covers the key above)
-const TIP_STYLES = { root: { pointerEvents: 'none' } } as const;
+export const TIP_STYLES = { root: { pointerEvents: 'none' } } as const;
 
 // the keys of a plate all off (a bypassed effect), why
 interface PlateOff {
@@ -149,8 +149,8 @@ interface PlateOff {
 }
 const PlateContext = React.createContext<PlateOff>({ disabled: false });
 
-// the tooltip of a key: its name, what it does and, disabled, why
-const keyTip = (name: string, hint: string | undefined, why: string | undefined) => (
+// the tooltip of a key (of a value hovered as long: DragValue): its name, what it does and, disabled, why
+export const keyTip = (name: string, hint?: string, why?: string) => (
   <>
     <TipName>{name}</TipName>
     {hint && <TipText>{hint}</TipText>}

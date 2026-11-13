@@ -220,6 +220,38 @@ mod lanes4 {
         pub fn or_else(self, mask: U32x4, other: F32x4) -> F32x4 {
             F32x4(v128_bitselect(self.0, other.0, mask.0))
         }
+        /// the lanes over those of `other`: all their bits set, else none (a NaN is over nothing)
+        #[inline(always)]
+        pub fn over(self, other: F32x4) -> U32x4 {
+            U32x4(f32x4_gt(self.0, other.0))
+        }
+        /// the bits of the lanes
+        #[inline(always)]
+        pub fn bits(self) -> U32x4 {
+            U32x4(self.0)
+        }
+        #[inline(always)]
+        pub fn from_bits(bits: U32x4) -> F32x4 {
+            F32x4(bits.0)
+        }
+        /// the largest integer under each lane or equal to it
+        #[inline(always)]
+        pub fn floor(self) -> F32x4 {
+            F32x4(f32x4_floor(self.0))
+        }
+        /// the lanes truncated to i32 (two's complement in the u32; one out of its range saturates, a NaN is 0)
+        #[inline(always)]
+        pub fn to_int(self) -> U32x4 {
+            U32x4(i32x4_trunc_sat_f32x4(self.0))
+        }
+        /// four lanes picked out of the eight of `self` (0..4) and `other` (4..8)
+        #[inline(always)]
+        pub fn pick<const A: usize, const B: usize, const C: usize, const D: usize>(
+            self,
+            other: F32x4,
+        ) -> F32x4 {
+            F32x4(i32x4_shuffle::<A, B, C, D>(self.0, other.0))
+        }
         /// the samples at[lane] and at[lane] + 1 after `base`, of each lane: the first ones, the second ones (a
         /// load of 64 bits per lane: wasm has no gather)
         ///
@@ -270,9 +302,18 @@ mod lanes4 {
         pub fn shifted(self, bits: u32) -> U32x4 {
             U32x4(u32x4_shr(self.0, bits))
         }
+        /// every lane << bits (bits under 32)
+        #[inline(always)]
+        pub fn shifted_left(self, bits: u32) -> U32x4 {
+            U32x4(u32x4_shl(self.0, bits))
+        }
         #[inline(always)]
         pub fn and(self, other: U32x4) -> U32x4 {
             U32x4(v128_and(self.0, other.0))
+        }
+        #[inline(always)]
+        pub fn or(self, other: U32x4) -> U32x4 {
+            U32x4(v128_or(self.0, other.0))
         }
         /// the lanes as f32 (each under 2^31)
         #[inline(always)]
@@ -397,6 +438,42 @@ mod lanes4 {
                 }
             }))
         }
+        #[inline(always)]
+        pub fn over(self, other: F32x4) -> U32x4 {
+            U32x4(core::array::from_fn(|k| {
+                if self.0[k] > other.0[k] {
+                    u32::MAX
+                } else {
+                    0
+                }
+            }))
+        }
+        #[inline(always)]
+        pub fn bits(self) -> U32x4 {
+            U32x4(self.0.map(f32::to_bits))
+        }
+        #[inline(always)]
+        pub fn from_bits(bits: U32x4) -> F32x4 {
+            F32x4(bits.0.map(f32::from_bits))
+        }
+        // (the floor of an f32 is an f32: through the floor of doubles of jsmath, std has none off wasm)
+        #[inline(always)]
+        pub fn floor(self) -> F32x4 {
+            F32x4(self.0.map(|x| jsmath::floor(x as f64) as f32))
+        }
+        // (`as` saturates and takes a NaN as 0, as i32x4.trunc_sat_f32x4)
+        #[inline(always)]
+        pub fn to_int(self) -> U32x4 {
+            U32x4(self.0.map(|x| x as i32 as u32))
+        }
+        #[inline(always)]
+        pub fn pick<const A: usize, const B: usize, const C: usize, const D: usize>(
+            self,
+            other: F32x4,
+        ) -> F32x4 {
+            let lane = |k: usize| if k < 4 { self.0[k] } else { other.0[k - 4] };
+            F32x4([lane(A), lane(B), lane(C), lane(D)])
+        }
         /// # Safety
         /// two f32 can be read at base + at[lane] for every lane
         #[inline(always)]
@@ -433,8 +510,16 @@ mod lanes4 {
             U32x4(self.0.map(|x| x >> bits))
         }
         #[inline(always)]
+        pub fn shifted_left(self, bits: u32) -> U32x4 {
+            U32x4(self.0.map(|x| x << bits))
+        }
+        #[inline(always)]
         pub fn and(self, other: U32x4) -> U32x4 {
             U32x4(core::array::from_fn(|k| self.0[k] & other.0[k]))
+        }
+        #[inline(always)]
+        pub fn or(self, other: U32x4) -> U32x4 {
+            U32x4(core::array::from_fn(|k| self.0[k] | other.0[k]))
         }
         #[inline(always)]
         pub fn to_f32(self) -> F32x4 {
@@ -559,6 +644,21 @@ mod tests {
         assert_eq!(
             phase.and(U32x4::splat(0xfff)).to_f32().lanes(),
             [4080.0, 7.0, 0.0, 1656.0]
+        );
+        let over = a.over(F32x4::new(1.0, -2.0, f32::NAN, 7.0));
+        assert_eq!(over.lanes(), [u32::MAX, 0, 0, u32::MAX]);
+        assert_eq!(a.bits().lanes(), [1.5f32, -2.0, 0.25, 8.0].map(f32::to_bits));
+        assert_eq!(F32x4::from_bits(a.bits()).lanes(), a.lanes());
+        let floor = F32x4::new(-0.5, 2.5, -3.0, 1e10).floor().lanes();
+        assert_eq!(floor, [-1.0, 2.0, -3.0, 1e10]);
+        // truncated, saturated at the ends of i32, a NaN as 0
+        let ints = F32x4::new(-2.7, 3.9, 1e12, f32::NAN).to_int().lanes();
+        assert_eq!(ints, [-2i32 as u32, 3, i32::MAX as u32, 0]);
+        assert_eq!(a.pick::<0, 4, 3, 7>(b).lanes(), [1.5, 0.5, 8.0, 2.0]);
+        assert_eq!(phase.shifted_left(4).lanes(), [0xffff_ff00, 0x70, 0, 0x2345_6780]);
+        assert_eq!(
+            U32x4::splat(0xf0).or(U32x4::new(1, 2, 4, 0x100)).lanes(),
+            [0xf1, 0xf2, 0xf4, 0x1f0]
         );
         let flushed = F32x4::new(1e-26, -1e-30, -1e-24, f32::NAN).flush().lanes();
         assert_eq!(flushed[..3], [0.0, 0.0, -1e-24]);

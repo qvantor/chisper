@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { parseArgs, root } from '../bench-common.mjs';
 import { prepareReference } from '../bench-perf/reference.mjs';
-import { nodeRender, SCENES } from '../wasm-browsers/scenes.mjs';
+import { hasCore, nodeRender, SCENES } from '../wasm-browsers/scenes.mjs';
 
 const SIZE = 4096;
 const SPLIT = 16000;
@@ -85,6 +85,11 @@ const scenes = SCENES.filter((scene) => !args.only || scene.name.includes(args.o
 console.log(`the difference from ${reference.short}, dB under the signal (whole band, < 16 kHz, > 16 kHz)`);
 let failed = false;
 for (const scene of scenes) {
+  // (a scene of a core the reference doesn't have yet: nothing to compare with)
+  if (scene.module && !hasCore(scene.module, theirs)) {
+    console.log(`${' '.repeat(8)}no ${scene.module} core in ${reference.short}  ${scene.name}`);
+    continue;
+  }
   const [ours, base] = [await seeded(() => nodeRender(scene)), await seeded(() => nodeRender(scene, theirs))];
   const total = { signal: { low: 0, high: 0, all: 0 }, difference: { low: 0, high: 0, all: 0 } };
   let worst = 0;

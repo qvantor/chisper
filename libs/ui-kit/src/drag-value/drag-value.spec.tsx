@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { drawn } from '../common/test-utils/canvas';
 import { withElementSize } from '../common/test-utils/element-size';
 import type { HandleModulation } from '../handle';
+import { SWITCH_KEY_TIP_DELAY } from '../switch-key';
 import { DragValue } from './index';
 
 // jsdom has no PointerEvent: a mouse event with the pointer type name and a pointerId works for React and
@@ -87,6 +88,39 @@ describe('DragValue', () => {
     expect(slider.textContent).toBe('Rand3');
   });
 
+  describe('with a hint', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+    const hover = (element: HTMLElement, ms = SWITCH_KEY_TIP_DELAY) => {
+      fireEvent.mouseEnter(element);
+      act(() => {
+        jest.advanceTimersByTime(ms);
+      });
+    };
+
+    it('hovered a while, a tooltip tells its name and what it changes; none before', () => {
+      const { slider } = setup({ name: 'Randomness', hint: 'How far each note strays' });
+      hover(slider, SWITCH_KEY_TIP_DELAY - 100);
+      expect(screen.queryByRole('tooltip')).toBeNull();
+      act(() => {
+        jest.advanceTimersByTime(100);
+      });
+      expect(screen.getByRole('tooltip').textContent).toBe('RandomnessHow far each note strays');
+    });
+
+    it('has none without a hint', () => {
+      const { slider } = setup();
+      hover(slider);
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    });
+
+    it('shows the hint of a value that is only shown as well', () => {
+      render(<DragValue label='Low' name='Low crossover' value={131} hint='Where the low band ends' />);
+      hover(screen.getByText('Low').parentElement as HTMLElement);
+      expect(screen.getByRole('tooltip').textContent).toBe('Low crossoverWhere the low band ends');
+    });
+  });
+
   it('only shows the value without onChange', () => {
     render(<DragValue label='Wave' value={3} formatValue={(value) => `${value + 1}/8`} />);
     expect(screen.queryByRole('slider')).toBeNull();
@@ -104,6 +138,17 @@ describe('DragValue', () => {
     expect(last()).toBe(0.25);
     drag([0, 50]);
     expect(last()).toBe(0.25);
+  });
+
+  it('a log one spreads its octaves evenly over the travel (a frequency)', () => {
+    const { drag, last } = setup({ value: 100, min: 20, max: 20000, precision: 1, mode: 'log' });
+    // a third of the travel: a third of the three decades, up and down
+    drag([200 / 3, 0]);
+    expect(last()).toBe(1000);
+    drag([-200 / 3, 0]);
+    expect(last()).toBe(20);
+    drag([1000, 0]);
+    expect(last()).toBe(20000);
   });
 
   it('adds up both directions of a diagonal drag', () => {

@@ -31,8 +31,11 @@ const uint = (n) => (n < 24 ? n : { uint: n, info: 24 });
 // of `slots` routes `source` to `param` (its id) named `name` of `Oscillator<osc>` by `amount` (%), `bipolar`.
 // `noise` puts the noise oscillator (`Oscillator3`, its `NoiseOsc3`) on the sample at `path` (under the noises of
 // the Audio Unit, noisesFolder(): `frames` frames of `channels` at `rate`) with the plain params of its sampler
-// `params` (kParamOneShot…)
-export const editedState = (initFile, oscs, slots = [], noise = null) => {
+// `params` (kParamOneShot…). `fx` is the chain of the main rack (`FXRack0`, empty in the init state): each effect
+// { module, type, params } an item { <module>: { plainParams }, type } (a compressor is `FXComp`, type 5), its
+// plain params not listed at their defaults; their values are floats of 32 bits (the host renders silence on some
+// written as doubles)
+export const editedState = (initFile, oscs, slots = [], noise = null, fx = null) => {
   const init = readFileSync(initFile);
   const length = Number(init.readBigUInt64LE(9));
   const header = JSON.parse(init.subarray(17, 17 + length).toString());
@@ -54,6 +57,19 @@ export const editedState = (initFile, oscs, slots = [], noise = null) => {
     set(sampler, 'sampleRate', noise.rate);
     if (noise.params) set(sampler, 'plainParams', { map: Object.entries(noise.params) });
   }
+  if (fx)
+    set(get(doc, 'FXRack0'), 'FX', {
+      array: fx.map(({ module, type, params = {} }) => {
+        const plain = Object.entries(params).map(([key, value]) => [key, { f32: value }]);
+        return {
+          map: [
+            [module, { map: [['plainParams', plain.length ? { map: plain } : 'default']] }],
+            ['kUIParamMixOrGain', { f32: 0 }],
+            ['type', uint(type)],
+          ],
+        };
+      }),
+    });
   slots.forEach(({ source, osc, param, name, amount, bipolar }, i) => {
     const params = [['kParamAmount', { f64: amount }], ...(bipolar ? [['kParamBipolar', { f32: 1 }]] : [])];
     set(doc, `ModSlot${i}`, {

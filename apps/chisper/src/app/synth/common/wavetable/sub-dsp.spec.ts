@@ -2,7 +2,15 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import FFT from 'fft.js';
 import { SUB_SHAPES, SubShape } from '@chisper/preset-schema';
-import { apart, frequencyOf, renderedShape, semitones, turns } from '../../../../test-utils/measures';
+import {
+  apart,
+  dB,
+  frequencyOf,
+  renderedShape,
+  semitones,
+  toneOf,
+  turns,
+} from '../../../../test-utils/measures';
 import { BLOCK, oscScope, VOICE_DEFAULTS } from '../../../../test-utils/voice-dsp';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import { subShapeFrame, subTable } from './sub-shapes';
@@ -124,26 +132,12 @@ const play = ({
   return [left, right];
 };
 
-// the amplitude and the phase (degrees, of a sine from sample 0) of a tone of `f` in x over n samples from `from`
-// (Hann), as the renders read them
-const toneOf = (x: Float32Array, f: number, from: number, n: number, rate = RATE) => {
-  let [re, im, sum] = [0, 0, 0];
-  for (let i = 0; i < n; i++) {
-    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
-    const phase = (2 * Math.PI * f * (from + i)) / rate;
-    re += x[from + i] * w * Math.sin(phase);
-    im += x[from + i] * w * Math.cos(phase);
-    sum += w;
-  }
-  return { amplitude: (2 * Math.hypot(re, im)) / sum, phase: (Math.atan2(im, re) * 180) / Math.PI };
-};
 // the phase (turns of a sine) at sample `at` of a tone of `f`: read over 0.1 s from 10 ms after it (or up to 10 ms
 // before it), as the renders read it
 const phaseAt = (x: Float32Array, f: number, at: number, before = false) =>
-  turns(toneOf(x, f, before ? at - 5280 : at + 480, 4800).phase / 360 + (f * at) / RATE);
-const dB = (value: number) => 20 * Math.log10(value);
+  turns(toneOf(x, f, RATE, before ? at - 5280 : at + 480, 4800).phase / 360 + (f * at) / RATE);
 // the amplitude of C5 in x over 0.1..0.3 s
-const amplitudeOf = (x: Float32Array) => toneOf(x, C5, 4800, 9600).amplitude;
+const amplitudeOf = (x: Float32Array) => toneOf(x, C5, RATE, 4800, 9600).amplitude;
 
 // the renders read a sine some samples after the start of its block, the same at every pitch: the phase it starts
 // at (c) and that delay (samples) from `start` (least squares of phase = c - f · delay / RATE)
@@ -165,7 +159,7 @@ describe('the sub of a voice', () => {
     // the harmonics 1..40 at C2 against the fundamental of the sine: [amplitude, phase against n × the first]
     const harmonicsOf = (shape: SubShape) => {
       const [left] = play({ shape, frequency: hz(36), seconds: 1.4 });
-      const parts = Array.from({ length: 40 }, (_, j) => toneOf(left, hz(36) * (j + 1), 14400, RATE));
+      const parts = Array.from({ length: 40 }, (_, j) => toneOf(left, hz(36) * (j + 1), RATE, 14400, RATE));
       return parts.map(({ amplitude, phase }, j): [number, number] => [
         amplitude,
         turns((phase - (j + 1) * parts[0].phase) / 360 + 0.5) * 360 - 180,

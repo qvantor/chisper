@@ -133,6 +133,16 @@ export const CPU_CASES = [
     notes: HELD,
   },
   {
+    id: 'C1',
+    group: 'cpu',
+    title: 'the heavy patch and the compressor (three bands, down and up), 12 notes',
+    snapshot: {
+      ...HEAVY,
+      fx: { ...HEAVY.fx, compressor: { a: true, on: true, mix: 1, multi: 1, below: 0.5, ratio: 8 } },
+    },
+    notes: HELD,
+  },
+  {
     id: 'T1',
     group: 'cpu',
     title: 'the heavy patch, a clip played by the track',

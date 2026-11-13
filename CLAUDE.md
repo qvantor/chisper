@@ -11,7 +11,8 @@ Chisper is an experimental browser wavetable synth (TypeScript + Web Audio API, 
 - `libs/math`, `libs/rxjs-react`, `libs/ui-kit`, `libs/preset-schema` — imported as `@chisper/*` (aliases in
   `tsconfig.base.json`).
 - `netlify/` — Functions v2 (presets, usage, clips, bucket lists) and their specs; Postgres for presets and clips
-  (`db/migrations/`, applied manually, in order).
+  (`db/migrations/`, applied manually, in order; a change of the preset schema has no file there: the presets are
+  rewritten by `scripts/presets/rehash.mjs`, a dry run unless `--apply`).
 - `dsp/` — the DSP of the audio worklets in Rust → wasm32.
 
 Deployed to Netlify at chisper.qvantor.org (`waveform.qvantor.org` is an old alias that `netlify.toml` redirects).
@@ -69,7 +70,9 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `node scripts/null-test/run.mjs --against=<ref> [--only=…] [--limit=<dB>]` — the scenes of the browser parity
   rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal.
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
-  `dsp/measurements/*.json`, which the specs compare the engine with.
+  `dsp/measurements/*.json`, which the specs compare the engine with. An effect of its rack goes into its state
+  (`state.mjs`), a signal of ours through it as a one-shot sample of its noise oscillator; renders of different
+  samples never run at once and each is rendered until two in a row agree (now and then one is of another state).
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
   `tmp/noises/`. `upload.mjs` writes to the production bucket: dry run unless `--apply`, only when the user asks.
 
@@ -81,7 +84,8 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
 - **Deterministic DSP.** A core gives the same bits in every browser and in Node (`scripts/wasm-browsers/run.mjs`),
   so: no `mul_add`, no fast-math, no relaxed-simd, wasm-opt never with fast-math. The hot loops run in f32 lanes
   with their sums in an order of their own (`F32x4`/`U32x4` of `dsp-core/src/simd.rs`: FIRs of `fir.rs`, the
-  rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators, the filters of two voices);
+  rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators, the filters of two voices,
+  the bands and the detectors of the compressor, its `log2`/`exp2` of bits and polynomials: `compressor/src/math.rs`);
   the native variant of a
   lane type does the same operations in the same order (cargo tests compute the bits of the wasm). Math per block
   goes through `dsp/jsmath` (`dsp/clippy.toml` disallows `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…).
@@ -104,8 +108,9 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   repaints/relayouts the page in Chrome; `scripts/wasm-browsers/app.mjs` checks it).
 - **Persisted state**: extend the model's `modelToSnap`/`applySnap` **and** `presetDataSchema` in
   `libs/preset-schema` (unknown keys are stripped silently). `applySnap` must handle falsy values (`!== undefined`)
-  and missing keys mean defaults. A new field changes every preset hash: DB presets get it by a migration after
-  deploy, not legacy code, then `netlify api purgeCache` (the CDN cached the old presets again between the two).
+  and missing keys mean defaults. A new field changes every preset hash: DB presets get it by
+  `scripts/presets/rehash.mjs --apply` on production before the deploy, not legacy code, then `netlify api purgeCache`
+  after it (the CDN holds the presets of before).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), the knob
   ids of `targets.rs` / `VOICE_MODULES` (a new module goes last; `voice-modules.spec` holds them).
 - **Netlify**: function specs live in `netlify/tests/`, never in `netlify/functions/` (every file there is
@@ -173,9 +178,18 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   is ready the master is silent (no fallback); a failure shows a toast with Retry (`retryAudio`).
 - FX (`synth/fx/`): effects are defined in `FX_REGISTRY` (`fx/effects/`) with params/ranges from `FX_PARAMS` of
   `libs/preset-schema`; a new effect type = a registry entry + its preset schema. `createFxSlot` wraps each (mix
-  crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, delay, reverb).
-  Delay is native nodes; reverb (16-line FDN) and distortion (4× oversampled in two stages, the hard clip
-  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables) are wasm worklets.
+  crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, delay, compressor,
+  reverb); `FX_SLOTS` of `fx-mod-params.ts` is their count (it can't import the schema).
+  Delay is native nodes; reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip
+  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables) and the compressor are wasm
+  worklets.
+- Compressor (`dsp/compressor`, measured: `dsp/measurements/compressor.json`, `compressor-measured.spec.ts`): one
+  band (the louder channel at every sample against the threshold, the reduction smoothed in dB) or three (LR4
+  crossovers on state variable filters, the mean square of each band held and released, compressed down and up,
+  the gains every `SPAN` samples). It mixes inside (`FxCore.mixInside`: the slot passes the core alone and gives it
+  the mix as a param, its routes with the others) and posts its meter only while watched (`FxCore.meter`,
+  `report` of `registerStereoProcessor`); its knobs keep the laws of the Audio Unit (`thresh`, `gain`, `level` are
+  knob positions, `compressor-params.ts` has their laws). Not done: its limiter at the top of the ratio.
 - Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
   destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
   module fails, the app works without that effect; until `ready` a slot passes only the dry signal.
@@ -203,7 +217,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
   tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub; `compressor` for the effect). Aliasing −70 dB, spurs −80 dB.
 - Worklet modules prewarm their core on load (lazy wasm compilation would hit the first note).
 
 ### Synth, input, transport (`synth/common/modules`, `synth/common/*`)
@@ -235,12 +249,13 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 ### Rust cores (`dsp/`)
 
 - One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `limiter`, `reverb`,
-  `distortion`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
+  `distortion`, `compressor`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
   lanes), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.
 - A bundle `<name>.worklet.ts` registers its processors (names in `common/processors.ts`); its facade
   `<name>-wasm.ts` wraps the core. Effect cores expose `fx_new`, `fx_buffers`, `fx_process`, `fx_clear`, `fx_free`,
-  `fx_command`. Specs import the wasm bytes via `@chisper/wasm/<name>.wasm` (`apps/chisper/wasm-babel-plugin.js`).
+  `fx_command`. A new one is also named in `WASM_MODULES` (`wasm-support.ts`), `CORES` of `scripts/wasm.mjs`, the
+  `worklets` script of `package.json`, the scenes of `scripts/wasm-browsers/scenes.mjs`. Specs import the wasm bytes via `@chisper/wasm/<name>.wasm` (`apps/chisper/wasm-babel-plugin.js`).
 - NaN/±Inf input is taken as 0 by the effects, the decoded files and the worker.
 
 ### Snapshots
