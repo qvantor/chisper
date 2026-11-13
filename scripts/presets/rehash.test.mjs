@@ -18,7 +18,8 @@ test('a preset of the schema of now is left alone, one of before is rewritten', 
   assert.equal(fresh.blocked, false);
   const [{ hash, data }] = fresh.changes;
   assert.equal(data.fx.compressor.a, false);
-  assert.deepEqual(data.fx.o, ['distortion', 'delay', 'compressor', 'reverb']);
+  assert.equal(data.fx.chorus.a, false);
+  assert.deepEqual(data.fx.o, ['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
   const again = plan([{ id: 'a', hash, data }], rehashPresets);
   assert.equal(again.changes.length, 0);
   assert.match(again.lines[0], /^1 presets, 0 to rewrite, 0 the schema rejects$/);

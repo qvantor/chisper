@@ -72,7 +72,9 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
   `dsp/measurements/*.json`, which the specs compare the engine with. An effect of its rack goes into its state
   (`state.mjs`), a signal of ours through it as a one-shot sample of its noise oscillator; renders of different
-  samples never run at once and each is rendered until two in a row agree (now and then one is of another state).
+  samples never run at once (a block renders one sample after another, never back to one: a host has played the
+  sample before it, twice alike) and each is rendered until two in a row agree (now and then one is of another
+  state). An effect sleeps in a silence: a signal that reads its LFO keeps a quiet tone under it.
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
   `tmp/noises/`. `upload.mjs` writes to the production bucket: dry run unless `--apply`, only when the user asks.
 
@@ -85,13 +87,14 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   so: no `mul_add`, no fast-math, no relaxed-simd, wasm-opt never with fast-math. The hot loops run in f32 lanes
   with their sums in an order of their own (`F32x4`/`U32x4` of `dsp-core/src/simd.rs`: FIRs of `fir.rs`, the
   rational `tanh4`, the lines of the reverb, the fixed-point phases of the oscillators, the filters of two voices,
-  the bands and the detectors of the compressor, its `log2`/`exp2` of bits and polynomials: `compressor/src/math.rs`);
-  the native variant of a
+  the bands and the detectors of the compressor, its `log2`/`exp2` of bits and polynomials: `compressor/src/math.rs`,
+  the taps of the chorus); the native variant of a
   lane type does the same operations in the same order (cargo tests compute the bits of the wasm). Math per block
   goes through `dsp/jsmath` (`dsp/clippy.toml` disallows `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…).
   What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut; the filter of a voice
   is a state variable filter, which holds a low cutoff in f32), the gain path of the limiter, the delays of the
-  reverb lines, the phase a voice keeps between spans (a whole number of 2^-52 of a cycle). A pass that reorders
+  reverb lines, the filter of the chorus and the delays of its taps, the phase a voice keeps between spans (a whole
+  number of 2^-52 of a cycle). A pass that reorders
   a loop (the chunks of the reverb, the voices filtered in pairs) gives the bits of the plain order: its cargo
   test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
   flush-to-zero). Any change of the bits is an explicit golden update, checked by the quality specs with their
@@ -178,11 +181,11 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   is ready the master is silent (no fallback); a failure shows a toast with Retry (`retryAudio`).
 - FX (`synth/fx/`): effects are defined in `FX_REGISTRY` (`fx/effects/`) with params/ranges from `FX_PARAMS` of
   `libs/preset-schema`; a new effect type = a registry entry + its preset schema. `createFxSlot` wraps each (mix
-  crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, delay, compressor,
-  reverb); `FX_SLOTS` of `fx-mod-params.ts` is their count (it can't import the schema).
+  crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, chorus, delay,
+  compressor, reverb); `FX_SLOTS` of `fx-mod-params.ts` is their count (it can't import the schema).
   Delay is native nodes; reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip
-  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables) and the compressor are wasm
-  worklets.
+  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables), the chorus and the compressor are
+  wasm worklets.
 - Compressor (`dsp/compressor`, measured: `dsp/measurements/compressor.json`, `compressor-measured.spec.ts`): one
   band (the louder channel at every sample against the threshold, the reduction smoothed in dB) or three (LR4
   crossovers on state variable filters, the mean square of each band held and released, compressed down and up,
@@ -190,6 +193,18 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   the mix as a param, its routes with the others) and posts its meter only while watched (`FxCore.meter`,
   `report` of `registerStereoProcessor`); its knobs keep the laws of the Audio Unit (`thresh`, `gain`, `level` are
   knob positions, `compressor-params.ts` has their laws). Not done: its limiter at the top of the ratio.
+- Chorus (`dsp/chorus`, measured: `dsp/measurements/chorus.json`, `chorus-measured.spec.ts`): four taps, two a
+  channel, each a line of its own fed back into itself, moved by one triangle LFO (the taps of a channel half a cycle
+  apart, the channels a quarter) through a pole of 20 ms; a state variable filter of two passes a sample after them,
+  outside the feedback; the mix inside by its own law (`mixInside`), then the level. In BPM a cycle of the LFO is a
+  division (`chorusDivisions`): the main thread gives the core its Hz. Not active it has no feedback. A read of a
+  group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the first: not the bits of
+  `read4`), a sample alone its lane of that four: how a block is cut changes no sample. Deliberate differences: its
+  LFO never stops in a silence, a tap keeps the highs the one of the Audio Unit loses over 12 kHz, its phase is not
+  kept in a preset. Its screen (`chorus-screen.tsx`) draws the taps and drags their delays and the depth: the core tells
+  its LFO and the knobs of the taps as it has them (`fx_meter`, posted as the meter of the compressor is, only while
+  watched: `meter-report.ts` in the worklets, `createFxMeter` on the main thread), between two posts the main thread
+  moves the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
 - Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
   destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
   module fails, the app works without that effect; until `ready` a slot passes only the dry signal.
@@ -217,7 +232,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
   tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub; `compressor` for the effect). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub; `compressor` and `chorus` for the effects). Aliasing −70 dB, spurs −80 dB.
 - Worklet modules prewarm their core on load (lazy wasm compilation would hit the first note).
 
 ### Synth, input, transport (`synth/common/modules`, `synth/common/*`)
@@ -249,7 +264,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 ### Rust cores (`dsp/`)
 
 - One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `limiter`, `reverb`,
-  `distortion`, `compressor`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
+  `distortion`, `compressor`, `chorus`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
   lanes), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.
 - A bundle `<name>.worklet.ts` registers its processors (names in `common/processors.ts`); its facade

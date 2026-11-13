@@ -184,6 +184,53 @@ impl Rows {
         hermite4(at(-1), at(0), at(1), at(2), t)
     }
 
+    /// line `row` at four samples in a row, the first `back` writes before now, their delays a line: `delay` of the
+    /// first, each next one `slope` longer. Their places are one sample and 1 - slope apart: the share of a sample
+    /// of each is the one of the first less its slopes, in f32 (where read4 works out each place in doubles); while
+    /// it stays within the sample of its lane the taps of all four are a row of the ring. Not the bits of read4: a
+    /// read of its own, the same for a lane whoever of its group is asked (a group cut by a block reads its
+    /// samples one by one, each its lane with the same `back` to the first)
+    #[inline(always)]
+    pub fn read4_line(&self, row: usize, back: usize, delay: f64, slope: f32) -> F32x4 {
+        let at = (self.index - back as i32) as f64 - delay;
+        let whole = floor(at);
+        let i = whole as i32;
+        let t = F32x4::splat((at - whole) as f32) - F32x4::splat(slope) * F32x4::new(0.0, 1.0, 2.0, 3.0);
+        let last = t.lanes()[3];
+        if (0.0..1.0).contains(&last) {
+            let from = row * self.stride + (i.wrapping_sub(1) & self.mask) as usize;
+            let taps = &self.buffer[from..from + 7];
+            return hermite4(
+                F32x4::load(taps),
+                F32x4::load(&taps[1..]),
+                F32x4::load(&taps[2..]),
+                F32x4::load(&taps[3..]),
+                t,
+            );
+        }
+        self.read_line_each(row, i, t)
+    }
+
+    // read4_line where a share leaves the sample of its lane (a delay that moves fast, or crosses a sample in
+    // the group): each lane from the sample its share is in
+    #[inline(never)]
+    fn read_line_each(&self, row: usize, i: i32, t: F32x4) -> F32x4 {
+        let whole = t.floor();
+        let t = t - whole;
+        let moved = whole.lanes();
+        let at = |j: i32| {
+            let sample = |k: usize| {
+                let place = i
+                    .wrapping_add(k as i32)
+                    .wrapping_add(moved[k] as i32)
+                    .wrapping_add(j);
+                self.buffer[row * self.stride + (place & self.mask) as usize]
+            };
+            F32x4::new(sample(0), sample(1), sample(2), sample(3))
+        };
+        hermite4(at(-1), at(0), at(1), at(2), t)
+    }
+
     /// four samples in a row of line `row`, the first `ahead` writes from now (what is too small to sound as 0)
     #[inline(always)]
     pub fn write4(&mut self, row: usize, ahead: usize, value: F32x4) {
@@ -397,6 +444,27 @@ pub fn peak(data: &[f32]) -> f64 {
         loudest = max(loudest, (*value as f64).abs());
     }
     loudest
+}
+
+/// the loudest sample of a block in lanes (a NaN stays)
+pub fn loudest(data: &[f32]) -> f32 {
+    let mut lanes = F32x4::splat(0.0);
+    let mut chunks = data.chunks_exact(4);
+    for chunk in &mut chunks {
+        lanes = lanes.max(F32x4::load(chunk).abs());
+    }
+    let [a, b, c, d] = lanes.lanes();
+    let mut peak = F32x4::new(a, b, 0.0, 0.0).max(F32x4::new(c, d, 0.0, 0.0));
+    for value in chunks.remainder() {
+        peak = peak.max(F32x4::splat(value.abs()));
+    }
+    let [a, b, ..] = peak.lanes();
+    louder(a, b)
+}
+
+/// the louder of two peaks (a NaN stays: f32::max would drop it)
+pub fn louder(a: f32, b: f32) -> f32 {
+    F32x4::splat(a).max(F32x4::splat(b)).lanes()[0]
 }
 
 #[cfg(test)]
@@ -670,6 +738,63 @@ mod tests {
                     let sum = input[lane] + gain * delayed;
                     ring.push(sum);
                     assert_eq!(out, delayed - gain * sum);
+                }
+            }
+        }
+    }
+
+    // a read of a line of delays is the one of read4 (to the rounding of its shares in f32), whether its samples
+    // stay within their own or a delay crosses one, and a lane is the same whichever of its four asks
+    #[test]
+    fn a_line_of_delays_reads_what_the_delays_do() {
+        let mut rows = Rows::new(4000.0);
+        let mut seed = 5u32;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / (1 << 23) as f32 - 1.0
+        };
+        for _ in 0..1200 {
+            for row in 0..4 {
+                rows.write1(row, 0, noise());
+            }
+            rows.advance(1);
+        }
+        for (delay, slope) in [
+            (40.25, 1e-4),
+            (300.9995, 0.01),
+            (7.5, -0.3),
+            (2000.2, 0.7),
+            (64.0, 0.0),
+            (90.3, -1.6),
+        ] {
+            for row in 0..4 {
+                let line = rows.read4_line(row, 0, delay, slope as f32).lanes();
+                let each = rows
+                    .read4(
+                        row,
+                        0,
+                        [
+                            F64x2::new(delay, delay + slope),
+                            F64x2::new(delay + 2.0 * slope, delay + 3.0 * slope),
+                        ],
+                    )
+                    .lanes();
+                for lane in 0..4 {
+                    assert!(
+                        (line[lane] - each[lane]).abs() < 2e-5,
+                        "{delay} {slope}: {line:?} {each:?}"
+                    );
+                }
+                // the samples of the four after a write each: their lanes as they were
+                let mut later = Rows {
+                    buffer: rows.buffer.clone(),
+                    ..Rows::new(4000.0)
+                };
+                later.index = rows.index;
+                for back in 1..4 {
+                    later.advance(1);
+                    let lanes = later.read4_line(row, back, delay, slope as f32).lanes();
+                    assert_eq!(lanes[back].to_bits(), line[back].to_bits());
                 }
             }
         }

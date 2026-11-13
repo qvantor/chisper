@@ -1,5 +1,6 @@
 import React from 'react';
 import { FxType } from '@chisper/preset-schema';
+import { ChorusControls } from './chorus-controls';
 import { CompressorControls } from './compressor-controls';
 import { DelayControls } from './delay-controls';
 import { DistortionControls } from './distortion-controls';
@@ -10,6 +11,7 @@ import { FxControlsProps } from './types';
 // after the last group of the effect
 export const FX_CONTROLS: Record<FxType, React.ComponentType<FxControlsProps>> = {
   distortion: DistortionControls,
+  chorus: ChorusControls,
   delay: DelayControls,
   compressor: CompressorControls,
   reverb: ReverbControls,

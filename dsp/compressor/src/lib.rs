@@ -26,7 +26,7 @@ pub mod math;
 use alloc::{boxed::Box, vec, vec::Vec};
 use wasm_rt as _;
 
-use dsp_core::blocks::Smoothed;
+use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::io::StereoIo;
 use dsp_core::simd::{F32x4, U32x4};
 use jsmath::{cos, exp, log10, log2, max, min, pow, sin, PI, SQRT2};
@@ -88,27 +88,6 @@ const MIN_CROSSOVER: f64 = 20.0;
 #[inline(always)]
 fn bands(low: f32, mid: f32, high: f32) -> F32x4 {
     F32x4::new(low, mid, high, 0.0)
-}
-
-/// the loudest sample of a block (a NaN stays)
-fn loudest(data: &[f32]) -> f32 {
-    let mut lanes = F32x4::splat(0.0);
-    let mut chunks = data.chunks_exact(4);
-    for chunk in &mut chunks {
-        lanes = lanes.max(F32x4::load(chunk).abs());
-    }
-    let [a, b, c, d] = lanes.lanes();
-    let mut peak = F32x4::new(a, b, 0.0, 0.0).max(F32x4::new(c, d, 0.0, 0.0));
-    for value in chunks.remainder() {
-        peak = peak.max(F32x4::splat(value.abs()));
-    }
-    let [a, b, ..] = peak.lanes();
-    louder(a, b)
-}
-
-// the louder of two peaks (a NaN stays: f32::max would drop it)
-fn louder(a: f32, b: f32) -> f32 {
-    F32x4::splat(a).max(F32x4::splat(b)).lanes()[0]
 }
 
 // A section of a crossover (Butterworth, 2nd order) as a state variable filter: the trapezoidal integrators ic1

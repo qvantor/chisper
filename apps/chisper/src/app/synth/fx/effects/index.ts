@@ -3,11 +3,12 @@ import { FX_MIX_PARAMS, FxType } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
 import { FxDefinition, FxParamDef, FxPreset } from './types';
 import { distortion } from './distortion';
+import { chorus } from './chorus';
 import { compressor } from './compressor';
 import { delay } from './delay';
 import { reverb } from './reverb';
 
-export const FX_REGISTRY: Record<FxType, FxDefinition> = { distortion, delay, compressor, reverb };
+export const FX_REGISTRY: Record<FxType, FxDefinition> = { distortion, chorus, delay, compressor, reverb };
 
 // the mix of each effect, applied by createFxSlot: the same knob, the default of the effect (the distortion and the compressor all wet)
 export const MIX_PARAMS: Record<FxType, FxParamDef> = mapValues(FX_MIX_PARAMS, (mix) => ({

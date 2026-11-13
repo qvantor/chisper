@@ -2,6 +2,7 @@ import { FX_MIX_PARAMS, FX_PARAMS } from '@chisper/preset-schema';
 import { mapValues } from 'lodash';
 import type { CompressorDspParams } from '../app/synth/fx/effects/compressor-params';
 import { CompressorExports, createCompressorWasm } from '../app/synth/fx/effects/compressor-wasm';
+import { FxChange, renderStereo } from './fx-render';
 import { dB } from './measures';
 import { wasmCore } from './wasm';
 
@@ -12,53 +13,28 @@ export const COMPRESSOR_DEFAULTS: CompressorDspParams = {
   mix: FX_MIX_PARAMS.compressor.default,
 };
 
-const BLOCK = 128;
 let core: CompressorExports | undefined;
 // one instance of the core for a spec file (a scope)
 export const compressorCore = () => (core ??= wasmCore<CompressorExports>('compressor'));
 
-export interface CompressorChange {
-  // the frame of the block it is set before
-  at: number;
-  params?: Partial<CompressorDspParams>;
-  clear?: boolean;
-}
+export type CompressorChange = FxChange<CompressorDspParams>;
 
 // both channels through a compressor of `params` at `rate`, in blocks of 128: the outputs, whether it was idle
 // after each block and its meter then
 export const renderCompressor = (
   params: Partial<CompressorDspParams>,
   rate: number,
-  [left, right]: [ArrayLike<number>, ArrayLike<number>],
+  channels: [ArrayLike<number>, ArrayLike<number>],
   changes: CompressorChange[] = []
 ) => {
   const dsp = createCompressorWasm(compressorCore(), rate, { params: { ...COMPRESSOR_DEFAULTS, ...params } });
-  const frames = left.length;
-  const [outL, outR] = [new Float32Array(frames), new Float32Array(frames)];
-  const idle: boolean[] = [];
   const meters: ReturnType<typeof dsp.meter>[] = [];
-  for (let start = 0; start < frames; start += BLOCK) {
-    const n = Math.min(BLOCK, frames - start);
-    changes
-      .filter(({ at }) => at >= start && at < start + BLOCK)
-      .forEach((change) => {
-        if (change.params) dsp.set(change.params);
-        if (change.clear) dsp.clear();
-      });
-    const [inL, inR] = [left, right].map((channel) =>
-      Float32Array.from({ length: n }, (_, i) => channel[start + i])
-    );
-    const [blockL, blockR] = [new Float32Array(n), new Float32Array(n)];
-    dsp.process(inL, inR, blockL, blockR);
-    outL.set(blockL, start);
-    outR.set(blockR, start);
-    idle.push(dsp.idle);
+  const rendered = renderStereo(dsp, channels, changes, () => {
     // (the core gives the same object every time)
     const { gains, input } = dsp.meter();
     meters.push({ gains: [...gains], input });
-  }
-  dsp.free();
-  return { left: outL, right: outR, idle, meters };
+  });
+  return { ...rendered, meters };
 };
 
 // a sine of both channels a quarter of a cycle apart (its level is hypot(L, R) at every sample), or alike (mono):

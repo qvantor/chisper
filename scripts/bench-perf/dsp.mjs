@@ -49,6 +49,11 @@ const WASM_CORES = [
     create: 'createCompressorWasm',
   },
   {
+    core: 'chorus',
+    facade: 'src/app/synth/fx/effects/chorus-wasm',
+    create: 'createChorusWasm',
+  },
+  {
     core: 'wavetable-osc',
     facade: 'src/app/synth/common/wavetable/wavetable-osc-wasm',
     create: 'createOscScope, createTableStoreWasm, createVoiceSharedWasm, createVoiceWasm',
@@ -583,6 +588,8 @@ const createCases = (dsp) => {
     level: 0.5,
     mix: 1,
   };
+  // a fresh chorus
+  const CHORUS = { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 };
   const distortionParams = (mode) => ({ params: { mode, drive: 8, tone: 20000, level: 0 } });
   return {
     ...withTs(
@@ -716,6 +723,17 @@ const createCases = (dsp) => {
           )),
       dsp.createDistortionDsp &&
         ((mode) => effect(() => dsp.createDistortionDsp(RATE, distortionParams(mode)).process, input))
+    ),
+    // a fresh chorus (a slow, deep LFO), then a fast one with a high feedback
+    ...withTs(
+      { chorus: [{}], 'chorus fast': [{ rate: 6, depth: 2, fb: 0.8, cut: 8000 }] },
+      dsp.wasm.chorus &&
+        ((params) =>
+          effect(
+            () => dsp.createChorusWasm(dsp.wasm.chorus, RATE, { params: { ...CHORUS, ...params } }).process,
+            input
+          )),
+      null
     ),
     // one band, then three (compressed down; down and up): over the noise, so they compress all the time; then
     // hits of the noise after silences (50 ms every 200 ms): the gains of every sample of a hit, the bands lifted

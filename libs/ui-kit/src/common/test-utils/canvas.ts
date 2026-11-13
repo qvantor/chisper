@@ -141,6 +141,7 @@ const createRecorder = (canvas: HTMLCanvasElement) => {
     textBaseline: 'alphabetic',
     fillText: () => undefined,
     createLinearGradient: () => ({ addColorStop: () => undefined }),
+    createRadialGradient: () => ({ addColorStop: () => undefined }),
   };
   return { context, shapes };
 };

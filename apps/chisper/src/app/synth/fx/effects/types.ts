@@ -59,16 +59,10 @@ export interface FxCore {
   meter?: FxMeter;
 }
 
-// the gains of the bands of a compressor (dB: under 0 a reduction, over it a boost of its upward compression)
-// and the peak of its input
-export interface FxMeterValues {
-  gains: [number, number, number];
-  input: number;
-}
-
-// watch(listener): the values about 30 times a second until the function it returns is called
-export interface FxMeter {
-  watch: (listener: (values: FxMeterValues) => void) => () => void;
+// watch(listener): the values of the effect (CompressorMeterValues of compressor-params.ts, ChorusMeterValues of
+// chorus-params.ts) about 30 times a second until the function it returns is called
+export interface FxMeter<Values = unknown> {
+  watch: (listener: (values: Values) => void) => () => void;
 }
 
 // a built-in preset of the effect: sets mix and every param, added/on/order are not touched
@@ -92,6 +86,9 @@ export interface FxDefinition<K extends string = string> {
     value: number,
     bpm: number
   ) => Record<string, number>;
+  // the bounds of the routes to its knobs at a tempo, by param (Time of the delay in BPM: within its divisions);
+  // absent or none for a param: the range of its knob
+  bounds?: (params: Record<string, number>, bpm: number) => Partial<Record<string, [number, number]>>;
   // (the knobs of native nodes follow their routes by the lines of `fxMod`)
   create: (audioCtx: BaseAudioContext, fxMod?: FxMod) => FxCore;
 }

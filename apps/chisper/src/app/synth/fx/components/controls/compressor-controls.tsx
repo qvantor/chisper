@@ -6,6 +6,8 @@ import { DragValue, theme } from '@chisper/ui-kit';
 import { compressor, formatBandThresholds } from '../../effects/compressor';
 import { CompressorParam } from '../../effects/compressor-presets';
 import { useKnobModulation } from '../../../modulation/use-knob-modulation';
+import type { CompressorMeterValues } from '../../effects/compressor-params';
+import type { FxMeter } from '../../effects/types';
 import { bandLimit, BandParam, bandValue, CompressorScreen, SCREEN_SIZE } from './compressor-screen';
 import { ControlsGroup, LastGroups } from './group';
 import { ParamHandle } from './param-handle';
@@ -182,7 +184,13 @@ export const CompressorControls = ({ params, setParam, on, out, meter }: FxContr
       <ControlsGroup caption={multi ? 'Bands' : 'Curve'} disabled={!on}>
         <Display>
           {multi && values('Crossovers', CROSSOVERS)}
-          <CompressorScreen params={params} setParam={setParam} meter={meter} multi={multi} active={on} />
+          <CompressorScreen
+            params={params}
+            setParam={setParam}
+            meter={meter as FxMeter<CompressorMeterValues> | undefined}
+            multi={multi}
+            active={on}
+          />
           {multi && values('Band gains', GAINS)}
         </Display>
       </ControlsGroup>

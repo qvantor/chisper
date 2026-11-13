@@ -3,13 +3,14 @@ import { FX_MIX_PARAMS, FX_PARAMS } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
 import { COMPRESSOR_PROCESSOR } from '../../common/processors';
 import { createLfoFeed } from '../../common/lfo/lfo-curve';
-import { FxDefinition, FxMeterValues } from './types';
+import { FxDefinition } from './types';
+import { createFxMeter } from './fx-meter';
 import { COMPRESSOR_MODES } from './compressor-modes';
 import {
   bandThresholdsDb,
   CompressorDspParams,
   CompressorMessage,
-  CompressorMeterMessage,
+  CompressorMeterValues,
   CompressorOptions,
   levelGain,
   makeupGain,
@@ -119,7 +120,7 @@ export const compressor: FxDefinition<CompressorParam> = {
       ...mapValues(FX_PARAMS.compressor, (param) => param.default),
       mix: FX_MIX_PARAMS.compressor.default,
     };
-    const listeners = new Set<(values: FxMeterValues) => void>();
+    const meters = createFxMeter<CompressorMeterValues>((message) => post(message));
 
     // the node starts with the params and the LFOs kept until the module has loaded, its meter on if watched
     const worklet = createWorkletFx(
@@ -130,17 +131,14 @@ export const compressor: FxDefinition<CompressorParam> = {
         const processorOptions: CompressorOptions = {
           params: { ...values },
           ...(lfos && { lfos }),
-          ...(listeners.size > 0 && { meter: true }),
+          ...(meters.watched() && { meter: true }),
         };
         return new AudioWorkletNode(audioCtx, COMPRESSOR_PROCESSOR, {
           ...STEREO_WORKLET_OPTIONS,
           processorOptions,
         });
       },
-      (data) => {
-        const { meter } = (data ?? {}) as Partial<CompressorMeterMessage>;
-        if (meter) listeners.forEach((listener) => listener(meter));
-      }
+      meters.take
     );
     const post = (message: CompressorMessage) => worklet.post(message);
     // the LFOs, only while a route of one moves a knob
@@ -171,18 +169,9 @@ export const compressor: FxDefinition<CompressorParam> = {
         worklet.post(message);
       },
       setLfos: feed.take,
-      meter: {
-        watch: (listener) => {
-          listeners.add(listener);
-          if (listeners.size === 1) post({ meter: true });
-          return () => {
-            listeners.delete(listener);
-            if (listeners.size === 0) post({ meter: false });
-          };
-        },
-      },
+      meter: meters.meter,
       destroy: () => {
-        listeners.clear();
+        meters.clear();
         worklet.destroy();
       },
     };

@@ -5,6 +5,7 @@ import { theme } from '../common/constants';
 import {
   ActionKey,
   FollowIcon,
+  HighPassIcon,
   LegatoIcon,
   QuantizeIcon,
   SelectIcon,
@@ -68,6 +69,16 @@ describe('SwitchKey', () => {
     const key = screen.getByRole('button', { name: 'Follow the playhead' });
     expect(key.textContent).toBe('');
     expect(key.querySelector('svg')?.querySelectorAll('path')).toHaveLength(4);
+  });
+
+  it('shows the response of the filter on the key of a high pass: up from the left, then flat', () => {
+    render(<SwitchKey on icon={<HighPassIcon />} name='High pass' />);
+    const key = screen.getByRole('button', { name: 'High pass' });
+    expect(key.textContent).toBe('');
+    const [path, ...more] = key.querySelectorAll('path');
+    expect(more).toHaveLength(0);
+    expect(path.getAttribute('d')).toMatch(/^M1\.5 13\.5c.*h6\.4$/);
+    expect(path.getAttribute('fill')).toBe('none');
   });
 
   it('shows a magnet on the key of snapping to the grid', () => {

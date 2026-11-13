@@ -31,7 +31,7 @@ export const FILTER_TYPES = [
 ] as const;
 
 // effects of the fx rack, the order is the default chain order
-export const FX_TYPES = ['distortion', 'delay', 'compressor', 'reverb'] as const;
+export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'] as const;
 export type FxType = (typeof FX_TYPES)[number];
 
 // known types only, no duplicates (presets from a newer client may contain effect types this one doesn't
@@ -59,9 +59,10 @@ export interface ParamRange {
 // the dry/wet mix of an effect (0: dry, 1: wet); delay and reverb are mixed into the dry sound
 export const FX_MIX_PARAM: ParamRange = { min: 0, max: 1, default: 0.3 };
 // the mix of each effect, the default is the one of a freshly added effect: the distortion and the compressor
-// replace the dry sound
+// replace the dry sound, the chorus is half of it (its own law: wet sin²(π mix / 2), dry 1 - wet²)
 export const FX_MIX_PARAMS: Record<FxType, ParamRange> = {
   distortion: { ...FX_MIX_PARAM, default: 1 },
+  chorus: { ...FX_MIX_PARAM, default: 0.5 },
   delay: FX_MIX_PARAM,
   compressor: { ...FX_MIX_PARAM, default: 1 },
   reverb: FX_MIX_PARAM,
@@ -79,6 +80,30 @@ export const FX_PARAMS = {
     tone: { min: 500, max: 20000, default: 20000 },
     // dB of the output on top of the makeup gain (0: a note is about as loud as the dry one)
     level: { min: -24, max: 12, default: 0 },
+  },
+  // four taps (two a channel) moved by an LFO; the knobs, their ranges and defaults as measured on the Audio Unit
+  // (dsp/measurements/chorus.json)
+  chorus: {
+    // Hz of the LFO (the knob: 20 × its travel⁴)
+    rate: { min: 0, max: 20, default: 0.078 },
+    // BPM (1): a cycle of the LFO is `div`, an index into TEMPO_DIVISIONS (1/32 … 8 bar, with `trip` and `dot`
+    // (1) their triplets and dotted ones) at the tempo of the synth
+    sync: { min: 0, max: 1, default: 0, int: true },
+    div: { min: 0, max: DIVISION_MAX, default: divisionIndex('8 bar'), int: true },
+    trip: { min: 0, max: 1, default: 0, int: true },
+    dot: { min: 0, max: 1, default: 0, int: true },
+    // ms of the second tap of each channel and of the first one
+    d1: { min: 0, max: 20, default: 5 },
+    d2: { min: 0, max: 20, default: 0 },
+    // how far the LFO moves the taps: 62.5 ms at the top
+    depth: { min: 0, max: 26, default: 26 },
+    // of each tap into itself
+    fb: { min: 0, max: 0.95, default: 0.095 },
+    // Hz of the filter of the wet signal: a low pass, or (hpf 1) a high pass
+    cut: { min: 20, max: 20000, default: 1000 },
+    hpf: { min: 0, max: 1, default: 0, int: true },
+    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
+    level: { min: 0, max: 1, default: 0.5 },
   },
   delay: {
     // seconds of the echoes (MS)
@@ -588,6 +613,13 @@ const fxSchema = z
         )
       )
       .prefault({}),
+    chorus: z
+      .object(
+        fxEffectShape(FX_PARAMS.chorus, FX_MIX_PARAMS.chorus, paramRange, (value) =>
+          z.boolean().default(value)
+        )
+      )
+      .prefault({}),
     delay: z
       .object(
         fxEffectShape(FX_PARAMS.delay, FX_MIX_PARAMS.delay, paramRange, (value) => z.boolean().default(value))
@@ -622,6 +654,7 @@ export const fxSnapSchema = z.preprocess(
   z.object({
     o: z.array(z.unknown()).catch([]).transform(normalizeFxOrder),
     distortion: lenientFxEffect(FX_PARAMS.distortion, FX_MIX_PARAMS.distortion),
+    chorus: lenientFxEffect(FX_PARAMS.chorus, FX_MIX_PARAMS.chorus),
     delay: lenientFxEffect(FX_PARAMS.delay, FX_MIX_PARAMS.delay),
     compressor: lenientFxEffect(FX_PARAMS.compressor, FX_MIX_PARAMS.compressor),
     reverb: lenientFxEffect(FX_PARAMS.reverb, FX_MIX_PARAMS.reverb),

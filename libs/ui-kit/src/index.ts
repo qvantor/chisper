@@ -59,6 +59,7 @@ export {
   ContiguousIcon,
   DottedIcon,
   FollowIcon,
+  HighPassIcon,
   LegatoIcon,
   LoopIcon,
   OneShotIcon,

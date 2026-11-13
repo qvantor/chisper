@@ -1,7 +1,6 @@
-import { stereoCore, StereoCoreExports } from '../../common/wasm/stereo-core';
-import { createView } from '../../common/wasm/wasm-core';
+import { paramsCore, ParamsCoreExports } from '../../common/wasm/stereo-core';
 import type { CompressorDspParams, CompressorOptions } from './compressor-params';
-import type { FxMeterValues } from './types';
+import type { CompressorMeterValues } from './compressor-params';
 
 // the Rust core of the compressor (dsp/compressor, compressor.wasm): a highpass, then one band (the louder channel
 // against the threshold, the reduction smoothed by the attack and the release) or three (crossovers, the mean
@@ -25,13 +24,8 @@ export const COMPRESSOR_KEYS: readonly (keyof CompressorDspParams)[] = [
   'mix',
 ];
 
-export interface CompressorExports extends StereoCoreExports {
-  // the buffer of the params of fx_new and fx_set: the bits of the keys fx_set changes, then the params; fx_meter
-  // writes the meter into its first values
-  fx_command: () => number;
-  fx_new: (sampleRate: number) => number;
-  fx_set: (handle: number) => void;
-  fx_idle: (handle: number) => number;
+export interface CompressorExports extends ParamsCoreExports {
+  // writes the meter into the first values of the buffer of the params
   fx_meter: (handle: number) => void;
 }
 
@@ -40,34 +34,20 @@ export const createCompressorWasm = (
   sampleRate: number,
   { params }: CompressorOptions
 ) => {
-  const view = createView(exports, Float64Array);
-  const command = () => view(exports.fx_command(), COMPRESSOR_KEYS.length + 1);
-  const options = command();
-  COMPRESSOR_KEYS.forEach((key, i) => (options[1 + i] = params[key]));
-  const handle = exports.fx_new(sampleRate);
+  const { dsp, handle, command } = paramsCore<keyof CompressorDspParams>(
+    exports,
+    sampleRate,
+    COMPRESSOR_KEYS,
+    params
+  );
   // what meter() gives, the same object every time: nothing is made on the audio thread
-  const gains: FxMeterValues['gains'] = [0, 0, 0];
-  const values: FxMeterValues = { gains, input: 0 };
-  return {
-    ...stereoCore(exports, handle),
-    set: (changes: Partial<CompressorDspParams>) => {
-      const buffer = command();
-      let present = 0;
-      for (let i = 0; i < COMPRESSOR_KEYS.length; i++) {
-        const value = changes[COMPRESSOR_KEYS[i]];
-        if (value === undefined) continue;
-        present |= 1 << i;
-        buffer[1 + i] = value;
-      }
-      buffer[0] = present;
-      exports.fx_set(handle);
-    },
-    get idle() {
-      return exports.fx_idle(handle) !== 0;
-    },
+  const gains: CompressorMeterValues['gains'] = [0, 0, 0];
+  const values: CompressorMeterValues = { gains, input: 0 };
+  // (assigned: `idle` of the dsp stays a getter)
+  return Object.assign(dsp, {
     // the gains of the bands and the peak of the input of the last block (its values hold until the next call:
     // who keeps them copies them)
-    meter: (): FxMeterValues => {
+    meter: (): CompressorMeterValues => {
       exports.fx_meter(handle);
       const buffer = command();
       gains[0] = buffer[0];
@@ -76,5 +56,5 @@ export const createCompressorWasm = (
       values.input = buffer[3];
       return values;
     },
-  };
+  });
 };

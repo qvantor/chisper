@@ -330,6 +330,9 @@ const COMPRESSOR = {
   mix: 1,
 };
 
+// the knobs of a fresh chorus (FX_PARAMS.chorus without its tempo, and its mix)
+const CHORUS = { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 };
+
 export const SCENES = [
   {
     name: 'limiter, a chord 12 dB over',
@@ -385,6 +388,23 @@ export const SCENES = [
       create: (dsp, wasm) => dsp.createCompressorWasm(wasm.compressor, RATE, { params }),
     };
   }),
+  // a fresh chorus (a slow LFO over all of its depth), then a fast one with a high feedback through a high pass:
+  // notes and silences (the taps move, the core goes idle and wakes)
+  ...[
+    ['fresh', {}],
+    ['fast, a high feedback, a high pass', { rate: 7, d1: 18, d2: 9, depth: 3, fb: 0.9, cut: 700, hpf: 1 }],
+  ].map(([name, changes]) => {
+    const params = { ...CHORUS, ...changes };
+    return {
+      name: `chorus, ${name}`,
+      module: 'chorus',
+      processor: 'chisper-chorus',
+      options: { ...STEREO, processorOptions: { params } },
+      frames: 2 * RATE,
+      input: () => notesAndSilences(2 * RATE),
+      create: (dsp, wasm) => dsp.createChorusWasm(wasm.chorus, RATE, { params }),
+    };
+  }),
 ]
   .map((scene) => ({ rate: RATE, ...scene }))
   .concat(OSC_SCENES);
@@ -394,6 +414,7 @@ export { createLimiterWasm } from './apps/chisper/src/app/synth/common/limiter/l
 export { createReverbWasm } from './apps/chisper/src/app/synth/fx/effects/reverb-wasm';
 export { createDistortionWasm } from './apps/chisper/src/app/synth/fx/effects/distortion-wasm';
 export { createCompressorWasm } from './apps/chisper/src/app/synth/fx/effects/compressor-wasm';
+export { createChorusWasm } from './apps/chisper/src/app/synth/fx/effects/chorus-wasm';
 export {
   createOscScope,
   createTableStoreWasm,

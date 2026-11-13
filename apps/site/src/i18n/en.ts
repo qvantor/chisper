@@ -21,7 +21,7 @@ export const en = {
     // ./index.ts)
     lead: 'Chisper is a **free wavetable synthesizer** that runs in the browser on a computer, a Chromebook or a phone: **no download, no account**.',
     details:
-      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a **noise oscillator**, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, delay, a compressor and reverb. Plug in a MIDI keyboard or play the computer keyboard, and record what you play in the **piano roll**.',
+      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a **noise oscillator**, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, chorus, delay, a compressor and reverb. Plug in a MIDI keyboard or play the computer keyboard, and record what you play in the **piano roll**.',
     listen: 'Hear it',
     screenshotAlt:
       'The Chisper synth playing chords: the waves of both oscillators, the dots of the envelopes and the LFO, the filter and the spectrum moving',
@@ -112,9 +112,9 @@ export const en = {
       more: 'Modulation: envelopes, LFOs, velocity',
     },
     effects: {
-      h2: 'Effects: distortion, delay, compressor, reverb',
+      h2: 'Effects: distortion, chorus, delay, compressor, reverb',
       text: [
-        'Finish the sound inside the synth: distortion (soft or hard clip, oversampled), a delay (normal or ping-pong, with a band filter in its feedback and a Haas stereo offset), a compressor (one band, or three bands pressed down and lifted for the dense sound of modern basses) and an algorithmic reverb of 16 lines. Drag them into any order; each has its own Mix and presets. A limiter on the master keeps the output from clipping.',
+        'Finish the sound inside the synth: distortion (soft or hard clip, oversampled), a chorus (four voices moved by an LFO that can follow the tempo, for the width of pads and supersaws), a delay (normal or ping-pong, with a band filter in its feedback and a Haas stereo offset), a compressor (one band, or three bands pressed down and lifted for the dense sound of modern basses) and an algorithmic reverb of 16 lines. Drag them into any order; each has its own Mix and presets. A limiter on the master keeps the output from clipping.',
       ],
     },
     playing: {

@@ -1,7 +1,6 @@
 import {
   delayDivisions,
   divisionSeconds,
-  divisionWithin,
   FX_PARAMS,
   nearestDivision,
   quartersOf,
@@ -10,6 +9,7 @@ import {
 } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
 import { FxDefinition } from './types';
+import { isOn, OFF_ON, tempoSync } from './tempo-sync';
 import { DelayParam, DELAY_PRESETS } from './delay-presets';
 import { createFxParams } from './fx-params';
 import { formatHz, formatMs } from './format';
@@ -19,7 +19,6 @@ import { DELAY_LINES, FxModMap } from './fx-mod-params';
 const { time, sync, div, trip, dot, fb, mode, pan, freq, q } = FX_PARAMS.delay;
 
 const isPingPong = (value: number) => value >= 0.5;
-const isOn = (value: number) => value >= 0.5;
 
 // time changes glide like tape (~95% in 0.3s), so a knob drag bends the echoes once instead of chirping per step
 const TIME_GLIDE = 0.1;
@@ -28,51 +27,26 @@ const NODE_KNOBS: DelayParam[] = ['time', 'pan', 'freq', 'q'];
 // seconds of a line: a bar at 60 BPM; a longer division plays this long
 export const DELAY_LINE_MAX = 4;
 
-// in BPM the steps of Time: 1/64 … 1 bar, with TRIP and DOT their triplets and dotted ones (the same array for the
-// same switches: the knob, the travel of its routes)
-const DELAY_STEPS = [false, true].map((trip) => [false, true].map((dot) => delayDivisions(trip, dot)));
-export const delayStepsOf = (params: Record<string, number>) =>
-  DELAY_STEPS[+isOn(params['trip'])][+isOn(params['dot'])];
-// the division of Time in BPM: one of its steps
-export const delayDivisionOf = (params: Record<string, number>) =>
-  divisionWithin(Math.round(params['div']), delayStepsOf(params));
-// the seconds of the echoes of a division at a tempo (DELAY_LINE_MAX at most)
+// seconds of the echoes of a division at a tempo (DELAY_LINE_MAX at most)
 export const delayDivisionSeconds = (division: number, bpm: number) =>
   Math.min(DELAY_LINE_MAX, divisionSeconds(division, bpm));
-// the seconds of the echoes: of Time, in BPM of its division at the tempo
-export const delayTime = (params: Record<string, number>, bpm: number) =>
-  isOn(params['sync']) ? delayDivisionSeconds(delayDivisionOf(params), bpm) : params['time'];
-// the bounds of the routes to Time in BPM at a tempo: from the shortest of its steps to the longest (none: those of
-// the knob)
-export const delayTimeBounds = (
-  params: Record<string, number>,
-  bpm: number
-): [number, number] | undefined => {
-  if (!isOn(params['sync'])) return undefined;
-  const steps = delayStepsOf(params);
-  return [delayDivisionSeconds(steps[0], bpm), delayDivisionSeconds(steps[steps.length - 1], bpm)];
-};
-// a change of the user at a tempo, as of an LFO and the envelopes: BPM takes the division nearest to Time, MS the
-// seconds of the division (within the range of Time); TRIP or DOT switched off the straight division of a triplet
-// or a dotted one
-export const delayParamChange = (
-  params: Record<string, number>,
-  key: string,
-  value: number,
-  bpm: number
-): Record<string, number> => {
-  const next = { ...params, [key]: value };
-  if (key === 'sync' && isOn(value) !== isOn(params['sync']))
-    return isOn(value)
-      ? { sync: value, div: nearestDivision(quartersOf(params['time'], bpm), delayStepsOf(params)) }
-      : { sync: value, time: number.thresholds(delayTime(params, bpm), time.min, time.max) };
-  if (key === 'trip' || key === 'dot') return { [key]: value, div: delayDivisionOf(next) };
-  return { [key]: value };
-};
-const OFF_ON = [
-  { id: 'off', label: 'Off' },
-  { id: 'on', label: 'On' },
-];
+// Time in BPM: its steps 1/64 … 1 bar, with TRIP and DOT their triplets and dotted ones; BPM takes the division
+// nearest to Time, MS the seconds of the division
+const synced = tempoSync({
+  knob: 'time',
+  range: time,
+  steps: delayDivisions,
+  valueOf: delayDivisionSeconds,
+  nearest: (seconds, bpm, steps) => nearestDivision(quartersOf(seconds, bpm), steps),
+});
+export const {
+  stepsOf: delayStepsOf,
+  divisionOf: delayDivisionOf,
+  // the seconds of the echoes: of Time, in BPM of its division at the tempo
+  value: delayTime,
+  bounds: delayTimeBounds,
+  paramChange: delayParamChange,
+} = synced;
 
 // input → splitter → in gains → line L/R → bandpass L/R → pan L/R → merger (output)
 // feedback: bandpass L/R → fb gains → line L/R; normal: each line feeds itself,
@@ -154,6 +128,7 @@ export const delay: FxDefinition<DelayParam> = {
   },
   presets: DELAY_PRESETS,
   paramChange: delayParamChange,
+  bounds: (params, bpm) => ({ time: delayTimeBounds(params, bpm) }),
   create: (audioCtx, fxMod) => {
     // mono input is upmixed to both channels
     const input = audioCtx.createGain();

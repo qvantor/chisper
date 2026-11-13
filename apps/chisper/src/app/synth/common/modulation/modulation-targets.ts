@@ -119,7 +119,7 @@ const fxTargets = Object.fromEntries(
       .filter(([, definition]) => !definition.options)
       .map(([param, { label, min, max, mode }]): [string, FxTarget] => [
         `${fx}.${param}`,
-        { kind: 'fx', fx, param, label, scale: mode === 'log' ? 'log' : 'linear', range: [min, max] },
+        { kind: 'fx', fx, param, label, scale: mode ?? 'linear', range: [min, max] },
       ])
   )
 );
