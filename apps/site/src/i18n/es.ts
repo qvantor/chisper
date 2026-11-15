@@ -93,9 +93,9 @@ export const es: Messages = {
         'Los colores del ruido: el espectro del ruido blanco (plano), rosa (−3 dB por octava), marrón (−6 dB por octava), azul (+3 dB) y violeta (+6 dB) de 20 Hz a 20 kHz',
     },
     filter: {
-      h2: 'Un filtro en cada voz: 8 tipos',
+      h2: 'Un filtro en cada voz: 30 tipos',
       text: [
-        'Cada nota tiene su propio filtro, así que una envolvente lo abre en cada nota de un acorde por separado, como en los sintetizadores polifónicos analógicos. Ocho tipos: lowpass (paso bajo), highpass (paso alto), bandpass (paso banda), low shelf, high shelf, peaking, notch y allpass, con Cutoff, Res y Gain.',
+        'Cada nota tiene su propio filtro, así que una envolvente lo abre en cada nota de un acorde por separado, como en los sintetizadores polifónicos analógicos. Una escalera cálida de 6 a 24 dB que conserva los graves al subir la resonancia, paso bajo y paso alto de 6 a 24 dB, paso banda, pico y notch, estantes y campanas de ecualizador, y los tipos clásicos: con Cutoff, Res, Drive hacia el filtro y Comp, que devuelve el cuerpo que se lleva la resonancia.',
       ],
     },
     modulation: {

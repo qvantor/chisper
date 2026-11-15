@@ -193,14 +193,22 @@ const PRESETS: Record<string, unknown> = {
   },
   // an order saved before the distortion: it goes to its default place
   'fx order without a type': { fx: { o: ['reverb', 'delay'], reverb: { a: true } } },
+  // a model type of the filter with its Drive and Var
+  'a model filter': { filter: { a: true, t: 'ladder24', cut: 880, res: 35.5, dr: 20, v: 0 } },
+  // a type of a newer client: the default type (the hash of the preset with it)
+  'an unknown filter type': { filter: { a: true, t: 'comb', cut: 880 } },
+  'its default type': { filter: { a: true, t: 'lowpass', cut: 880 } },
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: '1cfc87b42c2e08558d86fbe7d0c8712509b7e934cdfed698d737f299feb5dd34',
-  full: '560754f60bdfb96327ad59296f2e67790e6b55b0ef69ed683f059c4adc6f6a3d',
-  legacy: '126ab49b241583ff05929c9bcc0de420466c2f53080446c66ea12b2c765f4a57',
-  partial: '6b6460905aa4beaaf5bd62336440f3a74c5b59729562deee5a251f3eafb21dca',
-  'fx order without a type': 'eb468b78ec6395fca38418d40d586ee2cc96402efb9d13848dd60ee18edd342e',
+  empty: '35b8b0f5ca6a937ddd6b7f2cbfa5d17e14fad5d0ab5ef156966320524740e03f',
+  full: 'c28fb499dcb2183666b4154b24b986abeee2e99e689ffa5740ad86aaa5e73a8a',
+  legacy: 'f2a097f4512fe6494c30b1f15db32102ba648e35671636435b6c27e5b1e29267',
+  partial: '0b05a78f33a7791dc9c682d6fbcc9fc1d269a17db6996664048ae267069df87e',
+  'fx order without a type': 'cd9067fcd8e6399111ac6024ead9570e852b0429762843621d9c25e5d209f04a',
+  'a model filter': 'acadc4d022e1188b04ab88db01bab2ebab2e3e7b07487e06099359ef83f3005e',
+  'an unknown filter type': '81f92aac53fe29af896cb26e4e43831f3f8fa1489f19cb136d37d021b96867c3',
+  'its default type': '81f92aac53fe29af896cb26e4e43831f3f8fa1489f19cb136d37d021b96867c3',
 };
 
 // not presets: the schema rejects them
@@ -218,7 +226,8 @@ const INVALID: Record<string, unknown> = {
   'a fractional sub octave': { sub: { o: -0.5 } },
   'a sub coarse past 64 semitones': { sub: { c: -64.5 } },
   'a sub phase past a cycle': { sub: { ph: 1.25 } },
-  'an unknown filter type': { filter: { t: 'comb' } },
+  'a filter drive past 100': { filter: { dr: 101 } },
+  'a negative filter variation': { filter: { v: -1 } },
   'an LFO on the knob of an LFO': { mod: { 'lfo1:lfo2.rate': 0.5 } },
   'a route object without a flag': { mod: { 'env1:osc1.wave': { a: 0.5 } } },
   'five sources on a knob': {
@@ -275,6 +284,10 @@ const hashOf = (value: unknown) =>
 describe('the hashes of presets', () => {
   it.each(Object.keys(PRESETS))('%s', (name) => {
     expect(presetHash(PRESETS[name])).toBe(PRESET_HASHES[name]);
+  });
+
+  it('a filter type of a newer client is the default one', () => {
+    expect(PRESET_HASHES['an unknown filter type']).toBe(PRESET_HASHES['its default type']);
   });
 
   it('Init is the defaults of every knob', () => {

@@ -288,6 +288,39 @@ const OSC_SCENES = [
       ),
     ],
   }),
+  // the model types of the filter: two voices of one layout in the lanes of one (Ladder 24 with Drive and FAT, Ladder
+  // 12: their resonance clipped), two others of another (Low 24 with FAT, Band 24: theirs saturating), a fifth alone
+  // (High 18), their cutoffs moved; DB +/- of an EQ one moved by ENV 2; their designs (the Newton roots, the matched
+  // numerators), the curve of Drive and the saturation of the resonance, in every browser the bits of Node
+  oscScene('wavetable, the model types of the filter', {
+    frames: OSC_RATE / 2,
+    tables: { a: [saw(2048, 200), saw(1024, 300, 0.7)] },
+    voices: [
+      ...[
+        { type: 'ladder24', cutoff: 700, resonance: 70, gain: 0, drive: 60, variation: 50 },
+        { type: 'ladder12', cutoff: 900, resonance: 95, gain: 0, drive: 10, variation: 0 },
+        { type: 'low24', cutoff: 1200, resonance: 40, gain: 0, drive: 15, variation: 100 },
+        { type: 'band24', cutoff: 600, resonance: 90, gain: 0, drive: 30, variation: 30 },
+        { type: 'high18', cutoff: 400, resonance: 60, gain: 0, drive: 20, variation: 0 },
+      ].map((filter, k) =>
+        note(
+          [{ table: 'a', unison: 2, phase: 0.1 * k, phaseRand: 0 }, null],
+          { frequency: 55 * (k + 1), spread1: 10 },
+          [],
+          {
+            filter,
+            envelopes: [FLAT, { attack: 0.02, hold: 0, decay: 0.15, sustain: 0.2, release: 0 }, FLAT],
+            routes: [{ source: 1, param: 'cutoff', amount: 3, min: 20, max: 20000, scale: 'log' }],
+          }
+        )
+      ),
+      note([{ table: 'a', unison: 1, phase: 0, phaseRand: 0 }, null], { frequency: 330 }, [], {
+        filter: { type: 'loweq12', cutoff: 500, resonance: 30, gain: 0, drive: 0, variation: 50 },
+        envelopes: [FLAT, { attack: 0.1, hold: 0, decay: 0.1, sustain: 0.5, release: 0 }, FLAT],
+        routes: [{ source: 1, param: 'variation', amount: 50, min: 0, max: 100 }],
+      }),
+    ],
+  }),
   oscScene('wavetable, LFOs on the wave, the gain and the cutoff, ENV 2 on a Rate', {
     frames: OSC_RATE / 2,
     tables: { a: [saw(2048, 200), saw(1024, 300, 0.7), saw(2048, 50)] },

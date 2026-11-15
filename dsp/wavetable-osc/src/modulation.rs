@@ -12,7 +12,7 @@
 use crate::envelope::EnvelopeBlock;
 use crate::glided::{glide_length, Glided};
 use crate::lfo::{frac, LfoBlock, LFOS, PHASE};
-use crate::targets::{self, LFO_KNOBS, TARGETS};
+use crate::targets::{self, CUTOFF, FILTER, FILTER_EXTRA, FILTER_GAIN, LFO_KNOBS, TARGETS};
 use crate::voice::is_constant;
 use alloc::{vec, vec::Vec};
 use jsmath::{max, min, pow, sqrt};
@@ -60,6 +60,8 @@ pub struct Sources<'a> {
 
 const BLOCK: usize = 128;
 const SEGMENT: f64 = 32.0;
+// (the filter reads its cutoff and gain at the starts of its spans: the points of the routes, `sparse`)
+const _: () = assert!(SEGMENT as usize == crate::filter::SEGMENT);
 
 // the levels of a source of the routes in a block: one value while it is flat (`constant`), else one a sample
 #[derive(Clone, Copy)]
@@ -176,10 +178,37 @@ struct Target {
     scale: u32,
     // the Phase of an LFO: around the cycle, not clamped
     wrap: bool,
+    // read only at the points the routes work out (a..b by SEGMENT, from a): the cutoff and the gain of the filter,
+    // which reads them at the start of each of its spans; the lines between the points and the values outside a..b
+    // are left out
+    sparse: bool,
     values: Vec<f32>,
     one: [f32; 1],
     current: Current,
     base: f64,
+}
+
+// a knob of the filter: its range and its scale are those of the type of the filter, which may change on a note
+fn of_filter(module: usize) -> bool {
+    module == FILTER || module == FILTER_EXTRA
+}
+
+// the targets the routes set: all of them, all but the knobs of the filter, those alone
+#[derive(Clone, Copy)]
+enum Which {
+    All,
+    Others,
+    Filter,
+}
+
+impl Which {
+    fn takes(self, module: usize) -> bool {
+        match self {
+            Which::All => true,
+            Which::Others => !of_filter(module),
+            Which::Filter => of_filter(module),
+        }
+    }
 }
 
 pub struct Modulation {
@@ -195,6 +224,14 @@ pub struct Modulation {
     // the params of the voice a route may move, bits of their ids (an oscillator off for the note has none)
     accesses: u128,
     pub active: bool,
+    // a change of type of the filter waits for the end of a fade: the routes of its knobs sent meanwhile, of the next
+    // type, wait for it (`held`); those that play keep their amounts and ranges until it comes (an amount in % of
+    // a model type is not one in dB of a type of a BiquadFilterNode)
+    holding: bool,
+    held: Vec<VoiceRoute>,
+    // the buffers of the targets `release` makes (it comes in a block, where a core never allocates: they are made
+    // with the routes held), the values of a block and room for a route of each source
+    spare: Vec<(Vec<f32>, Vec<Route>)>,
 }
 
 impl Modulation {
@@ -217,8 +254,11 @@ impl Modulation {
             quiet_until: f64::NEG_INFINITY,
             accesses,
             active: false,
+            holding: false,
+            held: Vec::new(),
+            spare: Vec::new(),
         };
-        modulation.set_routes(initial, false);
+        modulation.set_routes(initial, false, false);
         modulation
     }
 
@@ -250,13 +290,53 @@ impl Modulation {
         self.active = !self.targets.is_empty() || self.dropped;
     }
 
-    fn set_routes(&mut self, routes: &[VoiceRoute], gliding: bool) {
+    fn set_routes(&mut self, routes: &[VoiceRoute], gliding: bool, hold: bool) {
+        // (the routes held before: these now, or none)
+        self.held.clear();
+        self.holding = hold;
+        if hold {
+            let filter = routes
+                .iter()
+                .filter(|route| targets::of(route.param).is_some_and(|(module, _, _)| of_filter(module)));
+            self.held.extend(filter);
+        }
+        self.update(routes, gliding, if hold { Which::Others } else { Which::All });
+        // (after the others: those of their targets that come take no room of the routes held)
+        if hold {
+            self.reserve_held();
+        }
+    }
+
+    // room for the routes held, which `release` sets in a block: a route of each source in every target of a knob
+    // of the filter, a target of each param held (a spare buffer, a place among the targets) whether its target
+    // plays or not (it may be gone by then)
+    fn reserve_held(&mut self) {
+        for target in self.targets.iter_mut().filter(|target| of_filter(target.module)) {
+            target.routes.reserve(SOURCES.saturating_sub(target.routes.len()));
+        }
+        let held = &self.held;
+        let params = (0..held.len())
+            .filter(|&i| !held[..i].iter().any(|route| route.param == held[i].param))
+            .count();
+        self.targets.reserve(params);
+        while self.spare.len() < params {
+            self.spare.push((vec![0.0; BLOCK], Vec::with_capacity(SOURCES)));
+        }
+    }
+
+    // the routes of the targets `which` (the others as they are); `gliding`: their amounts glide there, those of a
+    // knob of the filter whose range or scale changed (a change of type: its base too) at once
+    fn update(&mut self, routes: &[VoiceRoute], gliding: bool, which: Which) {
         self.quiet_until = f64::NEG_INFINITY;
         for target in self.targets.iter_mut() {
-            for route in target.routes.iter_mut() {
-                route.removed = true;
+            if which.takes(target.module) {
+                for route in target.routes.iter_mut() {
+                    route.removed = true;
+                }
             }
         }
+        // the params whose amounts change at once (bits of their ids)
+        let mut jumps: u128 = 0;
         for route in routes {
             let source = route.source;
             // not a whole index of a source, of an envelope the voice has not, or an LFO where none is read
@@ -273,6 +353,9 @@ impl Modulation {
             let Some((module, instance, knob)) = targets::of(route.param) else {
                 continue;
             };
+            if !which.takes(module) {
+                continue;
+            }
             let scale = if route.scale == LOG || route.scale == POW {
                 route.scale
             } else {
@@ -282,17 +365,20 @@ impl Modulation {
             let index = match self.targets.iter().position(|target| target.param == route.param) {
                 Some(index) => index,
                 None => {
+                    // (a spare buffer: never written while it waits, its values are 0)
+                    let (values, routes) = self.spare.pop().unwrap_or_else(|| (vec![0.0; BLOCK], Vec::new()));
                     self.targets.push(Target {
                         param: route.param,
                         module,
                         instance,
                         knob,
-                        routes: Vec::new(),
+                        routes,
                         min: route.min,
                         max: route.max,
                         scale,
                         wrap,
-                        values: vec![0.0; BLOCK],
+                        sparse: module == FILTER && (knob == CUTOFF || knob == FILTER_GAIN),
+                        values,
                         one: [0.0],
                         current: Current::None,
                         base: f64::NAN,
@@ -301,6 +387,11 @@ impl Modulation {
                 }
             };
             let target = &mut self.targets[index];
+            if of_filter(module)
+                && (target.min != route.min || target.max != route.max || target.scale != scale)
+            {
+                jumps |= 1 << route.param;
+            }
             target.min = route.min;
             target.max = route.max;
             target.scale = scale;
@@ -330,9 +421,16 @@ impl Modulation {
         }
         let glide = self.glide;
         for target in self.targets.iter_mut() {
+            if !which.takes(target.module) {
+                continue;
+            }
+            let jump = jumps >> target.param & 1 != 0;
             for route in target.routes.iter_mut() {
                 if route.removed {
                     route.target = 0.0;
+                }
+                if jump {
+                    route.amount = route.target;
                 }
                 route.step = (route.target - route.amount) / glide;
                 route.offset_step = (route.offset_target - route.offset) / glide;
@@ -343,7 +441,29 @@ impl Modulation {
 
     /// the routes of a playing note changed: their amounts glide
     pub fn set(&mut self, routes: &[VoiceRoute]) {
-        self.set_routes(routes, true);
+        self.set_routes(routes, true, false);
+    }
+
+    /// the routes of a playing note changed while a change of type of its filter waits for the end of a fade: their
+    /// amounts glide, those of the knobs of the filter wait for `release` (they play as they were until then)
+    pub fn set_holding(&mut self, routes: &[VoiceRoute]) {
+        self.set_routes(routes, true, true);
+    }
+
+    /// the change of type came: the knobs of the filter take the routes that waited for it
+    pub fn release(&mut self) {
+        if !self.holding {
+            return;
+        }
+        self.holding = false;
+        let held = core::mem::take(&mut self.held);
+        self.update(&held, true, Which::Filter);
+        self.held = held;
+        self.held.clear();
+    }
+
+    pub fn holds(&self) -> bool {
+        self.holding
     }
 
     pub fn renders(&self, k: usize, end: f64) -> bool {
@@ -362,6 +482,11 @@ impl Modulation {
 
     pub fn wake(&mut self) {
         self.quiet_until = f64::NEG_INFINITY;
+    }
+
+    /// a route moves `param` (its target is there: `apply` reads its base)
+    pub fn moves(&self, param: usize) -> bool {
+        self.targets.iter().any(|target| target.param == param)
     }
 
     pub fn raises(&self, param: usize) -> bool {
@@ -392,7 +517,8 @@ impl Modulation {
         let mut quiet = true;
         let mut dropped = false;
         for target in self.targets.iter_mut() {
-            let (min_value, max_value, scale, wrap) = (target.min, target.max, target.scale, target.wrap);
+            let (min_value, max_value, scale, wrap, sparse) =
+                (target.min, target.max, target.scale, target.wrap, target.sparse);
             let base = bases.base(target.module, target.instance, target.knob);
             // (128 equal values in Firefox are one value too: the per-sample path cost +19% of a voice there)
             let mut constant = is_constant(base);
@@ -460,7 +586,7 @@ impl Modulation {
                 } else {
                     value
                 } as f32;
-                if p > from {
+                if p > from && !sparse {
                     let start = values[from as usize] as f64;
                     let slope = (values[p as usize] as f64 - start) / (p - from);
                     let mut i = from + 1.0;
@@ -494,9 +620,11 @@ impl Modulation {
                     }
                 }
             }
-            let (first, end) = (values[a as usize], values[b as usize - 1]);
-            values[..a as usize].fill(first);
-            values[b as usize..n].fill(end);
+            if !sparse {
+                let (first, end) = (values[a as usize], values[b as usize - 1]);
+                values[..a as usize].fill(first);
+                values[b as usize..n].fill(end);
+            }
             target.current = Current::Values;
         }
         if dropped {
@@ -610,6 +738,159 @@ mod tests {
         // a log one in octaves around it
         let log = moved_one(&[route(0.0, CUTOFF1, 2.0, LOG, true)], CUTOFF1, 4.0, 1.0, false);
         assert_eq!(log, Some(8.0));
+    }
+
+    // a change of type of the filter waits for the end of a fade: the routes of its knobs sent with it wait for it,
+    // those that play keep their amounts and ranges until it comes (then their amounts change at once, as the knobs
+    // do), the others take theirs at once
+    #[test]
+    fn the_routes_of_the_knobs_of_the_filter_wait_for_its_type() {
+        use crate::targets::{FILTER_EXTRA, RESONANCE, VARIATION};
+        let resonance = target(FILTER, 0, RESONANCE);
+        let variation = target(FILTER_EXTRA, 0, VARIATION);
+        let ranged = |param: usize, amount: f64, max: f64| VoiceRoute {
+            min: 0.0,
+            max,
+            ..route(1.0, param, amount, LINEAR, false)
+        };
+        // Res in dB of a Biquad LP (0..20), Var of none; Res in % of a model type (0..100), its Var
+        let web = [ranged(resonance, 10.0, 20.0), ranged(GAIN1, 1.0, 2.0)];
+        let model = [
+            ranged(resonance, 50.0, 100.0),
+            ranged(GAIN1, 2.0, 4.0),
+            ranged(variation, 30.0, 100.0),
+        ];
+        let mut modulation = Modulation::new(
+            RATE_48,
+            3,
+            false,
+            &web,
+            only(resonance) | only(GAIN1) | only(variation),
+        );
+        let envelopes = envelopes(1.0);
+        let velocity = Glided::new(0.0);
+        let one = [1.0f32];
+        let mut frame = 0.0;
+        // the value of `param` at the last sample of `blocks` blocks
+        let mut moved = |modulation: &mut Modulation, blocks: usize, param: usize| {
+            let bases = Bases::new(&one);
+            let sources = Sources {
+                envelopes: &envelopes,
+                velocity: &velocity,
+                lfos: &[],
+            };
+            for _ in 0..blocks {
+                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+                frame += 128.0;
+            }
+            modulation.moved(param).map(|values| values[values.len() - 1])
+        };
+        // (past the glide of an amount)
+        let glided = 64;
+        modulation.set_holding(&model);
+        assert!(modulation.holds());
+        assert_eq!(moved(&mut modulation, glided, resonance), Some(11.0));
+        assert_eq!(moved(&mut modulation, 0, GAIN1), Some(3.0));
+        assert_eq!(moved(&mut modulation, 0, variation), None);
+        modulation.release();
+        assert!(!modulation.holds());
+        // (from its first block: the amount of the next type, not one gliding there from that of the type before)
+        assert_eq!(moved(&mut modulation, 1, resonance), Some(51.0));
+        assert_eq!(moved(&mut modulation, glided, variation), Some(31.0));
+        // a change of type that doesn't wait: at once too
+        modulation.set(&web);
+        assert_eq!(moved(&mut modulation, 1, resonance), Some(11.0));
+        // routes set again before it came (back to the type that plays): theirs, none held
+        modulation.set_holding(&model);
+        modulation.set(&web);
+        assert!(!modulation.holds());
+        assert_eq!(moved(&mut modulation, 1, resonance), Some(11.0));
+        modulation.release();
+        assert_eq!(moved(&mut modulation, 1, resonance), Some(11.0));
+    }
+
+    // the routes held come in a block, where a core never allocates: the room of their targets is made with them (a
+    // new source of a target that plays, a param no route moved, one whose target is gone by then)
+    #[test]
+    fn the_routes_held_come_without_memory() {
+        use crate::targets::{DRIVE, FILTER_EXTRA, RESONANCE, VARIATION};
+        use crate::tests::without_memory;
+        let resonance = target(FILTER, 0, RESONANCE);
+        let variation = target(FILTER_EXTRA, 0, VARIATION);
+        let drive = target(FILTER_EXTRA, 0, DRIVE);
+        let ranged = |source: f64, param: usize, amount: f64, max: f64| VoiceRoute {
+            min: 0.0,
+            max,
+            ..route(source, param, amount, LINEAR, false)
+        };
+        let accesses = only(resonance) | only(variation) | only(drive) | only(GAIN1);
+        let initial = [
+            ranged(1.0, resonance, 10.0, 20.0),
+            ranged(1.0, variation, 5.0, 100.0),
+        ];
+        let mut modulation = Modulation::new(RATE_48, 3, false, &initial, accesses);
+        let envelopes = envelopes(1.0);
+        let velocity = Glided::new(0.0);
+        let one = [1.0f32];
+        let mut frame = 0.0;
+        let mut moved = |modulation: &mut Modulation, blocks: usize, param: usize| {
+            let bases = Bases::new(&one);
+            let sources = Sources {
+                envelopes: &envelopes,
+                velocity: &velocity,
+                lfos: &[],
+            };
+            for _ in 0..blocks {
+                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+                frame += 128.0;
+            }
+            modulation.moved(param).map(|values| values[values.len() - 1])
+        };
+        let glided = 64;
+        // (the route of Res glides out: its target goes while the others wait)
+        modulation.set(&[ranged(1.0, GAIN1, 1.0, 2.0), ranged(1.0, variation, 5.0, 100.0)]);
+        modulation.set_holding(&[
+            ranged(1.0, GAIN1, 1.0, 2.0),
+            ranged(1.0, resonance, 50.0, 100.0),
+            ranged(2.0, resonance, 20.0, 100.0),
+            ranged(1.0, variation, 30.0, 100.0),
+            ranged(2.0, variation, 10.0, 100.0),
+            ranged(0.0, drive, 40.0, 100.0),
+        ]);
+        assert_eq!(moved(&mut modulation, glided, resonance), None);
+        assert_eq!(moved(&mut modulation, 0, variation), Some(6.0));
+        assert_eq!(moved(&mut modulation, 0, drive), None);
+        without_memory(|| modulation.release());
+        assert_eq!(moved(&mut modulation, glided, resonance), Some(71.0));
+        assert_eq!(moved(&mut modulation, 0, variation), Some(41.0));
+        assert_eq!(moved(&mut modulation, 0, drive), Some(41.0));
+    }
+
+    // the routes of a knob of the filter in the same range (a type of the same units): their amounts glide
+    #[test]
+    fn the_amounts_of_a_knob_of_the_filter_in_the_same_range_glide() {
+        use crate::targets::RESONANCE;
+        let resonance = target(FILTER, 0, RESONANCE);
+        let ranged = |amount: f64| VoiceRoute {
+            min: 0.0,
+            max: 100.0,
+            ..route(1.0, resonance, amount, LINEAR, false)
+        };
+        let mut modulation = Modulation::new(RATE_48, 3, false, &[ranged(10.0)], only(resonance));
+        let envelopes = envelopes(1.0);
+        let velocity = Glided::new(0.0);
+        let one = [1.0f32];
+        let bases = Bases::new(&one);
+        let sources = Sources {
+            envelopes: &envelopes,
+            velocity: &velocity,
+            lfos: &[],
+        };
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.set(&[ranged(50.0)]);
+        modulation.apply(&bases, &sources, 128.0, 0.0, 128.0, 128);
+        let last = modulation.moved(resonance).expect("moved")[127];
+        assert!(last > 11.0 && last < 51.0, "{last}");
     }
 
     #[test]

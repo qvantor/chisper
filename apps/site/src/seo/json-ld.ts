@@ -13,7 +13,7 @@ export const FEATURES = [
   'Two wavetable oscillators, tables of up to 256 frames',
   'Supersaw unison of up to 8 voices per oscillator with Detune and Blend',
   'Noise oscillator: 90 samples (white, pink and brown noise, drum transients, textures), loop or one-shot, Pitch Track',
-  'A filter in every voice, 8 types',
+  'A filter in every voice, 30 types: ladder, low and high pass of 6 to 24 dB, band, peak, notch, EQ; Drive and Comp',
   'Three envelopes, four LFOs and velocity routed to any knob',
   'Tempo sync and MIDI Clock',
   'Distortion, chorus, delay, a compressor and reverb in any order, a master limiter',

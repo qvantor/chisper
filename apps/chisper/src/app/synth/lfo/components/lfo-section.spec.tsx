@@ -9,12 +9,15 @@ import {
   createModulation,
   createSynthCore,
   createTransport,
+  initModel,
 } from '../../../../test-utils/models';
 import { EnvelopesContext } from '../../common/modules/envelopes';
 import { LfoContext } from '../../common/modules/lfos';
 import { ModulationContext } from '../../common/modules/modulation';
 import { SynthCoreContext } from '../../common/modules/synth-core';
 import { TransportContext } from '../../common/modules/transport';
+import { filter } from '../../filter/modules/filter';
+import { FilterContext } from '../../filter/modules';
 import { LFO_STATE_INTERVAL } from '../../common/lfo/lfo-curve';
 import { shapeOptionOf } from '../lfo-shapes';
 import { LfoSection } from './lfo-section';
@@ -57,16 +60,20 @@ const setup = () => {
   const transport = createTransport(synthCore);
   const lfos = createLfos(synthCore, transport);
   const modulation = createModulation();
+  const filterModule = initModel(filter({ synthCore }), 'filter', undefined);
   render(
     <SynthCoreContext.Provider value={synthCore}>
       <TransportContext.Provider value={transport}>
         <EnvelopesContext.Provider value={envelopes}>
           <LfoContext.Provider value={lfos}>
             <ModulationContext.Provider value={modulation}>
-              <LfoSection />
-              <div data-mod-target='osc1.wave' data-testid='wave' />
-              <div data-mod-target='filter.gain' data-testid='gain' />
-              <div data-mod-target='lfo2.rate' data-testid='rate' />
+              <FilterContext.Provider value={filterModule}>
+                <LfoSection />
+                <div data-mod-target='osc1.wave' data-testid='wave' />
+                <div data-mod-target='filter.gain' data-testid='gain' />
+                <div data-mod-target='filter.var' data-testid='var' />
+                <div data-mod-target='lfo2.rate' data-testid='rate' />
+              </FilterContext.Provider>
             </ModulationContext.Provider>
           </LfoContext.Provider>
         </EnvelopesContext.Provider>
@@ -78,7 +85,7 @@ const setup = () => {
       .map(([props]) => props as HandleProps)
       .filter((props) => props.label === label)
       .at(-1) as HandleProps;
-  return { envelopes, lfos, modulation, transport, knob };
+  return { envelopes, lfos, modulation, transport, filter: filterModule, knob };
 };
 
 describe('LfoSection', () => {
@@ -345,6 +352,18 @@ describe('LfoSection', () => {
     expect(modulation[0].$routes.value).toEqual([
       { source: 'lfo2', target: 'osc1.wave', amount: 0.5 },
       { source: 'lfo2', target: 'filter.gain', amount: 0.5, bipolar: true },
+    ]);
+  });
+
+  it('a tab dragged onto Var assigns its LFO bipolar where it is the Gain of the band of an EQ type', () => {
+    const { modulation, filter } = setup();
+    act(() => filter[1].setType('ladder12'));
+    dragTab('LFO 1', screen.getByTestId('var'));
+    act(() => filter[1].setType('loweq12'));
+    dragTab('LFO 2', screen.getByTestId('var'));
+    expect(modulation[0].$routes.value).toEqual([
+      { source: 'lfo1', target: 'filter.var', amount: 0.5 },
+      { source: 'lfo2', target: 'filter.var', amount: 0.5, bipolar: true },
     ]);
   });
 });

@@ -20,3 +20,5 @@ pub use pow::pow;
 pub const PI: f64 = core::f64::consts::PI;
 /// Math.SQRT2
 pub const SQRT2: f64 = core::f64::consts::SQRT_2;
+/// Math.LN10
+pub const LN_10: f64 = core::f64::consts::LN_10;

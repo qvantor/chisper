@@ -3,11 +3,13 @@ import { styled } from 'styled-components';
 import cls from 'classnames';
 import { distinctUntilChanged, map } from 'rxjs';
 import { MdDragIndicator } from 'react-icons/md';
-import { ModSource } from '@chisper/preset-schema';
+import { isLfo, ModSource } from '@chisper/preset-schema';
 import { startModDrag, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import { ModRoute } from '../common/modules/modulation';
 import { useEnvelopes, useModulation } from '../common/modules';
+import { centered } from '../common/modulation/modulation-targets';
+import { FilterContext } from '../filter/modules';
 import { SOURCE_COLORS, SOURCE_LABELS } from '../envelope/envelope-colors';
 
 // the whole header (a plain one): a segmented control on its grey, as high as the other headers
@@ -112,12 +114,14 @@ const sameCounts = (a: number[], b: number[]) => a.every((count, i) => count ===
 
 // the tabs of sources in the header of a section, ENV 1 | ENV 2 | ENV 3, VELO or LFO 1 | … | LFO 4: the selected one
 // (of every source, the tabs of the other sections too) is the source the knobs show the routes of. A tab dragged
-// onto a knob assigns its source to it at +50% (bipolar on a knob centered on 0) and selects it, the knobs show the
-// new route at once (a click selects it), the grip of the selected one tells it. The dot of a tab has the number
-// of the routes of its source: a route added or removed renders the tabs, not an amount
+// onto a knob assigns its source to it at +50% (an LFO bipolar on a knob centered on 0: Var of an EQ type by the type
+// of the filter) and selects it, the knobs show the new route at once (a click selects it), the grip of the selected
+// one tells it. The dot of a tab has the number of the routes of its source: a route added or removed renders the
+// tabs, not an amount
 export const SourceTabs = <S extends ModSource>({ label, sources, shown, onSelect, accepts }: Props<S>) => {
   const [{ $selected }, { select: selectSource }] = useEnvelopes();
   const [{ $routes }, { addRoute }] = useModulation();
+  const filter = React.useContext(FilterContext)?.[0];
   const selected = useBehaviorSubject($selected);
   const $counts = React.useMemo(
     () =>
@@ -149,7 +153,7 @@ export const SourceTabs = <S extends ModSource>({ label, sources, shown, onSelec
               color: SOURCE_COLORS[id],
               accepts,
               onDrop: (target) => {
-                addRoute(id, target);
+                addRoute(id, target, undefined, isLfo(id) && centered(target, filter?.$filterType.value));
                 select(id);
               },
             })

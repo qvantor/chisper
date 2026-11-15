@@ -28,6 +28,8 @@ const osc = (key, values = {}) => ({
 });
 const OFF = { a: false };
 const FILTER = { a: true, t: 'lowpass', cut: 2500, res: 6 };
+// the filter of F1: a ladder with its resonance saturating, Drive and FAT on (the costliest model type)
+const LADDER24 = { a: true, t: 'ladder24', cut: 2500, res: 60, dr: 40, v: 50 };
 const NO_FILTER = { a: false };
 const ADSR = { attack: 0.01, hold: 0.1, decay: 0.3, sustain: 0.8, release: 0.3 };
 // a sharp onset for the latency cases: no attack, every unison voice at its phase
@@ -119,6 +121,15 @@ export const CPU_CASES = [
     notes: HELD,
   },
   {
+    id: 'F1',
+    group: 'cpu',
+    title: 'the heavy patch through Ladder 24 (Res 60, Drive 40, FAT 50), 12 notes',
+    snapshot: { ...HEAVY, filter: LADDER24 },
+    // (a tree without the model types of the filter can't take the snapshot: the heavy patch there, its lowpass)
+    fallback: HEAVY,
+    notes: HELD,
+  },
+  {
     id: 'S5s',
     group: 'cpu',
     title: 'the heavy patch and the sub, 12 notes',
@@ -170,6 +181,159 @@ export const CPU_CASES = [
   },
 ];
 
+// --- the matrix (--only=matrix): every part alone over a light patch, at rest and modulated by LFO 1 (8 Hz) ---
+// What costs what in the browser: the light patch (one oscillator, u1, no filter, no effect, 12 notes held), the
+// oscillators, every filter type (at rest, Drive/Var high, every knob moved by LFO 1) and every effect (at rest,
+// in its modes, every knob moved by LFO 1). Read it with `matrix.mjs` (Mcps over the light patch)
+
+const LIGHT = patch({ osc1: osc(TABLES.saw303) });
+const LFO_FAST = { lfo: { l1: { rate: 8 } } };
+const withMod = (snapshot, targets, amount = 0.3) => ({
+  ...snapshot,
+  ...LFO_FAST,
+  mod: Object.fromEntries(targets.map((target) => [`lfo1:${target}`, { a: amount, bi: true }])),
+});
+const fxOnly = (type, values = {}) => ({
+  ...LIGHT,
+  fx: { o: [type], [type]: { a: true, on: true, ...values } },
+});
+const matrixCase = (id, title, snapshot) => ({ id, group: 'matrix', title, snapshot, notes: HELD });
+
+const MODEL = [
+  'ladder6',
+  'ladder12',
+  'ladder18',
+  'ladder24',
+  'low6',
+  'low12',
+  'low18',
+  'low24',
+  'high6',
+  'high12',
+  'high18',
+  'high24',
+  'band12',
+  'band24',
+  'peak12',
+  'peak24',
+  'notch12',
+  'notch24',
+  'loweq6',
+  'loweq12',
+  'bandeq12',
+  'higheq6',
+  'higheq12',
+];
+const EQ = (type) => type.includes('eq');
+const filterCases = () => [
+  matrixCase('lowpass rest', 'web lowpass at rest', {
+    ...LIGHT,
+    filter: { a: true, t: 'lowpass', cut: 1200, res: 6 },
+  }),
+  matrixCase(
+    'lowpass mod',
+    'web lowpass, cutoff, res and gain moved by LFO 1',
+    withMod({ ...LIGHT, filter: { a: true, t: 'lowpass', cut: 1200, res: 6, gain: 0 } }, [
+      'filter.cutoff',
+      'filter.resonance',
+      'filter.gain',
+    ])
+  ),
+  ...MODEL.flatMap((type) => {
+    const filter = { a: true, t: type, cut: 1200, res: 50, dr: 0, v: 0 };
+    const knobs = ['filter.cutoff', 'filter.resonance', 'filter.drive', 'filter.var', 'filter.gain'];
+    return [
+      matrixCase(`${type} rest`, `${type} at rest (Res 50)`, { ...LIGHT, filter }),
+      matrixCase(`${type} drive100`, `${type} Drive 100, Var 100`, {
+        ...LIGHT,
+        filter: { ...filter, dr: 100, v: 100 },
+      }),
+      matrixCase(
+        `${type} mod`,
+        `${type}, every knob moved by LFO 1`,
+        withMod({ ...LIGHT, filter: { ...filter, dr: 40, v: 40 } }, knobs)
+      ),
+    ];
+  }),
+];
+
+const FX_MATRIX = {
+  distortion: {
+    rest: [{ mode: 0 }, { mode: 1, drive: 12 }],
+    knobs: ['drive', 'tone', 'level', 'mix'],
+    values: { mode: 0, drive: 8, tone: 8000 },
+  },
+  chorus: {
+    rest: [
+      { rate: 0.5, depth: 10, fb: 0.1 },
+      { rate: 2, depth: 26, fb: 0.9, d1: 15, d2: 10 },
+    ],
+    knobs: ['rate', 'd1', 'd2', 'depth', 'fb', 'cut', 'level', 'mix'],
+    values: { rate: 2, depth: 10, fb: 0.5, cut: 8000, mix: 0.5 },
+  },
+  delay: {
+    rest: [
+      { time: 0.3, fb: 0.5 },
+      { time: 0.3, fb: 0.9, mode: 1, q: 3 },
+    ],
+    knobs: ['time', 'fb', 'pan', 'freq', 'q', 'mix'],
+    values: { time: 0.3, fb: 0.5, mix: 0.5 },
+  },
+  compressor: {
+    rest: [
+      { multi: 0, thresh: 0.5, ratio: 8 },
+      { multi: 1, thresh: 0.5, ratio: 8, below: 0.5 },
+    ],
+    knobs: [
+      'thresh',
+      'ratio',
+      'attack',
+      'release',
+      'gain',
+      'xlow',
+      'xhigh',
+      'below',
+      'low',
+      'mid',
+      'high',
+      'level',
+      'mix',
+    ],
+    values: { multi: 1, thresh: 0.5, ratio: 8, below: 0.5, mix: 1 },
+  },
+  reverb: {
+    rest: [
+      { decay: 1, size: 0.3, mix: 0.3 },
+      { decay: 10, size: 1, mix: 0.5 },
+    ],
+    knobs: ['lowcut', 'pre', 'size', 'decay', 'damp', 'bass', 'depth', 'sep', 'er', 'mix'],
+    values: { decay: 3, size: 0.5, mix: 0.3 },
+  },
+};
+const fxCases = () =>
+  Object.entries(FX_MATRIX).flatMap(([type, { rest, knobs, values }]) => [
+    ...rest.map((v, i) =>
+      matrixCase(`${type} rest ${i + 1}`, `${type} at rest: ${JSON.stringify(v)}`, fxOnly(type, v))
+    ),
+    matrixCase(
+      `${type} mod`,
+      `${type}, every knob moved by LFO 1`,
+      withMod(
+        fxOnly(type, values),
+        knobs.map((k) => `${type}.${k}`)
+      )
+    ),
+  ]);
+
+const OSC_CASES = [
+  matrixCase('light (osc u1)', 'one oscillator, u1, no filter, no effect', LIGHT),
+  matrixCase('osc u8', 'one oscillator, unison 8', patch({ osc1: osc(TABLES.saw303, { u: 8, d: 25 }) })),
+  matrixCase('osc 2 x u8', 'two oscillators, unison 8', patch(BOTH_U8)),
+  matrixCase('sub', 'light patch and the sub', { ...LIGHT, sub: SUB }),
+];
+
+export const MATRIX_CASES = [...OSC_CASES, ...filterCases(), ...fxCases()];
+
 // --- latency: real input, one run each (README: latency) ---
 
 // keys of the QWERTY keyboard of the app and their notes (keyboard-controller.ts)
@@ -210,6 +374,10 @@ export const LATENCY_CASES = [
 // the cases of a run: all of them, or those --only names (ids, or the groups cpu and latency)
 export const selectCases = ({ only }) => {
   const all = [...CPU_CASES, ...LATENCY_CASES];
+  if (only === 'matrix') {
+    const match = process.env.MATRIX_MATCH && new RegExp(process.env.MATRIX_MATCH);
+    return match ? MATRIX_CASES.filter(({ id }) => match.test(id)) : MATRIX_CASES;
+  }
   if (!only) return all;
   const wanted = only.split(',');
   return all.filter((kase) => wanted.includes(kase.id) || wanted.includes(kase.group));

@@ -73,7 +73,8 @@ Eine Route ist entweder:
   richtig für Vibrato oder ein Panning, das nach links und rechts wandert.
 
 Ein LFO, den du auf einen Regler mit einem um null zentrierten Bereich ziehst (**Pan**, **Pitch**, **Fine**,
-**Crs** des Subs, Gain des Filters), startet bipolar; jede andere Route startet unipolar.
+**Crs** des Subs, Gain des Filters, Gain eines EQ-Typs mit 0 dB in seiner Mitte), startet bipolar; jede andere
+Route startet unipolar.
 
 | Geste | Was sie bewirkt |
 |---|---|
@@ -104,8 +105,11 @@ entfernt alle seine Routen. Ein Regler ohne Routen sagt *Drag a source tab here 
 - **Osc 1** und **Osc 2**: Gain, Wave, Detune, Blend, Pitch (auf dem Feld **Semi**) und Fine. **Oct** nimmt keine
   an.
 - **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
-- **Filter**: Cutoff, Res, Gain. Eine Route bleibt auf einem Regler, den der Filtertyp nicht nutzt, und wirkt
+- **Filter**: Cutoff, Res (oder Q), Gain, Drive und Comp. Das Gain eines EQ-Typs ist nicht das Gain eines
+  Biquad-Typs: Es ist der Regler von Comp, eine Route darauf bewegt also Comp der anderen Typen, und eine Route auf
+  dem Gain eines Biquad-Kuhschwanzes oder der Bell bewegt es nicht. Eine Route bleibt auf einem Regler, den der Filtertyp nicht nutzt, und wirkt
   wieder, sobald du einen Typ wählst, der ihn nutzt.
+
 - **Effekte**: jeder Regler und der Mix jedes Effekts (Drive, Tone und Level der Distortion; Time, Feedback, Freq,
   Q und Pan des Delays; die Regler des Chorus und des Kompressors; die Regler und Fader des Reverbs). Ihre
   Schalter nehmen keine an.

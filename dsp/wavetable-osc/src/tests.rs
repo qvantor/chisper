@@ -453,6 +453,68 @@ fn an_event_without_memory_ends_its_voice_the_others_take_theirs() {
     scope.end(&mut store, &mut shared);
 }
 
+// the voices that wait for the next one: a pair, more while every one is wide (Ladder 12 from Res 40 % on) in one
+// layout; a wide pair that waits finishes alone before one that is not, which waits for the next one in turn (not a
+// group of three whose last runs alone); wide ones before one wide in another layout too, which waits with its own
+#[test]
+fn a_voice_that_is_not_wide_after_a_wide_pair_waits_for_the_next_one() {
+    use crate::filter::{FilterOptions, Kind as FilterKind};
+    use dsp_core::filter_model::ModelType;
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    let mut scope = Scope::new(RATE, [(-BIG, BIG); PARAMS]);
+    let filtered = |(ty, resonance): (ModelType, f64)| VoiceOptions {
+        filter: Some(FilterOptions {
+            kind: FilterKind::Model(ty),
+            cutoff: 1000.0,
+            resonance,
+            gain: 0.0,
+            drive: 0.0,
+            variation: 0.0,
+        }),
+        ..note()
+    };
+    let play =
+        |scope: &mut Scope, store: &mut Store, shared: &mut Shared, resonances: &[(ModelType, f64)]| {
+            // (the gate held)
+            let mut held = [0.0; PARAMS];
+            held[1] = 1.0;
+            for (k, &resonance) in resonances.iter().enumerate() {
+                scope.on(
+                    k as f64 + 1.0,
+                    filtered(resonance),
+                    held,
+                    false,
+                    false,
+                    store,
+                    shared,
+                );
+            }
+            scope.finished.clear();
+            scope.process(0.0, 128, store, shared);
+            let finished = core::mem::take(&mut scope.finished);
+            scope.end(store, shared);
+            finished
+        };
+    let ladders = |resonances: &[f64]| -> Vec<(ModelType, f64)> {
+        resonances.iter().map(|&res| (ModelType::Ladder12, res)).collect()
+    };
+    // (wide, wide, plain, plain, wide, wide)
+    let pattern = ladders(&[80.0, 80.0, 20.0, 20.0, 80.0, 80.0]);
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &pattern), [2, 2, 2]);
+    let wide = ladders(&[80.0; 6]);
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &wide), [4, 2]);
+    let plain = ladders(&[20.0, 20.0, 20.0]);
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &plain), [2, 1]);
+    // wide in two layouts (Ladder 12, Low 12): a group of each, never one of both (its pairs would each run alone)
+    let (ladder, low) = ((ModelType::Ladder12, 80.0), (ModelType::Low12, 80.0));
+    let two = [ladder, ladder, ladder, low, low];
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &two), [3, 2]);
+    let pairs = [ladder, ladder, low, low];
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &pairs), [2, 2]);
+    let turns = [ladder, low, low, ladder, ladder];
+    assert_eq!(play(&mut scope, &mut store, &mut shared, &turns), [1, 2, 2]);
+}
+
 #[test]
 fn a_voice_of_mono_lives_on_release_lead_after_its_release_a_note_meanwhile_takes_it_over() {
     let (mut store, mut shared) = (Store::default(), Shared::default());

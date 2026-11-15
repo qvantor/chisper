@@ -3,7 +3,7 @@
 //! into one stereo output (ported from the TS; the loops that read the tables are in fixed point and f32 lanes)
 
 use crate::envelope::{EnvelopeBlock, EnvelopeParams};
-use crate::filter::{self, FilterOptions, VoiceFilter};
+use crate::filter::{self, Designs, FilterOptions, VoiceFilter};
 use crate::lfo::{LfoBlock, LfoGlobal, DELAY, KNOBS, LFOS, RATE, RISE, SMOOTH};
 use crate::modulation::{lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
 use crate::noise::{Noise, NoiseOptions};
@@ -12,11 +12,12 @@ use crate::source::{each_source, RenderCx, Slots, Source, StartCx, ZERO};
 use crate::store::{EntryRef, Levels, Store, FRAME_GUARD};
 use crate::sub::{Sub, SubOptions};
 use crate::targets::{
-    self, mask, BLEND, CUTOFF, FILTER, FILTER_GAIN, FINE, GAIN, LFO_KNOBS, OSC, PITCH, POSITION, RESONANCE,
-    SPREAD,
+    self, mask, BLEND, CUTOFF, DRIVE, FILTER, FILTER_EXTRA, FILTER_GAIN, FINE, GAIN, LFO_KNOBS, OSC, PITCH,
+    POSITION, RESONANCE, SPREAD, VARIATION,
 };
 use crate::velocity::{PendingVelocities, Velocity, VoiceVelocity, Volume};
 use alloc::{boxed::Box, vec, vec::Vec};
+use dsp_core::filter_model::Layout;
 use dsp_core::simd::{F32x4, U32x4};
 use jsmath::{ceil, cos, floor, log2, max, min, pow, round, sin, PI};
 
@@ -1627,6 +1628,10 @@ impl BaseOf for VoiceBases<'_> {
         if module == FILTER {
             return self.filter.base(knob);
         }
+        if module == FILTER_EXTRA {
+            // (after the knobs of FILTER)
+            return self.filter.base(targets::MODULES[FILTER].1 + knob);
+        }
         self.slots.base(module, instance, knob, self.params, self.n)
     }
 }
@@ -1738,7 +1743,7 @@ impl Voice {
             }
         }
         // the params the routes move: the knobs of the sources on, of the filter
-        let mut accesses = mask(FILTER, 0);
+        let mut accesses = mask(FILTER, 0) | mask(FILTER_EXTRA, 0);
         each_source!(slots, source => accesses |= source.targets());
         let modulation = Modulation::new(sample_rate, envelopes.len(), true, &options.routes, accesses);
         // the knobs of the LFOs: no LFO moves them
@@ -1912,7 +1917,13 @@ impl Voice {
         if routes.iter().any(|route| route.source >= LFO as f64) {
             self.lfos.iter_mut().for_each(LfoBlock::reserve);
         }
-        self.modulation.set(routes);
+        // (a change of type of the filter that waits for the end of a fade: its knobs keep the ranges of the type
+        // that plays until it comes)
+        if self.filter.waits() {
+            self.modulation.set_holding(routes);
+        } else {
+            self.modulation.set(routes);
+        }
         self.lfo_mod.set(routes);
         // a knob of an LFO a route moves now (its Delay: a flat LFO may end sooner)
         for lfo in self.lfos.iter_mut() {
@@ -2021,13 +2032,13 @@ impl Voice {
     ) -> bool {
         let (playing, filtered) = self.render(frame, params, bend, out_l, out_r, store, shared);
         if let Some((a, b)) = filtered {
-            self.finish(frame, a, b, out_l, out_r);
+            self.finish(frame, a, b, out_l, out_r, None);
         }
         playing
     }
 
     /// The block of `process` up to the filter: whether the voice still plays and, with its filter on, the a..b
-    /// its channels hold unfiltered (silence around them), for `finish` or `finish_pair` to end the block. The
+    /// its channels hold unfiltered (silence around them), for `finish` or `finish_group` to end the block. The
     /// voices of a node finish in pairs: the filters of two in the lanes of one
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -2093,6 +2104,12 @@ impl Voice {
         }
         let b = max(a, min(nf, self.stop_frame - frame));
         self.envelopes[0].render(frame, a, b);
+        // (the ranges of the routes of the knobs of the filter held for a change of its type: with it, before the
+        // sources of the routes are asked for, which render those the routes held read, and the routes of the cutoff)
+        self.filter.switch_type();
+        if self.modulation.holds() && !self.filter.waits() {
+            self.modulation.release();
+        }
         // (the LFOs and the routes of their knobs only while a route of a param reads an LFO)
         let lfos = self.modulation.active && self.modulation.uses_lfos();
         if self.modulation.active {
@@ -2107,7 +2124,10 @@ impl Voice {
             self.render_lfos(frame, a, b, n, shared);
         }
         if self.filter.on {
-            self.filter.glide(n);
+            // (the cutoff no route reads: the filter alone, at the starts of its spans from a)
+            let read = targets::target(FILTER, 0, CUTOFF);
+            let alone = !(self.modulation.active && self.modulation.moves(read));
+            self.filter.glide(n, alone.then_some(a as usize));
         }
         each_source!(self.slots, source => source.glide(a as usize, b as usize));
         if self.modulation.active {
@@ -2170,38 +2190,60 @@ impl Voice {
         (true, filtered)
     }
 
-    /// the end of a block `render` left unfiltered over a..b: the filter, ENV 1 × the amp of the velocity, the
-    /// fade of a stolen voice
-    pub fn finish(&mut self, frame: f64, a: usize, b: usize, out_l: &mut [f32], out_r: &mut [f32]) {
-        filter::run(
-            &mut self.filter.pass(a, b, filter_moved(&self.modulation)),
-            out_l,
-            out_r,
-        );
+    /// the end of a block `render` left unfiltered over a..b: the filter (with the designs of its node), ENV 1 ×
+    /// the amp of the velocity, the fade of a stolen voice
+    pub fn finish(
+        &mut self,
+        frame: f64,
+        a: usize,
+        b: usize,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        designs: Option<&Designs>,
+    ) {
+        let pass = self.filter.pass(a, b, filter_moved(&self.modulation));
+        let mut pass = match designs {
+            Some(designs) => pass.shared(designs),
+            None => pass,
+        };
+        filter::run(&mut pass, out_l, out_r);
         self.volume(frame, a, b, out_l, out_r);
     }
 
-    /// `finish` of two voices (their a..b, their channels of n samples): both filters in the lanes of one, each
-    /// voice the bits of its own `finish`
-    pub fn finish_pair(
-        voices: [&mut Voice; 2],
+    /// the layout of its filter where, over the a..b `render` left of its block of n, it runs faster in a group of
+    /// four voices of that layout than in a pair (filter::run_group); None: not there
+    pub fn wide(&mut self, a: usize, b: usize, n: usize) -> Option<Layout> {
+        let Voice {
+            filter, modulation, ..
+        } = self;
+        filter.wide(a, b, n, || filter_moved(modulation))
+    }
+
+    /// `finish` of two to four voices (their a..b, their channels of n samples): two in the lanes of one filter, two
+    /// pairs of filters in one loop where they are wide (filter::run_group), else in pairs, each voice the bits of its
+    /// own `finish`
+    pub fn finish_group<const N: usize>(
+        mut voices: [&mut Voice; N],
         frame: f64,
-        spans: [(usize, usize); 2],
-        outs: [[&mut [f32]; 2]; 2],
+        spans: [(usize, usize); N],
+        mut outs: [[&mut [f32]; 2]; N],
         n: usize,
+        designs: &Designs,
     ) {
-        let [p, q] = voices;
-        let [[pl, pr], [ql, qr]] = outs;
-        filter::run_pair(
-            [
-                &mut p.filter.pass(spans[0].0, spans[0].1, filter_moved(&p.modulation)),
-                &mut q.filter.pass(spans[1].0, spans[1].1, filter_moved(&q.modulation)),
-            ],
-            [[&mut *pl, &mut *pr], [&mut *ql, &mut *qr]],
-            n,
-        );
-        p.volume(frame, spans[0].0, spans[0].1, pl, pr);
-        q.volume(frame, spans[1].0, spans[1].1, ql, qr);
+        {
+            let mut spans = spans.into_iter();
+            let mut passes: [filter::Pass; N] = voices.each_mut().map(|voice| {
+                let (a, b) = spans.next().unwrap_or_default();
+                let Voice {
+                    filter, modulation, ..
+                } = &mut **voice;
+                filter.pass(a, b, filter_moved(modulation)).shared(designs)
+            });
+            filter::run_group(&mut passes, &mut outs, n);
+        }
+        for ((voice, (a, b)), [left, right]) in voices.iter().zip(spans).zip(outs.iter_mut()) {
+            voice.volume(frame, a, b, left, right);
+        }
     }
 
     // the filtered channels × ENV 1 × the amp of the velocity, then the fade of a stolen voice
@@ -2231,9 +2273,16 @@ impl Voice {
     }
 }
 
-// the knobs of the filter the routes move (cutoff, resonance, gain), None: its base
-fn filter_moved(modulation: &Modulation) -> [Option<&[f32]>; 3] {
-    [CUTOFF, RESONANCE, FILTER_GAIN].map(|knob| modulation.moved(targets::target(FILTER, 0, knob)))
+// the knobs of the filter the routes move (cutoff, resonance, gain, drive, variation), None: its base
+fn filter_moved(modulation: &Modulation) -> [Option<&[f32]>; filter::KNOBS] {
+    [
+        targets::target(FILTER, 0, CUTOFF),
+        targets::target(FILTER, 0, RESONANCE),
+        targets::target(FILTER, 0, FILTER_GAIN),
+        targets::target(FILTER_EXTRA, 0, DRIVE),
+        targets::target(FILTER_EXTRA, 0, VARIATION),
+    ]
+    .map(|id| modulation.moved(id))
 }
 
 // what the render functions of an oscillator read of its voice

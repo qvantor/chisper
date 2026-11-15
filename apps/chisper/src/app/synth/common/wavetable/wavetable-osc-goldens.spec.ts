@@ -1,7 +1,7 @@
 // first: the Math of JS as jsmath (test-utils/js-math.ts): the inputs and the levels the TS builds the same on every
 // machine (Node's own Math differs in the last bits on arm64), so are the goldens
 import '../../../../test-utils/js-math';
-import type { SubShape } from '@chisper/preset-schema';
+import { MODEL_FILTER_TYPES, type SubShape } from '@chisper/preset-schema';
 import { EnvelopeParams } from '../envelope/envelope-curve';
 import { FREE, LfoPoints, LfosState, lfoTable, LfoWire, nextAnchor, RETRIG } from '../lfo/lfo-curve';
 import { withCurves } from '../../../../test-utils/envelopes';
@@ -704,6 +704,91 @@ const GOLDEN: [string, Scenario][] = [
       seed: 1,
     },
   ]),
+  ...MODEL_FILTER_TYPES.map((type, k): [string, Scenario] => [
+    `the ${type} filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1`,
+    {
+      rate: RATE,
+      blocks: quanta(0.15),
+      tables: { a: [SAW] },
+      voices: [
+        {
+          at: 0,
+          options: note({
+            envelopes: [FLAT, { attack: 0.03, hold: 0, decay: 0.05, sustain: 0.3, release: 0.1 }, FLAT],
+            filter: { type, cutoff: 800, resonance: 60, gain: 0, drive: 30, variation: 40 },
+            routes: [
+              { source: 1, param: 'cutoff', amount: 3, min: 20, max: 20000, scale: 'log' },
+              { source: 4, param: 'drive', amount: 40, min: 0, max: 100 },
+              { source: 4, param: 'variation', amount: -30, min: 0, max: 100 },
+            ],
+          }),
+          params: { frequency: constant(110) },
+          filters: { 20: { type, cutoff: 3000, resonance: 20 + k, gain: 0, drive: 70, variation: 90 } },
+        },
+      ],
+      seed: 1,
+    },
+  ]),
+  // a cutoff that moves alone: between the designs of the cells of its grid (ENV 2 sweeping it of one voice, LFO 1
+  // of the other, whose knob then glides up: two in the lanes of one), from 300 Hz past 10 kHz
+  ...MODEL_FILTER_TYPES.map((type, k): [string, Scenario] => [
+    `the ${type} filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding`,
+    {
+      rate: RATE,
+      blocks: quanta(0.15),
+      tables: { a: [SAW] },
+      voices: [0, 1].map((voice) => ({
+        at: voice * 0.004,
+        options: note({
+          envelopes: [FLAT, { attack: 0.04, hold: 0, decay: 0.06, sustain: 0.2, release: 0.1 }, FLAT],
+          filter: { type, cutoff: 300, resonance: 50 + k, gain: 0, drive: 0, variation: 40 },
+          routes: [
+            voice
+              ? { source: 4, param: 'cutoff', amount: 4, min: 20, max: 20000, scale: 'log', bipolar: true }
+              : { source: 1, param: 'cutoff', amount: 5, min: 20, max: 20000, scale: 'log' },
+          ],
+        }),
+        params: { frequency: constant(110 * (voice + 1)) },
+        filters: { 25: { type, cutoff: 2400, resonance: 50 + k, gain: 0, drive: 0, variation: 40 } },
+      })),
+      lfos: { 0: lfosAtOnce([{ anchor: { time: 0, phase: 0, period: 0.06 } }]) },
+      seed: 3,
+    },
+  ]),
+  ...(
+    [
+      ['lowpass', 'ladder24'],
+      ['ladder12', 'high18'],
+      ['low24', 'bandpass'],
+      ['loweq6', 'peak12'],
+    ] as const
+  ).map(([from, to]): [string, Scenario] => [
+    `a change of the filter from ${from} to ${to} on a playing note: a crossfade`,
+    {
+      rate: RATE,
+      blocks: quanta(0.12),
+      tables: { a: [SAW] },
+      voices: [
+        {
+          at: 0,
+          options: note({
+            filter: {
+              type: from,
+              cutoff: 1200,
+              resonance: from.match(/^[a-z]+$/) ? 6 : 50,
+              gain: 3,
+              drive: 10,
+            },
+          }),
+          params: { frequency: constant(147) },
+          filters: {
+            18: { type: to, cutoff: 1800, resonance: to.match(/^[a-z]+$/) ? 4 : 70, gain: 3, variation: 50 },
+          },
+        },
+      ],
+      seed: 2,
+    },
+  ]),
   [
     'routes to the wave, the gain and the spread, changed on the note',
     {
@@ -1030,6 +1115,8 @@ const KNOBS: [string, number, number, ('log' | 'pow')?][] = [
   ['cutoff', 20, 20000, 'log'],
   ['resonance', -12, 24],
   ['gain', -24, 24],
+  ['drive', 0, 100],
+  ['variation', 0, 100],
   ['pitch1', -1200, 1200],
   ['fine2', -100, 100],
   ['lfo1.rate', 1 / 32, 100, 'log'],
@@ -1111,15 +1198,25 @@ const randomLfos = (random: Random, blocks: number[], rate: number): Record<numb
   }
   return lfos;
 };
-const randomFilter = (random: Random): VoiceFilterOptions | null =>
-  random() < 0.4
-    ? null
-    : {
-        type: pick(random, FILTERS),
-        cutoff: 20 * 2 ** (random() * 10),
-        resonance: between(random, -6, 20),
-        gain: between(random, -18, 18),
-      };
+const randomFilter = (random: Random): VoiceFilterOptions | null => {
+  if (random() < 0.4) return null;
+  // a model type half of the time: its Res, Drive and Var in %
+  if (random() < 0.5)
+    return {
+      type: pick(random, MODEL_FILTER_TYPES),
+      cutoff: 20 * 2 ** (random() * 10),
+      resonance: between(random, 0, 100),
+      gain: 0,
+      drive: random() < 0.5 ? 0 : between(random, 0, 100),
+      variation: between(random, 0, 100),
+    };
+  return {
+    type: pick(random, FILTERS),
+    cutoff: 20 * 2 ** (random() * 10),
+    resonance: between(random, -6, 20),
+    gain: between(random, -18, 18),
+  };
+};
 const randomFrames = (random: Random) =>
   Array.from({ length: 1 + Math.floor(random() * (random() < 0.5 ? 1 : 6)) }, (_, k) => {
     const size = pick(random, [2048, 2048, 1024, 256, 64, 16]);

@@ -106,7 +106,25 @@ Preset sofort, und der Dialog bleibt offen: So hörst du dich eines nach dem and
 8. **Osc 2**: der zweite, in allem gleich; in *Init* ist er aus.
 9. **Noise**: ein Rausch-Oszillator in jeder Stimme: weißes, rosa und braunes Rauschen, Hi-Hats, Vinyl-Knistern
    und mehr, als Loop oder einmal gespielt.
-10. **Filter**: ein Filter in jeder Stimme, acht Typen, mit **Cutoff**, **Res** und **Gain**.
+10. **Filter**: ein Filter in jeder Stimme. Sein Typ steht zwischen **◀ ▶**, die durch alle blättern; ein Klick auf
+    den Namen öffnet sie nach dem, was sie tun: **Low Pass**, **High Pass**, **Band Pass**, **Notch & Peak** und
+    **EQ**. **Ladder** ist ein warmer Leiterfilter, der seinen Bass behält, wenn **Res** steigt; **Low**, **High**,
+    **Band**, **Peak** und **Notch** sind die anderen, die Zahl ihre Flankensteilheit in dB pro Oktave; **Low EQ**,
+    **Band EQ** und **High EQ** ein Kuhschwanz oder eine Glocke, deren **Gain** ihr Band absenkt oder anhebt (0 dB in
+    der Mitte des Reglers, +19 dB ganz oben; von einem Typ mit
+    **Comp** kommend beginnt er bei 0 dB); die **Biquad**-Typen sind die von früher. **Cutoff** bei allen, **Res**
+    bei allen außer Low 6, High 6, Low EQ 6 und High EQ 6 (ein einzelner Pol hat keine Resonanz): in %, bei Biquad LP
+    und HP die Spitze in dB, bei Biquad BP, Notch und Bell ein **Q**; **Drive** (lauter in den Filter, dann gesättigt)
+    bei allen außer den Biquad-Typen, **Comp** (Kompensation: gibt den Pegel zurück, den die Resonanz dem
+    Durchlassbereich nimmt, bei Res 0 tut er also nichts; lauter in den Filter, seine Resonanz härter getrieben) bei
+    Ladder, Low, High, Band, Peak und Notch außer Low 6 und High 6, **Gain** in dB bei den EQ-Typen und den
+    Kuhschwänzen und der Bell von Biquad; ein Regler, den der Typ nicht nutzt, ist grau, und jeder zeigt seinen Wert
+    mit seiner Einheit, wenn du auf ihn zeigst. Die Resonanz von Ladder, Low, High, Band, Peak und Notch sättigt: ein
+    lauter Klang zähmt sie und bekommt Obertöne (ein Ladder kappt sie). Das Diagramm zeigt, was der Filter mit jeder
+    Frequenz macht: die Linie quer durch ihre Mitte ist der Pegel, mit dem ein Klang hineingeht, die Kurve darüber
+    lauter, darunter leiser (eine Linie alle 24 dB und bei 100 Hz, 1 kHz und 10 kHz). Drive hebt die Kurve so weit,
+    wie ein lauter Klang lauter herauskommt, und macht die obersten Höhen weicher.
+
 11. **ENV 1–3**: [Hüllkurven](/de/anleitung/modulation-huellkurven-lfo/). ENV 1 ist die Lautstärke jeder Note.
 12. **LFO 1–4**: [LFOs](/de/anleitung/modulation-huellkurven-lfo/), die jeden Regler bewegen, auf den du sie
     ziehst.
@@ -144,9 +162,9 @@ schwebt wie mit Chorus. **Blend** regelt den Pegel der mittleren Stimmen gegenü
 
 ### Cutoff
 
-Schalte das Filter mit einem Klick auf seinen Titel ein. Es ist ein Lowpass, sein Cutoff liegt standardmäßig bei
-440 Hz (der Regler zeigt die Hertz ohne Einheit). Dreh **Cutoff** herunter, und der Sound wird dunkler, dreh ihn
-hoch, und er öffnet sich; erhöhe **Res**, und am Cutoff steigt ein Pfeifen auf.
+Schalte das Filter mit einem Klick auf seinen Titel ein. Es ist ein Lowpass (**Biquad LP**), sein Cutoff liegt
+standardmäßig bei 440 Hz (sein Wert erscheint, wenn du auf den Regler zeigst). Dreh **Cutoff** herunter, und der Sound
+wird dunkler, dreh ihn hoch, und er öffnet sich; erhöhe **Res**, und am Cutoff steigt ein Pfeifen auf.
 
 ## Übung: dein erster eigener Sound
 

@@ -16,7 +16,7 @@ node scripts/bench-perf/run.mjs --only=dsp --against=main                     # 
 node scripts/bench-perf/run.mjs --only=dsp --dsp=reverb,chord --against=main  # its cases with these in their names
 ```
 
-Options: `--against=<ref>` (a commit, branch or tag: an A/B run); `--only=` cases (`S5`, `S5s`, `SUB`, `C1`, `T1`, `T2`, `L1`, `L3`), groups
+Options: `--against=<ref>` (a commit, branch or tag: an A/B run); `--only=` cases (`S5`, `F1`, `S5s`, `SUB`, `C1`, `T1`, `T2`, `L1`, `L3`), groups
 (`cpu`, `latency`) or `dsp`; `--runs=N` (the runs of S5 a side, 5 by default); `--browsers=chromium,webkit`;
 `--update-baseline`; `--headless` (latency and quanta not representative: a separate baseline);
 `--keep-traces`; `--dump-trace` (every event of the Chromium trace of S5 in `tmp/bench-perf/trace-events.md`);
@@ -54,6 +54,10 @@ the report says so: a tree before an update of the tools doesn't build with thos
 - L1, L3: 5 sessions of 10 notes a side, a fresh page each, alternating; the latency of every note is worked out
   in Node by the `latency.ts` of the working tree from what the page recorded (one formula for both sides);
 - the DSP: the code of the reference bundled too, the samples of both alternate in one process.
+
+F1 is S5 through Ladder 24 (Res 60, Drive 40, FAT 50). A tree without the model types of the filter refuses its
+snapshot: that side plays its fallback, S5 itself (the classic lowpass), and the shift is the cost of Ladder 24
+against it.
 
 Against a tree without the sub (before its merge) S5s and SUB play no sub on its side: their shift is the cost of
 the sub (SUB, the sub of 12 notes with the limiter: ~3.3 Mcps on an M5 Pro, under a tenth of S5), a regression

@@ -69,16 +69,21 @@ const NOISE_LEVELS = 'src/app/synth/common/wavetable/noise-levels';
 // the tables of the shapes of the LFOs (a tree that has them)
 const LFO_CURVE = 'src/app/synth/common/lfo/lfo-curve';
 const SUB_SHAPES = 'src/app/synth/common/wavetable/sub-shapes';
+const VOICE_OPTIONS = 'src/app/synth/common/wavetable/voice-options';
 
 // as in production: the counters of the perf build out. A tree with wasm cores bundles their facades too and
 // instantiates them (one instance per core, as one AudioWorkletGlobalScope)
-const loadDsp = async (source = root, name) => {
+export const loadDsp = async (source = root, name) => {
   const app = path.join(source, appDir(source));
   const cores = WASM_CORES.filter(
     ({ core, facade }) =>
       fs.existsSync(path.join(app, `${facade}.ts`)) &&
       fs.existsSync(path.join(source, `tmp/wasm/${core}.wasm`))
   );
+  const exports = (module, name) => {
+    const file = path.join(app, `${module}.ts`);
+    return fs.existsSync(file) && new RegExp(`export const ${name}\\b`).test(fs.readFileSync(file, 'utf8'));
+  };
   const ts = TS_CORES.filter(({ module }) => fs.existsSync(path.join(app, `${module}.ts`)));
   // (instantiated by its instantiateCore, as the worklets do: a tree that guards the calls of its cores pays for it)
   const instantiate = cores.length > 0 && fs.existsSync(path.join(app, `${WASM_CORE}.ts`));
@@ -93,6 +98,8 @@ const loadDsp = async (source = root, name) => {
     ...(fs.existsSync(path.join(app, `${LFO_CURVE}.ts`)) ? [[LFO_CURVE, 'lfoTable']] : []),
     ...(fs.existsSync(path.join(app, `${NOISE_LEVELS}.ts`)) ? [[NOISE_LEVELS, 'buildNoiseLevels']] : []),
     ...(fs.existsSync(path.join(app, `${SUB_SHAPES}.ts`)) ? [[SUB_SHAPES, 'subShapeFrame']] : []),
+    // (the types of the filter of a voice: a tree before them has none)
+    ...(exports(VOICE_OPTIONS, 'VOICE_FILTER_TYPES') ? [[VOICE_OPTIONS, 'VOICE_FILTER_TYPES']] : []),
   ]
     .map(([module, create]) => `export { ${create} } from './${module}';\n`)
     .join('')}`;
@@ -103,15 +110,31 @@ const loadDsp = async (source = root, name) => {
       return [core, instantiate ? dsp.instantiateCore(module) : new WebAssembly.Instance(module).exports];
     })
   );
-  return { ...dsp, wasm };
+  return { ...dsp, wasm, modelFilters: dsp.VOICE_FILTER_TYPES?.includes('ladder24') ?? false };
 };
 
 // a table of 256 frames of 2048 samples as the store takes it (its layout is not read) and a chunk of it (1 MB)
 const TABLE_256 = { frames: 256, harmonics: [1], lengths: [8], offsets: [0], length: 16670976 };
 const CHUNK = new Float32Array(262144);
 
+// the LFOs of a shared or a node: sines of `period` seconds, retrig, at once with their tables (the lfoTable of the
+// app of `dsp`)
+export const lfoStateOf = (dsp, period) => ({
+  at: 0,
+  instantly: true,
+  lfos: [0, 1, 2, 3].map(() => ({
+    mode: 0,
+    delay: 0,
+    rise: 0,
+    smooth: 0,
+    phase: 0,
+    anchor: { time: 0, phase: 0, period },
+    table: dsp.lfoTable('sine'),
+  })),
+});
+
 // ns per call over `ms` at least
-const timeCalls = (call, ms) => {
+export const timeCalls = (call, ms) => {
   let calls = 0;
   const start = process.hrtime.bigint();
   let elapsed = 0;
@@ -158,7 +181,7 @@ const calibrate = () => {
 };
 
 // a frame of a band-limited saw with its harmonics shifted by `k` (the frames of a table differ)
-const frame = (k, size = 2048) =>
+export const frame = (k, size = 2048) =>
   Float32Array.from({ length: size }, (_, n) => {
     let sum = 0;
     for (let h = 1; h <= 64; h++) sum += Math.sin((2 * Math.PI * h * n) / size + k * h * 0.01) / h;
@@ -392,19 +415,7 @@ const createCases = (dsp) => {
   const gliding = (frameAt) => glideBlocks[(frameAt / BLOCK) % glideBlocks.length];
   // the LFOs of a shared or a node: sines of `period` seconds, retrig, at once with their tables (a tree before
   // them: none)
-  const lfoState = (period) => ({
-    at: 0,
-    instantly: true,
-    lfos: [0, 1, 2, 3].map(() => ({
-      mode: 0,
-      delay: 0,
-      rise: 0,
-      smooth: 0,
-      phase: 0,
-      anchor: { time: 0, phase: 0, period },
-      table: dsp.lfoTable('sine'),
-    })),
-  });
+  const lfoState = (period) => lfoStateOf(dsp, period);
   // a u8 voice LFO 1 moves a param of (a sine of 0.5 s on its position: the direct path, a frame at a time; on its
   // gain: the gain per sample, the voice on its mix tables; a vibrato of 5 Hz on its Fine: the pitch moves all
   // along, at 220 Hz over the flat of a level, `crossfade` over the middle of a crossfade)
@@ -438,36 +449,42 @@ const createCases = (dsp) => {
   // the coefficients of every voice worked out again every 32 samples
   // (`filtered` false: the same chord and route without the filter, `routed` false: the filter at rest; the share of
   // the filter in a voice is between them and `scope chord attack`)
-  const scopeChordLfoOf = (filtered, routed) => () => {
-    const shared = createShared.wasm();
-    let voices = null;
-    let block = 0;
-    const options = {
-      ...scopeOptions,
-      filter: filtered ? { type: 'lowpass', cutoff: 1200, resonance: 3, gain: 0 } : null,
-      routes: routed
-        ? [{ source: 4, param: 'cutoff', amount: 2, min: 20, max: 20000, scale: 'log', bipolar: true }]
-        : [],
+  // (`filter`: another one than the lowpass, a model type of a tree that has them)
+  const scopeChordLfoOf =
+    (filtered, routed, filter = { type: 'lowpass', cutoff: 1200, resonance: 3, gain: 0 }) =>
+    () => {
+      const shared = createShared.wasm();
+      let voices = null;
+      let block = 0;
+      const options = {
+        ...scopeOptions,
+        filter: filtered ? filter : null,
+        routes: routed
+          ? [{ source: 4, param: 'cutoff', amount: 2, min: 20, max: 20000, scale: 'log', bipolar: true }]
+          : [],
+      };
+      return () => {
+        if (block % ATTACK === 0) {
+          voices?.free();
+          voices = dsp.createVoiceScopeWasm(oscScope, RATE, wasmStore, shared);
+          voices.apply([{ kind: 'lfos', ...lfoState(0.25) }]);
+          voices.apply(
+            chord.map((params, voice) => ({
+              kind: 'on',
+              voice,
+              options,
+              params: Object.fromEntries(Object.entries(params).map(([k, [v]]) => [k, v])),
+            }))
+          );
+        }
+        voices.process(block * BLOCK, outL, outR);
+        voices.reports();
+        block++;
+      };
     };
-    return () => {
-      if (block % ATTACK === 0) {
-        voices?.free();
-        voices = dsp.createVoiceScopeWasm(oscScope, RATE, wasmStore, shared);
-        voices.apply([{ kind: 'lfos', ...lfoState(0.25) }]);
-        voices.apply(
-          chord.map((params, voice) => ({
-            kind: 'on',
-            voice,
-            options,
-            params: Object.fromEntries(Object.entries(params).map(([k, [v]]) => [k, v])),
-          }))
-        );
-      }
-      voices.process(block * BLOCK, outL, outR);
-      voices.reports();
-      block++;
-    };
-  };
+  const modelFilters = !!oscScope && dsp.modelFilters;
+  const LOW12 = { type: 'low12', cutoff: 1200, resonance: 30, gain: 0, drive: 0, variation: 0 };
+  const LADDER24 = { type: 'ladder24', cutoff: 1200, resonance: 60, gain: 0, drive: 40, variation: 50 };
   // a voice whose routes move all the time: ENV 2 and 3 (a decay of 0.2 s, started again every 64 blocks by the
   // gate held at its other value) on the gain, the cutoff and the resonance of the filter, worked out at the points
   // of every 32 samples (the hot loop of the routes; u1: the oscillator costs little next to them). No velocity: a
@@ -483,24 +500,32 @@ const createCases = (dsp) => {
       block++;
     };
   };
-  const routedOf = (core) => () => {
-    const decay = { attack: 0, hold: 0, decay: 0.2, sustain: 0, release: 0 };
-    const voiceDsp = createVoice[core]({
-      osc: [{ table: 'a', unison: 1, phase: 0, phaseRand: 0 }, null],
-      start: 0,
-      envelopes: [flat, decay, decay],
-      envStart: 0,
-      phrase: 0,
-      // (in the fields of every tree: `env` and `log` before the LFOs, `source` and `scale` since)
-      routes: [
-        { env: 1, source: 1, param: 'gain1', amount: -0.5, min: 0, max: 1 },
-        { env: 1, source: 1, param: 'cutoff', amount: 4, min: 20, max: 20000, log: true, scale: 'log' },
-        { env: 2, source: 2, param: 'resonance', amount: 12, min: -12, max: 24 },
-      ],
-      filter: { type: 'lowpass', cutoff: 400, resonance: 3, gain: 0 },
-    });
-    return retriggered(voiceDsp);
-  };
+  // (`model`: Low 12 instead of the lowpass, its Res in % moved as much, a tree that has the model types: the
+  // design of a voice its own at every span, none of another to share)
+  const routedOf =
+    (core, model = false) =>
+    () => {
+      const decay = { attack: 0, hold: 0, decay: 0.2, sustain: 0, release: 0 };
+      const voiceDsp = createVoice[core]({
+        osc: [{ table: 'a', unison: 1, phase: 0, phaseRand: 0 }, null],
+        start: 0,
+        envelopes: [flat, decay, decay],
+        envStart: 0,
+        phrase: 0,
+        // (in the fields of every tree: `env` and `log` before the LFOs, `source` and `scale` since)
+        routes: [
+          { env: 1, source: 1, param: 'gain1', amount: -0.5, min: 0, max: 1 },
+          { env: 1, source: 1, param: 'cutoff', amount: 4, min: 20, max: 20000, log: true, scale: 'log' },
+          model
+            ? { env: 2, source: 2, param: 'resonance', amount: 33, min: 0, max: 100 }
+            : { env: 2, source: 2, param: 'resonance', amount: 12, min: -12, max: 24 },
+        ],
+        filter: model
+          ? { ...LOW12, cutoff: 400, resonance: 10 }
+          : { type: 'lowpass', cutoff: 400, resonance: 3, gain: 0 },
+      });
+      return retriggered(voiceDsp);
+    };
   // a kick of u8: ENV 2 from 36 semitones over the note down to it in 80 ms (bounds wider than those of Semi: the
   // pitch moves all along), the envelopes started again every AGAIN blocks (as `voice u1 routed`): the direct path
   // while the pitch moves, then its mix tables again; its cost over `voice u8 held` (a tree before the pitch as a
@@ -635,6 +660,7 @@ const createCases = (dsp) => {
       oscScope && (() => routedOf('wasm')),
       store && (() => routedOf('ts'))
     ),
+    ...(modelFilters && { 'voice u1 routed low12': routedOf('wasm', true) }),
     ...withTs(
       { 'voice chord attack': [] },
       oscScope && (() => chordOf('wasm')),
@@ -665,6 +691,15 @@ const createCases = (dsp) => {
         'scope chord lfo cutoff': scopeChordLfoOf(true, true),
         'scope chord lfo cutoff, no filter': scopeChordLfoOf(false, true),
         'scope chord filter': scopeChordLfoOf(true, false),
+        // the model types of the filter (a tree that has them): Low 12 next to the lowpass it replaces, Low 24, Ladder
+        // 24 with Drive and FAT; at rest and under the LFO (their design every 32 samples)
+        ...(modelFilters && {
+          'scope chord filter low12': scopeChordLfoOf(true, false, LOW12),
+          'scope chord lfo cutoff low12': scopeChordLfoOf(true, true, LOW12),
+          'scope chord filter low24': scopeChordLfoOf(true, false, { ...LOW12, type: 'low24' }),
+          'scope chord filter ladder24 drive fat': scopeChordLfoOf(true, false, LADDER24),
+          'scope chord lfo cutoff ladder24 drive fat': scopeChordLfoOf(true, true, LADDER24),
+        }),
       }),
     'build 256 frames': {
       build: () => {

@@ -25,8 +25,14 @@ const CORES = [
   { crate: 'chorus', name: 'chorus', budget: 21000 },
   // (the voices of one node: their timelines and their scope, +5.8 KB; the fades of a frame, +1.3 KB; the LFOs and
   // the routes of their knobs, +6.3 KB; the blend a param, its blocks that move it, +1.2 KB; the noise, its
-  // samples and its windowed sincs, +5.7 KB; the sub, its loops of its own, +4.0 KB)
-  { crate: 'wavetable-osc', name: 'wavetable-osc', budget: 87000 },
+  // samples and its windowed sincs, +5.7 KB; the sub, its loops of its own, +4.0 KB; the model types of the filter,
+  // their design and their sections in lanes, +9.6 KB; the grid of their cutoff and its cells, +1.9 KB; two pairs of
+  // voices in one loop, its 8 samples inlined, +7.2 KB; the steps of a fresh note, a change of type that waits for a
+  // fade, the narrow cells, Drive averaged by its parts, +0.2 KB; the ranges of the routes of the filter held for its
+  // type, +0.2 KB; groups of one layout, the scan of a filter kept for its pass, +0.4 KB; the late pole of a one-pole
+  // by W₀ near its double one, +0.3 KB; the room of the routes held made with them, not in their block, +0.5 KB; the
+  // knobs a type is not designed by, its FAT set after a design, its cutoff in its cells while they move, +0.4 KB)
+  { crate: 'wavetable-osc', name: 'wavetable-osc', budget: 110300 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];

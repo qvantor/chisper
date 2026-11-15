@@ -234,6 +234,11 @@ describe('POST /api/presets', () => {
     ['a too long name', { name: 'x'.repeat(PRESET_NAME_MAX_LENGTH + 1), data, turnstileToken: 't' }],
     ['out of range data', { name: 'My Pad', data: { ...data, v: { max: 100 } }, turnstileToken: 't' }],
     ['a clip id that is not a uuid', { name: 'My Pad', data, turnstileToken: 't', clipId: 'clip' }],
+    // (it would be saved as the default type, under the hash of that sound)
+    [
+      'a filter type it does not know',
+      { name: 'My Pad', data: { ...data, filter: { t: 'comb', res: 80 } }, turnstileToken: 't' },
+    ],
   ])('rejects %s with 400', async (_, body) => {
     const { status } = await save(body);
     expect(status).toBe(400);
@@ -416,6 +421,10 @@ describe('PUT /api/presets/:id', () => {
     ['a short token', { name: 'New name', data, editToken: 'short' }],
     ['a profane name', { name: 'fuck', data, editToken: EDIT_TOKEN }],
     ['a clip id that is not a uuid', { name: 'New name', data, editToken: EDIT_TOKEN, clipId: 'clip' }],
+    [
+      'a filter type it does not know',
+      { name: 'New name', data: { ...data, filter: { t: 'comb', res: 80 } }, editToken: EDIT_TOKEN },
+    ],
   ])('rejects %s with 400', async (_, body) => {
     editable({});
     expect((await update(body)).status).toBe(400);

@@ -35,6 +35,13 @@ export const VOICE_MODULES = [
     knobs: ['level', 'pan', 'crs'],
     name: (knob: string) => `sub.${knob}`,
   },
+  {
+    // Drive and Var of the filter (its model types)
+    module: 'filterExtra',
+    instances: 1,
+    knobs: ['drive', 'variation'],
+    name: (knob: string) => knob,
+  },
 ] as const;
 
 export type VoiceModule = (typeof VOICE_MODULES)[number]['module'];

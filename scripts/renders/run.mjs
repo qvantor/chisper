@@ -34,8 +34,13 @@
 // - chorus.json: the chorus of its effect rack on clicks and noise of ours: the delays of its four taps by its
 //   knobs, how its LFO moves them (trains of clicks: where each comes out), the feedback, the filter, the laws of
 //   the mix and the level, the level of the mono sum
+// - filter-types.json: Filter 1 of a voice, the types of Normal and the EQ ones of Misc: the response of each by
+//   the cutoff and the resonance (a multisine of our table through it), the EQ ones by DB +/-, the law and the
+//   saturation of Drive, FAT and the saturation of a resonance on sines at the cutoff
+// - filter-resonance.json: the resonance of MG Low 12 and 24, Low and Band 12 at Res 0.9 and 1 by the cutoff: a quiet
+//   sine around the cutoff (its peak, its width), a sine at it by its amplitude (the saturation)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus`
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,filter-types,filter-resonance`
 // renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -173,6 +178,25 @@ const frequency = (x, start = from, n = RATE) => {
 };
 const semitones = (x, base, start, n) => +(12 * Math.log2(frequency(x, start, n) / base)).toFixed(3);
 const amplitude = (x, f) => tone(x, f, from, RATE).amplitude;
+// renders of `once(attempt)` until two in a row agree (`same`; now and then a render is of another state); the
+// first two at once where `together` (a host each), else one after the other
+const untilAgree = async (name, once, same, together = false) => {
+  let [before, last] = together ? await Promise.all([once(0), once(1)]) : [await once(0), await once(1)];
+  for (let attempt = 2; !same(before, last); attempt++) {
+    if (attempt > 5) throw new Error(`the renders of ${name} never agree`);
+    [before, last] = [last, await once(attempt)];
+  }
+  return last;
+};
+// a result as JSON, a row of a table on a line of its own
+const writeRows = (file, result) => {
+  const lines = Object.entries(result).map(([key, value]) =>
+    Array.isArray(value)
+      ? ` ${JSON.stringify(key)}: [\n${value.map((row) => `  ${JSON.stringify(row)}`).join(',\n')}\n ]`
+      : ` ${JSON.stringify(key)}: ${JSON.stringify(value)}`
+  );
+  writeFileSync(file, `{\n${lines.join(',\n')}\n}\n`);
+};
 const dB = (v) => +(20 * Math.log10(v)).toFixed(3);
 // the shares of the harmonics 1..count of f0 in x over 0.15..0.45 s (their amplitudes, summing to 1)
 const harmonicShares = (x, f0, count) => {
@@ -1774,14 +1798,7 @@ const rackStand = (tag) => {
     const same = (a, b) =>
       a.every((channel, c) => channel.every((value, i) => Math.abs(value - b[c][i]) < 1e-5));
     // rendered until two renders in a row agree (now and then a render is of another state: one in a hundred)
-    const job = lane.then(async () => {
-      let [before, last] = [await once(0), await once(1)];
-      for (let attempt = 2; !same(before, last); attempt++) {
-        if (attempt > 5) throw new Error(`the renders of ${name} never agree`);
-        [before, last] = [last, await once(attempt)];
-      }
-      return last;
-    });
+    const job = lane.then(() => untilAgree(name, once, same));
     laneJobs.push(job);
     return job;
   };
@@ -2407,5 +2424,375 @@ if (runs('chorus')) {
     console.log('dsp/measurements: chorus', JSON.stringify({ fresh: result.fresh, mono: result.mono }));
   } finally {
     stand.remove();
+  }
+}
+
+// --- the filter: filter-types, filter-resonance ---
+// Filter 1 of a voice (osc A goes through it alone): its type an index of 107 (Filter 1 Type = i / 106), its
+// Freq the note 136.8 v (the display: 440 · 2^((136.8 v - 69) / 12), 8 Hz..22050 Hz)
+const FILTER_TYPES = {
+  'MG Low 6': 0,
+  'MG Low 12': 1,
+  'MG Low 18': 2,
+  'MG Low 24': 3,
+  'Low 6': 4,
+  'Low 12': 5,
+  'Low 18': 6,
+  'Low 24': 7,
+  'High 6': 8,
+  'High 12': 9,
+  'High 18': 10,
+  'High 24': 11,
+  'Band 12': 12,
+  'Band 24': 13,
+  'Peak 12': 14,
+  'Peak 24': 15,
+  'Notch 12': 16,
+  'Notch 24': 17,
+  'Low EQ 6': 71,
+  'Low EQ 12': 72,
+  'Band EQ 12': 73,
+  'High EQ 6': 74,
+  'High EQ 12': 75,
+};
+const filterKnobOf = (hz) => (69 + 12 * Math.log2(hz / 440)) / 136.8;
+const noteHz = (note) => 440 * 2 ** ((note - 69) / 12);
+const FILTER_FROM = Math.round(0.5 * RATE);
+// a note of osc A through Filter 1 (filter null: off), its left channel; `agree`: rendered until two renders in a
+// row agree (now and then a render is of another state)
+const playFilter = async (name, state, note, filter, params = {}, agree = false) => {
+  const knobs = filter
+    ? {
+        'Filter 1 On': 1,
+        'Filter 1 Type': FILTER_TYPES[filter.type] / 106,
+        'Filter 1 Freq': filter.cut === 'max' ? 1 : filterKnobOf(filter.cut),
+        'Filter 1 Res': filter.res ?? 0,
+        'Filter 1 Drive': filter.drive ?? 0,
+        'Filter 1 Var': filter.var ?? 0,
+      }
+    : {};
+  const once = async (attempt) => {
+    const [left] = await hostRender(`filter-${name}${attempt ? `-${attempt}` : ''}`, {
+      seconds: 1.6,
+      state,
+      params: { ...FLAT, 'Env 1 Decay': 0, ...params, ...knobs },
+      notes: [{ note, on: 0, off: 1.55, velocity: 127 }],
+    });
+    return left;
+  };
+  if (!agree) return once(0);
+  const same = (a, b) => a.every((value, i) => Math.abs(value - b[i]) < 1e-6);
+  return untilAgree(name, once, same, true);
+};
+// the amplitude of a frequency over 0.5..1.5 s (Hann)
+const filterLevel = (x, f) => tone(x, f, FILTER_FROM, RATE).amplitude;
+const round = (v, digits = 2) => +v.toFixed(digits);
+// a sine (osc A on a table of one sine `state`, at the amplitude A Level²) through a filter: the gain of its
+// fundamental against the dry render and its harmonics 2..7 (dB under the fundamental); a dry render once a note
+// and amplitude (no two hosts writing one file); `agree` as playFilter's
+const sineGainsOf = (state, agree = false) => {
+  const drys = new Map();
+  const dryOf = (note, amp, params) => {
+    const key = `${note}-${amp}`;
+    if (!drys.has(key)) drys.set(key, playFilter(`sine-dry-${key}`, state, note, null, params, agree));
+    return drys.get(key);
+  };
+  return async (name, note, filter, amp) => {
+    const params = { 'A Level': Math.sqrt(amp) };
+    const f = noteHz(note);
+    const [dry, y] = await Promise.all([
+      dryOf(note, amp, params),
+      playFilter(`sine-${name}-${note}-${amp}`, state, note, filter, params, agree),
+    ]);
+    const level = (x, k) => filterLevel(x, k * f);
+    const fundamental = level(y, 1);
+    return [
+      round(20 * Math.log10(fundamental / level(dry, 1))),
+      [2, 3, 4, 5, 6, 7].map((k) => round(Math.max(-140, 20 * Math.log10(level(y, k) / fundamental)), 1)),
+    ];
+  };
+};
+
+// --- filter-types ---
+if (runs('filter-types')) {
+  const EQ = ['Low EQ 6', 'Low EQ 12', 'Band EQ 12', 'High EQ 6', 'High EQ 12'];
+  const NORMAL = Object.keys(FILTER_TYPES).filter((name) => !EQ.includes(name));
+  // a frame of harmonics 1..1000 of one magnitude, Schroeder phases (its crest low): the response of a filter at
+  // every harmonic of the note at once
+  const multisine = (() => {
+    const x = new Float64Array(2048);
+    for (let h = 1; h <= 1000; h++)
+      for (let i = 0; i < 2048; i++)
+        x[i] += Math.cos((2 * Math.PI * h * i) / 2048 + (Math.PI * h * (h - 1)) / 1000);
+    const peak = Math.max(...x.map(Math.abs));
+    return Array.from(x, (v) => v / peak);
+  })();
+  const msState = tableState('filter-multisine', [multisine]);
+  const sineState = tableState('filter-sine', [sine()]);
+  // the multisine on C1: the gain of a filter (dB against the dry render, -120 at least) at harmonics hs
+  const F0 = noteHz(24);
+  const ms = (name, filter, params) => playFilter(name, msState, 24, filter, { 'A Level': 0.3, ...params });
+  const dryMs = ms('ms-dry', null);
+  const gains = async (y, hs) => {
+    const dry = await dryMs;
+    return hs.map((h) =>
+      round(Math.max(-120, 20 * Math.log10(filterLevel(y, h * F0) / filterLevel(dry, h * F0))))
+    );
+  };
+  // the harmonics read at a cutoff: 40 from 1 to 733 (23.97 kHz) evenly in log, every one within ±35 % of the cutoff
+  const LOG = [...new Set(Array.from({ length: 40 }, (_, i) => Math.round(733 ** (i / 39))))];
+  const harmonicsAt = (cut) => {
+    const hz = cut === 'max' ? 22050 : cut;
+    const near = [];
+    for (let h = Math.ceil((0.65 * hz) / F0); h <= Math.min(733, Math.floor((1.35 * hz) / F0)); h++)
+      near.push(h);
+    return [...new Set([...LOG, ...near])].sort((a, b) => a - b);
+  };
+  const CUTS = [100, 300, 1000, 3000, 8000, 15000, 'max'];
+  const RES = [0, 0.25, 0.5, 0.75, 1];
+  const responses = Promise.all(
+    NORMAL.flatMap((type) =>
+      CUTS.flatMap((cut) =>
+        RES.map(async (res) => {
+          const y = await ms(`ms-${FILTER_TYPES[type]}-${cut}-${res}`, { type, cut, res });
+          return [type, cut, res, await gains(y, harmonicsAt(cut))];
+        })
+      )
+    )
+  );
+  // the EQ types by DB +/- (Var)
+  const EQ_CUTS = [300, 1000, 3000, 10000];
+  const VARS = [0, 0.25, 0.5, 0.75, 1];
+  const eqResponses = Promise.all(
+    EQ.flatMap((type) =>
+      EQ_CUTS.flatMap((cut) =>
+        [0, 0.5, 1].flatMap((res) =>
+          VARS.map(async (v) => {
+            const y = await ms(`eq-${FILTER_TYPES[type]}-${cut}-${res}-${v}`, { type, cut, res, var: v });
+            return [type, cut, res, v, await gains(y, harmonicsAt(cut))];
+          })
+        )
+      )
+    )
+  );
+  // the law of DB +/-: the gain of Low EQ 6 at 1 kHz on C1 (h1, 32.7 Hz) and of High EQ 6 at 300 Hz at h 245 (8 kHz)
+  const DB_VARS = Array.from({ length: 21 }, (_, i) => i / 20);
+  const dbLaw = Promise.all(
+    DB_VARS.map(async (v) => {
+      const [low] = await gains(await ms(`dblaw-low-${v}`, { type: 'Low EQ 6', cut: 1000, var: v }), [1]);
+      const [high] = await gains(await ms(`dblaw-high-${v}`, { type: 'High EQ 6', cut: 300, var: v }), [245]);
+      return [v, low, high];
+    })
+  );
+  const sineGains = sineGainsOf(sineState);
+  // Drive: the gain of a quiet sine (220 Hz, -60 dB) by the knob, Low 12 open; then the saturation of louder ones
+  // at Drive 0, 0.5 and 1, before Low 12 and MG Low 12 open
+  const DRIVES = Array.from({ length: 11 }, (_, i) => i / 10);
+  const AMPS = [0.01, 0.03, 0.1, 0.2, 0.3, 0.5625, 1];
+  const driveLaw = Promise.all(
+    DRIVES.map(async (drive) => [
+      drive,
+      (await sineGains(`drive-${drive}`, 57, { type: 'Low 12', cut: 'max', drive }, 0.001))[0],
+    ])
+  );
+  const driveCurves = Promise.all(
+    ['Low 12', 'MG Low 12'].flatMap((type) =>
+      [0, 0.5, 1].flatMap((drive) =>
+        AMPS.map(async (amp) => [
+          type,
+          drive,
+          amp,
+          ...(await sineGains(`drive-${FILTER_TYPES[type]}-${drive}`, 57, { type, cut: 'max', drive }, amp)),
+        ])
+      )
+    )
+  );
+  // where the drive is: a sine at 220, 440 and 880 Hz before Low 12 at 1.5 kHz (its harmonics filtered or not)
+  const drivePlace = Promise.all(
+    [57, 69, 81].map(async (note) => [
+      note,
+      ...(await sineGains(`drive-place`, note, { type: 'Low 12', cut: 1500, drive: 1 }, 0.1)),
+    ])
+  );
+  // FAT (Var of the types of Normal) and the saturation of a resonance: a sine at the cutoff (B5, 987.8 Hz) by
+  // its amplitude, the resonance and FAT
+  const FAT_TYPES = ['Low 12', 'Low 24', 'High 12', 'Band 12', 'Peak 12', 'MG Low 12', 'MG Low 24'];
+  const FAT_AMPS = [0.001, 0.03, 0.1, 0.3, 0.5625, 1];
+  const fat = Promise.all(
+    FAT_TYPES.flatMap((type) =>
+      [0.5, 0.9, 1].flatMap((res) =>
+        [0, 0.5, 1].flatMap((v) =>
+          FAT_AMPS.map(async (amp) => [
+            type,
+            res,
+            v,
+            amp,
+            ...(await sineGains(
+              `fat-${FILTER_TYPES[type]}-${res}-${v}`,
+              83,
+              { type, cut: noteHz(83), res, var: v },
+              amp
+            )),
+          ])
+        )
+      )
+    )
+  );
+  // FAT on the multisine (quiet: the response of the small signal) at 1 kHz
+  const fatResponses = Promise.all(
+    FAT_TYPES.flatMap((type) =>
+      [0.25, 0.5, 0.75, 1].flatMap((res) =>
+        [0.5, 1].map(async (v) => {
+          const y = await ms(`fatms-${FILTER_TYPES[type]}-${res}-${v}`, { type, cut: 1000, res, var: v });
+          return [type, res, v, await gains(y, harmonicsAt(1000))];
+        })
+      )
+    )
+  );
+  try {
+    const result = {
+      about:
+        'Filter 1 of a voice of the Audio Unit (osc A alone goes through it, its table ours), Freq the note ' +
+        '136.8 v. responses: a multisine on C1 (harmonics 1..1000 of one magnitude, Schroeder phases, at the ' +
+        'amplitude 0.09 into the filter), the gain of each type (dB against the filter off, -120 at least) at ' +
+        'harmonics `harmonics[cut]` of 32.703 Hz, by the cutoff (Hz) and the resonance (0..1), Drive and Var 0: ' +
+        '[type, cut, res, gains]. eq: the EQ types the same by DB +/- (Var 0..1): [type, cut, res, var, gains]. ' +
+        'dbLaw: [var, the gain of Low EQ 6 at 1 kHz on 32.7 Hz, of High EQ 6 at 300 Hz on 8 kHz]. Sines (osc A ' +
+        'on a sine at the amplitude A Level²): [gain of the fundamental against the filter off (dB), harmonics ' +
+        '2..7 under it (dB)]. driveLaw: [drive, gain] of a sine of 220 Hz at -60 dB before Low 12 open. ' +
+        'driveCurves: [type, drive, amplitude, gain, harmonics] of a sine of 220 Hz, the type open. drivePlace: ' +
+        '[note, gain, harmonics] of a sine at amplitude 0.1 before Low 12 at 1.5 kHz, Drive 1. fat: [type, res, ' +
+        'var, amplitude, gain, harmonics] of a sine at the cutoff (987.8 Hz). fatResponses: [type, res, var, ' +
+        'gains] of the multisine at 1 kHz. scripts/renders/run.mjs --only=filter-types',
+      rate: RATE,
+      f0: round(F0, 4),
+      types: TYPES,
+      harmonics: Object.fromEntries(
+        [...new Set([...CUTS, ...EQ_CUTS])].map((cut) => [cut, harmonicsAt(cut)])
+      ),
+      responses: await responses,
+      eq: await eqResponses,
+      dbLaw: await dbLaw,
+      driveLaw: await driveLaw,
+      driveCurves: await driveCurves,
+      drivePlace: await drivePlace,
+      fat: await fat,
+      fatResponses: await fatResponses,
+    };
+    writeRows(join(out, 'filter-types.json'), result);
+    console.log(
+      'dsp/measurements: filter-types',
+      result.responses.length,
+      result.eq.length,
+      result.fat.length
+    );
+  } finally {
+    removeTables();
+  }
+}
+
+// --- filter-resonance ---
+if (runs('filter-resonance')) {
+  // the resonance of a type at Res 0.9 and 1 by the cutoff (filter-types reads it at 987.8 Hz alone): a quiet
+  // sine (1e-4, its small signal) at a note with the cutoff `cents` under it (the sine `cents` over the cutoff),
+  // and a sine at the cutoff by its amplitude (the saturation)
+  const TYPES = ['MG Low 12', 'MG Low 24', 'Low 12', 'Band 12'];
+  const RES = [0.9, 1];
+  const NOTES = [48, 60, 72, 83, 95, 107, 115];
+  const CENTS = Array.from({ length: 17 }, (_, i) => -40 + 5 * i);
+  const AMPS = [0.01, 0.03, 0.1, 0.3, 1];
+  // the fine grids of MG Low 24 around its peak (its resonance a few cents wide at Res 1): [from, to, step] cents by Res
+  const FINE = [
+    [0.8, -240, 40, 10],
+    [0.9, -160, 40, 8],
+    [0.95, -100, 30, 5],
+    [0.98, -50, 25, 2.5],
+    [1, -16, 16, 1],
+  ];
+  const sineGains = sineGainsOf(tableState('filter-resonance-sine', [sine()]), true);
+  // `--parts=peaks,levels,fine`: those rendered again, the others kept from the file
+  const parts = process.argv
+    .find((arg) => arg.startsWith('--parts='))
+    ?.slice(8)
+    .split(',');
+  const file = join(out, 'filter-resonance.json');
+  const before = parts ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  const part = (name, rows) => (!parts || parts.includes(name) ? Promise.all(rows()) : before[name]);
+  const fine = part('fine', () =>
+    FINE.flatMap(([res, from, to, step]) =>
+      NOTES.flatMap((note) =>
+        Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step).map(
+          async (cents) => {
+            const cut = noteHz(note) * 2 ** (-cents / 1200);
+            const [gain] = await sineGains(
+              `fine-${res}-${cents}`,
+              note,
+              { type: 'MG Low 24', cut, res },
+              1e-4
+            );
+            return ['MG Low 24', res, note, cents, gain];
+          }
+        )
+      )
+    )
+  );
+  const peaks = part('peaks', () =>
+    TYPES.flatMap((type) =>
+      RES.flatMap((res) =>
+        NOTES.flatMap((note) =>
+          CENTS.map(async (cents) => {
+            const cut = noteHz(note) * 2 ** (-cents / 1200);
+            const name = `res-${FILTER_TYPES[type]}-${res}-${cents}`;
+            const [gain] = await sineGains(name, note, { type, cut, res }, 1e-4);
+            return [type, res, note, cents, gain];
+          })
+        )
+      )
+    )
+  );
+  const levels = part('levels', () =>
+    TYPES.flatMap((type) =>
+      RES.flatMap((res) =>
+        NOTES.flatMap((note) =>
+          AMPS.map(async (amp) => [
+            type,
+            res,
+            note,
+            amp,
+            ...(await sineGains(
+              `lvl-${FILTER_TYPES[type]}-${res}`,
+              note,
+              { type, cut: noteHz(note), res },
+              amp
+            )),
+          ])
+        )
+      )
+    )
+  );
+  try {
+    const result = {
+      about:
+        'Filter 1 of a voice of the Audio Unit (osc A alone goes through it, on a sine of ours at the amplitude ' +
+        'A Level²), Freq the note 136.8 v, Drive and Var 0. peaks: [type, res, note, cents, gain] a sine of 1e-4 ' +
+        '(the small signal) at the note, the cutoff `cents` under it: the gain of the sine against the filter off ' +
+        '(dB). levels: [type, res, note, amplitude, gain, harmonics] a sine at the cutoff: the gain of its ' +
+        'fundamental (dB), its harmonics 2..7 under it (dB). fine: [type, res, note, cents, gain] as peaks, MG Low 24 ' +
+        'on fine grids around its peak at Res 0.8..1. scripts/renders/run.mjs --only=filter-resonance ' +
+        '[--parts=peaks,levels,fine]',
+      rate: RATE,
+      peaks: await peaks,
+      levels: await levels,
+      fine: await fine,
+    };
+    writeRows(file, result);
+    console.log(
+      'dsp/measurements: filter-resonance',
+      result.peaks.length,
+      result.levels.length,
+      result.fine.length
+    );
+  } finally {
+    removeTables();
   }
 }

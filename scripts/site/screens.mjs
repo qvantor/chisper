@@ -19,13 +19,8 @@ const OUT = path.join(root, 'apps/site/src/assets');
 const MANUAL = path.join(OUT, 'manual');
 const ONLY = args.only ? String(args.only).split(',') : ['landing', 'manual', 'editor'];
 const VIEWPORT = { width: 1440, height: 900 };
-// the sections of the synth screen in their order: Osc 1, Osc 2, Filter, ENV, LFO
+// a section of the synth screen (found by its title: section, sourcesSection)
 const SECTION = '[class*="section__Root"]';
-const OSC1 = 0;
-const OSC2 = 1;
-const FILTER = 2;
-const ENV = 3;
-const LFO = 4;
 // a phone, its whole screen (the browser's bars of the iPhone 13 of Playwright left out)
 const phoneOf = (devices) => ({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 } });
 // the color of the synth's panel, between pictures put together
@@ -69,37 +64,36 @@ const landing = async (browser, devices) => {
 
   // both oscillators, one over the other
   const osc = await open(browser, 'ufo-drone');
-  const oscillators = [
-    await osc.locator(SECTION).nth(OSC1).screenshot(),
-    await osc.locator(SECTION).nth(OSC2).screenshot(),
-  ];
+  const oscillators = [await section(osc, 'Osc 1').screenshot(), await section(osc, 'Osc 2').screenshot()];
   await osc.close();
   fs.writeFileSync(file('osc'), await stack(browser, oscillators, 2));
 
   // Detune held: the unison voices (8 of a saw) over the wave, not the tooltip of its value
   const unison = await open(browser, 'biting-brass-keys');
   await unison.addStyleTag({ content: '[class*="ooltip"] { visibility: hidden !important; }' });
-  const section = unison.locator(SECTION).nth(OSC1);
-  const label = await section.getByText('Detune', { exact: true }).boundingBox();
+  const osc1 = section(unison, 'Osc 1');
+  const label = await osc1.getByText('Detune', { exact: true }).boundingBox();
   await unison.mouse.move(label.x + label.width / 2, label.y - 24);
   await unison.mouse.down();
   await unison.waitForTimeout(600);
-  await section.screenshot({ path: file('unison') });
+  await osc1.screenshot({ path: file('unison') });
   await unison.mouse.up();
   await unison.close();
 
   const filter = await open(browser, 'acid-bass');
-  await filter
-    .locator(SECTION)
-    .nth(FILTER)
-    .screenshot({ path: file('filter') });
+  await section(filter, 'Filter').screenshot({ path: file('filter') });
   await filter.close();
 
   // the sources and where they go: Osc 2 (the route of LFO 1 on its gain), the envelopes, LFO 1 (its shape, the
   // route of ENV 2 on its rate), one over the other
   const sources = await open(browser, 'helicopter');
   const panels = [];
-  for (const index of [OSC2, ENV, LFO]) panels.push(await sources.locator(SECTION).nth(index).screenshot());
+  for (const panel of [
+    section(sources, 'Osc 2'),
+    sourcesSection(sources, 'Envelopes'),
+    sourcesSection(sources, 'LFOs'),
+  ])
+    panels.push(await panel.screenshot());
   await sources.close();
   fs.writeFileSync(file('modulation'), await stack(browser, panels, 2));
 

@@ -1,8 +1,8 @@
 // The video of the first section of the promo page: the synth on the preset of the first clip playing four chords
 // (its LFO moving both wave positions, ENV 2 the filter and the drive; the dots of the envelopes, the LFO and the
 // velocity, the marks of the knobs, the spectrum and the meter of the header moving), recorded from the production
-// site, looped where a chord follows the last one: the chord before the first is played before the recording, so its
-// tail is there at the start as at the end. Into apps/site/public/video/synth.mp4 (H.264, the browsers of the
+// site, looped where a chord follows the last one: the chords are played over and over before the recording, so the
+// start follows the same chords the end does. Into apps/site/public/video/synth.mp4 (H.264, the browsers of the
 // systems play it) and synth.webm (VP9, for a Chromium without H.264), its first frame into
 // apps/site/src/assets/synth-poster.png:
 //   FFMPEG=<path of ffmpeg> npx -y -p playwright@1.50.1 node scripts/site/video.mjs [--url=https://chisper.qvantor.org]
@@ -25,14 +25,16 @@ const FPS = 30;
 const WIDTH = 1280;
 // seconds a chord is held
 const CHORD = 2;
-// the keys of the computer keyboard (Z = C3, Q = C4): G before the loop, then Am, F, C, G
-const PREROLL = ['b', 'm', 'w'];
+// the keys of the computer keyboard (Z = C3, Q = C4): Am, F, C, G
 const CHORDS = [
   ['n', 'q', 'e'],
   ['v', 'n', 'q'],
   ['q', 'e', 't'],
   ['b', 'm', 'w'],
 ];
+// the chords played over and over before the loop (cycles): a stolen voice carries its envelopes on, ENV 2 (5 s up,
+// 6 s down) settles into the cycle of the chords only after some
+const PREROLL = Number(args.preroll ?? 4);
 const OUT = args.out ?? path.join(root, 'apps/site/public/video');
 const POSTER = args.poster ?? path.join(root, 'apps/site/src/assets/synth-poster.png');
 
@@ -60,13 +62,17 @@ const record = async () => {
     for (const key of keys) await page.keyboard.down(key);
     held = keys;
   };
-  await play(PREROLL);
-  await page.waitForTimeout(CHORD * 1000);
+  const cycle = async () => {
+    for (const chord of CHORDS) {
+      await play(chord);
+      await page.waitForTimeout(CHORD * 1000);
+    }
+  };
+  for (let i = 0; i < PREROLL; i++) await cycle();
+  // of the frames before the loop only the last: the loop starts on it
+  frames.splice(0, frames.length - 1);
   const start = Date.now() / 1000;
-  for (const chord of CHORDS) {
-    await play(chord);
-    await page.waitForTimeout(CHORD * 1000);
-  }
+  await cycle();
   // the first chord again, past the end of the loop: the last frames are not of a release
   await play(CHORDS[0]);
   await page.waitForTimeout(300);
@@ -100,7 +106,8 @@ const main = async () => {
   );
   mkdirSync(OUT, { recursive: true });
   const input = ['-framerate', String(FPS), '-i', path.join(dir, '%04d.jpg')];
-  const scale = ['-vf', `scale=${WIDTH}:-2:flags=lanczos`, '-an'];
+  // the range of a TV (the frames are JPEG, of the full range: an ffmpeg 7 keeps it)
+  const scale = ['-vf', `scale=${WIDTH}:-2:flags=lanczos:out_range=tv`, '-an'];
   const vp9 = [
     '-c:v',
     'libvpx-vp9',

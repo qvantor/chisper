@@ -1,4 +1,5 @@
-import { DB_RANGE, frequencyResponseDb, responseBuffers, responseInto } from './index';
+import { filterModel } from '@chisper/math';
+import { DB_RANGE, frequencyResponseDb, frequencyX, responseBuffers, responseInto } from './index';
 
 const sampleRate = 48000;
 const db = (
@@ -91,5 +92,54 @@ describe('filter frequency response', () => {
         })
       )
     );
+  });
+
+  describe('Drive of a model type', () => {
+    const knobs = { cutoff: 2000, resonance: 30, gain: 0, variation: 40 };
+    const model = (drive: number, f: number) =>
+      frequencyResponseDb('low12', { ...knobs, drive }, f, sampleRate);
+    // the design alone
+    const design = (f: number) =>
+      10 *
+      Math.log10(
+        filterModel.designGain2(
+          filterModel.modelDesign('low12', { cutoff: 2000, resonance: 0.3, variation: 0.4 }, sampleRate),
+          f,
+          sampleRate
+        )
+      );
+
+    it('is not drawn at 0', () => {
+      [100, 2000, 16000].forEach((f) => expect(model(0, f)).toBeCloseTo(design(f), 10));
+    });
+
+    it('raises it by the level of a sine of full scale, the average of two samples over it', () => {
+      [0.25, 0.5, 1].forEach((drive) => {
+        const level = 20 * Math.log10(filterModel.driveLevel(drive));
+        [100, 2000, 16000].forEach((f) => {
+          const average = 10 * Math.log10(0.5 * (1 + Math.cos((2 * Math.PI * f) / sampleRate)));
+          expect(model(drive * 100, f)).toBeCloseTo(design(f) + level + average, 8);
+        });
+      });
+      // at 100 %: about +12 dB in the pass band, rising with it
+      expect(model(100, 100) - model(0, 100)).toBeCloseTo(12.4, 1);
+      expect(model(50, 100)).toBeLessThan(model(100, 100));
+    });
+
+    it("doesn't move a type of a BiquadFilterNode (it has none)", () => {
+      const props = { cutoff: 1000, resonance: 6, gain: 0 };
+      [100, 1000, 10000].forEach((f) =>
+        expect(frequencyResponseDb('lowpass', { ...props, drive: 80 }, f, sampleRate)).toBe(
+          frequencyResponseDb('lowpass', props, f, sampleRate)
+        )
+      );
+    });
+  });
+
+  it('frequencyX: the decades of the chart, its last point at the right edge', () => {
+    expect(frequencyX(10, 48000)).toBe(0);
+    expect(frequencyX(20000, 48000)).toBeCloseTo(1, 12);
+    expect(frequencyX(1000, 48000)).toBeCloseTo(2 / Math.log10(2000), 12);
+    expect(frequencyX(12000, 24000)).toBeCloseTo(1, 12);
   });
 });
