@@ -62,9 +62,10 @@ export type FilterType = (typeof FILTER_TYPES)[number];
 // a type of a BiquadFilterNode: its Res is in dB (lowpass, highpass) or a Q, its Gain in dB; the model ones have Res,
 // Drive and Var in % (0..100) and no Gain
 export type WebFilterType = (typeof WEB_FILTER_TYPES)[number];
-export type ModelFilterType = (typeof MODEL_FILTER_TYPES)[number];
 export const isWebFilterType = (type: string): type is WebFilterType =>
   (WEB_FILTER_TYPES as readonly string[]).includes(type);
+export const isFilterType = (type: unknown): type is FilterType =>
+  (FILTER_TYPES as readonly unknown[]).includes(type);
 
 // effects of the fx rack, the order is the default chain order
 export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'] as const;
@@ -360,9 +361,6 @@ const filterKnobsSchema = z.object({
 // a filter to save: a type or units this version doesn't know are refused (it would be saved as another sound, under
 // the hash of that one)
 const savedFilterSchema = filterKnobsSchema.prefault({});
-
-const isFilterType = (type: unknown): type is FilterType =>
-  (FILTER_TYPES as readonly unknown[]).includes(type);
 
 // a filter to open, one of a newer client maybe. A type this one doesn't know: the default type at its cutoff (its
 // other knobs are in the units of that type: a Res in % would be one in dB); units it doesn't know: as if not there

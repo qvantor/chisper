@@ -35,9 +35,8 @@ enum Work {
     Idle,
     // the voice at the cursor renders
     Render,
-    // the voice at the cursor finishes alone
-    Finish,
     // the voices that waited (this many, at the places before the cursor) and the one at the cursor finish together
+    // (0: it finishes alone)
     FinishGroup(usize),
     // the voices that waited (this many, before the cursor) finish without the one at the cursor; Some(playing):
     // that one is rendered in the output after theirs, not in the sum yet
@@ -435,11 +434,7 @@ impl Scope {
                 }
                 Some(span) => {
                     self.spans[self.waiting] = span;
-                    self.at_work(if self.waiting == 0 {
-                        Work::Finish
-                    } else {
-                        Work::FinishGroup(self.waiting)
-                    });
+                    self.at_work(Work::FinishGroup(self.waiting));
                     self.finish(self.waiting + 1);
                     self.work = Work::Idle;
                     self.settle_waiting();
@@ -577,7 +572,7 @@ impl Scope {
         match work {
             Work::Idle => return false,
             // (one that render() ended already ends once: Voice::end)
-            Work::Render | Work::Finish => self.end_voice(self.cursor, store, shared),
+            Work::Render => self.end_voice(self.cursor, store, shared),
             Work::FinishGroup(waited) => {
                 // (if this end traps too, the others still wait: they finish without it)
                 self.end_voice(self.cursor, store, shared);

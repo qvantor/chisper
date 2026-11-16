@@ -5,18 +5,17 @@ import { switchKeyTip as tip, withElementSize } from '@chisper/ui-kit/test-utils
 import { divisionIndex, TEMPO_DIVISIONS, TIME_DIVISIONS } from '@chisper/preset-schema';
 import {
   createEnvelopes,
+  createFilter,
   createLfos,
   createModulation,
   createSynthCore,
   createTransport,
-  initModel,
 } from '../../../../test-utils/models';
 import { EnvelopesContext } from '../../common/modules/envelopes';
 import { LfoContext } from '../../common/modules/lfos';
 import { ModulationContext } from '../../common/modules/modulation';
 import { SynthCoreContext } from '../../common/modules/synth-core';
 import { TransportContext } from '../../common/modules/transport';
-import { filter } from '../../filter/modules/filter';
 import { FilterContext } from '../../filter/modules';
 import { LFO_STATE_INTERVAL } from '../../common/lfo/lfo-curve';
 import { shapeOptionOf } from '../lfo-shapes';
@@ -60,7 +59,7 @@ const setup = () => {
   const transport = createTransport(synthCore);
   const lfos = createLfos(synthCore, transport);
   const modulation = createModulation();
-  const filterModule = initModel(filter({ synthCore }), 'filter', undefined);
+  const filterModule = createFilter(synthCore);
   render(
     <SynthCoreContext.Provider value={synthCore}>
       <TransportContext.Provider value={transport}>

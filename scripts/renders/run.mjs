@@ -2666,7 +2666,7 @@ if (runs('filter-types')) {
         'gains] of the multisine at 1 kHz. scripts/renders/run.mjs --only=filter-types',
       rate: RATE,
       f0: round(F0, 4),
-      types: TYPES,
+      types: FILTER_TYPES,
       harmonics: Object.fromEntries(
         [...new Set([...CUTS, ...EQ_CUTS])].map((cut) => [cut, harmonicsAt(cut)])
       ),

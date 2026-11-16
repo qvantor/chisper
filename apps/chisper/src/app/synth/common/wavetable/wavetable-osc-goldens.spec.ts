@@ -1,7 +1,7 @@
 // first: the Math of JS as jsmath (test-utils/js-math.ts): the inputs and the levels the TS builds the same on every
 // machine (Node's own Math differs in the last bits on arm64), so are the goldens
 import '../../../../test-utils/js-math';
-import { MODEL_FILTER_TYPES, type SubShape } from '@chisper/preset-schema';
+import { isWebFilterType, MODEL_FILTER_TYPES, type SubShape, WEB_FILTER_TYPES } from '@chisper/preset-schema';
 import { EnvelopeParams } from '../envelope/envelope-curve';
 import { FREE, LfoPoints, LfosState, lfoTable, LfoWire, nextAnchor, RETRIG } from '../lfo/lfo-curve';
 import { withCurves } from '../../../../test-utils/envelopes';
@@ -775,14 +775,14 @@ const GOLDEN: [string, Scenario][] = [
             filter: {
               type: from,
               cutoff: 1200,
-              resonance: from.match(/^[a-z]+$/) ? 6 : 50,
+              resonance: isWebFilterType(from) ? 6 : 50,
               gain: 3,
               drive: 10,
             },
           }),
           params: { frequency: constant(147) },
           filters: {
-            18: { type: to, cutoff: 1800, resonance: to.match(/^[a-z]+$/) ? 4 : 70, gain: 3, variation: 50 },
+            18: { type: to, cutoff: 1800, resonance: isWebFilterType(to) ? 4 : 70, gain: 3, variation: 50 },
           },
         },
       ],
@@ -1129,16 +1129,6 @@ const KNOBS: [string, number, number, ('log' | 'pow')?][] = [
   ['noise.pitch', -4800, 4800],
   ['noise.fine', -100, 100],
 ];
-const FILTERS = [
-  'lowpass',
-  'highpass',
-  'bandpass',
-  'lowshelf',
-  'highshelf',
-  'peaking',
-  'notch',
-  'allpass',
-] as const;
 
 const randomEnvelope = (random: Random): EnvelopeParams => {
   const time = () =>
@@ -1211,7 +1201,7 @@ const randomFilter = (random: Random): VoiceFilterOptions | null => {
       variation: between(random, 0, 100),
     };
   return {
-    type: pick(random, FILTERS),
+    type: pick(random, WEB_FILTER_TYPES),
     cutoff: 20 * 2 ** (random() * 10),
     resonance: between(random, -6, 20),
     gain: between(random, -18, 18),

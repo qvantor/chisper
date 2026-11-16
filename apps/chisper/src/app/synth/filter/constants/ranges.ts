@@ -1,5 +1,5 @@
 import { cloneDeep, merge } from 'lodash';
-import { FilterNumerics, FilterRange, FilterRanges } from '@chisper/ui-kit';
+import { FilterNumerics, FilterParams, FilterRange, FilterRanges } from '@chisper/ui-kit';
 import { filterModel } from '@chisper/math';
 import {
   FILTER_TYPES,
@@ -97,6 +97,16 @@ const EQ_UNITY = 50;
 // Var of an empty filter of a type: Comp 0 %, the Gain of the band of an EQ type 0 dB
 export const variationDefaultOf = (type: FilterType) =>
   filterModel.isEqFilterType(type) ? EQ_UNITY : PRESET_DEFAULTS.filter.v;
+
+// the knobs of an empty filter of a type (within the range of the type: the knob clamps them; Var of an EQ type, the
+// Gain of its band, at 0 dB)
+export const filterDefaultsOf = (type: FilterType): Omit<FilterParams, 'type'> => ({
+  cutoff: PRESET_DEFAULTS.filter.cut,
+  resonance: PRESET_DEFAULTS.filter.res,
+  gain: PRESET_DEFAULTS.filter.gain,
+  drive: PRESET_DEFAULTS.filter.dr,
+  variation: variationDefaultOf(type),
+});
 
 // the travel of Res of a type, whose share a change of type between a type of a BiquadFilterNode (dB or a Q) and a
 // model one (%) keeps: of a model type its % also where it doesn't use it (a one-pole between two that do keeps it)

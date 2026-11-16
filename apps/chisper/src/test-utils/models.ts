@@ -60,6 +60,9 @@ export const createNoise = (
 export const createSub = (synthCoreModule = createSynthCore()) =>
   initModel(sub({ synthCore: synthCoreModule }), 'sub', undefined);
 
+export const createFilter = (synthCoreModule = createSynthCore()) =>
+  initModel(filter({ synthCore: synthCoreModule }), 'filter', undefined);
+
 export const createEnvelopes = (transportModule = createTransport()) =>
   initModel(envelopes({ transport: transportModule }), 'env', undefined);
 
@@ -87,7 +90,7 @@ export const createSynth = (
   const osc2 = createOscillator(synthCoreModule, 'osc2', { active: false, initialWavePath }, loadWavetable);
   const noiseModule = createNoise(synthCoreModule, loadNoiseSample);
   const subModule = createSub(synthCoreModule);
-  const filterModule = initModel(filter({ synthCore: synthCoreModule }), 'filter', undefined);
+  const filterModule = createFilter(synthCoreModule);
   const synthModule = initModel(
     synth({
       synthCore: synthCoreModule,

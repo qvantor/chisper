@@ -1,5 +1,6 @@
 export {
   defaultFilterRanges,
+  filterDefaultsOf,
   rangesOf,
   resonanceTravelOf,
   variationDefaultOf,

@@ -6,20 +6,20 @@
 // every 4 blocks, 300 Hz to 5 kHz and back: it glides). `node scripts/bench-perf/filters.mjs [--types=a,b] [--json=out]`
 import fs from 'node:fs';
 import { frame, lfoStateOf, loadDsp, timeCalls } from './dsp.mjs';
-import { median } from './util.mjs';
+import { median, parseArgs } from './util.mjs';
 
 const BLOCK = 128;
 const RATE = 48000;
 const VOICES = 32;
 const SAMPLES = 7;
-const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
+const args = parseArgs(process.argv.slice(2));
 
 const dsp = await loadDsp(undefined, 'filters');
 const core = dsp.wasm['wavetable-osc'];
 if (!core || !dsp.createVoiceScopeWasm) throw new Error('no wavetable-osc core: npm run wasm');
 // the types of a BiquadFilterNode, then the model ones from the first ladder (VOICE_FILTER_TYPES)
 const MODEL = dsp.VOICE_FILTER_TYPES.slice(dsp.VOICE_FILTER_TYPES.indexOf('ladder6'));
-const types = arg('types')?.split(',') ?? dsp.VOICE_FILTER_TYPES;
+const types = args.types?.split(',') ?? dsp.VOICE_FILTER_TYPES;
 const oscScope = dsp.createOscScope(core);
 const store = dsp.createTableStoreWasm(oscScope);
 store.set('a', 1, dsp.buildLevels(Array.from({ length: 16 }, (_, k) => frame(k))));
@@ -165,7 +165,7 @@ for (const type of types) {
   rows.push(row);
   console.error(type);
 }
-if (arg('json')) fs.writeFileSync(arg('json'), JSON.stringify({ base, rows }, null, 1));
+if (args.json) fs.writeFileSync(args.json, JSON.stringify({ base, rows }, null, 1));
 const cols = [...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => k !== 'type')))];
 const worst = (r) => Math.max(...cols.map((c) => r[c] ?? 0));
 rows.sort((a, b) => worst(b) - worst(a));
