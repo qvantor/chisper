@@ -123,7 +123,7 @@ describe('chorus dsp', () => {
     expect(over).toEqual(top);
   });
 
-  it('the mix: wet sin²(π mix / 2), dry 1 - wet², the level × 4 knob²', () => {
+  it('the mix: wet sin²(π mix / 2), dry 1 - wet², the level × 4 knob² of the wet signal alone', () => {
     expect(mixGains(0)).toEqual([1, 0]);
     expect(mixGains(0.5)[0]).toBeCloseTo(0.75, 9);
     expect(mixGains(0.5)[1]).toBeCloseTo(0.5, 9);
@@ -131,16 +131,22 @@ describe('chorus dsp', () => {
     expect(mixGains(2)).toEqual(mixGains(1));
     expect(levelGain(0.5)).toBe(1);
     expect(levelGain(1)).toBe(4);
-    // a tone held: the dry signal alone at no mix, × the level
     const input = tone(440, 0.5);
-    for (const level of [0.25, 0.5, 1]) {
-      const { left } = renderChorus({ mix: 0, level }, RATE, [input, input]);
-      const gain = toneOf(left, 440, RATE, 12000, 8192).amplitude / 0.25;
-      expect(dB(gain)).toBeCloseTo(dB(levelGain(level)), 2);
+    const gainOf = (params: Partial<typeof CHORUS_TAPS>) => {
+      const { left } = renderChorus(params, RATE, [input, input]);
+      return dB(toneOf(left, 440, RATE, 12000, 8192).amplitude / 0.25);
+    };
+    for (const level of [0, 0.25, 0.5, 1]) {
+      // a tone held: the dry signal alone at no mix, as it came at any level
+      expect(gainOf({ mix: 0, level })).toBeCloseTo(0, 2);
+      // the taps of a channel at one delay, the filter open: the wet signal as loud as the dry one was, × the level
+      if (level > 0) {
+        expect(gainOf({ ...CHORUS_TAPS, depth: 0, d1: 0, d2: 0, level })).toBeCloseTo(
+          dB(levelGain(level)),
+          1
+        );
+      }
     }
-    // the taps of a channel at one delay, the filter open: the wet signal as loud as the dry one was
-    const { left } = renderChorus({ ...CHORUS_TAPS, depth: 0, d1: 0, d2: 0 }, RATE, [input, input]);
-    expect(dB(toneOf(left, 440, RATE, 12000, 8192).amplitude / 0.25)).toBeCloseTo(0, 1);
   });
 
   it('the filter of the wet signal: a low pass under its cutoff, a high pass over it, the dry signal whole', () => {

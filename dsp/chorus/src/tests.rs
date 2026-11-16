@@ -243,23 +243,32 @@ fn a_tap_feeds_only_itself() {
     assert!(level(17.0 + latency).abs() < 0.005);
 }
 
-// what goes in at no mix comes out as it is × the level; the wet signal alone is the two taps of a channel, a half
-// each
+// what goes in at no mix comes out as it is at any level (the level is of the wet signal alone: × 4 knob²); the
+// wet signal alone is the two taps of a channel, a half each
 #[test]
 fn the_mix_and_the_level() {
     let input = program(4096, 3);
-    for level in [0.5, 1.0, 0.25] {
+    for level in [0.5, 1.0, 0.25, 0.0] {
         let mut params = fresh();
         params[MIX] = 0.0;
         params[LEVEL] = level;
         let mut chorus = Chorus::new(48000.0, &params);
         let output = render(&mut chorus, &input, &mut || 128);
-        let gain = (4.0 * level * level) as f32;
         assert!(output[..4096]
             .iter()
             .zip(&input.0)
-            .all(|(y, x)| (y - gain * x).abs() < 1e-6));
+            .all(|(y, x)| (y - x).abs() < 1e-6));
     }
+    let wet = |level: f64| {
+        let mut params = fresh();
+        params[MIX] = 1.0;
+        params[LEVEL] = level;
+        let mut chorus = Chorus::new(48000.0, &params);
+        render(&mut chorus, &input, &mut || 128)
+    };
+    let (middle, top) = (wet(0.5), wet(1.0));
+    assert!(middle.iter().any(|y| y.abs() > 0.01));
+    assert!(top.iter().zip(&middle).all(|(y, x)| (y - 4.0 * x).abs() < 1e-5));
     let mut chorus = Chorus::new(44100.0, &taps(0.0, 0.0, 0.0, 0.0));
     let output = render(&mut chorus, &click(4096, 100), &mut || 128);
     let sum: f32 = output[100..200].iter().sum();
@@ -332,7 +341,8 @@ fn the_gains_glide() {
         .map(|pair| (pair[1] - pair[0]).abs())
         .fold(0.0f32, f32::max);
     assert!(steepest < 0.05, "{steepest}");
-    assert!((output[frames - 1] / tone[frames - 1] - 4.0).abs() < 0.01);
+    // at no mix the tone as it came: the level is of the wet signal alone
+    assert!((output[frames - 1] / tone[frames - 1] - 1.0).abs() < 0.01);
 }
 
 // a block that is not finite is forgotten: silence, and the next ones are whole

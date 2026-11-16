@@ -108,10 +108,13 @@ describe('compressor core: one band', () => {
     expect(gainOf({ ...quiet, level: 1 }, -40)).toBeCloseTo(dB(4), 2);
     const silent = held(-20);
     expect(rms(renderCompressor({ ...quiet, level: 0 }, RATE, silent).left)).toBe(0);
-    // the mix: the dry signal and the compressed one added, both in phase
+    // the mix: the dry signal and the compressed one added, both in phase; the level of the compressed one alone
     const wet = 10 ** (gainOf({ ...PEAK, thresh: 0.8 }, -6) / 20);
     expect(gainOf({ ...PEAK, thresh: 0.8, mix: 0.5 }, -6)).toBeCloseTo(dB((1 + wet) / 2), 1);
-    expect(gainOf({ ...PEAK, thresh: 0.8, mix: 0 }, -6)).toBeCloseTo(0, 2);
+    expect(gainOf({ ...PEAK, thresh: 0.8, mix: 0.5, level: 1 }, -6)).toBeCloseTo(dB((1 + 4 * wet) / 2), 1);
+    for (const level of [0, 0.25, 0.5, 1]) {
+      expect(gainOf({ ...PEAK, thresh: 0.8, mix: 0, level }, -6)).toBeCloseTo(0, 2);
+    }
   });
 
   it('takes the lows off with a highpass of one pole at 12 Hz, whatever the mix', () => {

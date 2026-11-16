@@ -138,7 +138,7 @@ export const FX_PARAMS = {
     // Hz of the filter of the wet signal: a low pass, or (hpf 1) a high pass
     cut: { min: 20, max: 20000, default: 1000 },
     hpf: { min: 0, max: 1, default: 0, int: true },
-    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
+    // the output knob of the wet signal: × 4 knob² (0 dB at the middle, +12 dB at the top)
     level: { min: 0, max: 1, default: 0.5 },
   },
   delay: {
@@ -182,7 +182,7 @@ export const FX_PARAMS = {
     low: { min: -24, max: 24, default: 0 },
     mid: { min: -24, max: 24, default: 0 },
     high: { min: -24, max: 24, default: 0 },
-    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
+    // the output knob of the wet signal: × 4 knob² (0 dB at the middle, +12 dB at the top)
     level: { min: 0, max: 1, default: 0.5 },
   },
   // algorithmic reverb
