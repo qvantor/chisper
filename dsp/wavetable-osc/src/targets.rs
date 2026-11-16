@@ -15,6 +15,8 @@ pub const NOISE: usize = 2;
 pub const LFO_KNOBS: usize = 3;
 /// the sub: its level, its pan, the offset of its pitch (Coarse in cents)
 pub const SUB: usize = 4;
+/// the knobs of the filter added after the others: Drive, Var (of its model types)
+pub const FILTER_EXTRA: usize = 5;
 
 /// the knobs of an oscillator
 pub const POSITION: usize = 0;
@@ -35,9 +37,12 @@ pub const NOISE_PITCH: usize = 2;
 pub const NOISE_FINE: usize = 3;
 /// the knobs of the sub
 pub const COARSE: usize = 2;
+/// the knobs of FILTER_EXTRA (k of VoiceFilter::base: 3 + these)
+pub const DRIVE: usize = 0;
+pub const VARIATION: usize = 1;
 
 /// (instances, knobs) of each module, in the order of their ids
-pub const MODULES: [(usize, usize); 5] = [(2, OSC_KNOBS), (1, 3), (1, 4), (LFOS, KNOBS), (1, 3)];
+pub const MODULES: [(usize, usize); 6] = [(2, OSC_KNOBS), (1, 3), (1, 4), (LFOS, KNOBS), (1, 3), (1, 2)];
 
 /// the id of the first knob of `module` of `modules`
 pub const fn first_in(modules: &[(usize, usize)], module: usize) -> usize {
@@ -101,7 +106,9 @@ mod tests {
         assert_eq!(target(LFO_KNOBS, 3, PHASE), 38);
         assert_eq!(target(SUB, 0, LEVEL), 39);
         assert_eq!(target(SUB, 0, COARSE), 41);
-        assert_eq!(TARGETS, 42);
+        assert_eq!(target(FILTER_EXTRA, 0, DRIVE), 42);
+        assert_eq!(target(FILTER_EXTRA, 0, VARIATION), 43);
+        assert_eq!(TARGETS, 44);
     }
 
     #[test]

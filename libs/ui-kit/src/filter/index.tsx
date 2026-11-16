@@ -1,24 +1,14 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { Select } from '../select';
+import { filterModel } from '@chisper/math';
 import { Handle } from '../handle';
 import { CommonFilterProps, FilterNumerics, FilterRange, FilterRanges, FilterParams } from './types';
 import { FilterResponse } from './components/filter-response';
+import { filterKnobLooks } from './services/knobs';
 
 export type { FilterNumerics, FilterParams, FilterRange, FilterRanges };
 export { FilterResponse };
 export { frequencyResponseDb } from './services';
-
-const types: BiquadFilterType[] = [
-  'lowpass',
-  'highpass',
-  'bandpass',
-  'lowshelf',
-  'highshelf',
-  'peaking',
-  'notch',
-];
-const options = types.map((value) => ({ name: value, value }));
 
 const Root = styled.div`
   display: flex;
@@ -38,7 +28,7 @@ export const HandlersContainer = styled.div`
 
 export const Filter = ({
   type,
-  setType,
+  typeSelect,
   setNumericValue,
   ranges,
   active = true,
@@ -46,18 +36,39 @@ export const Filter = ({
   cutoff,
   resonance,
   gain,
+  drive,
+  variation,
   modulation = {},
   defaults = {},
 }: CommonFilterProps) => {
-  const setValueInternal = (key: FilterNumerics) => (value: number) => setNumericValue(key, value);
+  // the knobs of the type: Gain of a BiquadFilterNode (disabled where it doesn't use it, as before), Drive and Var of
+  // a model type (Var: Comp, or the Gain of an EQ one); their labels, names and units by the type
+  const model = filterModel.isModelFilterType(type);
+  const looks = React.useMemo(() => filterKnobLooks(type), [type]);
+  const values = { cutoff, resonance, gain, drive, variation };
+  const knob = (key: FilterNumerics) => (
+    <Handle
+      key={key}
+      value={values[key]}
+      onChange={(next) => setNumericValue(key, next)}
+      label={looks[key].label}
+      name={looks[key].name}
+      formatValue={looks[key].format}
+      defaultValue={defaults[key]}
+      {...ranges[key]}
+      {...modulation[key]}
+    />
+  );
   return (
     <Root>
-      <Select value={type} options={options} onChange={setType} />
+      {typeSelect}
       <Chart
         type={type}
         cutoff={cutoff}
         resonance={resonance}
         gain={gain}
+        drive={drive}
+        variation={variation}
         sampleRate={sampleRate}
         active={active}
         ranges={ranges}
@@ -65,36 +76,14 @@ export const Filter = ({
           cutoff: modulation.cutoff?.modulations,
           resonance: modulation.resonance?.modulations,
           gain: modulation.gain?.modulations,
+          drive: modulation.drive?.modulations,
+          variation: modulation.variation?.modulations,
         }}
       />
       <HandlersContainer>
-        <Handle
-          value={cutoff}
-          onChange={setValueInternal('cutoff')}
-          label='Cutoff'
-          name='Filter cutoff'
-          defaultValue={defaults.cutoff}
-          {...ranges.cutoff}
-          {...modulation.cutoff}
-        />
-        <Handle
-          value={resonance}
-          onChange={setValueInternal('resonance')}
-          label='Res'
-          name='Resonance'
-          defaultValue={defaults.resonance}
-          {...ranges.resonance}
-          {...modulation.resonance}
-        />
-        <Handle
-          value={gain}
-          onChange={setValueInternal('gain')}
-          label='Gain'
-          name='Filter gain'
-          defaultValue={defaults.gain}
-          {...ranges.gain}
-          {...modulation.gain}
-        />
+        {knob('cutoff')}
+        {knob('resonance')}
+        {model ? [knob('drive'), knob('variation')] : knob('gain')}
       </HandlersContainer>
     </Root>
   );

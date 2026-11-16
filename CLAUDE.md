@@ -221,10 +221,11 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `sending`/`stored`/`refused`/`failed` in `$tables`; versions only grow.
 - `createVoice(options, values)` gives a `VoiceHandle` whose params mimic AudioParam calls; each call is an event
   of the voices node, a task's events go in one message (by a microtask). The node reports `started`/`ended`.
-  A trap in a voice (as it renders or as its filter finishes its block; two filtered in the lanes of one end both)
+  A trap in a voice (as it renders or as its filter finishes its block; those filtered together all end)
   ends only that voice.
-- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node, filtered in pairs), `voice.rs`, `source.rs` (oscillators,
-  noise and sub as slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
+- The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node, filtered in pairs; up to four wide ones,
+  `interleaves` of `filter.rs`, two pairs in one loop), `voice.rs`, `source.rs` (oscillators, noise and sub as
+  slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
   `envelope.rs`, `lfo.rs`, `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `sub.rs`, `store.rs`,
   `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids). Options/messages:
   `voice-options.ts`, params: `wavetable-osc-params.ts`.
@@ -232,7 +233,29 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
   tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub; `compressor` and `chorus` for the effects). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub, filter types; `compressor` and `chorus` for the effects).
+  Aliasing −70 dB, spurs −80 dB.
+- The filter of a voice (`filter.rs`): the types of a BiquadFilterNode (a TPT SVF, bit for bit as before) and the
+  model types of the AU (`dsp-core/src/filter_model.rs`, measured: `filter-types.json`, `filter-types-measured.spec.ts`;
+  the resonance by the cutoff: `filter-resonance.json`, `filter-resonance-measured.spec.ts`):
+  analog prototypes whose feedback comes late, realized in matched sections (TPT SVF, one-pole, a droop FIR), Drive
+  (the curve before them, ADAA1, only while Drive is over 0) and Var (FAT, the knob Comp: a gain of 1 + 4·Res·FAT
+  into the sections; DB +/- of the reference, the knob Gain of an EQ type; labels and units: `filterKnobLooks`). The
+  resonance of the types of Normal saturates in the core only (the damping of the first section, and of the second of
+  a 24 dB one, by the level of the sample before, worked out again every 4 samples of
+  a block, left out under Res 40 % without Drive and FAT: under 0.3 dB there; a ladder clips at its output: measured
+  by the `fat` rows, held by the cargo test `saturation`); the chart draws the small signal of the sections, filled to
+  0 dB, Drive at a sine of full scale (`driveLevel` of math, its `UT` that of the core). Their design
+  is the same code in `libs/math/src/filter/model.ts` (the chart; jsmath: the same bits, so no `Math.hypot`): change
+  both (`filter-model.spec` holds them bit for bit, the core's through `osc_model_design` of the perf build). A design of a span costs some sines (the poles of the delayed prototype by Halley's steps): the voices of a
+  node share the last 4 (`Designs` of `filter.rs`, a pure function of the type and knobs: one LFO on the cutoff of
+  all designs once a span). A cutoff that moves alone, a cell a span at most, takes the coefficients between the
+  designs at the edges of its cell (`cutoff_cell` of `filter_model.rs`: 16 an octave, kept by the node); a cell the
+  design isn't smooth across (`Coefs::near`, Res 100 % mostly) takes designs. The type lists
+  (`FILTER_TYPES` of the schema, `VOICE_FILTER_TYPES` of `voice-options.ts`, `MODEL_FILTER_TYPES` of math) only grow,
+  a spec holds them alike; Drive and Var are the knobs of `FILTER_EXTRA` (appended to `targets.rs`). Two voices of
+  one layout of sections share the lanes, others each alone; a change of type on a note into or out of a model type
+  crossfades 10 ms (a filter that never played: no fade).
 - Worklet modules prewarm their core on load (lazy wasm compilation would hit the first note).
 
 ### Synth, input, transport (`synth/common/modules`, `synth/common/*`)

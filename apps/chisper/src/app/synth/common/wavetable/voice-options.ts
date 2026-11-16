@@ -306,13 +306,55 @@ export interface StoreStoredMessage {
   version: number;
 }
 
+// the types of the filter by their index in the core (Kind::from_index of filter.rs): FILTER_TYPES of the preset
+// schema (a worklet can't import it: a spec holds the two alike), only appended. The types of a BiquadFilterNode,
+// then the model ones (filter_model.rs of dsp-core)
+export const VOICE_FILTER_TYPES = [
+  'lowpass',
+  'highpass',
+  'bandpass',
+  'lowshelf',
+  'highshelf',
+  'peaking',
+  'notch',
+  'allpass',
+  'ladder6',
+  'ladder12',
+  'ladder18',
+  'ladder24',
+  'low6',
+  'low12',
+  'low18',
+  'low24',
+  'high6',
+  'high12',
+  'high18',
+  'high24',
+  'band12',
+  'band24',
+  'peak12',
+  'peak24',
+  'notch12',
+  'notch24',
+  'loweq6',
+  'loweq12',
+  'bandeq12',
+  'higheq6',
+  'higheq12',
+] as const;
+export type VoiceFilterType = (typeof VOICE_FILTER_TYPES)[number];
+
 // the knobs of the filter (the filter model), null: off
 export interface VoiceFilterOptions {
-  type: BiquadFilterType;
-  // Hz, Q (dB for lowpass and highpass), dB
+  type: VoiceFilterType;
+  // Hz; of a type of a BiquadFilterNode: Q (dB for lowpass and highpass), dB; of a model type: Res in % (0..100)
   cutoff: number;
   resonance: number;
   gain: number;
+  // of a model type, % (0..100): the gain into it (1 + d)⁴ and its variation (Comp, or the Gain of the EQ types);
+  // none: 0
+  drive?: number;
+  variation?: number;
 }
 
 // seconds: the fade-out of a stolen voice, the crossfade into a new version of the table (a note of a legato phrase

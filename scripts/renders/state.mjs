@@ -72,14 +72,14 @@ export const editedState = (initFile, oscs, slots = [], noise = null, fx = null)
         };
       }),
     });
-  slots.forEach(({ source, osc, param, name, amount, bipolar }, i) => {
+  slots.forEach(({ source, osc, param, name, amount, bipolar, type = 'Oscillator' }, i) => {
     const params = [['kParamAmount', { f64: amount }], ...(bipolar ? [['kParamBipolar', { f32: 1 }]] : [])];
     set(doc, `ModSlot${i}`, {
       map: [
         ['destModuleID', uint(osc)],
         ['destModuleParamID', uint(param)],
         ['destModuleParamName', name],
-        ['destModuleTypeString', 'Oscillator'],
+        ['destModuleTypeString', type],
         ['plainParams', { map: params, info: params.length }],
         ['source', { array: [uint(source), 0], info: 2 }],
       ],

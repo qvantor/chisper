@@ -11,6 +11,7 @@ extern crate alloc;
 pub mod biquad;
 pub mod blocks;
 pub mod consts;
+pub mod filter_model;
 pub mod fir;
 pub mod io;
 pub mod simd;

@@ -102,7 +102,24 @@ dialog stays open, so you can go through them one after another.
 8. **Osc 2**: the second one, the same in every way; *Init* has it off.
 9. **Noise**: a noise oscillator in every voice: white, pink and brown noise, hats, vinyl crackle and more, looped
    or played once.
-10. **Filter**: a filter in every voice, eight types, with **Cutoff**, **Res** and **Gain**.
+10. **Filter**: a filter in every voice. Its type is between **◀ ▶**, which step through all of them; a click on its
+    name opens them by what they do: **Low Pass**, **High Pass**, **Band Pass**, **Notch & Peak** and **EQ**.
+    **Ladder** is a warm ladder that keeps its bass as **Res** rises; **Low**, **High**, **Band**, **Peak** and
+    **Notch** are the others, the number their slope in dB per octave; **Low EQ**, **Band EQ** and **High EQ** a shelf
+    or a bell whose **Gain** cuts or boosts it (0 dB in the middle of the knob, +19 dB at its top; from a type
+    with **Comp** it starts at 0 dB); the **Biquad**
+    types are those of before. **Cutoff** on all of them, **Res** on all but Low 6, High 6, Low EQ 6 and High EQ 6 (a
+    single pole has no resonance): in %, the peak in dB on Biquad LP and HP, a **Q** on Biquad BP, Notch and Bell;
+    **Drive** (louder into the filter, then saturated) on all but the Biquad ones, **Comp** (compensation: it gives
+    back the level the resonance takes off the pass band, so it does nothing at Res 0; louder into the filter, its
+    resonance driven harder) on Ladder, Low, High, Band, Peak and Notch but Low 6 and High 6, **Gain** in dB on the EQ
+    ones and the Biquad shelves and Bell; a knob the type doesn't use is grey, and each shows its value with its unit
+    when you point at it. The resonance of Ladder, Low, High, Band, Peak and Notch saturates: a loud sound tames it
+    and gets harmonics (a Ladder clips it). The chart is what the filter does to each frequency: the line across its
+    middle is the level a sound comes in at, the curve above it louder, under it quieter (a line every 24 dB and at
+    100 Hz, 1 kHz and 10 kHz). Drive raises the curve as much as a loud sound comes out louder, and softens the very
+    top of the highs.
+
 11. **ENV 1–3**: [envelopes](/manual/modulation-envelopes-lfo/). ENV 1 is the volume of every note.
 12. **LFO 1–4**: [LFOs](/manual/modulation-envelopes-lfo/) that move any knob you drag them onto.
 13. **VELO**: what the velocity of a note does.
@@ -139,8 +156,8 @@ Every oscillator plays a unison of voices on each note: *Init* has two (**Unison
 
 ### Cutoff
 
-Switch the Filter on with a click on its title. It is a lowpass with its cutoff at 440 Hz by default (the knob
-shows the hertz without the unit). Turn **Cutoff** down and the sound gets darker, up and it opens; raise **Res**
+Switch the Filter on with a click on its title. It is a lowpass (**Biquad LP**) with its cutoff at 440 Hz by default
+(point at the knob to see its value). Turn **Cutoff** down and the sound gets darker, up and it opens; raise **Res**
 and a whistle rises at the cutoff.
 
 ## Exercise: your first sound from scratch

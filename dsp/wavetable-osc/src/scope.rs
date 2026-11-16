@@ -2,11 +2,12 @@
 //! (a timeline of the events of the main thread per param, timeline.rs), rendered one after another in the order
 //! they were created by the same Voice::process, their outputs summed in f32 in that order. A block also tells the
 //! voices that started late (or on time too: `report`) and those that ended. A voice that traps (as it renders or as
-//! it finishes its block: two in the lanes of one filter end both) is ended by the wrapper (fail), the others
+//! it finishes its block: those whose filters run in one loop, up to four, all end) is ended by the wrapper (fail), the others
 //! render on; the params of a voice may also come as the arrays of a block (direct:
 //! the specs), and a tap keeps the output of every voice apart (the specs, the parity of the browsers). The pitch
 //! bend is the node's: on top of the detune of every voice, gliding to each new value
 
+use crate::filter::Designs;
 use crate::glided::{glide_length, Glided};
 use crate::shared::{Shared, PARAMS};
 use crate::store::Store;
@@ -14,6 +15,7 @@ use crate::timeline::{Kind, Timeline};
 use crate::voice::{Params, Voice, VoiceOptions, DETUNES};
 use alloc::{vec, vec::Vec};
 use core::sync::atomic::{compiler_fence, Ordering};
+use dsp_core::filter_model::Layout;
 use dsp_core::finite;
 
 /// an automation event: setValueAtTime, setTargetAtTime, exponentialRampToValueAtTime, cancelScheduledValues,
@@ -24,6 +26,9 @@ pub const RAMP: u32 = 2;
 pub const CANCEL: u32 = 3;
 pub const LINEAR: u32 = 4;
 
+/// the voices whose filters finish in one loop (filter::run_group): two pairs of lanes
+const GROUP: usize = 4;
+
 // what the scope does of a block, for fail(): in memory before each call of a voice that may trap
 #[derive(Clone, Copy)]
 enum Work {
@@ -32,11 +37,14 @@ enum Work {
     Render,
     // the voice at the cursor finishes alone
     Finish,
-    // the voice at this place and the one at the cursor finish in the lanes of one
-    FinishPair(usize),
-    // the voice at this place, which waited, finishes alone; Some(playing): the one at the cursor is rendered in
-    // outs[1], not in the sum yet
+    // the voices that waited (this many, at the places before the cursor) and the one at the cursor finish together
+    FinishGroup(usize),
+    // the voices that waited (this many, before the cursor) finish without the one at the cursor; Some(playing):
+    // that one is rendered in the output after theirs, not in the sum yet
     FinishWaiting(usize, Option<bool>),
+    // the voices that waited (this many, before the cursor) finish before the one at the cursor, which plays on with
+    // its filter still to run: its block in the output after theirs, its span after theirs (it waits next)
+    FinishBefore(usize),
 }
 
 struct ScopeVoice {
@@ -56,13 +64,19 @@ pub struct Scope {
     ranges: [(f32, f32); PARAMS],
     voices: Vec<ScopeVoice>,
     frames: usize,
-    // the params of a voice in a block (PARAMS × frames), the outputs of two voices and the sum (left, then right)
+    // the params of a voice in a block (PARAMS × frames), the outputs of the voices of a group and the sum (left,
+    // then right)
     params: Vec<f32>,
-    outs: [Vec<f32>; 2],
+    outs: [Vec<f32>; GROUP],
     pub sum: Vec<f32>,
-    // a voice rendered up to its filter, in outs[0] (its place among the voices, the a..b of its block): it waits
-    // for the next one, their filters run in the lanes of one (Voice::finish_pair)
-    waiting: Option<(usize, usize, usize)>,
+    // the voices rendered up to their filters, in outs[0..waiting] (at the places before the cursor, the a..b of the
+    // block of each in `spans`): they wait for the next ones, the filters of up to GROUP run in one loop
+    // (Voice::finish_group)
+    waiting: usize,
+    spans: [(usize, usize); GROUP],
+    // the layout of the voices that wait where every one is wide in it (Voice::wide): only then more than a pair
+    // wait, all of it
+    layout: Option<Layout>,
     // the block: its frame and length, the voice rendering (the next one), what it does of it now
     frame: f64,
     length: usize,
@@ -80,6 +94,11 @@ pub struct Scope {
     // the pitch bend of every voice (cents), the samples of its glide
     bend: Glided,
     glide: f64,
+    // the designs of the filters of the voices, shared
+    designs: Designs,
+    // the voices of each finish, in turn
+    #[cfg(test)]
+    pub finished: Vec<usize>,
 }
 
 // the detune of a voice in a block (its first `length` values: one, or n) with the pitch bend on top: one value
@@ -110,8 +129,10 @@ impl Scope {
             voices: Vec::new(),
             frames: 0,
             params: Vec::new(),
-            outs: [Vec::new(), Vec::new()],
-            waiting: None,
+            outs: core::array::from_fn(|_| Vec::new()),
+            waiting: 0,
+            spans: [(0, 0); GROUP],
+            layout: None,
             sum: Vec::new(),
             frame: 0.0,
             length: 0,
@@ -124,6 +145,9 @@ impl Scope {
             tapped: Vec::new(),
             taps: Vec::new(),
             bend: Glided::new(0.0),
+            #[cfg(test)]
+            finished: Vec::new(),
+            designs: Designs::default(),
             glide: glide_length(rate),
         }
     }
@@ -277,7 +301,7 @@ impl Scope {
     fn grow(&mut self, n: usize) {
         if n > self.frames {
             self.params = vec![0.0; PARAMS * n];
-            self.outs = [vec![0.0; 2 * n], vec![0.0; 2 * n]];
+            self.outs = core::array::from_fn(|_| vec![0.0; 2 * n]);
             self.sum = vec![0.0; 2 * n];
             self.frames = n;
         }
@@ -301,7 +325,7 @@ impl Scope {
         self.frame = frame;
         self.length = n;
         self.cursor = 0;
-        self.waiting = None;
+        self.waiting = 0;
         self.sum[..2 * n].fill(0.0);
         self.bend.render(0, n);
         self.resume(store, shared);
@@ -319,8 +343,8 @@ impl Scope {
             // reports of the voices before it are in it before the voice renders, not kept in registers past it
             // (the stores of the work and the cursor would be dead on the path that returns)
             self.at_work(Work::Render);
-            // (next to a voice that waits: into the other output)
-            let slot = self.waiting.is_some() as usize;
+            // (next to the voices that wait: into the output after theirs)
+            let slot = self.waiting;
             let voice = &mut self.voices[self.cursor];
             let (playing, filtered) = {
                 let (out_l, out_r) = self.outs[slot][..2 * n].split_at_mut(n);
@@ -370,47 +394,109 @@ impl Scope {
                     .render(frame, &params, bend, out_l, out_r, store, shared)
             };
             self.work = Work::Idle;
-            // a voice with a filter that plays on waits for the next one; with one that waits, both finish
+            // a voice with a filter that plays on waits for the next one: a pair, a group of up to GROUP while every
+            // one of them is wide in one layout (their filters faster together); the last of a group, the last voice,
+            // one that ended: it and those that wait finish together
             let last = self.cursor + 1 == self.voices.len();
-            match (self.waiting, filtered) {
-                (None, Some((a, b))) if playing && !last => {
-                    self.waiting = Some((self.cursor, a, b));
+            // (asked only where a group may grow: the first one, after wide ones)
+            let may = self.waiting == 0 || self.layout.is_some();
+            let layout = match filtered {
+                Some((a, b)) if may => self.voices[self.cursor].voice.wide(a, b, n),
+                _ => None,
+            };
+            let joins = self.waiting == 0 || (layout.is_some() && layout == self.layout);
+            match filtered {
+                Some(span) if playing && !last && joins && self.waiting + 1 < GROUP => {
+                    self.spans[self.waiting] = span;
+                    if self.waiting == 0 {
+                        self.layout = layout;
+                    }
+                    self.waiting += 1;
                     self.cursor += 1;
                     continue;
                 }
-                (None, Some((a, b))) => {
-                    self.at_work(Work::Finish);
-                    let (out_l, out_r) = self.outs[0][..2 * n].split_at_mut(n);
-                    self.voices[self.cursor].voice.finish(frame, a, b, out_l, out_r);
+                // wide ones that wait and one wide in another layout, or a pair or three of them and one that is not
+                // wide: they finish, this one waits for the next (next to them it would run alone; one not wide
+                // after one wide still pairs with it, their layout may be one)
+                Some(span)
+                    if playing
+                        && !last
+                        && !joins
+                        && self.layout.is_some()
+                        && (self.waiting >= 2 || layout.is_some()) =>
+                {
+                    self.spans[slot] = span;
+                    self.at_work(Work::FinishBefore(slot));
+                    self.finish(slot);
                     self.work = Work::Idle;
+                    self.settle_waiting();
+                    self.wait_alone(slot, layout);
+                    continue;
                 }
-                (Some((at, a, b)), Some(span)) => {
-                    self.at_work(Work::FinishPair(at));
-                    let (before, rest) = self.voices.split_at_mut(self.cursor);
-                    let [first, second] = &mut self.outs;
-                    let (first_l, first_r) = first[..2 * n].split_at_mut(n);
-                    let (second_l, second_r) = second[..2 * n].split_at_mut(n);
-                    Voice::finish_pair(
-                        [&mut before[at].voice, &mut rest[0].voice],
-                        frame,
-                        [(a, b), span],
-                        [[first_l, first_r], [second_l, second_r]],
-                        n,
-                    );
+                Some(span) => {
+                    self.spans[self.waiting] = span;
+                    self.at_work(if self.waiting == 0 {
+                        Work::Finish
+                    } else {
+                        Work::FinishGroup(self.waiting)
+                    });
+                    self.finish(self.waiting + 1);
                     self.work = Work::Idle;
-                    self.settle(at, 0);
+                    self.settle_waiting();
                 }
-                (Some(_), None) => self.finish_waiting(Some(playing)),
-                (None, None) => {}
+                None => self.finish_waiting(Some(playing)),
             }
-            self.waiting = None;
             self.advance(slot, playing);
         }
-        // (the voice after it trapped: it finishes alone)
-        if self.waiting.is_some() {
-            self.finish_waiting(None);
-            self.waiting = None;
+        // (the voice after them trapped: they finish without it)
+        self.finish_waiting(None);
+    }
+
+    // the first `members` voices of a group (those that wait, then the one at the cursor), their blocks in
+    // outs[0..members]: their filters, their volumes
+    fn finish(&mut self, members: usize) {
+        #[cfg(test)]
+        self.finished.push(members);
+        match members {
+            2 => self.finish_group::<2>(),
+            3 => self.finish_group::<3>(),
+            4 => self.finish_group::<4>(),
+            _ => {
+                let n = self.length;
+                let (a, b) = self.spans[0];
+                let (out_l, out_r) = self.outs[0][..2 * n].split_at_mut(n);
+                self.voices[self.cursor - self.waiting].voice.finish(
+                    self.frame,
+                    a,
+                    b,
+                    out_l,
+                    out_r,
+                    Some(&self.designs),
+                );
+            }
         }
+    }
+
+    fn finish_group<const N: usize>(&mut self) {
+        let n = self.length;
+        let mut voices = self.voices[self.cursor - self.waiting..].iter_mut();
+        let mut outs = self.outs.iter_mut();
+        // (N of them there are, by `finish`: a trap otherwise)
+        let voices: [&mut Voice; N] = core::array::from_fn(|_| &mut voices.next().unwrap().voice);
+        let outs: [[&mut [f32]; 2]; N] = core::array::from_fn(|_| {
+            let (left, right) = outs.next().unwrap()[..2 * n].split_at_mut(n);
+            [left, right]
+        });
+        let spans = core::array::from_fn(|k| self.spans[k]);
+        Voice::finish_group(voices, self.frame, spans, outs, n, &self.designs);
+    }
+
+    // the finished blocks of the voices that waited: into the sum, in their order
+    fn settle_waiting(&mut self) {
+        for k in 0..self.waiting {
+            self.settle(self.cursor - self.waiting + k, k);
+        }
+        self.waiting = 0;
     }
 
     // the scope is at `work`: in memory before the call that may trap
@@ -419,17 +505,25 @@ impl Scope {
         compiler_fence(Ordering::SeqCst);
     }
 
-    // the voice that waits finishes alone: its filter, its volume, then into the sum; `next`: whether the voice
-    // at the cursor, rendered next to it, plays on (None: no voice there)
+    // the voices that wait finish without the one at the cursor: their filters, their volumes, then into the sum;
+    // `next`: whether the voice at the cursor, rendered next to them, plays on (None: no voice there)
     fn finish_waiting(&mut self, next: Option<bool>) {
-        if let Some((at, a, b)) = self.waiting {
-            self.at_work(Work::FinishWaiting(at, next));
-            let n = self.length;
-            let (out_l, out_r) = self.outs[0][..2 * n].split_at_mut(n);
-            self.voices[at].voice.finish(self.frame, a, b, out_l, out_r);
+        if self.waiting > 0 {
+            self.at_work(Work::FinishWaiting(self.waiting, next));
+            self.finish(self.waiting);
             self.work = Work::Idle;
-            self.settle(at, 0);
+            self.settle_waiting();
         }
+    }
+
+    // the voice at the cursor, its block in outs[slot] and its span in spans[slot] (its filter to run), waits for the
+    // next one alone (`layout`: where it is wide)
+    fn wait_alone(&mut self, slot: usize, layout: Option<Layout>) {
+        self.outs.swap(0, slot);
+        self.spans[0] = self.spans[slot];
+        self.layout = layout;
+        self.waiting = 1;
+        self.cursor += 1;
     }
 
     // the voice at the cursor has its block in outs[slot]: into the sum, then the next one (it is gone, told
@@ -471,8 +565,8 @@ impl Scope {
     }
 
     /// a voice trapped as it rendered or finished its block: it ends (gives its versions and mixes back) and is
-    /// told ended, its output is not in the sum; two that finished in the lanes of one filter end both (the trap
-    /// is of either). False when the trap was not in a voice (the block is silence)
+    /// told ended, its output is not in the sum; those that finished together (their filters in one loop) all end
+    /// (the trap is of any). False when the trap was not in a voice (the block is silence)
     pub fn fail(&mut self, store: &mut Store, shared: &mut Shared) -> bool {
         self.failed = None;
         let work = self.work;
@@ -484,22 +578,38 @@ impl Scope {
             Work::Idle => return false,
             // (one that render() ended already ends once: Voice::end)
             Work::Render | Work::Finish => self.end_voice(self.cursor, store, shared),
-            Work::FinishPair(at) => {
-                // (if this end traps too, the first still waits: it finishes alone)
+            Work::FinishGroup(waited) => {
+                // (if this end traps too, the others still wait: they finish without it)
                 self.end_voice(self.cursor, store, shared);
-                self.waiting = None;
-                self.end_voice(at, store, shared);
-                self.cursor -= 1;
-            }
-            Work::FinishWaiting(at, next) => {
-                self.waiting = None;
-                // the voice rendered next to it is not rendered again: into the sum as it is (its place is after
-                // `at`: that one stays where it is)
-                if let Some(playing) = next {
-                    self.advance(1, playing);
+                self.waiting = 0;
+                for _ in 0..waited {
+                    self.cursor -= 1;
+                    self.end_voice(self.cursor, store, shared);
                 }
-                self.end_voice(at, store, shared);
-                self.cursor -= 1;
+            }
+            Work::FinishWaiting(waited, next) => {
+                self.waiting = 0;
+                let first = self.cursor - waited;
+                // the voice rendered next to them is not rendered again: into the sum as it is (its place is after
+                // theirs: they stay where they are)
+                if let Some(playing) = next {
+                    self.advance(waited, playing);
+                }
+                for k in (0..waited).rev() {
+                    self.end_voice(first + k, store, shared);
+                    self.cursor -= 1;
+                }
+            }
+            Work::FinishBefore(waited) => {
+                self.waiting = 0;
+                let first = self.cursor - waited;
+                for k in (0..waited).rev() {
+                    self.end_voice(first + k, store, shared);
+                    self.cursor -= 1;
+                }
+                // the voice rendered next to them still has its filter to run: it waits for the next one, as it
+                // would have (not rendered again; none groups with it)
+                self.wait_alone(waited, None);
             }
         }
         true

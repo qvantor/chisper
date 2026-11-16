@@ -98,7 +98,18 @@ const track = (processor: WorkletProcessorStub) => {
 afterEach(() => nodes.splice(0).forEach((processor) => processor.port.onmessage({ data: { stop: true } })));
 
 describe('wavetable oscillator wasm worklet', () => {
-  beforeAll(() => import('./wavetable-osc.worklet'));
+  // (the errors as the module loaded: of its prewarm; clearMocks clears the calls before every test)
+  let logged: unknown[][] = [];
+  beforeAll(async () => {
+    const error = jest.spyOn(console, 'error');
+    await import('./wavetable-osc.worklet');
+    logged = [...error.mock.calls];
+    error.mockRestore();
+  });
+
+  it('prewarms its core as it loads, without an error', () => {
+    expect(logged).toEqual([]);
+  });
 
   it('registers the store and the voices processor', () => {
     expect(processors[STORE_PROCESSOR]).toBeDefined();

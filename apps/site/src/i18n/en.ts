@@ -98,9 +98,9 @@ export const en = {
         'The colors of noise: the spectra of white noise (flat), pink (−3 dB per octave), brown (−6 dB per octave), blue (+3 dB) and violet noise (+6 dB) from 20 Hz to 20 kHz',
     },
     filter: {
-      h2: 'A filter in every voice: 8 types',
+      h2: 'A filter in every voice: 30 types',
       text: [
-        'Every note gets its own filter, so an envelope sweeps each note of a chord on its own, as on analog polysynths. Eight types: lowpass, highpass, bandpass, low shelf, high shelf, peaking, notch and allpass, with Cutoff, Res and Gain.',
+        'Every note gets its own filter, so an envelope sweeps each note of a chord on its own, as on analog polysynths. A warm ladder of 6 to 24 dB that keeps its bass as the resonance rises, low and high pass of 6 to 24 dB, band, peak and notch, EQ shelves and bells, and the classic types: with Cutoff, Res, Drive into the filter and Comp, which gives back the body the resonance takes.',
       ],
     },
     modulation: {

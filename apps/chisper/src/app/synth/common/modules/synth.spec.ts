@@ -2035,7 +2035,7 @@ describe('synth', () => {
 
       const [c, e] = voices();
       expect(options(c).filter).toBeNull();
-      const on = { type: 'lowpass', cutoff: 2000, resonance: 0, gain: 1 };
+      const on = { type: 'lowpass', cutoff: 2000, resonance: 0, gain: 1, drive: 0, variation: 0 };
       expect(options(e).filter).toEqual(on);
       expect(posted(c)).toEqual([
         { filter: { ...on, cutoff: 440 } },

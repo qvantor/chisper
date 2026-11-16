@@ -1,6 +1,7 @@
 import type { FilterNumerics } from '@chisper/ui-kit';
 import {
   ENVELOPE_TIME_MAX,
+  FilterType,
   FX_TYPES,
   FxType,
   LFO_RATE_MAX,
@@ -14,7 +15,7 @@ import {
   SEMI_MAX,
   SUB_COARSE_MAX,
 } from '@chisper/preset-schema';
-import { rangesOf } from '../../filter/constants';
+import { rangesOf, variationKindOf } from '../../filter/constants';
 import { FX_REGISTRY, MIX_PARAMS } from '../../fx/effects';
 import type { ModRoute } from '../modules/modulation';
 import type { FxRoute } from '../../fx/effects/fx-modulation';
@@ -208,14 +209,25 @@ const subTargets: Record<string, SubTarget> = withRoutes<Omit<SubTarget, 'route'
   (param) => routeParam('sub', 0, param)
 );
 
-const filterTargets: Record<string, FilterTarget> = withRoutes<Omit<FilterTarget, 'route'>>(
-  {
-    'filter.cutoff': { kind: 'filter', param: 'cutoff', label: 'Cutoff' },
-    'filter.resonance': { kind: 'filter', param: 'resonance', label: 'Res' },
-    'filter.gain': { kind: 'filter', param: 'gain', label: 'Gain' },
-  },
-  (param) => routeParam('filter', 0, param)
-);
+const filterTargets: Record<string, FilterTarget> = {
+  ...withRoutes<Omit<FilterTarget, 'route'>>(
+    {
+      'filter.cutoff': { kind: 'filter', param: 'cutoff', label: 'Cutoff' },
+      'filter.resonance': { kind: 'filter', param: 'resonance', label: 'Res' },
+      'filter.gain': { kind: 'filter', param: 'gain', label: 'Gain' },
+    },
+    (param) => routeParam('filter', 0, param as 'cutoff' | 'resonance' | 'gain')
+  ),
+  // Drive and Var of the model types: knobs of a module of their own (appended after the others in the core); Var is
+  // Comp of a knob (the Gain of an EQ type: its label by the type, filterKnobLooks)
+  ...withRoutes<Omit<FilterTarget, 'route'>>(
+    {
+      'filter.drive': { kind: 'filter', param: 'drive', label: 'Drive' },
+      'filter.var': { kind: 'filter', param: 'variation', label: 'Comp' },
+    },
+    (param) => routeParam('filterExtra', 0, param as 'drive' | 'variation')
+  ),
+};
 
 // the knobs of each LFO: Rate in Hz (the knob shows its period)
 const LFO_KNOBS: Record<LfoKnob, Pick<LfoTarget, 'label' | 'scale' | 'range'>> = {
@@ -246,7 +258,7 @@ export const MOD_TARGETS: Record<string, ModTarget> = {
 
 // the scale and the range of a knob of the filter for its type; disabled: the type doesn't use it (a route
 // on it stays, but is not applied)
-export const filterTargetScale = (type: BiquadFilterType, param: FilterNumerics) => {
+export const filterTargetScale = (type: FilterType, param: FilterNumerics) => {
   const { min, max, mode, disabled = false } = rangesOf(type)[param];
   return {
     scale: (mode === 'log' ? 'log' : 'linear') as ModScale,
@@ -258,12 +270,16 @@ export const filterTargetScale = (type: BiquadFilterType, param: FilterNumerics)
 export const isModTarget = (id: string) => id in MOD_TARGETS;
 
 // a knob whose range is centered on 0 (min = -max: a side, a boost or a cut; the gain of the filter is the boost
-// or the cut of its shelves): a route of an LFO dropped on it moves it around its value (bipolar), on the others
-// and of the other sources up from it
-export const centered = (id: string) => {
+// or the cut of its shelves, Var of an EQ type of `filterType` the Gain of its band, 0 dB in its middle): a route of
+// an LFO dropped on it moves it around its value (bipolar), on the others and of the other sources up from it
+export const centered = (id: string, filterType?: FilterType) => {
   const definition = MOD_TARGETS[id];
   if (!definition) return false;
-  if (definition.kind === 'filter') return definition.param === 'gain';
+  if (definition.kind === 'filter')
+    return (
+      definition.param === 'gain' ||
+      (definition.param === 'variation' && !!filterType && variationKindOf(filterType) === 'eq')
+    );
   return definition.range[0] === -definition.range[1];
 };
 

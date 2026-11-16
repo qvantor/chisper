@@ -131,7 +131,15 @@ const recordRun = async ({ launched, origin, kase, side, index, previous }) => {
   const quanta = chromium && index === 0;
   const trace = (categories, during) => traceEvents(launched.browser, page, categories, during);
   try {
-    await call('apply', kase.snapshot, 60000);
+    // (a snapshot the tree can't take: the fallback of the case, if it has one)
+    await call('apply', kase.snapshot, 60000).catch((error) => {
+      if (!kase.fallback) throw error;
+      log(
+        launched.name,
+        `${kase.id} ${side}: its snapshot refused, the fallback (${String(error.message ?? error).slice(0, 80)})`
+      );
+      return call('apply', kase.fallback, 60000);
+    });
     const playing = await playCase(page, call, kase);
     await sleep(WARMUP);
     await previous;
@@ -184,7 +192,7 @@ const analyzeWindow = async (launched, window, { dump }) => {
 // the next one sets up; an error of an analysis is kept (never an unhandled rejection) and fails the case at the
 // next run or at the end
 const runCpuCase = async ({ launched, origins, kase }) => {
-  const result = { id: kase.id, group: 'cpu', title: kase.title, runs: [] };
+  const result = { id: kase.id, group: kase.group, title: kase.title, runs: [] };
   if (origins.reference) result.reference = { runs: [] };
   const sides = origins.reference ? ['current', 'reference'] : ['current'];
   const order = Array.from({ length: runs }, (_, index) => (index % 2 ? [...sides].reverse() : sides))
@@ -278,7 +286,7 @@ const main = async () => {
           try {
             for (const kase of cases) {
               log(name, `${kase.id}: ${kase.title}`);
-              if (kase.group === 'cpu') {
+              if (kase.group === 'cpu' || kase.group === 'matrix') {
                 store[kase.id] = await runCpuCase({ launched, origins, kase });
                 continue;
               }
@@ -307,6 +315,14 @@ const main = async () => {
     awake();
   }
   results.duration = (Date.now() - started) / 1000;
+  if (args.only === 'matrix') {
+    // the matrix has no budgets or baseline: its runs as they are, `matrix.mjs` reads them
+    fs.mkdirSync(out, { recursive: true });
+    const file = path.join(out, 'matrix.json');
+    fs.writeFileSync(file, JSON.stringify(results, null, 1));
+    console.log(`matrix: ${file}`);
+    return;
+  }
   const baseline = loadBaseline(machineInfo.key);
   const checks = evaluate(results, baseline);
   const report = writeReport(results, checks);

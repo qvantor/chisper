@@ -63,6 +63,23 @@ const render = (voices: ReturnType<typeof node>['voices'], frame: number) => {
 
 const LOWPASS: VoiceFilterOptions = { type: 'lowpass', cutoff: 900, resonance: 9, gain: 0 };
 const PEAKING: VoiceFilterOptions = { type: 'peaking', cutoff: 2000, resonance: 3, gain: 9 };
+// a model type whose resonance saturates: up to four of them filtered in one loop (wide)
+const LADDER: VoiceFilterOptions = {
+  type: 'ladder24',
+  cutoff: 900,
+  resonance: 60,
+  gain: 0,
+  drive: 0,
+  variation: 30,
+};
+const LOW12: VoiceFilterOptions = {
+  type: 'low12',
+  cutoff: 1500,
+  resonance: 70,
+  gain: 0,
+  drive: 0,
+  variation: 0,
+};
 
 // more routes than the command buffer holds: the core reads past it, it traps
 const TOO_MANY_ROUTES = Array.from({ length: 1000 }, () => ({
@@ -267,9 +284,14 @@ describe('the voices of one node', () => {
     voices.free();
   });
 
-  it('filters the voices in pairs: each the bits it plays in a node of its own', () => {
+  it.each<[string, (VoiceFilterOptions | null)[]]>([
     // two with a filter (a pair), one without, a pair whose second starts late, one left alone
-    const filters = [LOWPASS, PEAKING, null, PEAKING, LOWPASS, LOWPASS];
+    ['in pairs', [LOWPASS, PEAKING, null, PEAKING, LOWPASS, LOWPASS]],
+    // four wide ones in one loop, then three (the fifth starts late: a pair with the sixth), a model type alone
+    ['wide, in groups', [LADDER, LADDER, LADDER, LADDER, LADDER, LADDER, LOW12]],
+    // a group of three before one without a filter, one of two wide before a plain one (a pair, then alone)
+    ['wide and not', [LOW12, LOW12, LOW12, null, LADDER, LADDER, LOWPASS, LADDER]],
+  ])('filters the voices %s: each the bits it plays in a node of its own', (_, filters) => {
     const routes = [{ source: 1, param: 'cutoff', amount: 3, min: 20, max: 20000, scale: 'log' as const }];
     const events = filters.map((filter, i): VoiceEvent => ({
       kind: 'on',
@@ -293,7 +315,7 @@ describe('the voices of one node', () => {
     });
     for (let block = 0; block < 6; block++) {
       const { left, taps } = render(voices, block * BLOCK);
-      expect(taps.map(({ voice }) => voice)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(taps.map(({ voice }) => voice)).toEqual(filters.map((_, i) => i + 1));
       taps.forEach((tap, i) => {
         const own = render(alone[i], block * BLOCK);
         expectSameBits(`voice ${i + 1}`, block, 'left', own.left, tap.left);
@@ -380,6 +402,35 @@ describe('the voices of one node', () => {
     ['after it waited for one with no filter', [LOWPASS, null, LOWPASS], [1], null, [1], [2, 3]],
     ['after the one it waited for trapped', [LOWPASS, LOWPASS], [1], 2, [2, 1], []],
     ['the last one, the pair before it plays on', [LOWPASS, LOWPASS, LOWPASS], [3], null, [3], [1, 2]],
+    // wide ones: up to four finish in one loop, all end
+    [
+      'in a group of four (all end), the second',
+      [LADDER, LADDER, LADDER, LADDER, LADDER],
+      [2],
+      null,
+      [4, 3, 2, 1],
+      [5],
+    ],
+    ['in a group of three, the last voices, the first', [LADDER, LADDER, LADDER], [1], null, [3, 2, 1], []],
+    ['in a group before one with no filter', [LADDER, LADDER, null, LADDER], [1], null, [2, 1], [3, 4]],
+    ['after the group it waited for trapped', [LADDER, LADDER, LADDER], [1], 3, [3, 2, 1], []],
+    // (the one not wide after them waits on with its filter: it finishes with the next one, filtered)
+    [
+      'in a wide pair before one not wide, which plays on',
+      [LADDER, LADDER, LOWPASS, LADDER],
+      [1],
+      null,
+      [2, 1],
+      [3, 4],
+    ],
+    [
+      'a pair of wide and not wide, the next group plays on',
+      [LADDER, LOWPASS, LADDER, LADDER, LADDER],
+      [2],
+      null,
+      [2, 1],
+      [3, 4, 5],
+    ],
   ])(
     'ends a voice that traps as it finishes its block, the others play on: %s',
     (_, filters, traps, renderTrap, ended, playing) => {

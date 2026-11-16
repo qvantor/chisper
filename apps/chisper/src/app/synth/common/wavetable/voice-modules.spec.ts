@@ -75,6 +75,8 @@ describe('the modules of a voice', () => {
       'sub.level': 39,
       'sub.pan': 40,
       'sub.crs': 41,
+      drive: 42,
+      variation: 43,
     });
     expect(routeParam('osc', 1, 'blend')).toBe('blend2');
     expect(routeParam('filter', 0, 'cutoff')).toBe('cutoff');

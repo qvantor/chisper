@@ -66,7 +66,8 @@ A route is either:
   vibrato or a pan that moves left and right.
 
 An LFO dropped onto a knob whose range is centred on zero (**Pan**, **Pitch**, **Fine**, the sub's **Crs**, the
-Gain of the filter) starts bipolar; every other route starts unipolar.
+Gain of the filter, the Gain of an EQ type, 0 dB in its middle) starts bipolar; every other route starts
+unipolar.
 
 | Gesture | What it does |
 |---|---|
@@ -95,8 +96,11 @@ routes says *Drag a source tab here to add a modulation*.
   up. A route you switched off still counts.
 - **Osc 1** and **Osc 2**: Gain, Wave, Detune, Blend, Pitch (on the **Semi** box) and Fine. **Oct** takes none.
 - **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
-- **Filter**: Cutoff, Res, Gain. A route stays on a knob the filter type doesn't use, and works again when you
-  pick a type that does.
+- **Filter**: Cutoff, Res (or Q), Gain, Drive and Comp. The Gain of an EQ type is not the Gain of a Biquad type: it
+  is the knob of Comp, so a route on it moves Comp of the other types, and a route on the Gain of a Biquad shelf or
+  Bell doesn't move it. A route stays on a knob the filter type doesn't use, and works again when you pick a type that
+  does.
+
 - **Effects**: every knob and the Mix of each effect (Drive, Tone and Level of the distortion; Time, Feedback,
   Freq, Q and Pan of the delay; the knobs of the chorus and of the compressor; the knobs and faders of the
   reverb). Their switches take none.

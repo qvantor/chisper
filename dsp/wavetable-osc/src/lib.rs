@@ -31,9 +31,8 @@ pub mod velocity;
 pub mod voice;
 
 use alloc::{boxed::Box, vec::Vec};
-use dsp_core::biquad::FilterType;
 use envelope::EnvelopeParams;
-use filter::FilterOptions;
+use filter::{FilterOptions, Kind};
 use modulation::VoiceRoute;
 use noise::{NoiseKnobs, NoiseOptions};
 use scope::Scope;
@@ -101,16 +100,19 @@ fn read_routes(reader: &mut Reader) -> Vec<VoiceRoute> {
         .collect()
 }
 
-// the filter: on, type, cutoff, resonance, gain
+// the filter: on, type, cutoff, resonance, gain, drive, variation
 fn read_filter(reader: &mut Reader) -> Option<FilterOptions> {
     let on = reader.next() != 0.0;
-    let ty = FilterType::from_index(reader.next() as u32);
+    let kind = Kind::from_index(reader.next() as u32);
     let (cutoff, resonance, gain) = (reader.next(), reader.next(), reader.next());
+    let (drive, variation) = (reader.next(), reader.next());
     on.then_some(FilterOptions {
-        ty,
+        kind,
         cutoff,
         resonance,
         gain,
+        drive,
+        variation,
     })
 }
 
@@ -322,7 +324,8 @@ pub unsafe extern "C" fn osc_scope_routes(scope: *mut Scope, id: f64) {
     (*scope).set_routes(id, &routes);
 }
 
-/// the knobs of the filter of voice `id` changed (in the command buffer: on, type, cutoff, resonance, gain)
+/// the knobs of the filter of voice `id` changed (in the command buffer: on, type, cutoff, resonance, gain, drive,
+/// variation)
 ///
 /// # Safety
 /// `scope` comes from osc_scope_new and was not freed
@@ -492,6 +495,42 @@ pub unsafe extern "C" fn osc_scope_tap_data(scope: *mut Scope) -> *mut f32 {
 #[no_mangle]
 pub unsafe extern "C" fn osc_scope_trap(scope: *mut Scope, id: f64) {
     (*scope).set_trap(id);
+}
+
+/// the design of the model type `index` (filter_model::MODEL_TYPES) at its knobs (cutoff in Hz, resonance and
+/// variation 0..1) and the sample rate into the command buffer: the count of its state variable filters, g, k and
+/// the mix of each of two (0 past the count), 1 with a one-pole (else 0), its g and mix, the droop, FAT; 0: no such
+/// type (the specs hold the design of the chart, libs/math/src/filter/model.ts, to it bit for bit: only the perf
+/// build has it)
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub extern "C" fn osc_model_design(
+    index: u32,
+    cutoff: f64,
+    resonance: f64,
+    variation: f64,
+    sample_rate: f64,
+) -> u32 {
+    use dsp_core::filter_model::{model_design, ModelType};
+    let Some(ty) = ModelType::from_index(index) else {
+        return 0;
+    };
+    let design = model_design(ty, cutoff, resonance, variation, sample_rate);
+    let command = command();
+    command[0] = design.svfs as f64;
+    for (s, svf) in design.svf.iter().enumerate() {
+        command[1 + 5 * s..6 + 5 * s].copy_from_slice(&[svf.g, svf.k, svf.mix[0], svf.mix[1], svf.mix[2]]);
+    }
+    let pole = design.pole.unwrap_or_default();
+    command[11..17].copy_from_slice(&[
+        f64::from(u8::from(design.pole.is_some())),
+        pole.g,
+        pole.mix[0],
+        pole.mix[1],
+        design.droop,
+        design.fat,
+    ]);
+    1
 }
 
 /// the voices of the scope and the events their timelines hold, into the command buffer
@@ -815,7 +854,7 @@ pub unsafe extern "C" fn osc_voice_set_routes(voice: *mut Voice) {
     (*voice).set_routes(&routes);
 }
 
-/// the knobs of the filter changed (in the command buffer: on, type, cutoff, resonance, gain)
+/// the knobs of the filter changed (in the command buffer: on, type, cutoff, resonance, gain, drive, variation)
 ///
 /// # Safety
 /// `voice` comes from osc_voice_new and was not freed

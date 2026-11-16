@@ -32,7 +32,7 @@ const TEXTS = {
     'What you can make with noise',
     'Risers and sweeps: white noise that swells and opens up into the drop',
     'Does Chisper have a noise oscillator?',
-    'lowpass, highpass, bandpass',
+    'low and high pass of 6 to 24 dB',
     'up to 64 routes, 4 per knob',
     'algorithmic reverb of 16 lines',
     'Up to 12 notes in Poly',

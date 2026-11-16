@@ -1,7 +1,7 @@
 import { FxRoute, movedBy, routeTerm } from '../../fx/effects/fx-modulation';
 import type { ModRoute } from '../modules/modulation';
 import { ROUTE_IDS } from '../wavetable/voice-modules';
-import { lfoKnobRoutes, MOD_TARGETS, routeAmount } from './modulation-targets';
+import { centered, lfoKnobRoutes, MOD_TARGETS, routeAmount } from './modulation-targets';
 
 // the knob a route moves from `base` at the level 1 of its source (unclamped: the bounds clamp it after)
 const movedAtOne = (base: number, route: FxRoute) => movedBy(base, routeTerm(route, 1), route);
@@ -51,5 +51,20 @@ describe('the knobs of the voice', () => {
     expect(MOD_TARGETS['filter.gain']).toMatchObject({ route: 'gain' });
     expect(MOD_TARGETS['noise.pitch']).toMatchObject({ route: 'noise.pitch' });
     expect(MOD_TARGETS['lfo3.smooth']).toMatchObject({ route: 'lfo3.smooth' });
+  });
+});
+
+describe('centered', () => {
+  it('is a knob centered on 0: the gain of the filter, Var of an EQ type (the Gain of its band), a pan', () => {
+    expect(centered('filter.gain')).toBe(true);
+    expect(centered('delay.pan')).toBe(true);
+    expect(centered('filter.cutoff')).toBe(false);
+    expect(centered('filter.var', 'loweq12')).toBe(true);
+    expect(centered('filter.var', 'bandeq12')).toBe(true);
+    // Comp, a type without Var, no type
+    expect(centered('filter.var', 'ladder12')).toBe(false);
+    expect(centered('filter.var', 'lowpass')).toBe(false);
+    expect(centered('filter.var')).toBe(false);
+    expect(centered('filter.resonance', 'loweq12')).toBe(false);
   });
 });

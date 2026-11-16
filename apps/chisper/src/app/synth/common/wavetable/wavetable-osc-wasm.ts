@@ -20,7 +20,9 @@ import {
   UNISON_STACKS,
   VoiceAutomation,
   VoiceEvent,
+  VOICE_FILTER_TYPES,
   VoiceFilterOptions,
+  VoiceFilterType,
   VoiceModuleKnobs,
   VoiceNoiseOptions,
   VoiceOptions,
@@ -133,17 +135,8 @@ const NO_ROUTE = 255;
 const ROUTE_SCALES = ['linear', 'log', 'pow'];
 // the values of a state of an LFO in the command buffer (LFO_STATE of shared.rs)
 const LFO_STATE = 9;
-// BiquadFilterType by its index in the core (another type: a constant 1)
-const FILTER_TYPES: readonly BiquadFilterType[] = [
-  'lowpass',
-  'highpass',
-  'bandpass',
-  'lowshelf',
-  'highshelf',
-  'peaking',
-  'notch',
-  'allpass',
-];
+// the types of the filter by their index in the core (VOICE_FILTER_TYPES: FILTER_TYPES of the preset schema)
+const filterIndex = (type: VoiceFilterType) => VOICE_FILTER_TYPES.indexOf(type);
 
 export type OscScope = ReturnType<typeof createOscScope>;
 
@@ -407,13 +400,16 @@ const writeRoutes = (command: Float64Array, at: number, routes: VoiceRoute[]) =>
   return at;
 };
 
+// the filter in the command buffer: on, type, cutoff, resonance, gain, drive, variation (read_filter of the core)
 const writeFilter = (command: Float64Array, at: number, filter: VoiceFilterOptions | null) => {
-  const type = filter ? FILTER_TYPES.indexOf(filter.type) : -1;
+  const type = filter ? filterIndex(filter.type) : -1;
   command[at++] = filter ? 1 : 0;
   command[at++] = type < 0 ? 255 : type;
   command[at++] = filter?.cutoff ?? 0;
   command[at++] = filter?.resonance ?? 0;
   command[at++] = filter?.gain ?? 0;
+  command[at++] = filter?.drive ?? 0;
+  command[at++] = filter?.variation ?? 0;
   return at;
 };
 

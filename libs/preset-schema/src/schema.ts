@@ -19,7 +19,10 @@ export const DEFAULT_WAVETABLE_PATH = [
   'ESW Core Tables/Basics/Basic Shapes.wav',
 ];
 
-export const FILTER_TYPES = [
+// the types of the filter of a voice, an index of the core (only appended): the responses of a BiquadFilterNode,
+// then those of the Audio Unit of the renders (dsp/measurements/filter-types.json): its Normal ones (MG Low 6–24 as
+// Ladder, Low and High 6–24, Band, Peak and Notch 12 and 24, the number their slope in dB an octave) and its EQ ones
+export const WEB_FILTER_TYPES = [
   'lowpass',
   'highpass',
   'bandpass',
@@ -29,6 +32,39 @@ export const FILTER_TYPES = [
   'notch',
   'allpass',
 ] as const;
+export const MODEL_FILTER_TYPES = [
+  'ladder6',
+  'ladder12',
+  'ladder18',
+  'ladder24',
+  'low6',
+  'low12',
+  'low18',
+  'low24',
+  'high6',
+  'high12',
+  'high18',
+  'high24',
+  'band12',
+  'band24',
+  'peak12',
+  'peak24',
+  'notch12',
+  'notch24',
+  'loweq6',
+  'loweq12',
+  'bandeq12',
+  'higheq6',
+  'higheq12',
+] as const;
+export const FILTER_TYPES = [...WEB_FILTER_TYPES, ...MODEL_FILTER_TYPES] as const;
+export type FilterType = (typeof FILTER_TYPES)[number];
+// a type of a BiquadFilterNode: its Res is in dB (lowpass, highpass) or a Q, its Gain in dB; the model ones have Res,
+// Drive and Var in % (0..100) and no Gain
+export type WebFilterType = (typeof WEB_FILTER_TYPES)[number];
+export type ModelFilterType = (typeof MODEL_FILTER_TYPES)[number];
+export const isWebFilterType = (type: string): type is WebFilterType =>
+  (WEB_FILTER_TYPES as readonly string[]).includes(type);
 
 // effects of the fx rack, the order is the default chain order
 export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'] as const;
@@ -305,15 +341,38 @@ const subSchema = z
   })
   .prefault({});
 
-const filterSchema = z
-  .object({
-    a: z.boolean().default(false),
-    t: z.enum(FILTER_TYPES).default('lowpass'),
-    cut: range(10, 22050).default(440),
-    res: range(0, 1000).default(0),
-    gain: range(-40, 40).default(1),
-  })
-  .prefault({});
+// the filter of a voice: its type, cutoff (Hz), resonance, gain (the types of a BiquadFilterNode), Drive and Var (%:
+// the gain into it and its variation, Comp or the Gain of an EQ type). Of a type that doesn't use them, the units its
+// Res and Var are in, of the last type that used them: `rt` the type of Res (not there: a Biquad LP), `vk` 'eq' for
+// the Gain of an EQ type (not there: Comp); only in the presets that need them, the others keep their hashes
+const filterKnobsSchema = z.object({
+  a: z.boolean().default(false),
+  t: z.enum(FILTER_TYPES).default('lowpass'),
+  cut: range(10, 22050).default(440),
+  res: range(0, 1000).default(0),
+  gain: range(-40, 40).default(1),
+  dr: range(0, 100).default(0),
+  v: range(0, 100).default(0),
+  rt: z.enum(FILTER_TYPES).optional(),
+  vk: z.literal('eq').optional(),
+});
+
+// a filter to save: a type or units this version doesn't know are refused (it would be saved as another sound, under
+// the hash of that one)
+const savedFilterSchema = filterKnobsSchema.prefault({});
+
+const isFilterType = (type: unknown): type is FilterType =>
+  (FILTER_TYPES as readonly unknown[]).includes(type);
+
+// a filter to open, one of a newer client maybe. A type this one doesn't know: the default type at its cutoff (its
+// other knobs are in the units of that type: a Res in % would be one in dB); units it doesn't know: as if not there
+const openedFilter = (filter: unknown) => {
+  if (!filter || typeof filter !== 'object' || Array.isArray(filter)) return filter;
+  const { t, rt, vk, ...knobs } = filter as Record<string, unknown>;
+  if (t !== undefined && !isFilterType(t)) return { a: knobs['a'], cut: knobs['cut'] };
+  return { ...knobs, t, ...(isFilterType(rt) && { rt }), ...(vk === 'eq' && { vk }) };
+};
+const filterSchema = z.preprocess(openedFilter, filterKnobsSchema).prefault({});
 
 // the envelopes ENV 1–3; ENV 1 is the volume of a note, all three modulate the knobs they are assigned to
 export const ENVELOPES = ['env1', 'env2', 'env3'] as const;
@@ -662,18 +721,24 @@ export const fxSnapSchema = z.preprocess(
 );
 
 // keys match snapshot plugin model names (voicing is saved with the `v` prefix)
-export const presetDataSchema = z.object({
-  osc1: oscillatorSchema(true),
-  osc2: oscillatorSchema(false),
-  noise: noiseSchema,
-  sub: subSchema,
-  filter: filterSchema,
-  env: envSchema,
-  lfo: lfoSectionSchema,
-  mod: modSchema,
-  v: voicingSchema,
-  fx: fxSchema,
-});
+const presetData = <F extends z.ZodType>(filter: F) =>
+  z.object({
+    osc1: oscillatorSchema(true),
+    osc2: oscillatorSchema(false),
+    noise: noiseSchema,
+    sub: subSchema,
+    filter,
+    env: envSchema,
+    lfo: lfoSectionSchema,
+    mod: modSchema,
+    v: voicingSchema,
+    fx: fxSchema,
+  });
+
+// a preset to open (of the server, of a tab, of a newer client maybe)
+export const presetDataSchema = presetData(filterSchema);
+// a preset to save: as one to open, its filter one this version knows (savedFilterSchema)
+const savedPresetDataSchema = presetData(savedFilterSchema);
 
 export type PresetData = z.infer<typeof presetDataSchema>;
 
@@ -712,7 +777,7 @@ export const turnstileTokenSchema = z.string().min(1).max(4096);
 
 export const savePresetRequestSchema = z.object({
   name: presetNameSchema,
-  data: presetDataSchema,
+  data: savedPresetDataSchema,
   turnstileToken: turnstileTokenSchema,
   clipId: presetClipIdSchema,
 });
@@ -723,7 +788,7 @@ export const editTokenSchema = z.string().min(20).max(128);
 
 export const updatePresetRequestSchema = z.object({
   name: presetNameSchema,
-  data: presetDataSchema,
+  data: savedPresetDataSchema,
   editToken: editTokenSchema,
   clipId: presetClipIdSchema,
 });

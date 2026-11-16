@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import FFT from 'fft.js';
+import { filterModel } from '@chisper/math';
 import { frequencyResponseDb } from '@chisper/ui-kit';
 import { EnvelopeParams, envelopeValue } from '../envelope/envelope-curve';
 import {
@@ -3031,6 +3032,76 @@ describe('the wavetable voice', () => {
       expectClose(at(0), at(0, 500, []), 1e-5);
     });
 
+    it('moves Drive and Var by their routes as their knobs', () => {
+      const { store } = core.storeWith({ a: [saw] });
+      const filter: VoiceFilterOptions = {
+        type: 'ladder12',
+        cutoff: 800,
+        resonance: 60,
+        gain: 0,
+        drive: 20,
+        variation: 0,
+      };
+      const routed = (level: number, routes: VoiceRoute[]) => {
+        const shared = core.createVoiceShared();
+        shared.setLfos(first([{ table: lfoTableFrom([level]) }]).state);
+        return render({ store, frames: 4096, params: { frequency: 110 }, filter, routes, shared }).left;
+      };
+      const plain = (knobs: Partial<VoiceFilterOptions>) =>
+        render({ store, frames: 4096, params: { frequency: 110 }, filter: { ...filter, ...knobs } }).left;
+      expectClose(
+        routed(1, [lfoRoute('drive', { amount: 30, min: 0, max: 100 })]),
+        plain({ drive: 50 }),
+        1e-5
+      );
+      expectClose(
+        routed(1, [lfoRoute('variation', { amount: 40, min: 0, max: 100 })]),
+        plain({ variation: 40 }),
+        1e-5
+      );
+    });
+
+    it('reads an LFO only the routes held for a change of type read, from the block the type comes in', () => {
+      // a second change of type during the fade of the first waits for its end, the routes of its knobs with it:
+      // the LFO of one, which no other route reads, has its levels in the block they come in (not those of a block
+      // it was never rendered in)
+      const { store } = core.storeWith({ a: [saw] });
+      const ladder: VoiceFilterOptions = {
+        type: 'ladder12',
+        cutoff: 800,
+        resonance: 30,
+        gain: 0,
+        drive: 0,
+        variation: 0,
+      };
+      const peaking: VoiceFilterOptions = { type: 'peaking', cutoff: 800, resonance: 2, gain: 0 };
+      const boost = lfoRoute('gain', { amount: 24, min: -40, max: 40 });
+      // (a route that moves nothing reads the LFO from the start: its levels are there in every block)
+      const idle = lfoRoute('gain1', { amount: 0 });
+      const play = (routes: VoiceRoute[], held: VoiceRoute[] = [boost]) => {
+        const shared = core.createVoiceShared();
+        shared.setLfos(first([{ table: lfoTableFrom([1]) }]).state);
+        return render({
+          store,
+          frames: 4096,
+          params: { frequency: 110 },
+          filter: ladder,
+          routes,
+          shared,
+          before: (frame, dsp) => {
+            if (frame === 1024) dsp.setFilter({ ...ladder, type: 'low12' });
+            if (frame !== 1152) return;
+            dsp.setFilter(peaking);
+            dsp.setRoutes([...routes, ...held]);
+          },
+        }).left;
+      };
+      expectClose(play([]), play([idle]), 1e-5);
+      // (the route is heard there: the band 24 dB up)
+      const [routed, flat] = [play([]), play([], [])];
+      expect(db(rms(routed, 2048) / rms(flat, 2048))).toBeGreaterThan(6);
+    });
+
     it('without a route reads none of it: a state of the LFOs changes no bit', () => {
       const { store } = core.storeWith({ a: [saw] });
       const shared = core.createVoiceShared();
@@ -3081,6 +3152,81 @@ describe('the wavetable voice', () => {
         // the chart stops at ±48 dB
         if (Math.abs(chart) < 48) expect(db(wet / dry)).toBeCloseTo(chart, 1);
         else expect(db(wet / dry)).toBeLessThan(-48);
+      });
+    });
+
+    it.each<[string, VoiceFilterOptions]>([
+      ['Ladder 12', { type: 'ladder12', cutoff: 1200, resonance: 50, gain: 0, drive: 0, variation: 0 }],
+      [
+        'Ladder 6, its Comp',
+        { type: 'ladder6', cutoff: 800, resonance: 70, gain: 0, drive: 0, variation: 60 },
+      ],
+      ['Ladder 18', { type: 'ladder18', cutoff: 3000, resonance: 30, gain: 0, drive: 0, variation: 0 }],
+      ['Ladder 24 at its most resonance', { type: 'ladder24', cutoff: 1500, resonance: 100, gain: 0 }],
+      ['Low 6', { type: 'low6', cutoff: 500, resonance: 0, gain: 0 }],
+      ['Low 12', { type: 'low12', cutoff: 2000, resonance: 40, gain: 0 }],
+      ['Low 18', { type: 'low18', cutoff: 1000, resonance: 60, gain: 0 }],
+      ['Low 24, its Comp', { type: 'low24', cutoff: 700, resonance: 50, gain: 0, variation: 100 }],
+      ['High 6', { type: 'high6', cutoff: 1000, resonance: 0, gain: 0 }],
+      ['High 12', { type: 'high12', cutoff: 1500, resonance: 50, gain: 0 }],
+      ['High 18', { type: 'high18', cutoff: 800, resonance: 20, gain: 0 }],
+      ['High 24', { type: 'high24', cutoff: 2500, resonance: 70, gain: 0 }],
+      ['Band 12', { type: 'band12', cutoff: 1000, resonance: 30, gain: 0 }],
+      ['Band 24', { type: 'band24', cutoff: 2000, resonance: 60, gain: 0 }],
+      ['Peak 12', { type: 'peak12', cutoff: 1000, resonance: 40, gain: 0 }],
+      ['Peak 24', { type: 'peak24', cutoff: 3000, resonance: 20, gain: 0 }],
+      ['Notch 12', { type: 'notch12', cutoff: 1300, resonance: 10, gain: 0 }],
+      ['Notch 24', { type: 'notch24', cutoff: 1000, resonance: 30, gain: 0 }],
+      ['Low EQ 6, a boost', { type: 'loweq6', cutoff: 400, resonance: 0, gain: 0, variation: 80 }],
+      ['Low EQ 12, a cut', { type: 'loweq12', cutoff: 600, resonance: 20, gain: 0, variation: 30 }],
+      ['Band EQ 12', { type: 'bandeq12', cutoff: 1000, resonance: 50, gain: 0, variation: 75 }],
+      ['High EQ 6', { type: 'higheq6', cutoff: 2000, resonance: 0, gain: 0, variation: 70 }],
+      ['High EQ 12', { type: 'higheq12', cutoff: 3000, resonance: 40, gain: 0, variation: 20 }],
+      ['Low 12 at 20 Hz', { type: 'low12', cutoff: 20, resonance: 50, gain: 0 }],
+      ['Ladder 12 at the top', { type: 'ladder12', cutoff: 22050, resonance: 50, gain: 0 }],
+    ])('filters the voice as the chart (its design) shows: %s', (_, filter) => {
+      [100, 400, 1000, 2500, 6000].forEach((frequency) => {
+        // (a quiet tone: the curve of Drive at 0 is a gain of 1 under it)
+        const quiet = { params: { frequency, gain1: 0.05 } };
+        const dry = toneAmplitude(tone(frequency, quiet).left, frequency);
+        const wet = toneAmplitude(tone(frequency, { ...quiet, filter }).left, frequency);
+        const props = {
+          cutoff: filter.cutoff,
+          resonance: filter.resonance,
+          gain: filter.gain,
+          drive: filter.drive ?? 0,
+          variation: filter.variation ?? 0,
+        };
+        const chart = frequencyResponseDb(filter.type, props, frequency, RATE);
+        if (Math.abs(chart) < 48) expect(db(wet / dry)).toBeCloseTo(chart, 1);
+        else expect(db(wet / dry)).toBeLessThan(-48);
+      });
+    });
+
+    it('drives a model type: (1 + d)⁴ into its curve', () => {
+      const filter: VoiceFilterOptions = { type: 'low12', cutoff: 22050, resonance: 0, gain: 0, drive: 50 };
+      const level = (gain1: number, drive: number) => {
+        const amplitude = (options: Partial<RenderOptions>) =>
+          toneAmplitude(tone(220, { params: { frequency: 220, gain1 }, ...options }).left, 220);
+        return amplitude({ filter: { ...filter, drive } }) / amplitude({});
+      };
+      // quiet: the gain of Drive (the open Low 12 a little under 0 dB at 220 Hz)
+      expect(db(level(0.001, 50)) - db(level(0.001, 0))).toBeCloseTo(20 * Math.log10(1.5 ** 4), 1);
+      expect(db(level(0.001, 100)) - db(level(0.001, 0))).toBeCloseTo(20 * Math.log10(16), 1);
+      // loud: the curve flattens it
+      expect(db(level(1, 100))).toBeLessThan(db(level(0.001, 100)) - 6);
+    });
+
+    it('drives a loud sine as the chart draws Drive (driveLevel)', () => {
+      const filter: VoiceFilterOptions = { type: 'low12', cutoff: 22050, resonance: 0, gain: 0, drive: 0 };
+      const amplitude = (options: Partial<RenderOptions>) =>
+        toneAmplitude(tone(220, { params: { frequency: 220, gain1: 1 }, ...options }).left, 220);
+      const dry = amplitude({});
+      const open = amplitude({ filter });
+      [25, 50, 100].forEach((drive) => {
+        const driven = amplitude({ filter: { ...filter, drive } });
+        // (the open Low 12 at 220 Hz apart; the core takes the amplitude of the voice into the curve)
+        expect(db(driven / open)).toBeCloseTo(db(filterModel.driveLevel(drive / 100, dry)), 1);
       });
     });
 

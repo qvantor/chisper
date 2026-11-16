@@ -107,7 +107,24 @@ instante y la ventana sigue abierta, así que puedes probarlos uno detrás de ot
 8. **Osc 2**: el segundo, igual en todo; en *Init* está apagado.
 9. **Noise**: un oscilador de ruido en cada voz: ruido blanco, rosa y marrón, hi-hats, crepitar de vinilo y más, en
    bucle o una sola vez.
-10. **Filter**: un filtro en cada voz, de ocho tipos, con **Cutoff**, **Res** y **Gain**.
+10. **Filter**: un filtro en cada voz. Su tipo está entre **◀ ▶**, que los recorren todos; un clic en el nombre los
+    abre por lo que hacen: **Low Pass**, **High Pass**, **Band Pass**, **Notch & Peak** y **EQ**. **Ladder** es una
+    escalera cálida que conserva los graves al subir **Res**; **Low**, **High**, **Band**, **Peak** y **Notch** son
+    los demás, el número su pendiente en dB por octava; **Low EQ**, **Band EQ** y **High EQ**, un estante o una
+    campana cuyo **Gain** recorta o realza su banda (0 dB en el centro de la perilla, +19 dB arriba del todo; al venir
+    de un tipo con **Comp** empieza en 0 dB); los
+    tipos **Biquad** son los de antes. **Cutoff** en todos, **Res** en todos menos Low 6, High 6, Low EQ 6 y High EQ 6
+    (un solo polo no tiene resonancia): en %, el pico en dB en Biquad LP y HP, una **Q** en Biquad BP, Notch y Bell;
+    **Drive** (más fuerte hacia el filtro y luego saturado) en todos menos los Biquad, **Comp** (compensación:
+    devuelve el nivel que la resonancia le quita a la banda de paso, así que con Res en 0 no hace nada; más fuerte
+    hacia el filtro, su resonancia más forzada) en Ladder, Low, High, Band, Peak y Notch salvo Low 6 y High 6,
+    **Gain** en dB en los EQ y en los estantes y la Bell de Biquad; una perilla que el tipo no usa queda gris, y cada
+    una muestra su valor con su unidad al pasar el puntero por encima. La resonancia de Ladder, Low, High, Band, Peak
+    y Notch se satura: un sonido fuerte la doma y gana armónicos (un Ladder la recorta). El gráfico es lo que el
+    filtro hace con cada frecuencia: la línea que lo cruza por el medio es el nivel al que entra el sonido, la curva
+    por encima más fuerte, por debajo más suave (una línea cada 24 dB y en 100 Hz, 1 kHz y 10 kHz). Drive sube la
+    curva tanto como un sonido fuerte sale más fuerte, y suaviza lo más alto de los agudos.
+
 11. **ENV 1–3**: [envolventes](/es/manual/modulacion-envolventes-lfo/). ENV 1 es el volumen de cada nota.
 12. **LFO 1–4**: [LFO](/es/manual/modulacion-envolventes-lfo/) que mueven cualquier perilla sobre la que los
     arrastres.
@@ -145,9 +162,9 @@ efecto chorus. **Blend** fija el nivel de las voces centrales frente a las later
 
 ### Cutoff
 
-Enciende la sección Filter con un clic en su título. Es un paso bajo con la frecuencia de corte en 440 Hz por
-defecto (la perilla muestra los hercios sin la unidad). Baja **Cutoff** y el sonido se oscurece; súbelo y se abre.
-Sube **Res** y aparece un silbido en la frecuencia de corte.
+Enciende la sección Filter con un clic en su título. Es un paso bajo (**Biquad LP**) con la frecuencia de corte en 440
+Hz por defecto (su valor aparece al pasar el puntero por la perilla). Baja **Cutoff** y el sonido se oscurece; súbelo
+y se abre. Sube **Res** y aparece un silbido en la frecuencia de corte.
 
 ## Ejercicio: tu primer sonido desde cero
 

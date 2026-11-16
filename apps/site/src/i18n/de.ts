@@ -90,9 +90,9 @@ export const de: Messages = {
         'Die Farben des Rauschens: die Spektren von weißem Rauschen (flach), rosa (−3 dB pro Oktave), braunem (−6 dB pro Oktave), blauem (+3 dB) und violettem Rauschen (+6 dB) von 20 Hz bis 20 kHz',
     },
     filter: {
-      h2: 'Ein Filter pro Stimme: 8 Typen',
+      h2: 'Ein Filter pro Stimme: 30 Typen',
       text: [
-        'Jede Note hat ihr eigenes Filter, so öffnet eine Hüllkurve jede Note eines Akkords für sich, wie bei analogen polyphonen Synthesizern. Acht Typen: Lowpass (Tiefpass), Highpass (Hochpass), Bandpass, Low Shelf, High Shelf, Peaking, Notch und Allpass, mit Cutoff, Res und Gain.',
+        'Jede Note hat ihr eigenes Filter, so öffnet eine Hüllkurve jede Note eines Akkords für sich, wie bei analogen polyphonen Synthesizern. Ein warmer Leiterfilter mit 6 bis 24 dB, der seinen Bass behält, wenn die Resonanz steigt, Tiefpass und Hochpass mit 6 bis 24 dB, Bandpass, Peak und Notch, EQ-Kuhschwänze und -Glocken und die klassischen Typen: mit Cutoff, Res, Drive in den Filter und Comp, das den Körper zurückgibt, den die Resonanz nimmt.',
       ],
     },
     modulation: {

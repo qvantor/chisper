@@ -279,6 +279,11 @@ mod lanes4 {
         pub fn new(a: u32, b: u32, c: u32, d: u32) -> U32x4 {
             U32x4(u32x4(a, b, c, d))
         }
+        /// whether no lane is 0 (of a mask: every lane set)
+        #[inline(always)]
+        pub fn all(self) -> bool {
+            i32x4_all_true(self.0)
+        }
         #[inline(always)]
         pub fn splat(x: u32) -> U32x4 {
             U32x4(u32x4_splat(x))
@@ -492,6 +497,10 @@ mod lanes4 {
         #[inline(always)]
         pub fn new(a: u32, b: u32, c: u32, d: u32) -> U32x4 {
             U32x4([a, b, c, d])
+        }
+        #[inline(always)]
+        pub fn all(self) -> bool {
+            self.0.iter().all(|lane| *lane != 0)
         }
         #[inline(always)]
         pub fn splat(x: u32) -> U32x4 {

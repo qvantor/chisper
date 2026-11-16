@@ -1,7 +1,13 @@
 import bytes from '@chisper/wasm/wavetable-osc.wasm';
 import { lfoTable, LfosState, RETRIG } from '../lfo/lfo-curve';
 import { instantiateCore } from '../wasm/wasm-core';
-import type { StoreStatsMessage, VoiceEvent, VoiceOptions } from './voice-options';
+import type {
+  StoreStatsMessage,
+  VoiceEvent,
+  VoiceFilterOptions,
+  VoiceOptions,
+  VoiceOscOptions,
+} from './voice-options';
 import { noiseLevels } from './noise-layout';
 import { createLevels, levelBase } from './wavetable-levels';
 import { STORE_PROCESSOR, VOICE_PARAMETERS, VOICES_PROCESSOR, VoiceParam } from './wavetable-osc-params';
@@ -50,13 +56,12 @@ const scope = createOscScope(instantiateCore<OscExports>(new WebAssembly.Module(
 // pitch moved by ENV 2 (the steps at the points, a change of kernel and of level crossfading), then in the scope a
 // mono one-shot an octave down (the pair), its knobs changed (up: into the bank, crossfading). Its sub: frame 0 of
 // the table of the oscillators, panned, its Coarse moved by ENV 2 (its levels read alone and blended, of one length
-// and of two), then in the scope in the centre (its steady loop), Contiguous, its knobs changed (the level glides)
+// and of two), then in the scope in the centre (its steady loop), Contiguous, its knobs changed (the level glides).
+// After it in the scope, voices of a sine whose filters take each path of a node (`WARM_FILTERS`)
 const WARM_ENVELOPE = { attack: 0.001, hold: 0, decay: 0.01, sustain: 0.5, release: 0.01 };
+const WARM_OSC: VoiceOscOptions = { table: 'warm', unison: 4, phase: 0.5, phaseRand: 1 };
 const WARM_VOICE: VoiceOptions = {
-  osc: [
-    { table: 'warm', unison: 4, phase: 0.5, phaseRand: 1 },
-    { table: '', unison: 3, phase: 0, phaseRand: 0 },
-  ],
+  osc: [WARM_OSC, { table: '', unison: 3, phase: 0, phaseRand: 0 }],
   noise: {
     sample: 'warm-noise',
     loop: true,
@@ -87,7 +92,7 @@ const WARM_VOICE: VoiceOptions = {
     { source: 3, param: 'noise.level', amount: 0.25, min: 0, max: 1 },
     { source: 1, param: 'sub.crs', amount: 700, min: -6400, max: 6400 },
   ],
-  filter: { type: 'lowpass', cutoff: 4000, resonance: 3, gain: 0 },
+  filter: { type: 'lowpass', cutoff: 4000, resonance: 3, gain: 0, drive: 0, variation: 0 },
   velocity: { level: 0.5, amp: 0.75 },
 };
 // LFO 1 a square of 50 ms in its Delay for a block (a flat block), its Rise and Smooth; then another Phase (it
@@ -105,6 +110,35 @@ const warmLfos = (at: number, phase: number, shape: 'square' | 'triangle', insta
     ...(lfo === 0 && { table: lfoTable(shape) }),
   })),
 });
+// the filters of the voices after it, by the paths of a node: a Biquad (a pair of them with it in the lanes of one),
+// two of a model type of one layout with Drive (a pair), four wide ones (a Ladder that saturates: two pairs in one
+// loop, `interleaves` of filter.rs) and a Biquad after them. Their cutoff then glides by less than a cell a span (the
+// designs of its cells) and the last Ladder changes its type (the crossfade, the other three in one loop)
+const WARM_LADDER: VoiceFilterOptions = {
+  type: 'ladder12',
+  cutoff: 1500,
+  resonance: 80,
+  gain: 0,
+  drive: 0,
+  variation: 0,
+};
+const WARM_DRIVEN: VoiceFilterOptions = {
+  type: 'low24',
+  cutoff: 1500,
+  resonance: 40,
+  gain: 0,
+  drive: 30,
+  variation: 50,
+};
+// (the voices of the Ladders)
+const WARM_LADDERS = [4, 5, 6, 7];
+const WARM_FILTERS: VoiceFilterOptions[] = [
+  { type: 'bandpass', cutoff: 2000, resonance: 2, gain: 0, drive: 0, variation: 0 },
+  WARM_DRIVEN,
+  WARM_DRIVEN,
+  ...WARM_LADDERS.map(() => WARM_LADDER),
+  { type: 'lowpass', cutoff: 4000, resonance: 3, gain: 0, drive: 0, variation: 0 },
+];
 const WARM_NOISE = WARM_VOICE.noise as NonNullable<VoiceOptions['noise']>;
 const WARM_SUB = WARM_VOICE.sub as NonNullable<VoiceOptions['sub']>;
 // (the kernels of the noise the warm store built go to `store`: built as the module loads, not with its first
@@ -155,6 +189,19 @@ const prewarm = (store: TableStoreWasm) => {
         },
         params: { spread1: 20, spread2: 10 },
       },
+      ...WARM_FILTERS.map((filter, index): VoiceEvent => ({
+        kind: 'on',
+        voice: index + 1,
+        options: {
+          ...WARM_VOICE,
+          osc: [{ ...WARM_OSC, unison: 1 }, null],
+          noise: null,
+          sub: null,
+          routes: [],
+          filter,
+        },
+        params: {},
+      })),
       { kind: 'set', voice: 0, param: 'frequency', value: 220, time: at(1) },
       { kind: 'ramp', voice: 0, param: 'frequency', value: 330, time: at(3) },
       { kind: 'cancel', voice: 0, param: 'position1', time: at(1) },
@@ -166,11 +213,18 @@ const prewarm = (store: TableStoreWasm) => {
     ];
     voices.apply(events);
     for (let block = 0; block < 6; block++) {
+      if (block === 1)
+        voices.apply([{ kind: 'filter', voices: WARM_LADDERS, filter: { ...WARM_LADDER, cutoff: 1400 } }]);
       // (its noise from the pair into the bank)
       if (block === 2)
         voices.apply([
           { kind: 'knobs', voices: [0], module: 'noise', values: { level: 0.7, pan: -0.2, cents: 300 } },
           { kind: 'knobs', voices: [0], module: 'sub', values: { level: 0.7, pan: 0, cents: 0 } },
+          {
+            kind: 'filter',
+            voices: WARM_LADDERS.slice(-1),
+            filter: { type: 'low18', cutoff: 900, resonance: 60, gain: 0, drive: 0, variation: 20 },
+          },
         ]);
       voices.process(block * 128, outL, outR);
       voices.reports();

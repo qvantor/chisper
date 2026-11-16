@@ -75,7 +75,8 @@ Una ruta puede ser:
   por debajo. Ideal para un vibrato o un paneo que va de izquierda a derecha.
 
 Un LFO que sueltas sobre una perilla con el rango centrado en cero (**Pan**, **Pitch**, **Fine**, el **Crs** del
-sub, la perilla Gain del filtro) empieza bipolar; cualquier otra ruta empieza unipolar.
+sub, la perilla Gain del filtro, la Gain de un tipo EQ, con 0 dB en su centro) empieza bipolar; cualquier otra
+ruta empieza unipolar.
 
 | Gesto | Qué hace |
 |---|---|
@@ -107,8 +108,11 @@ modulación).
 - **Osc 1** y **Osc 2**: Gain, Wave, Detune, Blend, Pitch (en el recuadro **Semi**) y Fine. **Oct** no admite
   ninguna.
 - **Noise**: Gain, Pan, Pitch, Fine. **Sub**: Gain, Pan, Crs.
-- **Filter**: Cutoff, Res, Gain. Una ruta se queda en una perilla que el tipo de filtro no usa, y vuelve a
-  funcionar cuando eliges un tipo que sí la usa.
+- **Filter**: Cutoff, Res (o Q), Gain, Drive y Comp. El Gain de un tipo EQ no es el Gain de un tipo Biquad: es la
+  perilla de Comp, así que una ruta en él mueve el Comp de los otros tipos, y una ruta en el Gain de un estante o de
+  la Bell Biquad no lo mueve. Una ruta se queda en una perilla que el tipo de filtro no usa, y vuelve a funcionar cuando eliges un
+  tipo que sí la usa.
+
 - **Efectos**: todas las perillas y el Mix de cada efecto (Drive, Tone y Level de la distorsión; Time, Feedback,
   Freq, Q y Pan del delay; las perillas del chorus y del compresor; las perillas y los faders de la reverb). Sus
   interruptores no admiten ninguna.

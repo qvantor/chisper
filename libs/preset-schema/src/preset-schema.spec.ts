@@ -359,6 +359,49 @@ describe('normalizePreset', () => {
     expect(normalizePreset({ mod }).mod).toEqual(mod);
   });
 
+  it('keeps the units of Res and Var of a filter of a type without them only in a preset that has them', () => {
+    expect(PRESET_DEFAULTS.filter).not.toHaveProperty('rt');
+    expect(PRESET_DEFAULTS.filter).not.toHaveProperty('vk');
+    const without = { a: true, t: 'lowshelf', cut: 500, res: 80, gain: 3, dr: 0, v: 70 };
+    const filter = { ...without, rt: 'ladder12', vk: 'eq' };
+    expect(normalizePreset({ filter }).filter).toEqual(filter);
+    // (of a newer client: as if not there, the hash too)
+    const newer = normalizePreset({ filter: { ...filter, rt: 'comb', vk: 'gain' } }).filter;
+    expect(newer.rt).toBeUndefined();
+    expect(newer.vk).toBeUndefined();
+    expect(presetHash({ filter: { ...filter, rt: 'comb', vk: 'gain' } })).toBe(
+      presetHash({ filter: without })
+    );
+  });
+
+  it('opens a filter of a type of a newer client as the default type at its cutoff: its knobs are in other units', () => {
+    // (a Res of 80 % would be a lowpass of 80 dB)
+    const newer = {
+      a: true,
+      t: 'comb',
+      cut: 880,
+      res: 80,
+      gain: 12,
+      dr: 30,
+      v: 70,
+      rt: 'ladder12',
+      vk: 'eq',
+    };
+    expect(normalizePreset({ filter: newer }).filter).toEqual({
+      ...PRESET_DEFAULTS.filter,
+      a: true,
+      cut: 880,
+    });
+    expect(normalizePreset({ filter: { ...newer, t: 5 } }).filter).toEqual(
+      normalizePreset({ filter: newer }).filter
+    );
+    // (its cutoff still one of the schema)
+    expect(() => normalizePreset({ filter: { ...newer, cut: 5 } })).toThrow();
+    // a type it knows keeps them
+    const known = { a: true, t: 'ladder12', cut: 880, res: 80, gain: 12, dr: 30, v: 70 };
+    expect(normalizePreset({ filter: known }).filter).toEqual(known);
+  });
+
   it('gives the defaults of an empty preset', () => {
     expect(PRESET_DEFAULTS).toEqual(normalizePreset({}));
     expect(PRESET_DEFAULTS.osc1).toMatchObject({ g: 0.5, w: 0, d: 5, b: 0.75, u: 2, o: 0, s: 0, f: 0 });
@@ -699,7 +742,7 @@ describe('normalizePreset', () => {
     ['position out of range', { ...preset, osc1: { ...preset.osc1, w: 1024 } }],
     ['not integer', { ...preset, osc1: { ...preset.osc1, o: 1.5 } }],
     ['wrong type', { ...preset, filter: { ...preset.filter, cut: '440' } }],
-    ['unknown filter type', { ...preset, filter: { ...preset.filter, t: 'comb' } }],
+    ['filter drive out of range', { ...preset, filter: { ...preset.filter, dr: 120 } }],
     ['empty wavetable path', { ...preset, osc1: { ...preset.osc1, p: [] } }],
     ['NaN', { ...preset, env: { ...preset.env, e1: { ...preset.env.e1, attack: NaN } } }],
     ['envelope time over 32 s', { ...preset, env: { ...preset.env, e2: { ...preset.env.e2, release: 33 } } }],
@@ -851,6 +894,38 @@ describe('requests', () => {
       updatePresetRequestSchema.safeParse({ name: 'Pad', data: preset, editToken: 'short' }).success
     ).toBe(false);
     expect(updatePresetRequestSchema.safeParse({ name: 'Pad', data: preset }).success).toBe(false);
+  });
+
+  it('refuses to save a filter of a type or of units it does not know (opened, they are the defaults)', () => {
+    const save = { name: 'Pad', turnstileToken: 't' };
+    const update = { name: 'Pad', editToken: 'x'.repeat(43) };
+    const model = {
+      a: true,
+      t: 'lowshelf',
+      cut: 500,
+      res: 80,
+      gain: 3,
+      dr: 0,
+      v: 70,
+      rt: 'ladder12',
+      vk: 'eq',
+    };
+    (
+      [
+        [savePresetRequestSchema, save],
+        [updatePresetRequestSchema, update],
+      ] as const
+    ).forEach(([schema, base]) => {
+      const saved = (filter: unknown) => schema.safeParse({ ...base, data: { ...preset, filter } });
+      expect(saved(model).data?.data.filter).toEqual(model);
+      expect(saved({ ...model, t: 'comb' }).success).toBe(false);
+      expect(saved({ ...model, rt: 'comb' }).success).toBe(false);
+      expect(saved({ ...model, vk: 'gain' }).success).toBe(false);
+      expect(presetDataSchema.safeParse({ ...preset, filter: { ...model, t: 'comb' } }).success).toBe(true);
+      // (no filter: its defaults)
+      const data = { ...preset, filter: undefined };
+      expect(schema.parse({ ...base, data }).data.filter).toEqual(PRESET_DEFAULTS.filter);
+    });
   });
 
   it('takes the clip a preset opens with: a uuid, null for none, missing in an update keeps it', () => {
