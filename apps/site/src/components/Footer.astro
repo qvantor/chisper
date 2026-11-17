@@ -3,7 +3,8 @@ import Logo from './Logo.astro';
 import SocialIcon from './SocialIcon.astro';
 import type { Messages } from '../i18n';
 import { LANGS, LINKS, LOCALES, type Lang } from '../i18n/locales';
-import { manualNav } from '../manual/entries';
+import { sectionNav } from '../manual/entries';
+import { SECTIONS } from '../manual/pages';
 
 interface Props {
   lang: Lang;
@@ -13,11 +14,16 @@ interface Props {
 }
 
 const { lang, m, paths } = Astro.props;
-// the pages of the manual in its language, by their names in the nav
-const manual = (await manualNav(lang)).map((link) => ({
-  ...link,
-  current: Astro.url.pathname === link.href,
-}));
+// the pages of the manual and of Learn in their language, by their names in the nav
+const sections = await Promise.all(
+  SECTIONS.map(async (section) => ({
+    section,
+    links: (await sectionNav(section, lang)).map((link) => ({
+      ...link,
+      current: Astro.url.pathname === link.href,
+    })),
+  }))
+);
 const SOCIAL = [
   { name: 'github', label: 'GitHub', href: LINKS.github },
   { name: 'instagram', label: 'Instagram', href: LINKS.instagram },
@@ -39,18 +45,20 @@ const SOCIAL = [
         ))}
       </ul>
     </div>
-    <nav aria-label={m.manual.name}>
-      <p class='heading'>{m.manual.name}</p>
-      <ul>
-        {manual.map(({ href, name, current }) => (
-          <li>
-            <a href={href} aria-current={current ? 'page' : undefined}>
-              {name}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    {sections.map(({ section, links }) => (
+      <nav aria-label={m[section].name}>
+        <p class='heading'>{m[section].name}</p>
+        <ul>
+          {links.map(({ href, name, current }) => (
+            <li>
+              <a href={href} aria-current={current ? 'page' : undefined}>
+                {name}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    ))}
     <nav aria-label={m.footer.languages}>
       <p class='heading'>{m.footer.languages}</p>
       <ul>
@@ -95,7 +103,7 @@ const SOCIAL = [
 
   .grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr));
     gap: 32px;
     align-items: start;
   }

@@ -38,7 +38,8 @@ Dev and build:
 - `npm start` — `netlify dev --filter chisper` (functions, :8888) + Nx dev server (:4200, proxies `/.netlify/*`,
   `/api/*` and `/files/*`). Needs `npm run certs` once (mkcert into `.certs/`; `mkcert -install` trusts the CA).
 - `npm run client:start` — frontend only (lists of tables/noises and presets fail).
-- `npm run build` — production build into `dist/apps/chisper` (wasm, minified worklets, then the site merged in).
+- `npm run build` — production build into `dist/apps/chisper` (wasm, minified worklets, then the site merged in and
+  the lastmods of the sitemap dated against the live site: needs the network).
 - `npm run build:perf` — build with the test hook `window.__chisperPerf` into `dist/apps/chisper-perf`.
 - `npm run wasm` — Rust cores → `tmp/wasm/` (prod) and `tmp/wasm-perf/` (cargo feature `perf`, used by specs and
   `build:perf`). Flags: `--only=prod|perf`, `--watch`, `--sizes`, `--check-sizes`.
@@ -340,13 +341,19 @@ an oscillator) are read, never written.
 ### Promo pages (`apps/site`)
 
 Astro static pages, one route per language (`src/i18n/locales.ts`, texts in `src/i18n/{en,es,de}.ts`; knob and
-section names stay English). The root `/` is the synth; the build merges the site into the synth's dist
-(`scripts/site/merge.mjs`). Demo clips in `src/data/demos.ts` (mp3 not in git), images and video from production by
-`scripts/site/*.mjs`. The only JS: players, the video, the canvas art (`src/art/`, pure math).
+section names stay English; the Spanish and German words for each thing are those of `apps/site/GLOSSARY.md`, a new
+term goes there first). The root `/` is the synth; the build merges the site into the synth's dist
+(`scripts/site/merge.mjs`), then `scripts/site/lastmod.mjs` dates its pages in the sitemap: a page that says what
+it says live (title, description, structured data, the text and links of its `<main>`; not scripts, markup or
+navigation) keeps the `<lastmod>` of the live sitemap, a new or changed one takes the time of the build (a live
+answer it can't read fails the build). Demo clips in `src/data/demos.ts` (mp3 not in git), images and video from
+production by `scripts/site/*.mjs`. The only JS: players, the video, the canvas art (`src/art/`, pure math).
 
-The manual: pages and their path per language in `src/manual/pages.ts` (the sitemap and hreflang pair them, the
-synth's `MANUAL_PATH` opens the hub), texts in `src/content/manual/<lang>/<page>.mdx` (a missing language fails the
-build; MDX is not run through Prettier: it breaks a paragraph at a line that starts with a tag), components in
+The manual (how to use the synth) and Learn (what a synth does, for a reader who may not know Chisper: no internals,
+no test numbers): pages and their path per language in `src/manual/pages.ts` (two sections; the sitemap and hreflang
+pair them, the synth's `MANUAL_PATH` opens the manual's hub, a folder of a section redirects to its hub in
+`netlify.toml`), texts in `src/content/<section>/<lang>/<page>.mdx` (a missing language fails the build; MDX is not
+run through Prettier: it breaks a paragraph at a line that starts with a tag), components in
 `components/manual/`, pictures in `src/assets/manual/` (`screens.mjs --only=manual`, with `synth-map.json`, the
 places of the parts of the synth; `--only=editor --url=…` for a change of the editor not yet on production), presets
 besides the clips' in `src/manual/presets.ts` (`check-presets.mjs`). Every fact is the code's: a change of what the

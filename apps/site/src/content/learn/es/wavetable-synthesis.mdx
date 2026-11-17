@@ -1,0 +1,205 @@
+---
+title: '¿Qué es la síntesis wavetable? Cómo funciona, con sonidos'
+h1: '¿Qué es la síntesis wavetable? Cómo funciona y cómo oírla'
+description: 'Síntesis wavetable explicada: una tabla de ondas de un ciclo, una posición que la recorre, unísono y filtro. Prueba cada idea en un sintetizador online gratis.'
+nav: '¿Qué es la síntesis wavetable?'
+updated: 2026-11-17
+preset: warehouse-lead
+image: oscillator
+---
+La síntesis wavetable (de tabla de ondas) crea un sonido tocando una onda de una tabla con muchas y recorriendo la
+tabla mientras suena la nota. Cada onda de la tabla es un solo ciclo de una forma distinta, así que cada una tiene su
+propio timbre: pasar de una a la siguiente convierte una senoidal suave en una sierra brillante, una vocal en otra, un
+tono limpio en un gruñido. Esa capacidad de cambiar de timbre con el tiempo es lo que hace tan útil la síntesis
+wavetable para bajos, leads y pads que evolucionan. Esta página explica la idea pieza a pieza, con algo que oír en
+cada paso; los ejemplos funcionan en Chisper, un sintetizador wavetable gratis que suena en el navegador.
+
+## La síntesis wavetable en un minuto
+
+1. Una wavetable es una colección de ondas de un solo ciclo, llamadas frames. En Chisper, una tabla puede contener
+   hasta 256 frames, normalmente de 2048 muestras cada uno.
+2. El oscilador toca un frame en bucle. La tecla que pulsas fija la velocidad del bucle, que es la altura, y la forma
+   del frame fija el timbre.
+3. La perilla **Wave** selecciona qué frame suena.
+4. Algo mueve la posición: tu mano o, mejor, una envolvente, un LFO o la velocidad. El movimiento es lo que da vida a
+   un sonido wavetable.
+5. Lo demás es un sintetizador normal. El unísono engrosa las voces, un filtro las moldea, una envolvente les da su
+   volumen y los efectos rematan el sonido.
+
+<WavetableStack label='Una wavetable: sus frames apilados de una senoidal (frame 1) a una sierra (frame 256), con la perilla Wave sobre el frame que suena'>
+
+Una wavetable dibujada como una pila: una senoidal al fondo, una sierra delante y, iluminado, el frame que toca la
+perilla **Wave**.
+
+</WavetableStack>
+
+## ¿Qué es una wavetable y qué hay en un frame?
+
+Piensa en un ciclo de onda como en una receta. Repetido una y otra vez es un tono, y su forma es su timbre. Forma y
+armónicos son lo mismo visto de dos maneras: toda onda que se repite es una suma de senoidales en múltiplos enteros
+de su altura, los armónicos, y la forma dice cuánto suena cada uno.
+
+- Una senoidal es el caso más simple, el primer armónico y nada más: un tono puro y suave, como un diapasón.
+- Una sierra contiene todos los armónicos enteros, y la amplitud de cada uno disminuye en proporción inversa a su
+  frecuencia: el segundo suena a la mitad de volumen y el tercero a un tercio. Suena brillante y zumbona, la base de
+  cuerdas y metales.
+- Si dejas solo los impares, el 1.º, el 3.º, el 5.º y así, suena la cuadrada hueca de un clarinete.
+- Al estrechar el pulso de una cuadrada, más energía pasa a los armónicos agudos y el tono se vuelve fino y nasal.
+
+Una wavetable pone en fila muchos ciclos así, una receta tras otra. Un frame puede ser una forma básica, un ciclo
+recortado de una voz o un instrumento grabado, o una onda dibujada a mano, y la tabla los mantiene en orden, de modo
+que, al recorrerla, los armónicos cambian poco a poco.
+
+<Figure name='oscillator' alt='Osc 1 de Chisper en la tabla Spectral Gyro, en el frame 33 de 256: el nombre de la tabla con sus flechas, Oct, Semi y Fine, la onda de ese frame, Wave 33/256, Phase, Phase rand, Unison 3 y las perillas Gain, Wave, Detune y Blend' narrow>
+
+El oscilador en pantalla: la tabla arriba, el frame que suena en el centro (el 33 de 256) y **Wave** debajo.
+
+</Figure>
+
+## ¿Cómo hace una nota un oscilador wavetable?
+
+Lee el frame una y otra vez. Para un la a 440 Hz, el oscilador recorre el ciclo 440 veces por segundo, tenga el frame
+2048 muestras o 600. Altura y timbre quedan separados: la tecla decide con qué frecuencia se repite el ciclo; el
+frame, cómo es cada repetición.
+
+## ¿Qué hace la perilla Wave?
+
+**Wave** es la posición en la tabla. Su recorrido se divide en partes iguales, una por frame, y suena el frame en
+cuya parte está la perilla. La tira bajo la onda muestra dónde estás (*Wave 33/256*).
+
+Lo que pasa entre dos frames depende de la tabla. Con pocos frames el sonido se mueve a escalones: *Basic Shapes*, la
+tabla de *Init*, tiene nueve, una sierra, una senoidal, una triangular, dos cuadradas y cuatro pulsos estrechos (25;
+12,5; 6,25 y 3,125 %), y al girar **Wave** el tono salta de uno a otro. Dale el mismo giro a una tabla de 256 frames y
+se convierte en un deslizamiento, porque cada paso es solo 1/256 de la perilla.
+
+El salto de un frame al siguiente es limpio, sin clic. Algunas tablas de pocos frames son tablas morph: Chisper
+rellena los huecos entre sus frames, así que se deslizan como una tabla de 256. Toda tabla hecha a partir de un
+archivo de audio es morph.
+
+<Tip>
+
+Una tabla que suena a escalones al girar **Wave** tiene pocos frames. Elige una con más o crea una tabla morph a
+partir de audio (mira [Wavetables: importar, crear desde audio, dibujar](/es/manual/wavetables/)).
+
+</Tip>
+
+## ¿Cómo se hace que una wavetable se mueva?
+
+La síntesis wavetable vive en el movimiento: una tabla dejada en un solo frame es solo un oscilador corriente. **Wave**
+es una perilla como cualquier otra, así que cualquier fuente de modulación puede moverla. Arrastra a ella la pestaña
+de una envolvente, de un LFO o de VELO y se mueve (todo el mecanismo está en [Modulación: envolventes, LFO y
+velocidad](/es/manual/modulacion-envolventes-lfo/)).
+
+Una envolvente gira la perilla una vez por cada nota. Un decay corto a lo largo de la tabla es el chasquido de un
+pluck; un attack lento, un crescendo. Un LFO no se detiene nunca, así que el tono va y viene por la tabla: un pad que
+respira, un lead que reluce, y cuando el LFO sigue el tempo, la deriva se vuelve ritmo. La velocidad trae al
+intérprete: cuanto más fuerte pulsas una tecla, más adentro de la tabla empieza la nota.
+
+Dos osciladores significan dos posiciones. Una puede subir mientras la otra baja, o cada una recibe su propia tabla y
+su propia velocidad, creando texturas más complejas y cambiantes. Los presets *UFO Drone* y *Biting Brass Keys*
+funcionan así: el primero barre la posición por dos tablas con envolventes, el segundo mueve la posición de los dos
+osciladores con LFO 1.
+
+## ¿Qué más da forma a un sonido wavetable?
+
+Una wavetable es solo la fuente. La cadena que viene después es la de cualquier sintetizador.
+
+**Unison** (unísono) apila hasta 8 copias de la nota en cada oscilador. **Detune** las separa en altura, **Blend**
+equilibra las voces centrales con las laterales (75 % por defecto) y **Phase** y **Phase rand** deciden dónde empiezan
+las voces. Una tabla de sierra brillante con un unísono de 8 voces es el supersaw. **Oct**, **Semi** y **Fine** afinan
+cada oscilador, lo que permite que dos tablas a una octava o a una quinta de distancia suenen como una sola, y el
+oscilador **Sub** y el reproductor **Noise** añaden debajo un tono grave o una muestra (ruido blanco, un hi-hat,
+viento).
+
+Después viene el filtro, uno por voz. Una wavetable le da una fuente que ya cambia, así que a menudo tiene menos
+trabajo que con una sierra simple. Distorsión, chorus, delay, un compresor y una reverb rematan el sonido, en el orden
+que quieras.
+
+## Wavetable, sustractiva, FM, aditiva y muestreo: ¿en qué se diferencian?
+
+| Método | Qué crea el tono | Cómo cambia el tono | Conocido por |
+|---|---|---|---|
+| Sustractiva | Unas pocas ondas fijas (sierra, cuadrada) | Un filtro quita armónicos | Bajos y leads analógicos clásicos |
+| Wavetable | Una tabla de muchas ondas distintas | Una posición recorre la tabla | Pads que evolucionan, gruñidos, tonos digitales y vocales |
+| FM | Senoidales que se modulan la altura unas a otras | La cantidad de modulación | Campanas, pianos eléctricos, tonos metálicos |
+| Aditiva | Muchas senoidales sumadas una a una | El nivel de cada armónico | Órganos, texturas espectrales |
+| Muestreo | Una grabación | La altura, el bucle y el filtro | Instrumentos reales |
+
+Los métodos se mezclan. La mayoría de los sintetizadores wavetable ponen un filtro tras los osciladores, así que
+también son sustractivos: la tabla es una fuente que se mueve y el filtro la talla. Un frame es además una lista de
+armónicos, lo que hace de la wavetable prima de la síntesis aditiva, y una tabla recortada de un archivo de audio es
+prima del muestreo.
+
+## Tres cosas que oír
+
+<Try title='Escalones y después un barrido'>
+
+1. Carga *Init* (la flecha circular junto al nombre del preset) y mantén pulsada la <kbd>Q</kbd>.
+2. Gira **Wave** de Osc 1 despacio por todo su recorrido. Esta tabla es *Basic Shapes*.
+3. Haz clic en el nombre de la tabla para abrir el navegador y elige *Spectral Gyro*, una tabla de 256 frames.
+4. Gira **Wave** otra vez por todo su recorrido, a la misma velocidad.
+
+Deberías oír que el primer giro salta entre nueve formas distintas y el segundo se desliza por cientos de cambios
+pequeños, con la misma altura todo el rato.
+
+</Try>
+
+<Try title='Una envolvente barre la tabla' preset='ufo-drone'>
+
+1. Carga *Init*, elige *Spectral Gyro* en Osc 1 y gira **Wave** del todo hacia abajo.
+2. Arrastra la pestaña **ENV 2** a **Wave** de Osc 1. La ruta aparece al +50 %: arrastra su punto hasta el +100 %.
+3. Toca unas notas y mantén cada una unos tres segundos.
+4. Sube **Decay** de ENV 2 hasta unos 2 s y vuelve a tocarlas igual.
+
+Deberías oír cada nota empezar en el extremo de la tabla y volver hacia su primer frame en medio segundo, y con Decay
+a 2 s el recorrido dura cuatro veces más. El preset de abajo hace lo mismo con dos tablas y dos envolventes para un
+drone ambient.
+
+</Try>
+
+<Try title='Un LFO deriva por la tabla' preset='biting-brass-keys'>
+
+1. Carga *Init*, elige *Spectral Gyro* en Osc 1 y gira **Wave** hasta la mitad.
+2. En LFO 1 elige **Triangle** en el selector de forma, pon el modo en **Free** y gira **Rate** hasta unos 4 s.
+3. Arrastra la pestaña **LFO 1** a **Wave** de Osc 1, haz <kbd>Shift</kbd>-clic en su punto para que la ruta sea
+   bipolar y arrastra el punto hasta cerca del +60 %.
+4. Mantén un acorde diez segundos.
+
+Deberías oír el timbre del acorde respirar por la tabla y volver, sin que cambie la altura. El preset de abajo mueve
+la posición de dos osciladores con un LFO, sobre un filtro y un drive que se abren con una envolvente.
+
+</Try>
+
+## Preguntas frecuentes
+
+### ¿La síntesis wavetable es lo mismo que el muestreo?
+
+No. Un sampler reproduce una grabación de un sonido; un sintetizador wavetable toca muchas ondas de un ciclo y se
+mueve entre ellas. Eso sí, se encuentran en un truco: recorta una wavetable de un archivo de audio y sus frames se
+vuelven trozos cortos de ese sonido.
+
+### ¿Necesito wavetables propias?
+
+No. Chisper trae una biblioteca de wavetables ordenada en carpetas, y cada una se descarga al elegirla. Crea las tuyas
+para un sonido que la biblioteca no tiene: dibuja una onda, importa una wavetable WAV o convierte un archivo de audio
+en una.
+
+### ¿Por qué mi wavetable suena a escalones?
+
+Porque la tabla tiene pocos frames y **Wave** salta de uno al siguiente. Una tabla de 256 frames, o una tabla morph,
+se desliza.
+
+### ¿Puede una wavetable contener un instrumento real?
+
+Sí. Un frame puede ser un ciclo de una nota grabada, y una tabla puede ser una fila de esos ciclos desde el inicio de
+la nota hasta su final. *Harp Pluck* toca tablas de instrumentos reales: un arpa y una guitarra de nailon una octava
+más arriba.
+
+## ¿Y ahora qué?
+
+- [Wavetables: importar, crear desde audio, dibujar](/es/manual/wavetables/): la biblioteca, tablas propias a partir
+  de archivos WAV y de audio, y cómo dibujar una onda.
+- [Modulación: envolventes, LFO y velocidad](/es/manual/modulacion-envolventes-lfo/): haz que **Wave**, o cualquier
+  perilla, se mueva sola.
+- [Primeros pasos](/es/manual/primeros-pasos/): la pantalla de Chisper, las primeras perillas y cómo guardar un
+  sonido.

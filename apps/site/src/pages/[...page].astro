@@ -1,36 +1,38 @@
 ---
 import { getCollection } from 'astro:content';
 import Landing from '../components/Landing.astro';
-import ManualPage from '../components/manual/ManualPage.astro';
+import ArticlePage from '../components/manual/ArticlePage.astro';
 import { LANGS, LOCALES, type Lang } from '../i18n/locales';
-import { manualEntries } from '../manual/entries';
-import { MANUAL_PAGES, isManualPage, manualPath, type ManualPage as Page } from '../manual/pages';
+import { sectionEntries } from '../manual/entries';
+import { SECTIONS, SECTION_PAGES, isSitePage, pagePath, type SitePage } from '../manual/pages';
 
 interface Props {
   lang: Lang;
-  page?: Page;
+  page?: SitePage;
 }
 
-// the landing per language at the path of its locale; every page of the manual per language at its own path. A text
-// of the manual of no page or language, or a page without its text in a language, fails the build
+// the landing per language at the path of its locale; every page of the manual and of Learn per language at its own
+// path. A text of no page or language, or a page without its text in a language, fails the build
 export const getStaticPaths = async () => {
-  const ids = new Set((await getCollection('manual')).map((entry) => entry.id));
-  for (const id of ids) {
-    const [lang, page] = id.split('/');
-    if (!(LANGS as readonly string[]).includes(lang) || !page || !isManualPage(page))
-      throw new Error(`src/content/manual/${id}.mdx is no page of the manual (src/manual/pages.ts)`);
+  for (const section of SECTIONS) {
+    const ids = new Set((await getCollection(section)).map((entry) => entry.id));
+    for (const id of ids) {
+      const [lang, page] = id.split('/');
+      if (!(LANGS as readonly string[]).includes(lang) || !page || !isSitePage(section, page))
+        throw new Error(`src/content/${section}/${id}.mdx is no page of the section (src/manual/pages.ts)`);
+    }
+    await Promise.all(LANGS.map((lang) => sectionEntries(section, lang)));
   }
-  await Promise.all(LANGS.map(manualEntries));
-  const manual = MANUAL_PAGES.flatMap((page) =>
-    LANGS.map((lang) => ({ params: { page: manualPath(page, lang).slice(1, -1) }, props: { lang, page } }))
+  const articles = SECTIONS.flatMap((section) => SECTION_PAGES[section]).flatMap((page) =>
+    LANGS.map((lang) => ({ params: { page: pagePath(page, lang).slice(1, -1) }, props: { lang, page } }))
   );
   return [
     ...LANGS.map((lang) => ({ params: { page: LOCALES[lang].path.slice(1, -1) }, props: { lang } })),
-    ...manual,
+    ...articles,
   ];
 };
 
 const { lang, page } = Astro.props;
 ---
 
-{page ? <ManualPage lang={lang} page={page} /> : <Landing lang={lang} />}
+{page ? <ArticlePage lang={lang} page={page} /> : <Landing lang={lang} />}

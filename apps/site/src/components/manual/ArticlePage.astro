@@ -14,17 +14,18 @@ import OpenPreset from './OpenPreset.astro';
 import Table from './Table.astro';
 import Tip from './Tip.astro';
 import Try from './Try.astro';
+import WavetableStack from './WavetableStack.astro';
 import synth from '../../assets/synth.png';
 import { MESSAGES } from '../../i18n';
 import { LOCALES, type Lang } from '../../i18n/locales';
-import { manualEntries, manualNav } from '../../manual/entries';
+import { sectionEntries, sectionNav } from '../../manual/entries';
 import { figureOf } from '../../manual/figures';
-import { MANUAL_HUB, manualPath, manualPaths, neighbours, type ManualPage } from '../../manual/pages';
+import { HUBS, neighbours, pagePath, pagePaths, sectionOf, type SitePage } from '../../manual/pages';
 import { manualJsonLd, type Crumb } from '../../seo/manual-json-ld';
 
 interface Props {
   lang: Lang;
-  page: ManualPage;
+  page: SitePage;
 }
 
 // the components the texts of the manual use without importing them
@@ -37,19 +38,21 @@ const components = {
   OpenPreset,
   Tip,
   Try,
+  WavetableStack,
   table: Table,
 };
 
-// a page of the manual: where it is (breadcrumbs), the pages of the manual beside it (its own headings under its
-// name), its text, the pages before and after it
+// a page of the manual or of Learn: where it is (breadcrumbs), the pages of its section beside it (its own headings
+// under its name), its text, the pages before and after it
 const { lang, page } = Astro.props;
 const m = MESSAGES[lang];
-const entry = (await manualEntries(lang))[page];
+const section = sectionOf(page);
+const entry = (await sectionEntries(section, lang))[page];
 const { title, h1, description, nav, updated, preset, image } = entry.data;
 const { Content, headings } = await render(entry);
-const path = manualPath(page, lang);
-const paths = manualPaths(page);
-const pages = await manualNav(lang);
+const path = pagePath(page, lang);
+const paths = pagePaths(page);
+const pages = await sectionNav(section, lang);
 const sections = headings.filter((heading) => heading.depth === 2);
 const around = neighbours(page);
 const pager = (['prev', 'next'] as const).flatMap((rel) => {
@@ -57,11 +60,11 @@ const pager = (['prev', 'next'] as const).flatMap((rel) => {
   return link ? [{ ...link, rel, label: m.manual[rel] }] : [];
 });
 
-// the site, the manual (its hub), the page (the hub is the manual itself)
+// the site, its section (its hub), the page (the hub is the section itself)
 const crumbs: Crumb[] = [
   { name: 'Chisper', path: LOCALES[lang].path },
-  { name: m.manual.name, path: manualPath(MANUAL_HUB, lang) },
-  ...(page === MANUAL_HUB ? [] : [{ name: nav, path }]),
+  { name: m[section].name, path: pagePath(HUBS[section], lang) },
+  ...(page === HUBS[section] ? [] : [{ name: nav, path }]),
 ];
 // the screenshot of the synth (the same file as the landing's) and the picture of the page
 const screenshot = await getImage({ src: synth, format: 'webp', width: 1440 });
@@ -88,6 +91,8 @@ const date = updated.toISOString().slice(0, 10);
         image: picture.src,
         screenshot: screenshot.src,
         crumbs,
+        // a page of Learn is about the subject, not the synth
+        kind: section === 'learn' ? 'Article' : 'TechArticle',
       })}
     />
     <Font cssVariable='--font-inter-tight' preload />
@@ -109,7 +114,7 @@ const date = updated.toISOString().slice(0, 10);
         </ol>
       </nav>
       <div class='layout'>
-        <nav class='side' aria-label={m.manual.nav}>
+        <nav class='side' aria-label={m[section].nav}>
           <ol class='pages'>
             {pages.map(({ id, href, name }) => (
               <li>
@@ -144,14 +149,16 @@ const date = updated.toISOString().slice(0, 10);
                 {new Intl.DateTimeFormat(lang, { dateStyle: 'long', timeZone: 'UTC' }).format(updated)}
               </time>
             </p>
-            <nav class='pager' aria-label={m.manual.nav}>
-              {pager.map(({ rel, label, href, name }) => (
-                <a class:list={['turn', rel]} rel={rel} href={href}>
-                  <span class='direction'>{label}</span>
-                  <span class='name'>{name}</span>
-                </a>
-              ))}
-            </nav>
+            {pager.length > 0 && (
+              <nav class='pager' aria-label={m[section].nav}>
+                {pager.map(({ rel, label, href, name }) => (
+                  <a class:list={['turn', rel]} rel={rel} href={href}>
+                    <span class='direction'>{label}</span>
+                    <span class='name'>{name}</span>
+                  </a>
+                ))}
+              </nav>
+            )}
           </footer>
         </article>
       </div>

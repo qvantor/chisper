@@ -15,10 +15,12 @@ interface Article {
   screenshot: string;
   // from the site down to the page
   crumbs: Crumb[];
+  // a page of the manual is a technical article about the synth; a page of Learn an article that mentions it
+  kind?: 'TechArticle' | 'Article';
 }
 
-// the structured data of a page of the manual: the synth it is about, the page as an article of its language, and
-// where it is in the site
+// the structured data of a page of the manual or of Learn: the synth, the page as an article of its language (about
+// the synth, or mentioning it), and where it is in the site
 export const manualJsonLd = ({
   lang,
   path,
@@ -28,6 +30,7 @@ export const manualJsonLd = ({
   image,
   screenshot,
   crumbs,
+  kind = 'TechArticle',
 }: Article) => {
   const url = absolute(path);
   return {
@@ -35,7 +38,7 @@ export const manualJsonLd = ({
     '@graph': [
       appNode(screenshot),
       {
-        '@type': 'TechArticle',
+        '@type': kind,
         '@id': `${url}#article`,
         url,
         mainEntityOfPage: url,
@@ -46,7 +49,7 @@ export const manualJsonLd = ({
         image: absolute(image),
         author: AUTHOR,
         publisher: AUTHOR,
-        about: { '@id': `${SYNTH_URL}#app` },
+        [kind === 'TechArticle' ? 'about' : 'mentions']: { '@id': `${SYNTH_URL}#app` },
       },
       {
         '@type': 'BreadcrumbList',

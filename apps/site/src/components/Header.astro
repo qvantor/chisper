@@ -3,7 +3,7 @@ import BookIcon from './BookIcon.astro';
 import Logo from './Logo.astro';
 import type { Messages } from '../i18n';
 import { LOCALES, type Lang } from '../i18n/locales';
-import { MANUAL_HUB, manualPath } from '../manual/pages';
+import { HUBS, pagePath } from '../manual/pages';
 
 interface Props {
   lang: Lang;
@@ -11,7 +11,7 @@ interface Props {
 }
 
 // the wordmark (back to the landing of the language), the manual and the key into the synth; the languages are in
-// the footer (and in the alternates of the head)
+// the footer (and in the alternates of the head), so is Learn (and the manual leads to it)
 const { lang, m } = Astro.props;
 ---
 
@@ -19,7 +19,7 @@ const { lang, m } = Astro.props;
   <div class='column bar'>
     <Logo href={LOCALES[lang].path} />
     <nav class='links'>
-      <a class='key key-ghost manual' href={manualPath(MANUAL_HUB, lang)}>
+      <a class='key key-ghost manual' href={pagePath(HUBS.manual, lang)}>
         <BookIcon />
         {m.manual.name}
       </a>

@@ -2,7 +2,7 @@
 import ManualLink from './ManualLink.astro';
 import type { Messages } from '../i18n';
 import type { Lang } from '../i18n/locales';
-import { manualNav } from '../manual/entries';
+import { sectionNav } from '../manual/entries';
 
 interface Props {
   lang: Lang;
@@ -12,7 +12,7 @@ interface Props {
 // the answers are in the HTML whether a question is open or not (crawlers read them); an answer the manual tells
 // more of links its page (named as in the nav of the manual)
 const { lang, m } = Astro.props;
-const nav = await manualNav(lang);
+const nav = await sectionNav('manual', lang);
 const items = m.faq.items.map((item) => ({ ...item, link: nav.find(({ id }) => id === item.page) }));
 ---
 

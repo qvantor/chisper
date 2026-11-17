@@ -6,7 +6,19 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { DIST, LANGS, MANUAL, MANUAL_PAGES, PAGES, ROOT, SITE, attr, hrefs, pageAt } from './pages.mjs';
+import {
+  DIST,
+  LANGS,
+  LEARN,
+  MANUAL,
+  MANUAL_PAGES,
+  PAGES,
+  ROOT,
+  SITE,
+  attr,
+  hrefs,
+  pageAt,
+} from './pages.mjs';
 const CLIPS = [
   'acid-bass',
   'warehouse-lead',
@@ -235,9 +247,18 @@ describe('every version of the page', () => {
           MANUAL['getting-started'][lang],
         ]);
         assert.equal(attr(document, 'header a.manual', 'href'), MANUAL['getting-started'][lang]);
+        // the header has the manual and the synth; Learn is in the footer
+        assert.deepEqual(hrefs(document.querySelectorAll('header .links a')), [
+          MANUAL['getting-started'][lang],
+          '/',
+        ]);
         assert.deepEqual(
           hrefs(document.querySelectorAll('footer nav')[0].querySelectorAll('a')),
           MANUAL_PAGES.map((page) => MANUAL[page][lang])
+        );
+        assert.deepEqual(
+          hrefs(document.querySelectorAll('footer nav')[1].querySelectorAll('a')),
+          Object.values(LEARN).map((paths) => paths[lang])
         );
       });
 
@@ -399,6 +420,7 @@ describe('the build', () => {
     const groups = [
       Object.fromEntries(LANGS.map((lang) => [lang, PAGES[lang].path])),
       ...MANUAL_PAGES.map((page) => MANUAL[page]),
+      ...Object.values(LEARN),
     ];
     assert.deepEqual(
       urls.map((url) => url.getElementsByTagName('loc')[0].textContent).sort(),

@@ -1,0 +1,212 @@
+---
+title: 'Was ist Wavetable-Synthese? Einfach erklärt, mit Klangbeispielen'
+h1: 'Was ist Wavetable-Synthese? So funktioniert sie und so hörst du sie'
+description: 'Wavetable-Synthese erklärt: Tabelle aus Einzelzyklus-Wellen, wandernde Position, Unisono und Filter. Jede Idee im kostenlosen Online-Synth zum Ausprobieren.'
+nav: 'Was ist Wavetable-Synthese?'
+updated: 2026-11-17
+preset: warehouse-lead
+image: oscillator
+---
+Wavetable-Synthese erzeugt einen Klang, indem sie eine Welle aus einer Tabelle mit vielen Wellen spielt und während
+der Note durch die Tabelle fährt. Jede Welle in der Tabelle ist ein einzelner Zyklus in einer anderen Form und hat
+deshalb eine eigene Klangfarbe: Der Übergang von einer zur nächsten macht aus einem weichen Sinus einen hellen
+Sägezahn, aus einem Vokal einen anderen, aus einem sauberen Ton einen Growl. Diese Fähigkeit, die Klangfarbe über die
+Zeit zu verändern, macht die Wavetable-Synthese so nützlich für sich entwickelnde Bässe, Leads und Pads. Die Seite
+erklärt die Idee Baustein für Baustein, mit etwas zum Hören bei jedem Schritt; die Beispiele laufen in Chisper, einem
+kostenlosen Wavetable-Synthesizer, der im Browser spielt.
+
+## Wavetable-Synthese in einer Minute
+
+1. Eine Wavetable ist eine Sammlung von Einzelzyklus-Wellen, den sogenannten Frames. In Chisper kann eine Tabelle bis
+   zu 256 Frames enthalten, meist mit je 2048 Samples.
+2. Der Oszillator spielt einen Frame in einer Schleife. Die Taste, die du drückst, bestimmt das Tempo der Schleife,
+   also die Tonhöhe, und die Form des Frames bestimmt die Klangfarbe.
+3. Der Regler **Wave** wählt, welcher Frame spielt.
+4. Etwas bewegt die Position: deine Hand oder besser eine Hüllkurve, ein LFO oder die Anschlagstärke. Die Bewegung
+   macht einen Wavetable-Sound lebendig.
+5. Der Rest ist ein gewöhnlicher Synthesizer. Unisono verdickt die Stimmen, ein Filter formt sie, eine Hüllkurve gibt
+   ihnen ihre Lautstärke, Effekte runden den Sound ab.
+
+<WavetableStack label='Eine Wavetable: ihre Frames gestapelt von einem Sinus (Frame 1) bis zu einem Sägezahn (Frame 256), der Wave-Regler auf dem Frame, der gerade spielt'>
+
+Eine Wavetable als Stapel gezeichnet: hinten ein Sinus, vorn ein Sägezahn, hell der Frame, den der Regler **Wave**
+spielt.
+
+</WavetableStack>
+
+## Was ist eine Wavetable, und was steckt in einem Frame?
+
+Stell dir einen Zyklus einer Welle als Rezept vor. Immer wieder wiederholt ist er ein Ton, und seine Form ist seine
+Klangfarbe. Form und Teiltöne sind dasselbe aus zwei Blickwinkeln: Jede sich wiederholende Welle ist eine Summe von
+Sinuswellen bei ganzzahligen Vielfachen ihrer Tonhöhe, den Teiltönen, und die Form sagt, wie laut jeder davon ist.
+
+- Ein Sinus ist der einfachste Fall, nur der erste Teilton, der Grundton, und sonst nichts: ein reiner, weicher Ton
+  wie von einer Stimmgabel.
+- Ein Sägezahn enthält alle Teiltöne, wobei die Amplitude jedes Teiltons umgekehrt proportional zu seiner Frequenz
+  abnimmt: Der zweite ist halb so laut, der dritte ein Drittel so laut. Er klingt hell und schnarrend, die Basis von
+  Streichern und Blech.
+- Bleiben nur die ungeraden übrig, der 1., 3., 5. und so weiter, klingt das hohle Rechteck einer Klarinette.
+- Macht man den Puls eines Rechtecks schmaler, wandert mehr Energie in die hohen Teiltöne, und der Ton wird dünn und
+  nasal.
+
+Eine Wavetable reiht viele solcher Zyklen aneinander, ein Rezept nach dem anderen. Ein Frame kann eine Grundform sein,
+ein aus einer aufgenommenen Stimme oder einem Instrument geschnittener Zyklus oder eine von Hand gezeichnete Welle,
+und die Tabelle hält sie in Reihenfolge, sodass sich beim Durchfahren die Teiltöne Stück für Stück ändern.
+
+<Figure name='oscillator' alt='Osc 1 von Chisper auf der Tabelle Spectral Gyro bei Frame 33 von 256: der Tabellenname mit seinen Pfeilen, Oct, Semi und Fine, die Welle dieses Frames, Wave 33/256, Phase, Phase rand, Unison 3 und die Regler Gain, Wave, Detune und Blend' narrow>
+
+Der Oszillator auf dem Bildschirm: oben die Tabelle, in der Mitte der Frame, der gerade spielt (Frame 33 von 256),
+darunter **Wave**.
+
+</Figure>
+
+## Wie macht ein Wavetable-Oszillator eine Note?
+
+Er liest den Frame immer rund herum. Bei einem A mit 440 Hz läuft der Oszillator den Zyklus 440-mal pro Sekunde
+durch, egal ob der Frame 2048 Samples lang ist oder 600. Tonhöhe und Klangfarbe bleiben getrennt: Die Taste
+entscheidet, wie oft sich der Zyklus wiederholt, der Frame, wie jede Wiederholung aussieht.
+
+## Was macht der Regler Wave?
+
+**Wave** ist die Position in der Tabelle. Sein Regelweg ist in gleich große Teile geteilt, einen für jeden Frame, und
+du hörst den Frame, in dessen Teil der Regler steht. Der Streifen unter der Welle zeigt, wo du bist (*Wave 33/256*).
+
+Was zwischen zwei Frames passiert, hängt von der Tabelle ab. Bei wenigen Frames bewegt sich der Klang in Stufen:
+*Basic Shapes*, die Tabelle von *Init*, hat neun, einen Sägezahn, einen Sinus, ein Dreieck, zwei Rechtecke und vier
+schmale Pulse (25; 12,5; 6,25 und 3,125 %), und beim Drehen von **Wave** springt der Ton von einem zum nächsten. Gib
+dieselbe Drehung einer Tabelle mit 256 Frames, und sie wird zum Gleiten, weil jeder Schritt nur 1/256 des Reglers
+ist.
+
+Ein Sprung von einem Frame zum nächsten ist sauber, ohne Knackser. Manche Tabellen mit wenigen Frames sind
+Morph-Tabellen: Chisper füllt die Lücken zwischen ihren Frames, sodass sie gleiten wie eine Tabelle mit 256 Frames.
+Jede aus einer Audiodatei gemachte Tabelle ist eine Morph-Tabelle.
+
+<Tip>
+
+Eine Tabelle, die beim Drehen von **Wave** stufig klingt, hat wenige Frames. Nimm eine mit mehr oder mach eine
+Morph-Tabelle aus Audio (siehe [Wavetables: importieren, aus Audio erstellen, zeichnen](/de/anleitung/wavetables/)).
+
+</Tip>
+
+## Wie bringt man eine Wavetable in Bewegung?
+
+Wavetable-Synthese lebt von der Bewegung: Eine Tabelle, die auf einem Frame stehen bleibt, ist nur ein gewöhnlicher
+Oszillator. **Wave** ist ein Regler wie jeder andere, also kann ihn jede Modulationsquelle antreiben. Zieh den Tab
+einer Hüllkurve, eines LFO oder von VELO darauf, und er bewegt sich (der ganze Mechanismus steht auf [Modulation:
+Hüllkurven, LFOs und Anschlagstärke](/de/anleitung/modulation-huellkurven-lfo/)).
+
+Eine Hüllkurve dreht den Regler bei jeder Note einmal. Ein kurzer Decay quer durch die Tabelle ist das Schnalzen
+eines Plucks, ein langsamer Attack ein Anschwellen. Ein LFO hört nie auf, also driftet der Klang durch die Tabelle
+hin und her: ein Pad, das atmet, ein Lead, der schimmert, und folgt der LFO dem Tempo, wird aus der Drift Rhythmus.
+Die Anschlagstärke bringt den Spieler ins Spiel: Je härter du eine Taste drückst, desto weiter hinten in der Tabelle
+beginnt die Note.
+
+Zwei Oszillatoren bedeuten zwei Positionen. Die eine kann steigen, während die andere fällt, oder jede bekommt ihre
+eigene Tabelle und ihre eigene Geschwindigkeit, was komplexere und sich weiterentwickelnde Texturen erzeugt. Die
+Presets *UFO Drone* und *Biting Brass Keys* arbeiten so: Das erste fährt die Wavetable-Position mit Hüllkurven durch zwei
+Tabellen, das zweite bewegt die Position beider Oszillatoren mit LFO 1.
+
+## Was formt einen Wavetable-Sound noch?
+
+Eine Wavetable ist nur die Quelle. Die Kette danach kennst du von jedem Synthesizer.
+
+**Unison** (Unisono) schichtet in jedem Oszillator bis zu 8 Kopien der Note. **Detune** streut sie in der Tonhöhe,
+**Blend** stellt die mittleren Stimmen gegen die äußeren (standardmäßig 75 %), und **Phase** und **Phase rand** legen
+fest, wo die Stimmen starten. Eine helle Sägezahn-Tabelle in einem Unisono aus 8 Stimmen ergibt den Supersaw. **Oct**,
+**Semi** und **Fine** stimmen jeden Oszillator, sodass zwei Tabellen im Abstand einer Oktave oder Quinte wie ein Sound
+klingen, und der **Sub**-Oszillator und der **Noise**-Player legen darunter einen tiefen Ton oder ein Sample (weißes
+Rauschen, eine Hi-Hat, Wind).
+
+Dann kommt das Filter, eines pro Stimme. Eine Wavetable gibt ihm eine Quelle, die sich schon verändert, sodass es oft
+weniger zu tun hat als bei einem schlichten Sägezahn. Distortion, Chorus, Delay, ein Kompressor und ein Reverb runden
+den Sound ab, in beliebiger Reihenfolge.
+
+## Wavetable, subtraktiv, FM, additiv und Sampling: Wo liegt der Unterschied?
+
+| Verfahren | Was den Ton erzeugt | Wie sich der Ton ändert | Bekannt für |
+|---|---|---|---|
+| Subtraktiv | Wenige feste Wellen (Sägezahn, Rechteck) | Ein Filter nimmt Teiltöne weg | Klassische analoge Bässe und Leads |
+| Wavetable | Eine Tabelle vieler verschiedener Wellen | Eine Position fährt durch die Tabelle | Sich entwickelnde Pads, Growls, digitale und vokale Klänge |
+| FM | Sinuswellen, die sich gegenseitig in der Tonhöhe modulieren | Die Stärke der Modulation | Glocken, E-Pianos, metallische Klänge |
+| Additiv | Viele Sinuswellen, eine nach der anderen addiert | Die Lautstärke jedes Teiltons | Orgeln, spektrale Texturen |
+| Sampling | Eine Aufnahme | Die Tonhöhe, die Schleife und das Filter | Echte Instrumente |
+
+Die Verfahren mischen sich. Die meisten Wavetable-Synthesizer setzen ein Filter hinter die Oszillatoren und arbeiten
+damit auch subtraktiv: Die Tabelle ist eine Quelle, die sich bewegt, das Filter schnitzt sie zurecht. Ein Frame ist
+außerdem eine Liste von Teiltönen, was die Wavetable zu einer Verwandten der additiven Synthese macht, und eine aus
+einer Audiodatei geschnittene Tabelle ist eine Verwandte des Samplings.
+
+## Drei Dinge zum Hören
+
+<Try title='Stufen, dann ein Durchlauf'>
+
+1. Lade *Init* (der Kreispfeil neben dem Preset-Namen) und halte <kbd>Q</kbd>.
+2. Dreh **Wave** an Osc 1 langsam über den ganzen Regelweg. Das ist *Basic Shapes*.
+3. Klick auf den Namen der Tabelle, um den Browser zu öffnen, und wähl *Spectral Gyro*, eine Tabelle mit 256 Frames.
+4. Dreh **Wave** noch einmal über den ganzen Regelweg, mit derselben Geschwindigkeit.
+
+Du solltest hören, wie die erste Drehung zwischen neun deutlich verschiedenen Formen springt und die zweite durch
+Hunderte kleiner Änderungen gleitet, mit durchgehend gleicher Tonhöhe.
+
+</Try>
+
+<Try title='Eine Hüllkurve fährt durch die Tabelle' preset='ufo-drone'>
+
+1. Lade *Init*, wähl *Spectral Gyro* an Osc 1 und dreh **Wave** ganz nach unten.
+2. Zieh den Tab **ENV 2** auf **Wave** von Osc 1. Die Route entsteht bei +50 %: Zieh ihren Punkt hoch auf +100 %.
+3. Spiel ein paar Noten und halte jede etwa drei Sekunden.
+4. Erhöhe **Decay** von ENV 2 auf etwa 2 s und spiel sie noch einmal genauso.
+
+Du solltest hören, wie jede Note am hinteren Ende der Tabelle beginnt und in einer halben Sekunde zu ihrem ersten
+Frame zurückgleitet, und bei Decay 2 s dauert das Gleiten viermal so lange. Das Preset unten tut dasselbe mit zwei
+Tabellen und zwei Hüllkurven für einen Ambient-Drone.
+
+</Try>
+
+<Try title='Ein LFO driftet durch die Tabelle' preset='biting-brass-keys'>
+
+1. Lade *Init*, wähl *Spectral Gyro* an Osc 1 und dreh **Wave** auf die Mitte.
+2. Wähl an LFO 1 im Formen-Select **Triangle**, stell den Modus auf **Free** und dreh **Rate** auf etwa 4 s.
+3. Zieh den Tab **LFO 1** auf **Wave** von Osc 1, klick mit <kbd>Shift</kbd> auf seinen Punkt, damit die Route
+   bipolar wird, und zieh den Punkt auf etwa +60 %.
+4. Halte zehn Sekunden lang einen Akkord.
+
+Du solltest hören, wie die Klangfarbe des Akkords durch die Tabelle atmet und zurück, bei unveränderter Tonhöhe. Das
+Preset unten bewegt die Position zweier Oszillatoren mit einem LFO, über einem Filter und einem Drive, die sich mit
+einer Hüllkurve öffnen.
+
+</Try>
+
+## Häufige Fragen
+
+### Ist Wavetable-Synthese dasselbe wie Sampling?
+
+Nein. Ein Sampler spielt eine Aufnahme eines Klangs ab; ein Wavetable-Synth spielt viele Einzelzyklus-Wellen und fährt
+zwischen ihnen. In einem Kniff treffen sich beide: Schneide eine Wavetable aus einer Audiodatei, und ihre Frames
+werden zu kurzen Scheiben dieses Klangs.
+
+### Brauche ich eigene Wavetables?
+
+Nein. Chisper bringt eine Bibliothek von Wavetables mit, in Ordnern sortiert, und jede wird geladen, wenn du sie
+auswählst. Mach eigene für einen Klang, den die Bibliothek nicht hat: Zeichne eine Welle, importiere eine
+WAV-Wavetable oder mach aus einer Audiodatei eine.
+
+### Warum klingt meine Wavetable stufig?
+
+Weil die Tabelle wenige Frames hat und **Wave** von einem zum nächsten hüpft. Eine Tabelle mit 256 Frames oder eine
+Morph-Tabelle gleitet stattdessen.
+
+### Kann eine Wavetable ein echtes Instrument enthalten?
+
+Ja. Ein Frame kann ein Zyklus einer aufgenommenen Note sein, und eine Tabelle kann eine Reihe solcher Zyklen vom
+Anfang der Note bis zu ihrem Ende sein. *Harp Pluck* spielt Tabellen echter Instrumente, eine Harfe und eine
+Nylongitarre eine Oktave darüber.
+
+## Wie geht es weiter?
+
+- [Wavetables: importieren, aus Audio erstellen, zeichnen](/de/anleitung/wavetables/): die Bibliothek, eigene
+  Tabellen aus WAV- und Audiodateien, eine Welle zeichnen.
+- [Modulation: Hüllkurven, LFOs und Anschlagstärke](/de/anleitung/modulation-huellkurven-lfo/): Lass **Wave** oder
+  jeden anderen Regler sich von selbst bewegen.
+- [Erste Schritte](/de/anleitung/erste-schritte/): der Bildschirm von Chisper, die ersten Regler und das Speichern
+  eines Sounds.

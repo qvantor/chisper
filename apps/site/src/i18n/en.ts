@@ -176,13 +176,13 @@ export const en = {
   },
   demos: {
     'biting-brass-keys':
-      'Two 8-voice unisons of a Moog saw table an octave apart; LFO 1 moves both wave positions, ENV 2 opens the filter and the drive.',
+      'Two 8-voice unisons of a Moog saw table an octave apart; LFO 1 moves both wavetable positions, ENV 2 opens the filter and the drive.',
     'rhodes-keys':
       'A Rhodes table in a 2-voice unison over a vibraphone table; ENV 2 on the cutoff, a slow LFO on the gains: tremolo.',
     'lo-fi-tape-keys':
       'A Wurlitzer table through soft distortion; two LFOs wobble a short delay: the tape flutter of lo-fi hip hop.',
     'ufo-drone':
-      'Envelopes sweep the wave position through two tables, the pitch bend dips a tone and comes back: an ambient sci-fi drone.',
+      'Envelopes sweep the wavetable position through two tables, the pitch bend dips a tone and comes back: an ambient sci-fi drone.',
     'harp-pluck':
       'Tables of real instruments: a harp and a nylon guitar an octave above, each with its own decay.',
     'noise-riser':
@@ -193,7 +193,7 @@ export const en = {
       'A mono acid bass: a snappy one-shot table and a detuned analog saw an octave up; ENV 1 snaps a resonant lowpass open on every note, LFO 1 wobbles it, soft distortion.',
     helicopter: 'A custom LFO shape chops the volume; ENV 2 speeds the LFO up like a rotor spinning up.',
     'warehouse-lead':
-      'A techno lead: LFO 1 moves the wave position, a fast LFO on Fine adds grit, ENV 3 closes the filter; distortion, delay and reverb.',
+      'A techno lead: LFO 1 moves the wavetable position, a fast LFO on Fine adds grit, ENV 3 closes the filter; distortion, delay and reverb.',
     'sonar-ping': 'Three pings answered by a long delay and reverb; ENV 2 moves the band of the echoes.',
     'zesty-drive-bass':
       'A mono bass through a resonant lowpass nearly closed at 70 Hz: ENV 2 snaps it open almost four octaves on every note, then it settles; soft distortion and a ping-pong delay after it, overlapping notes glide.',
@@ -255,6 +255,11 @@ export const en = {
         a: 'Yes. The source code of Chisper is on GitHub, under the PolyForm Noncommercial license.',
       },
     ] satisfies Question[] as Question[],
+  },
+  // Learn, the articles on what a synth does (the header, the footer, the pages around the text)
+  learn: {
+    name: 'Learn',
+    nav: 'Learn articles',
   },
   // the manual (components/manual/): its name, what its pages show around their text
   manual: {
