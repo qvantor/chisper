@@ -28,7 +28,6 @@ version = "0.1.0"
 dependencies = [
  "dsp-core",
  "jsmath",
- "wasm-rt",
 ]
 
 [[package]]
@@ -37,7 +36,6 @@ version = "0.1.0"
 dependencies = [
  "dsp-core",
  "jsmath",
- "wasm-rt",
 ]
 
 [[package]]
@@ -46,7 +44,6 @@ version = "0.1.0"
 dependencies = [
  "dsp-core",
  "jsmath",
- "wasm-rt",
 ]
 
 [[package]]
@@ -91,7 +88,6 @@ version = "0.1.0"
 dependencies = [
  "dsp-core",
  "jsmath",
- "wasm-rt",
 ]
 
 [[package]]
@@ -100,7 +96,6 @@ version = "0.1.0"
 dependencies = [
  "dsp-core",
  "jsmath",
- "wasm-rt",
 ]
 
 [[package]]

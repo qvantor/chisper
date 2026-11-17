@@ -7,7 +7,6 @@
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
-use wasm_rt as _;
 
 use dsp_core::consts::CEILING;
 use dsp_core::true_peak::{StereoTruePeak, TRUE_PEAK_DELAY, TRUE_PEAK_TAPS};

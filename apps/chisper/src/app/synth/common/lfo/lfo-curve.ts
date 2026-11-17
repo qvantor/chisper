@@ -1,6 +1,6 @@
 import { curveShape } from '../envelope/envelope-curve';
 
-// the LFOs LFO 1–4 as the voices, the fx worklets and the main thread work them out, shared by them and the specs:
+// the LFOs LFO 1–4 as the voices, the chain and the main thread work them out, shared by them and the specs:
 // no imports but the curve of the envelopes. The Rust voice (dsp/wavetable-osc/src/lfo.rs) does the same
 // operations in the same order: a level of the TS at the points of the voice is the one of the core.
 //
@@ -43,7 +43,7 @@ export interface LfoAnchor {
   period: number;
 }
 
-// an LFO as the main thread sends it to the voices node and the fx worklets: its knobs, the newest anchor of its
+// an LFO as the main thread sends it to the voices node and the chain node: its knobs, the newest anchor of its
 // clock and its shape (only when it changed)
 export interface LfoWire {
   // RETRIG or FREE
@@ -69,7 +69,7 @@ export interface LfosState {
 export const mergeLfos = (before: LfoWire[] | null, { lfos }: LfosState): LfoWire[] =>
   lfos.map((wire, i) => ({ ...wire, table: wire.table ?? before?.[i]?.table }));
 
-// the LFOs a consumer takes (the voices node, an fx worklet, fx-mod): every state merged (the table of each kept),
+// the LFOs a consumer takes (the voices node, the chain node): every state merged (the table of each kept),
 // sent on only while the consumer reads an LFO (`use`): a state is a message every audio thread deserializes (a
 // table of 8 KB allocated there) and takes in, one that reads none gets none. Once it reads one it gets the LFOs as
 // they are at once (instantly, before the message that gives it the route), then every state; a node made later
@@ -240,7 +240,7 @@ interface Fade {
 
 const weightOf = ({ at }: Fade, t: number) => (t >= at + LFO_GLIDE ? 1 : t <= at ? 0 : (t - at) / LFO_GLIDE);
 
-// an LFO the voices of a node (or an fx worklet, or the main thread) share: its clock, its knobs (those of a
+// an LFO the voices of a node (or the chain, or the main thread) share: its clock, its knobs (those of a
 // state from its `at` on, the ones before until then) and its shape (crossfaded into a new one in LFO_GLIDE from
 // `at`: the shape at `at` and the new one; until `at` the crossfade before goes on, so a shape to come waits
 // (`pending`); a third one meanwhile takes the one waiting as played from now on). The tables come from the

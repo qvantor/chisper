@@ -44,7 +44,7 @@ Built with TypeScript, Rust (WebAssembly), RxJS and the Web Audio API. Nothing t
 - Built-in delay presets: Slapback, Stereo widener, Digital echo, Ping-pong 250ms, Echo 375ms, Echo 500ms, Wide ping-pong, Tape echo, Dub, Ambient wash, Lo-fi, Metallic comb
 - **Reverb**: an algorithmic 16-line feedback delay network with input low cut, predelay, room size, decay with hi damping and a bass multiplier, tail modulation depth (every line has its own LFO), stereo separation and early reflections level (damped like the tail; the wet level is the common mix), plus a decay-over-frequency display. An **Era** switch colors the input like vintage units: Now (full band), 80s (clean, converter-like bandwidth limit and a little low-mid body) and 70s (darker, with a touch of asymmetric tube saturation)
 - Built-in reverb presets: Small room, Medium room, Bright room, Dark chamber, Plate, Vintage plate, Vocal plate, Large hall, Cathedral, Lush modulated, Ambient wash
-- Distortion, reverb and the limiter run in AudioWorklets on Rust cores; the envelopes of the last note move the FX knobs too
+- The effects, the master gain and the limiter run in one AudioWorklet on one Rust core; the envelopes and the LFOs of the last note move the FX knobs too
 
 ### 🌊 Wavetables
 
@@ -174,8 +174,9 @@ libs/
   rxjs-react/           rxModel: RxJS state models bound to React context
   ui-kit/               knobs, charts, piano, analysers, ADSR widget, theme
   preset-schema/        zod schema of presets, normalization, hashing (shared by client and server)
-dsp/                    Rust cores of the worklets: wavetable-osc, limiter, reverb, distortion,
-                        dsp-core (shared blocks), jsmath (JS Math bit for bit); golden hashes of their sound
+dsp/                    Rust cores of the worklets: wavetable-osc and chain (the effects in their slots, the
+                        master gain, the limiter), dsp-core (shared blocks), jsmath (JS Math bit for bit);
+                        golden hashes of their sound
 netlify/
   functions/            presets API, usage stats, wavetables, scheduled jobs
   tests/                function specs

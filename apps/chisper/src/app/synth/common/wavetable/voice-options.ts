@@ -146,6 +146,11 @@ export interface VoiceModuleKnobs {
 }
 export type KnobsModule = keyof VoiceModuleKnobs;
 
+// main thread → a worklet: its node is destroyed, the processor ends, so it can be collected
+export interface StopMessage {
+  stop?: boolean;
+}
+
 // main thread → voices processor, the events of a task in the order they were made: a voice of a note (`on`), the
 // automation of its params (the AudioParam call of the same name: setValueAtTime, setTargetAtTime,
 // exponentialRampToValueAtTime, cancelScheduledValues, linearRampToValueAtTime (the synth makes none); values in

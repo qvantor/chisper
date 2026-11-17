@@ -25,7 +25,7 @@ const setup = async ({
   loadNoiseSample,
 }: { ready?: boolean; loadNoiseSample?: LoadNoiseSample } = {}) => {
   const modules = createSynth(['default'], undefined, loadNoiseSample);
-  const [{ audioCtx, preGain, wavetables }] = modules.synthCore;
+  const [{ audioCtx, input, wavetables }] = modules.synthCore;
   const createGain = jest.spyOn(audioCtx, 'createGain');
   const [, { onPress, onRelease }] = modules.inputController;
   const [synthModel, synthActions] = modules.synth;
@@ -50,7 +50,7 @@ const setup = async ({
     ...modules,
     envelopeModel: modules.envelopes,
     audioCtx,
-    preGain,
+    input,
     wavetables,
     onPress,
     onRelease,
@@ -153,13 +153,13 @@ describe('synth', () => {
     expect(gains()).toEqual([]);
   });
 
-  it('plays every voice in the voices node, connected straight to the synth output', async () => {
-    const { onPress, voices, preGain, audioCtx } = await setup();
+  it('plays every voice in the voices node, connected straight to the input of the chain', async () => {
+    const { onPress, voices, input, audioCtx } = await setup();
     onPress([4, 'A']);
     onPress([4, 'C']);
     const [node] = voicesNodes(audioCtx);
     expect(voicesNodes(audioCtx)).toHaveLength(1);
-    expect(node.connect).toHaveBeenCalledWith(preGain);
+    expect(node.connect).toHaveBeenCalledWith(input);
     expect(voices().map(({ node: of }) => of)).toEqual([node, node]);
   });
 

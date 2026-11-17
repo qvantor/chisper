@@ -1,154 +1,57 @@
-import { BehaviorSubject } from 'rxjs';
-import { noop } from 'lodash';
-import type { LfosState } from '../../common/lfo/lfo-curve';
-import { FxCore, FxStatus } from './types';
-import { FxModulation, FxRoute } from './fx-modulation';
-import { glideParam, setParam } from './fx-automation';
-import { mixGains } from './fx-mod-params';
-import type { FxMod } from './fx-mod';
-
-export { mixGains } from './fx-mod-params';
-
-// smooths param changes, so mix, bypass and effect params don't click
-export const setSmooth = (
-  audioCtx: BaseAudioContext,
-  param: AudioParam,
-  value: number,
-  timeConstant = 0.01
-) => glideParam(param, value, audioCtx.currentTime, timeConstant);
+import { mapValues } from 'lodash';
+import { TEMPO_DEFAULT } from '@chisper/preset-schema';
+import type { Chain } from '../../common/chain/chain';
+import { createFxMeter } from './fx-meter';
+import { FxDefinition, FxMeter } from './types';
 
 export type FxSlot = ReturnType<typeof createFxSlot>;
 
-// input → dry → output (mix: crossfade of dry and wet, mixGains; bypassed: only dry)
-// input → send → core → wet → output (send is closed while inactive, so the core gets no new signal)
-// a core with latency: input → dry delay (the latency) → dry, the same for bypass and mix, so the timing
-// doesn't jump and the mix doesn't comb filter
-// core → drain (muted) → destination: the core stays rendered while the slot is out of the chain, so its
-// loops drain (a disconnected delay freezes its buffer and replays the old tail when added back).
-// The routes of the mix move the gains by two lines of fx-mod (`mod`: the lines of the slot), the offsets of the
-// mix moved from the knob; the gains stay at the knob with their glides.
-// A core that mixes inside (FxCore.mixInside) gets the mix as its param `mix` and the routes of it with its own:
-// while on, the slot passes the core alone (bypassed: the dry signal alone, as any slot)
-export const createFxSlot = (
-  audioCtx: BaseAudioContext,
-  core: FxCore,
-  mod?: { fxMod: FxMod; dry: number; wet: number }
-) => {
-  const input = audioCtx.createGain();
-  const output = audioCtx.createGain();
-  const dry = audioCtx.createGain();
-  const wet = audioCtx.createGain();
-  const send = audioCtx.createGain();
-  const drain = audioCtx.createGain();
-  const { latency = 0, linearMix = false, mixInside = false } = core;
-  const dryDelay = latency > 0 ? audioCtx.createDelay(latency) : undefined;
+// The slot of an effect in the chain (common/chain: one worklet node with one core for every effect, the master
+// gain and the limiter). In the core a slot is: its input → the effect → mixed with the input (late by the latency
+// of the effect, so the mix doesn't comb filter) by the law of its kind (equal power: echoes and a reverb add up
+// like unrelated sounds; linear: a distortion is the dry signal reshaped, in time with it; inside: a chorus and a
+// compressor mix the dry signal themselves, their wet one is out of phase with it), its gains gliding. A slot that
+// doesn't play (out of the chain, bypassed, not ready) passes its input and its effect is forgotten once it has
+// faded out: a stale tail never comes back.
+//
+// Here it is what the fx model tells the chain of it: the knobs of the effect as its core takes them (`definition`
+// .core: a knob in BPM at the tempo of the synth, an era as the values of its stage), its mix, whether it plays;
+// its status is that of the chain, 'failed' when the effect itself failed in the core
+export const createFxSlot = (chain: Chain, slot: number, definition: FxDefinition, sampleRate: number) => {
+  let values: Record<string, number> = mapValues(definition.params, (param) => param.default);
+  // the tempo of the synth (BPM)
+  let bpm = TEMPO_DEFAULT;
+  const send = () => chain.setParams(slot, definition.core(values, bpm, sampleRate));
+  send();
 
-  dryDelay?.delayTime.setValueAtTime(latency, audioCtx.currentTime);
-  (dryDelay ? input.connect(dryDelay) : input).connect(dry);
-  dry.connect(output);
-  input.connect(send);
-  send.connect(core.input);
-  core.output.connect(wet);
-  wet.connect(output);
-  core.output.connect(drain);
-  drain.connect(audioCtx.destination);
-  drain.gain.setValueAtTime(0, audioCtx.currentTime);
-  // closed until the fx model activates the slot and sets the mix
-  setParam(send.gain, 0, audioCtx.currentTime);
-  setParam(wet.gain, 0, audioCtx.currentTime);
-
-  const setGain = (node: GainNode, value: number) => setSmooth(audioCtx, node.gain, value);
-
-  // the mix knob, on (not bypassed and ready), the routes moving it
-  let mix = { value: 0, on: false };
-  let mixRoutes: FxRoute[] = [];
-  // in the chain and not bypassed: the send is open
-  let active = false;
-  // [dry, wet] of the knob (bypassed: only dry)
-  const gains = () => {
-    if (!mix.on) return [1, 0];
-    return mixInside ? [0, 1] : mixGains(mix.value, linearMix);
-  };
-  // the lines of the routes of the mix on the gains (while it is on)
-  const follow = () => {
-    if (!mod) return;
-    const routed = mix.on && mixRoutes.length > 0;
-    const line = (map: 'dry' | 'wet') =>
-      routed
-        ? { routes: mixRoutes, base: mix.value, map: linearMix ? (`${map}Linear` as const) : map }
-        : null;
-    mod.fxMod.set(mod.dry, line('dry'), [dry.gain]);
-    mod.fxMod.set(mod.wet, line('wet'), [wet.gain]);
-  };
-  // the crossfade of mixGains: both gains glide alike, so a linear one keeps their sum
-  const applyMix = () => {
-    const [dryGain, wetGain] = gains();
-    setGain(dry, dryGain);
-    setGain(wet, wetGain);
-    follow();
-  };
+  // what the effect shows of its work while a screen watches it (absent: nothing)
+  const meters = definition.metered
+    ? createFxMeter<unknown>((watched) => chain.watch(slot, watched ? emit : null))
+    : undefined;
+  const emit = (values: unknown) => meters?.emit(values);
+  const meter: FxMeter | undefined = meters?.meter;
 
   return {
-    input,
-    output,
-    dry,
-    dryDelay,
-    wet,
-    send,
-    drain,
-    setParam: core.setParam,
-    // an effect without a status is always ready, it has nothing to retry
-    $status: core.$status ?? new BehaviorSubject<FxStatus>('ready'),
-    retry: core.retry ?? noop,
-    // the crossfade of mixGains (both gains glide alike, so a linear one keeps their sum); bypassed: only
-    // the dry signal passes
-    setMix: (value: number, on: boolean) => {
-      mix = { value, on };
-      if (mixInside) core.setParam('mix', value);
-      applyMix();
+    $status: chain.status(slot),
+    // loads the module of the chain again if it failed, makes the effect again if it did
+    retry: () => {
+      chain.retry();
+      chain.retryStage(slot);
     },
-    // what the core shows of its work (absent: nothing)
-    meter: core.meter,
-    // the LFOs of the last note (the core runs them)
-    setLfos: (state: LfosState) => core.setLfos?.(state),
-    // the tempo of the synth (a core in BPM follows it)
-    setTempo: (bpm: number) => core.setTempo?.(bpm),
-    // the routes of the envelopes and the LFOs of the last note: the mix moves the gains of the slot, the others
-    // the core (with the routes of the note to the knobs of the LFOs)
-    setModulation: (modulation: FxModulation | null) => {
-      const routes = modulation?.routes ?? [];
-      const next = mixInside ? [] : routes.filter(({ param }) => param === 'mix');
-      if (next.length > 0 || mixRoutes.length > 0) {
-        mixRoutes = next;
-        follow();
-      }
-      const own = mixInside ? routes : routes.filter(({ param }) => param !== 'mix');
-      const moved = own.some(({ param }) => !/^lfo[1-4]\./.test(param));
-      core.setModulation(modulation && moved ? { note: modulation.note, routes: own } : null);
+    // the knobs of the effect (those that changed reach the core)
+    setParams: (params: Record<string, number>) => {
+      values = { ...values, ...params };
+      send();
     },
-    // active: in the chain and not bypassed
-    setActive: (value: boolean) => {
-      active = value;
-      setGain(send, value ? 1 : 0);
-      core.setActive(value);
+    setMix: (value: number) => chain.setMix(slot, value),
+    // in the chain, on and ready: its effect plays
+    setActive: (active: boolean) => chain.setActive(slot, active),
+    // the tempo of the synth: a knob in BPM follows it
+    setTempo: (next: number) => {
+      bpm = next;
+      send();
     },
-    // a preset switch, the output muted: the core forgets its tail, the gains are at the knobs at once (from
-    // those of the preset before they would glide into its first notes); a mix its routes move follows them
-    clear: () => {
-      core.clear?.();
-      const now = audioCtx.currentTime;
-      const set = (node: GainNode, value: number) => {
-        node.gain.cancelScheduledValues(now);
-        setParam(node.gain, value, now);
-      };
-      set(send, active ? 1 : 0);
-      const [dryGain, wetGain] = gains();
-      set(dry, dryGain);
-      set(wet, wetGain);
-    },
-    destroy: () => {
-      core.destroy();
-      [input, output, dry, wet, send, drain, dryDelay].forEach((node) => node?.disconnect());
-    },
+    meter,
+    destroy: () => meters?.clear(),
   };
 };

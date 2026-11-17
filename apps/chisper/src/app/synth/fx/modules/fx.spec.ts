@@ -1,30 +1,83 @@
 import { mapValues } from 'lodash';
-import { divisionIndex, FX_MIX_PARAM, FX_PARAMS, FX_TYPES } from '@chisper/preset-schema';
+import { divisionIndex, FX_MIX_PARAM, FX_PARAMS, FX_TYPES, FxType } from '@chisper/preset-schema';
 import { applySnapshot, getSnapshot } from '../../../app';
+import {
+  chainNode,
+  chainNodes,
+  chainPosts,
+  chainReports,
+  flushChain as flush,
+} from '../../../../test-utils/chain-node';
 import { createFx, createLfos, createModulation, createSynthCore } from '../../../../test-utils/models';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
-import { DELAY_PRESETS } from '../effects/delay-presets';
-import { DELAY_LINE_MAX } from '../effects/delay';
+import {
+  CHAIN_KEYS,
+  ChainMessage,
+  LFO_KEYS,
+  LFO_KNOBS,
+  LFO_TARGET,
+  MIX_KEY,
+  NEUTRAL_PARAMS,
+  TARGET_KEYS,
+} from '../../common/chain/chain-params';
 import { LFO_STATE_INTERVAL } from '../../common/lfo/lfo-curve';
-import { DISTORTION_LATENCY } from '../effects/distortion-params';
+import { MOD_TARGETS } from '../../common/modulation/modulation-targets';
+import type { ModRoute } from '../../common/modules/modulation';
+import { DELAY_PRESETS } from '../effects/delay-presets';
 import { REVERB_PRESETS } from '../effects/reverb-presets';
 import { findFxPreset, FxStatus } from '../effects';
-import { getChain } from './fx';
+import { chainNote, chainRoutes, getChain } from './fx';
 
-const setup = () => {
-  const synthCore = createSynthCore();
-  const createDelay = jest.spyOn(synthCore[0].audioCtx, 'createDelay');
-  const createBiquadFilter = jest.spyOn(synthCore[0].audioCtx, 'createBiquadFilter');
-  const { fx, transport } = createFx(synthCore);
+// the slot of each effect in the chain
+const SLOT = Object.fromEntries(FX_TYPES.map((type, index) => [type, index])) as Record<FxType, number>;
+const ALL = (status: FxStatus) => Object.fromEntries(FX_TYPES.map((type) => [type, status]));
+
+// the fx model on the chain of a synth core: what it tells the chain (`told`: the calls of its methods, whether a
+// node exists or not)
+const setup = (synthCore = createSynthCore()) => {
+  const { audioCtx, chain } = synthCore[0];
+  const told = {
+    setParams: jest.spyOn(chain, 'setParams'),
+    setMix: jest.spyOn(chain, 'setMix'),
+    setActive: jest.spyOn(chain, 'setActive'),
+    setOrder: jest.spyOn(chain, 'setOrder'),
+    setRoutes: jest.spyOn(chain, 'setRoutes'),
+    setNote: jest.spyOn(chain, 'setNote'),
+    setLfos: jest.spyOn(chain, 'setLfos'),
+    clear: jest.spyOn(chain, 'clear'),
+  };
+  const { fx, transport, modulation, lfos, $fxNote } = createFx(synthCore);
   const [model, actions] = fx;
-  // the left delay line (the first one as long as the longest time) and its bandpass, the bandpass feeds the
-  // line back through the feedback gain
-  const line = createDelay.mock.calls.findIndex(([max]) => max === DELAY_LINE_MAX);
-  const delayNode = createDelay.mock.results[line].value as DelayNode;
-  const filterNode = createBiquadFilter.mock.results[0].value as BiquadFilterNode;
-  const feedback = (filterNode.connect as jest.Mock).mock.calls[0][0] as GainNode;
-  return { model, actions, synthCore: synthCore[0], delayNode, feedback, transport };
+  // whether the effect plays, as the chain was last told
+  const active = (type: FxType) =>
+    told.setActive.mock.calls.filter(([slot]) => slot === SLOT[type]).pop()?.[1] ?? false;
+  return {
+    model,
+    actions,
+    synthCore: synthCore[0],
+    audioCtx,
+    chain,
+    told,
+    active,
+    transport,
+    modulation,
+    lfos,
+    $fxNote,
+  };
+};
+
+// the model once the node of the chain exists: what the node is posted from here on (`posts`: every message,
+// `posted`: the values of one of its fields)
+const ready = async () => {
+  const context = setup();
+  await flush();
+  const node = chainNode(context.audioCtx);
+  node.port.postMessage.mockClear();
+  const posts = () => chainPosts(node);
+  const posted = <K extends keyof ChainMessage>(field: K) =>
+    posts().flatMap((message) => (field in message ? [message[field]] : []));
+  return { ...context, node, posts, posted, forget: () => node.port.postMessage.mockClear() };
 };
 
 const REVERB_DEFAULTS = mapValues(FX_PARAMS.reverb, (param) => param.default);
@@ -35,180 +88,156 @@ const COMPRESSOR_DEFAULTS = mapValues(FX_PARAMS.compressor, (param) => param.def
 const CHORUS_DEFAULTS = mapValues(FX_PARAMS.chorus, (param) => param.default);
 const defaultReverb = () => ({ mix: FX_MIX_PARAM.default, params: REVERB_DEFAULTS });
 
-const lastGain = (node: GainNode) => (node.gain.setTargetAtTime as jest.Mock).mock.lastCall?.[0];
-
-// the reverb worklet module loads asynchronously: settled after the pending promises
-const flush = () => new Promise((resolve) => setTimeout(resolve));
-
-// the reverb module fails to load on the first try, the other modules load
-const setupFailing = () => {
-  const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-  const synthCore = createSynthCore();
-  const addModule = synthCore[0].audioCtx.audioWorklet.addModule as jest.Mock;
-  let failed = false;
-  addModule.mockImplementation((url: string) => {
-    if (failed || !url.endsWith(`/reverb.js`)) return Promise.resolve();
-    failed = true;
-    return Promise.reject(new Error('404'));
-  });
-  const [model, actions] = createFx(synthCore).fx;
-  return { model, actions, synthCore: synthCore[0], addModule, error };
-};
-
 describe('fx', () => {
-  it('passes fxIn straight to fxOut when no effect is added', () => {
-    const { model, synthCore } = setup();
+  afterEach(() => jest.restoreAllMocks());
+
+  it('starts with no effect in the chain: the node is made with the defaults of the knobs, nothing playing', async () => {
+    const { model, audioCtx, told } = setup();
     expect(model.$effects.value.delay.added).toBe(false);
-    expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+    await flush();
+    const node = chainNode(audioCtx);
+    const { state } = node.options.processorOptions;
+    expect(state.order).toEqual([]);
+    expect(state.slots).toEqual({
+      distortion: { params: NEUTRAL_PARAMS.distortion, mix: 1, active: false },
+      chorus: { params: NEUTRAL_PARAMS.chorus, mix: 0.5, active: false },
+      delay: { params: NEUTRAL_PARAMS.delay, mix: 0.3, active: false },
+      compressor: { params: NEUTRAL_PARAMS.compressor, mix: 1, active: false },
+      reverb: { params: NEUTRAL_PARAMS.reverb, mix: 0.3, active: false },
+    });
+    expect(state.routes).toEqual([]);
+    expect(state.note).toBeNull();
+    // ready: nothing to tell it
+    expect(chainPosts(node)).toEqual([]);
+    expect(told.setOrder.mock.calls.every(([order]) => order.length === 0)).toBe(true);
   });
 
-  it('setAdded inserts and removes the effect slot', () => {
-    const { model, actions, synthCore } = setup();
-    const slot = model.slots.delay;
-
+  it('setAdded puts the slot of the effect in the chain and takes it out', async () => {
+    const { actions, posted } = await ready();
     actions.setAdded('delay', true);
-    expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(slot.input);
-    expect(slot.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+    expect(posted('order')).toEqual([[SLOT.delay]]);
+    expect(posted('active')).toEqual([[SLOT.delay, true]]);
 
     actions.setAdded('delay', false);
-    expect(slot.output.disconnect).toHaveBeenCalled();
-    expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+    expect(posted('order')).toEqual([[SLOT.delay], []]);
+    expect(posted('active')).toEqual([
+      [SLOT.delay, true],
+      [SLOT.delay, false],
+    ]);
   });
 
-  it('does not rewire the chain on param changes', () => {
-    const { actions, synthCore } = setup();
+  it('does not tell the order again on param changes', async () => {
+    const { actions, told, posted } = await ready();
     actions.setAdded('delay', true);
-    const calls = (synthCore.fxIn.disconnect as jest.Mock).mock.calls.length;
+    const calls = told.setOrder.mock.calls.length;
     actions.setParam('delay', 'time', 0.5);
     actions.setMix('delay', 0.5);
-    expect(synthCore.fxIn.disconnect).toHaveBeenCalledTimes(calls);
+    actions.setOn('delay', false);
+    expect(told.setOrder).toHaveBeenCalledTimes(calls);
+    expect(posted('order')).toEqual([[SLOT.delay]]);
   });
 
-  it('keeps send and wet closed until the slot is set up', () => {
-    const synthCore = createSynthCore();
-    const createGain = jest.spyOn(synthCore[0].audioCtx, 'createGain');
-    const [model] = createFx(synthCore).fx;
-    const gains = createGain.mock.results.map(({ value }) => value as GainNode);
-    const { send, wet } = model.slots.delay;
-    expect(gains).toContain(send);
-    [send, wet].forEach((node) => expect(node.gain.setValueAtTime).toHaveBeenCalledWith(0, 0));
-  });
-
-  it('crossfades dry and wet at equal power, bypass passes only the dry signal', () => {
-    const { model, actions } = setup();
-    const { input, output, dry, wet } = model.slots.delay;
-    expect(input.connect).toHaveBeenCalledWith(dry);
-    expect(dry.connect).toHaveBeenCalledWith(output);
-    const expectGains = (dryGain: number, wetGain: number) => {
-      expect(lastGain(dry)).toBeCloseTo(dryGain);
-      expect(lastGain(wet)).toBeCloseTo(wetGain);
-    };
-
-    actions.setMix('delay', 0.25);
-    expectGains(0.9239, 0.3827);
-    actions.setMix('delay', 0.5);
-    expectGains(Math.SQRT1_2, Math.SQRT1_2);
-    actions.setMix('delay', 0.75);
-    expectGains(0.3827, 0.9239);
-    actions.setMix('delay', 0);
-    expectGains(1, 0);
-    actions.setMix('delay', 1);
-    expectGains(0, 1);
+  it('gives the slot its mix, falsy included; bypass changes whether it plays, not its mix', async () => {
+    const { model, actions, posted, forget } = await ready();
+    actions.setAdded('delay', true);
+    forget();
+    [0.25, 0.5, 0, 1].forEach((mix) => actions.setMix('delay', mix));
+    expect(posted('mix')).toEqual([0.25, 0.5, 0, 1].map((mix) => [SLOT.delay, mix]));
+    expect(posted('active')).toEqual([]);
 
     actions.setOn('delay', false);
     expect(model.$effects.value.delay.on).toBe(false);
-    expectGains(1, 0);
     actions.setOn('delay', true);
-    expectGains(0, 1);
+    expect(posted('active')).toEqual([
+      [SLOT.delay, false],
+      [SLOT.delay, true],
+    ]);
+    expect(posted('mix')).toHaveLength(4);
   });
 
-  it('closes the send and kills the delay feedback while removed or bypassed', () => {
-    const { model, actions, feedback } = setup();
-    const { send } = model.slots.delay;
-    actions.setParam('delay', 'fb', 0.6);
-    expect(send.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-
+  it('an effect plays while it is in the chain, on and ready', async () => {
+    const { actions, active, audioCtx } = setup();
+    // loading
     actions.setAdded('delay', true);
-    expect(send.gain.setTargetAtTime).toHaveBeenLastCalledWith(1, 0, expect.any(Number));
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0.6, 0, expect.any(Number));
+    expect(active('delay')).toBe(false);
+    await flush();
+    expect(active('delay')).toBe(true);
+    // (the node was made before the chain was ready: it is told)
+    expect(chainPosts(chainNode(audioCtx))).toEqual([{ active: [SLOT.delay, true] }]);
 
     actions.setOn('delay', false);
-    expect(send.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-
-    actions.setParam('delay', 'fb', 0.2);
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-    actions.setOn('delay', true);
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0.2, 0, expect.any(Number));
-
+    expect(active('delay')).toBe(false);
     actions.setAdded('delay', false);
-    expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
+    actions.setOn('delay', true);
+    expect(active('delay')).toBe(false);
+    actions.setAdded('delay', true);
+    expect(active('delay')).toBe(true);
+    actions.setAdded('delay', false);
+    expect(active('delay')).toBe(false);
+    FX_TYPES.filter((type) => type !== 'delay').forEach((type) => expect(active(type)).toBe(false));
   });
 
-  it('keeps the effect rendered through a muted drain while removed, so the delay empties', () => {
-    const synthCore = createSynthCore();
-    const { audioCtx } = synthCore[0];
-    const createChannelMerger = jest.spyOn(audioCtx, 'createChannelMerger');
-    const [model, actions] = createFx(synthCore).fx;
-    const { drain, wet } = model.slots.delay;
-    // the delay output (merger) feeds both wet and the drain
-    const coreOutput = createChannelMerger.mock.results[0].value as ChannelMergerNode;
-    expect(coreOutput.connect).toHaveBeenCalledWith(wet);
-    expect(coreOutput.connect).toHaveBeenCalledWith(drain);
-    expect(drain.connect).toHaveBeenCalledWith(audioCtx.destination);
-    expect(drain.gain.setValueAtTime).toHaveBeenCalledWith(0, 0);
-
-    model.slots.delay.destroy();
-    expect(drain.disconnect).toHaveBeenCalled();
-  });
-
-  it('applies the params to the delay node', () => {
-    const { actions, delayNode } = setup();
+  it('gives the chain the knobs of an effect, in the chain or not: added later it plays them', async () => {
+    const { actions, posts } = await ready();
     actions.setParam('delay', 'time', 0.5);
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.5, 0, expect.any(Number));
+    actions.setParam('reverb', 'decay', 5);
+    actions.setParam('delay', 'fb', 0);
+    expect(posts()).toEqual([
+      { params: [SLOT.delay, { time: 0.5 }] },
+      { params: [SLOT.reverb, { decay: 5 }] },
+      { params: [SLOT.delay, { fb: 0 }] },
+    ]);
   });
 
-  it('the delay in BPM follows the tempo of the transport', () => {
-    const { actions, delayNode, transport } = setup();
+  it('the delay in BPM follows the tempo of the transport', async () => {
+    const { actions, posted, transport } = await ready();
     actions.setParam('delay', 'sync', 1);
     actions.setParam('delay', 'div', divisionIndex('1/4'));
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.5, 0, 0.1);
+    expect(posted('params').pop()).toEqual([SLOT.delay, { time: 0.5 }]);
     transport[1].setBpm(60);
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(1, 0, 0.1);
+    expect(posted('params').pop()).toEqual([SLOT.delay, { time: 1 }]);
   });
 
-  it('BPM of the delay takes the division nearest to Time at the tempo, MS the seconds of its division', () => {
-    const { model, actions, delayNode } = setup();
+  it('a tempo no knob follows tells the chain nothing', async () => {
+    const { posts, transport } = await ready();
+    transport[1].setBpm(60);
+    transport[1].setBpm(140);
+    expect(posts()).toEqual([]);
+  });
+
+  it('BPM of the delay takes the division nearest to Time at the tempo, MS the seconds of its division', async () => {
+    const { model, actions, posted } = await ready();
     const params = () => model.$effects.value.delay.params;
+    const time = () => posted('params').pop();
     actions.setParam('delay', 'time', 0.4);
     // 0.8 quarters at 120: 1/4
     actions.setParam('delay', 'sync', 1);
     expect(params()).toMatchObject({ sync: 1, div: divisionIndex('1/4'), time: 0.4 });
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.5, 0, 0.1);
+    expect(time()).toEqual([SLOT.delay, { time: 0.5 }]);
     // on again: nothing changes
     actions.setParam('delay', 'sync', 1);
     expect(params()['div']).toBe(divisionIndex('1/4'));
     actions.setParam('delay', 'div', divisionIndex('1/16'));
     actions.setParam('delay', 'sync', 0);
     expect(params()).toMatchObject({ sync: 0, div: divisionIndex('1/16'), time: 0.125 });
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.125, 0, 0.1);
+    expect(time()).toEqual([SLOT.delay, { time: 0.125 }]);
     // a bar is 2 s at 120: Time within its range (1 s)
     actions.setParam('delay', 'sync', 1);
     actions.setParam('delay', 'div', divisionIndex('1 bar'));
     actions.setParam('delay', 'sync', 0);
     expect(params()).toMatchObject({ sync: 0, time: FX_PARAMS.delay.time.max });
+    expect(time()).toEqual([SLOT.delay, { time: FX_PARAMS.delay.time.max }]);
   });
 
-  it('TRIP or DOT of the delay switched off takes the straight division of a triplet or a dotted one', () => {
-    const { model, actions, delayNode } = setup();
+  it('TRIP or DOT of the delay switched off takes the straight division of a triplet or a dotted one', async () => {
+    const { model, actions, posted } = await ready();
     const params = () => model.$effects.value.delay.params;
     actions.setParam('delay', 'sync', 1);
     actions.setParam('delay', 'trip', 1);
     actions.setParam('delay', 'div', divisionIndex('1/8T'));
     actions.setParam('delay', 'trip', 0);
     expect(params()).toMatchObject({ trip: 0, div: divisionIndex('1/8') });
-    expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.25, 0, 0.1);
+    expect(posted('params').pop()).toEqual([SLOT.delay, { time: 0.25 }]);
     // on again: the straight one stays
     actions.setParam('delay', 'trip', 1);
     expect(params()['div']).toBe(divisionIndex('1/8'));
@@ -221,8 +250,8 @@ describe('fx', () => {
     expect(params()).toEqual(DELAY_PRESETS[0].params);
   });
 
-  it('gives the meters the longest gap between two echoes of the delay while it sounds', () => {
-    const { model, actions, transport } = setup();
+  it('gives the meters the longest gap between two echoes of the delay while it sounds', async () => {
+    const { model, actions, transport } = await ready();
     const gaps: number[] = [];
     model.$echoGap.subscribe((gap) => gaps.push(gap));
     actions.setAdded('delay', true);
@@ -234,28 +263,37 @@ describe('fx', () => {
     expect(gaps).toEqual([0, 0.25, 0.3, 2.05, 4.05, 0]);
   });
 
-  it('applies only the changed values', () => {
-    const { model, actions, delayNode, feedback } = setup();
+  it('the gap of the echoes: none until the delay is ready, up to where a route may move Time', async () => {
+    const { model, actions, modulation } = setup();
+    const gaps: number[] = [];
+    model.$echoGap.subscribe((gap) => gaps.push(gap));
     actions.setAdded('delay', true);
-    const dry = model.slots.delay.dry.gain.setTargetAtTime as jest.Mock;
-    const wet = model.slots.delay.wet.gain.setTargetAtTime as jest.Mock;
-    const send = model.slots.delay.send.gain.setTargetAtTime as jest.Mock;
-    const time = delayNode.delayTime.setTargetAtTime as jest.Mock;
-    const fb = feedback.gain.setTargetAtTime as jest.Mock;
-    [dry, wet, send, time, fb].forEach((mock) => mock.mockClear());
+    expect(gaps).toEqual([0]);
+    await flush();
+    expect(gaps).toEqual([0, 0.25]);
+    // a route to Time: up to the top of the knob
+    modulation[1].addRoute('env2', 'delay.time', 0.5);
+    expect(gaps).toEqual([0, 0.25, 1.05]);
+    // one switched off moves nothing
+    modulation[1].setOff('env2', 'delay.time', true);
+    expect(gaps).toEqual([0, 0.25, 1.05, 0.25]);
+  });
+
+  it('tells the chain only the values that changed', async () => {
+    const { actions, posts, forget } = await ready();
+    actions.setAdded('delay', true);
+    forget();
 
     actions.setParam('delay', 'time', 0.5);
-    expect(time).toHaveBeenCalledTimes(1);
-    expect(dry).not.toHaveBeenCalled();
-    expect(wet).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
-    expect(fb).not.toHaveBeenCalled();
-
+    expect(posts()).toEqual([{ params: [SLOT.delay, { time: 0.5 }] }]);
     actions.setMix('delay', 0.5);
-    expect(dry).toHaveBeenCalledTimes(1);
-    expect(wet).toHaveBeenCalledTimes(1);
-    expect(send).not.toHaveBeenCalled();
-    expect(time).toHaveBeenCalledTimes(1);
+    expect(posts()).toEqual([{ params: [SLOT.delay, { time: 0.5 }] }, { mix: [SLOT.delay, 0.5] }]);
+    // the same values again: nothing
+    actions.setParam('delay', 'time', 0.5);
+    actions.setMix('delay', 0.5);
+    actions.setOn('delay', true);
+    actions.setAdded('delay', true);
+    expect(posts()).toHaveLength(2);
   });
 
   describe('applyPreset', () => {
@@ -284,20 +322,20 @@ describe('fx', () => {
       subscription.unsubscribe();
     });
 
-    it('applies the preset to the audio nodes', () => {
-      const { model, actions, delayNode, feedback } = setup();
+    it('gives the chain the knobs and the mix of the preset', async () => {
+      const { actions, told, posted } = await ready();
       actions.setAdded('delay', true);
       actions.applyPreset('delay', 'tape-echo');
-      const { params } = preset('tape-echo');
-      expect(delayNode.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(
-        params.time,
-        0,
-        expect.any(Number)
+      const { params, mix } = preset('tape-echo');
+      expect(told.setParams).toHaveBeenLastCalledWith(
+        SLOT.delay,
+        expect.objectContaining({ time: params.time, fb: params.fb, freq: params.freq, q: params.q })
       );
-      expect(feedback.gain.setTargetAtTime).toHaveBeenLastCalledWith(params.fb, 0, expect.any(Number));
-      // mix 0.3
-      expect(lastGain(model.slots.delay.dry)).toBeCloseTo(0.891);
-      expect(lastGain(model.slots.delay.wet)).toBeCloseTo(0.454);
+      expect(told.setMix).toHaveBeenLastCalledWith(SLOT.delay, mix);
+      // one message of its knobs that differ from the defaults
+      expect(posted('params')).toHaveLength(1);
+      expect(posted('params')[0]?.[1]).toMatchObject({ time: params.time, fb: params.fb });
+      expect(posted('mix')).toEqual(mix === FX_MIX_PARAM.default ? [] : [[SLOT.delay, mix]]);
     });
 
     it('does not share the params object with the preset', () => {
@@ -333,15 +371,14 @@ describe('fx', () => {
     });
   });
 
-  it('clear empties every effect, in the chain or not, and changes nothing else', () => {
-    const { model, actions, synthCore } = setup();
+  it('clear has the chain forget every tail at once, and changes nothing else', async () => {
+    const { actions, told, posts } = await ready();
     actions.setAdded('reverb', true);
-    const clears = FX_TYPES.map((type) => jest.spyOn(model.slots[type], 'clear'));
-    const connects = (synthCore.fxIn.connect as jest.Mock).mock.calls.length;
     const snapshot = getSnapshot();
+    const before = posts().length;
     actions.clear();
-    clears.forEach((clear) => expect(clear).toHaveBeenCalledTimes(1));
-    expect(synthCore.fxIn.connect).toHaveBeenCalledTimes(connects);
+    expect(told.clear).toHaveBeenCalledTimes(1);
+    expect(posts().slice(before)).toEqual([{ clear: true }]);
     expect(getSnapshot()).toEqual(snapshot);
   });
 
@@ -394,60 +431,43 @@ describe('fx', () => {
     expect(model.$order.value).toEqual(['reverb', 'chorus', 'distortion', 'delay', 'compressor']);
   });
 
+  it('a move of effects that are not in the chain tells it nothing', async () => {
+    const { actions, posts } = await ready();
+    actions.setAdded('delay', true);
+    const before = posts().length;
+    actions.move(4, 0);
+    actions.move(1, 3);
+    expect(posts()).toHaveLength(before);
+  });
+
+  it('the slots are those of the effects by their kinds, whatever their order', async () => {
+    const { model, actions, posted } = await ready();
+    expect(Object.keys(model.slots)).toEqual([...FX_TYPES]);
+    actions.move(4, 0);
+    actions.setAdded('reverb', true);
+    actions.setParam('reverb', 'size', 0);
+    expect(posted('order')).toEqual([[SLOT.reverb]]);
+    expect(posted('params')).toEqual([[SLOT.reverb, { size: 0 }]]);
+  });
+
   describe('distortion', () => {
     it('is first in the chain by default', async () => {
-      const { model, actions, synthCore } = setup();
-      const { distortion, chorus, delay, compressor, reverb } = model.slots;
+      const { model, actions, posted } = await ready();
       expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb']);
       FX_TYPES.forEach((type) => actions.setAdded(type, true));
-      await flush();
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(distortion.input);
-      expect(distortion.output.connect).toHaveBeenLastCalledWith(chorus.input);
-      expect(chorus.output.connect).toHaveBeenLastCalledWith(delay.input);
-      expect(delay.output.connect).toHaveBeenLastCalledWith(compressor.input);
-      expect(compressor.output.connect).toHaveBeenLastCalledWith(reverb.input);
-      expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(posted('order').pop()).toEqual([0, 1, 2, 3, 4]);
+      expect(posted('active')).toEqual(FX_TYPES.map((_, slot) => [slot, true]));
     });
 
-    it('its slot delays the dry signal by the latency of the worklet, the others have none', () => {
-      const { model, synthCore } = setup();
-      const { dryDelay } = model.slots.distortion;
-      expect(dryDelay?.delayTime.setValueAtTime).toHaveBeenCalledWith(
-        DISTORTION_LATENCY / synthCore.audioCtx.sampleRate,
-        0
-      );
-      expect(model.slots.distortion.input.connect).toHaveBeenCalledWith(dryDelay);
-      expect(dryDelay?.connect).toHaveBeenCalledWith(model.slots.distortion.dry);
-      expect(model.slots.delay.dryDelay).toBeUndefined();
-      expect(model.slots.reverb.dryDelay).toBeUndefined();
-    });
-
-    it('passes the changed params to the effect, activates it once ready', async () => {
-      const { model, actions } = setup();
-      const setParam = jest.spyOn(model.slots.distortion, 'setParam');
-      const { send } = model.slots.distortion;
+    it('gives the chain the changed params, plays once the chain is ready', async () => {
+      const { actions, told, active } = setup();
       actions.setAdded('distortion', true);
+      told.setParams.mockClear();
       actions.setParam('distortion', 'drive', 9);
-      expect(setParam.mock.calls).toEqual([['drive', 9]]);
-      expect(lastGain(send)).toBe(0);
+      expect(told.setParams.mock.calls).toEqual([[SLOT.distortion, { ...DISTORTION_DEFAULTS, drive: 9 }]]);
+      expect(active('distortion')).toBe(false);
       await flush();
-      expect(lastGain(send)).toBe(1);
-    });
-
-    it('crossfades dry and wet linearly: the wet signal is the dry one reshaped, in time with it', async () => {
-      const { model, actions } = setup();
-      const { dry, wet } = model.slots.distortion;
-      actions.setAdded('distortion', true);
-      await flush();
-      actions.setMix('distortion', 0.5);
-      expect(lastGain(dry)).toBeCloseTo(0.5);
-      expect(lastGain(wet)).toBeCloseTo(0.5);
-      actions.setMix('distortion', 0.25);
-      expect(lastGain(dry)).toBeCloseTo(0.75);
-      expect(lastGain(wet)).toBeCloseTo(0.25);
-      actions.setOn('distortion', false);
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
+      expect(active('distortion')).toBe(true);
     });
 
     it('a fresh distortion matches the default preset, its presets are found back', () => {
@@ -460,55 +480,30 @@ describe('fx', () => {
 
   describe('compressor', () => {
     it('is after the delay and before the reverb by default', async () => {
-      const { model, actions, synthCore } = setup();
-      const { delay, compressor, reverb } = model.slots;
-      (['delay', 'compressor', 'reverb'] as const).forEach((type) => actions.setAdded(type, true));
-      await flush();
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(delay.input);
-      expect(delay.output.connect).toHaveBeenLastCalledWith(compressor.input);
-      expect(compressor.output.connect).toHaveBeenLastCalledWith(reverb.input);
+      const { actions, posted } = await ready();
+      (['reverb', 'compressor', 'delay'] as const).forEach((type) => actions.setAdded(type, true));
+      expect(posted('order').pop()).toEqual([SLOT.delay, SLOT.compressor, SLOT.reverb]);
     });
 
-    it('mixes inside its core: the slot passes the core alone at any mix', async () => {
-      const { model, actions } = setup();
-      const { dry, wet, send, dryDelay } = model.slots.compressor;
-      expect(dryDelay).toBeUndefined();
+    it('its mix is the one of its slot, as of any effect (the core mixes it inside)', async () => {
+      const { actions, posts, forget } = await ready();
       actions.setAdded('compressor', true);
-      // loading: the dry signal alone, the core closed
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
-      expect(lastGain(send)).toBe(0);
-      await flush();
-      expect(lastGain(dry)).toBe(0);
-      expect(lastGain(wet)).toBe(1);
-      expect(lastGain(send)).toBe(1);
-      // (the mix goes to the core: create-fx-slot.spec, compressor.spec)
+      forget();
       actions.setMix('compressor', 0.25);
-      expect(lastGain(dry)).toBe(0);
-      expect(lastGain(wet)).toBe(1);
       actions.setMix('compressor', 0);
-      expect(lastGain(dry)).toBe(0);
-      expect(lastGain(wet)).toBe(1);
-      // bypassed: the dry signal alone, as any slot
-      actions.setOn('compressor', false);
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
-      expect(lastGain(send)).toBe(0);
+      expect(posts()).toEqual([{ mix: [SLOT.compressor, 0.25] }, { mix: [SLOT.compressor, 0] }]);
     });
 
-    it('passes the changed params to the effect', async () => {
-      const { model, actions } = setup();
-      const setParam = jest.spyOn(model.slots.compressor, 'setParam');
+    it('gives the chain the changed params, falsy ones included', async () => {
+      const { actions, posted } = await ready();
       actions.setAdded('compressor', true);
-      await flush();
-      setParam.mockClear();
       actions.setParam('compressor', 'multi', 1);
       actions.setParam('compressor', 'thresh', 0);
       actions.setParam('compressor', 'below', 0.5);
-      expect(setParam.mock.calls).toEqual([
-        ['multi', 1],
-        ['thresh', 0],
-        ['below', 0.5],
+      expect(posted('params')).toEqual([
+        [SLOT.compressor, { multi: 1 }],
+        [SLOT.compressor, { thresh: 0 }],
+        [SLOT.compressor, { below: 0.5 }],
       ]);
     });
 
@@ -522,7 +517,7 @@ describe('fx', () => {
       expect(findFxPreset('compressor', model.$effects.value.compressor)).toBeUndefined();
     });
 
-    it('its meter is the one of its core (the chorus has its own), the other effects have none', () => {
+    it('its meter is the one of its slot (the chorus has its own), the other effects have none', () => {
       const { model } = setup();
       expect(model.slots.compressor.meter?.watch).toEqual(expect.any(Function));
       expect(model.slots.chorus.meter?.watch).toEqual(expect.any(Function));
@@ -530,6 +525,21 @@ describe('fx', () => {
       expect(model.slots.delay.meter).toBeUndefined();
       expect(model.slots.distortion.meter).toBeUndefined();
       expect(model.slots.reverb.meter).toBeUndefined();
+    });
+
+    it('a watcher of its meter gets what the worklet posts of its slot', async () => {
+      const { model, node, posted } = await ready();
+      const listener = jest.fn();
+      const unwatch = model.slots.compressor.meter?.watch(listener);
+      expect(posted('meter')).toEqual([[SLOT.compressor, true]]);
+      chainReports(node, { meter: [SLOT.compressor, { reduction: [1, 2, 3] }] });
+      chainReports(node, { meter: [SLOT.chorus, { lfo: 0.5 }] });
+      expect(listener.mock.calls).toEqual([[{ reduction: [1, 2, 3] }]]);
+      unwatch?.();
+      expect(posted('meter')).toEqual([
+        [SLOT.compressor, true],
+        [SLOT.compressor, false],
+      ]);
     });
 
     it('round-trips its snapshot, falsy values included, missing keys are defaults', () => {
@@ -567,43 +577,24 @@ describe('fx', () => {
 
   describe('chorus', () => {
     it('is after the distortion and before the delay by default', async () => {
-      const { model, actions, synthCore } = setup();
-      const { distortion, chorus, delay } = model.slots;
-      (['distortion', 'chorus', 'delay'] as const).forEach((type) => actions.setAdded(type, true));
-      await flush();
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(distortion.input);
-      expect(distortion.output.connect).toHaveBeenLastCalledWith(chorus.input);
-      expect(chorus.output.connect).toHaveBeenLastCalledWith(delay.input);
+      const { actions, posted } = await ready();
+      (['delay', 'chorus', 'distortion'] as const).forEach((type) => actions.setAdded(type, true));
+      expect(posted('order').pop()).toEqual([SLOT.distortion, SLOT.chorus, SLOT.delay]);
     });
 
-    it('mixes inside its core: the slot passes the core alone at any mix', async () => {
-      const { model, actions } = setup();
-      const { dry, wet, dryDelay } = model.slots.chorus;
-      expect(dryDelay).toBeUndefined();
+    it('gives the chain the changed params, falsy ones included', async () => {
+      const { actions, posted } = await ready();
       actions.setAdded('chorus', true);
-      await flush();
-      expect(lastGain(dry)).toBe(0);
-      expect(lastGain(wet)).toBe(1);
-      actions.setMix('chorus', 0);
-      expect(lastGain(dry)).toBe(0);
-      expect(lastGain(wet)).toBe(1);
-      // (the mix goes to the core: create-fx-slot.spec, chorus.spec)
-    });
-
-    it('passes the changed params to the effect, falsy ones included', async () => {
-      const { model, actions } = setup();
-      const setParam = jest.spyOn(model.slots.chorus, 'setParam');
-      actions.setAdded('chorus', true);
-      await flush();
-      setParam.mockClear();
       actions.setParam('chorus', 'depth', 0);
       actions.setParam('chorus', 'hpf', 1);
       actions.setParam('chorus', 'fb', 0);
-      expect(setParam.mock.calls).toEqual([
-        ['depth', 0],
-        ['hpf', 1],
-        ['fb', 0],
+      actions.setMix('chorus', 0);
+      expect(posted('params')).toEqual([
+        [SLOT.chorus, { depth: 0 }],
+        [SLOT.chorus, { hpf: 1 }],
+        [SLOT.chorus, { fb: 0 }],
       ]);
+      expect(posted('mix')).toEqual([[SLOT.chorus, 0]]);
     });
 
     it('BPM takes the division nearest to a cycle of Rate at the tempo, HZ the rate of its division', () => {
@@ -633,12 +624,13 @@ describe('fx', () => {
     });
 
     it('in BPM its rate follows the tempo of the transport', async () => {
-      const { model, actions, transport } = setup();
-      const setTempo = jest.spyOn(model.slots.chorus, 'setTempo');
+      const { actions, posted, transport } = await ready();
       actions.setAdded('chorus', true);
-      await flush();
+      actions.setParam('chorus', 'sync', 1);
+      actions.setParam('chorus', 'div', divisionIndex('1/4'));
+      expect(posted('params').pop()).toEqual([SLOT.chorus, { rate: 2 }]);
       transport[1].setBpm(90);
-      expect(setTempo).toHaveBeenLastCalledWith(90);
+      expect(posted('params').pop()).toEqual([SLOT.chorus, { rate: 1.5 }]);
     });
 
     it('a fresh chorus matches the default preset, its presets are found back', () => {
@@ -685,39 +677,34 @@ describe('fx', () => {
   });
 
   describe('two effects', () => {
-    it('wires the added effects in the chain order', () => {
-      const { model, actions, synthCore } = setup();
-      const { delay, reverb } = model.slots;
+    it('tells the chain the added effects in their order', async () => {
+      const { actions, posted } = await ready();
       actions.setAdded('delay', true);
       actions.setAdded('reverb', true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(delay.input);
-      expect(delay.output.connect).toHaveBeenLastCalledWith(reverb.input);
-      expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
-
       actions.move(4, 0);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(reverb.input);
-      expect(reverb.output.connect).toHaveBeenLastCalledWith(delay.input);
-      expect(delay.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
-
       actions.setAdded('delay', false);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(reverb.input);
-      expect(reverb.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(posted('order')).toEqual([
+        [SLOT.delay],
+        [SLOT.delay, SLOT.reverb],
+        [SLOT.reverb, SLOT.delay],
+        [SLOT.reverb],
+      ]);
     });
 
     it('changes only the effect it is called for', async () => {
-      const { model, actions } = setup();
+      const { model, actions, posts } = await ready();
       const delayBefore = model.$effects.value.delay;
-      const delaySend = model.slots.delay.send.gain.setTargetAtTime as jest.Mock;
-      delaySend.mockClear();
       actions.setAdded('reverb', true);
       actions.setParam('reverb', 'decay', 5);
       actions.setMix('reverb', 0.6);
       expect(model.$effects.value.delay).toBe(delayBefore);
       expect(model.$effects.value.reverb).toMatchObject({ added: true, mix: 0.6, params: { decay: 5 } });
-      // the reverb is activated once its module has loaded
-      await flush();
-      expect(model.slots.reverb.send.gain.setTargetAtTime).toHaveBeenLastCalledWith(1, 0, expect.any(Number));
-      expect(delaySend).not.toHaveBeenCalled();
+      expect(posts()).toEqual([
+        { order: [SLOT.reverb] },
+        { active: [SLOT.reverb, true] },
+        { params: [SLOT.reverb, { decay: 5 }] },
+        { mix: [SLOT.reverb, 0.6] },
+      ]);
     });
 
     it('applies a reverb preset and finds it back', () => {
@@ -731,79 +718,77 @@ describe('fx', () => {
   });
 
   describe('status', () => {
-    afterEach(() => jest.restoreAllMocks());
+    // the module of the chain fails to load on the first try, the other modules load. The chain loads it as the
+    // synth core is made: the worklet of its context fails from the start (test-setup puts the one of the mock
+    // back after the test)
+    const failing = () => {
+      const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      let failed = false;
+      const addModule = jest.fn((url: string) => {
+        if (failed || !url.endsWith('/chain.js')) return Promise.resolve();
+        failed = true;
+        return Promise.reject(new Error('404'));
+      });
+      Object.defineProperty(AudioContext.prototype, 'audioWorklet', {
+        configurable: true,
+        get: () => ({ addModule }),
+      });
+      return { ...setup(), addModule, error };
+    };
 
-    it('delay is always ready, the worklet effects are ready once their modules have loaded', async () => {
-      const { model, synthCore } = setup();
-      expect(model.$status.value).toEqual({
-        distortion: 'loading',
-        chorus: 'loading',
-        delay: 'ready',
-        compressor: 'loading',
-        reverb: 'loading',
-      });
+    it('every effect has the status of the chain: ready once its one module has loaded', async () => {
+      const { model, audioCtx } = setup();
+      expect(model.$status.value).toEqual(ALL('loading'));
       await flush();
-      expect(model.$status.value).toEqual({
-        distortion: 'ready',
-        chorus: 'ready',
-        delay: 'ready',
-        compressor: 'ready',
-        reverb: 'ready',
-      });
-      const addModule = synthCore.audioCtx.audioWorklet.addModule as jest.Mock;
-      expect(workletLoads(addModule, 'distortion')).toBe(1);
-      expect(workletLoads(addModule, 'chorus')).toBe(1);
-      expect(workletLoads(addModule, 'compressor')).toBe(1);
-      expect(workletLoads(addModule, 'reverb')).toBe(1);
+      expect(model.$status.value).toEqual(ALL('ready'));
+      const addModule = audioCtx.audioWorklet.addModule as jest.Mock;
+      expect(workletLoads(addModule, 'chain')).toBe(1);
+      // one node for all of them
+      expect(chainNodes(audioCtx)).toHaveLength(1);
+      FX_TYPES.forEach((type) => expect(workletLoads(addModule, type)).toBe(0));
     });
 
-    it('a loading reverb is already in the chain and passes the dry signal until its node exists', async () => {
-      const { model, actions, synthCore } = setup();
-      const { dry, wet, send } = model.slots.reverb;
+    it('a loading reverb is already in the chain, it plays once the node exists', async () => {
+      const { model, actions, audioCtx, told, active } = setup();
       actions.setMix('reverb', 1);
       actions.setAdded('reverb', true);
       expect(model.$status.value.reverb).toBe('loading');
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.reverb.input);
-      // not silent at mix 1: only dry, at full level, and inactive
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
-      expect(lastGain(send)).toBe(0);
-      const rewires = (synthCore.fxIn.disconnect as jest.Mock).mock.calls.length;
+      expect(told.setOrder).toHaveBeenLastCalledWith([SLOT.reverb]);
+      expect(active('reverb')).toBe(false);
+      const orders = told.setOrder.mock.calls.length;
 
       await flush();
       expect(model.$status.value.reverb).toBe('ready');
-      expect(lastGain(dry)).toBeCloseTo(0);
-      expect(lastGain(wet)).toBeCloseTo(1);
-      expect(lastGain(send)).toBe(1);
-      // it was in the chain already
-      expect(synthCore.fxIn.disconnect).toHaveBeenCalledTimes(rewires);
+      expect(active('reverb')).toBe(true);
+      // it was in the chain already: the node was made with it
+      expect(told.setOrder).toHaveBeenCalledTimes(orders);
+      expect(chainNode(audioCtx).options.processorOptions.state).toMatchObject({
+        order: [SLOT.reverb],
+        slots: { reverb: { mix: 1 } },
+      });
+      expect(chainPosts(chainNode(audioCtx))).toEqual([{ active: [SLOT.reverb, true] }]);
     });
 
-    it('a bypassed reverb stays bypassed and inactive once ready', async () => {
-      const { model, actions } = setup();
-      const { dry, wet, send } = model.slots.reverb;
+    it('a bypassed reverb stays bypassed once ready', async () => {
+      const { model, actions, audioCtx, active } = setup();
       actions.setOn('reverb', false);
       actions.setAdded('reverb', true);
       await flush();
       expect(model.$status.value.reverb).toBe('ready');
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
-      expect(lastGain(send)).toBe(0);
+      expect(active('reverb')).toBe(false);
+      expect(chainPosts(chainNode(audioCtx))).toEqual([]);
     });
 
-    it('without AudioWorklet the model starts, the worklet effects are unsupported, the delay works', () => {
+    it('without AudioWorklet the model starts, every effect is unsupported', () => {
       withoutAudioWorklet();
-      const { model, actions, synthCore } = setup();
-      expect(model.$status.value).toEqual({
-        distortion: 'unsupported',
-        chorus: 'unsupported',
-        delay: 'ready',
-        compressor: 'unsupported',
-        reverb: 'unsupported',
-      });
-      actions.setAdded('delay', true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.delay.input);
-      expect(model.slots.delay.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      const { model, actions, told } = setup();
+      expect(model.$status.value).toEqual(ALL('unsupported'));
+      expect(() => {
+        actions.setParam('delay', 'time', 0.5);
+        actions.setMix('delay', 0.5);
+        actions.clear();
+      }).not.toThrow();
+      expect(told.setParams).toHaveBeenLastCalledWith(SLOT.delay, expect.objectContaining({ time: 0.5 }));
     });
 
     it('an unsupported effect can not be added, removing it still works', () => {
@@ -811,6 +796,7 @@ describe('fx', () => {
       const { model, actions } = setup();
       const before = model.$effects.value;
       actions.setAdded('reverb', true);
+      actions.setAdded('delay', true);
       expect(model.$effects.value).toBe(before);
       applySnapshot({ fx: { reverb: { a: true } } });
       actions.setAdded('reverb', false);
@@ -819,127 +805,180 @@ describe('fx', () => {
 
     it('an unsupported effect added by a snapshot stays out of the chain, the snapshot keeps it', () => {
       withoutAudioWorklet();
-      const { model, synthCore } = setup();
-      applySnapshot({ fx: { o: ['reverb', 'delay'], reverb: { a: true, decay: 5 }, delay: { a: true } } });
-      expect(model.$effects.value.reverb).toMatchObject({ added: true, params: { decay: 5 } });
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.delay.input);
-      expect(model.slots.delay.output.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
-      expect(model.slots.reverb.output.connect).not.toHaveBeenCalledWith(synthCore.fxOut);
+      const { model, told, active } = setup();
+      applySnapshot({
+        fx: { o: ['reverb', 'delay'], reverb: { a: true, decay: 5, mix: 1 }, delay: { a: true } },
+      });
+      expect(model.$effects.value.reverb).toMatchObject({ added: true, mix: 1, params: { decay: 5 } });
+      expect(told.setOrder.mock.calls.every(([order]) => order.length === 0)).toBe(true);
+      expect(active('reverb')).toBe(false);
+      expect(active('delay')).toBe(false);
       expect(getSnapshot()['fx']).toMatchObject({ reverb: { a: true, decay: 5 }, delay: { a: true } });
     });
 
-    it('a failed load reports the reverb as failed and drops it out of the chain', async () => {
-      const { model, actions, synthCore, error } = setupFailing();
+    it('a failed load reports every effect as failed and drops the added ones out of the chain', async () => {
+      const { model, actions, told, active, error } = failing();
       actions.setAdded('reverb', true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.reverb.input);
+      expect(told.setOrder).toHaveBeenLastCalledWith([SLOT.reverb]);
       await flush();
-      expect(model.$status.value.reverb).toBe('failed');
+      expect(model.$status.value).toEqual(ALL('failed'));
       expect(error).toHaveBeenCalled();
       expect(model.$effects.value.reverb.added).toBe(true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(told.setOrder).toHaveBeenLastCalledWith([]);
+      expect(active('reverb')).toBe(false);
     });
 
-    it('adding a failed effect loads it again and puts it in the chain', async () => {
-      const { model, actions, synthCore, addModule } = setupFailing();
+    it('adding a failed effect loads the chain again and puts it in the chain', async () => {
+      const { model, actions, audioCtx, told, active, addModule } = failing();
       await flush();
       expect(model.$status.value.reverb).toBe('failed');
-      expect(workletLoads(addModule, 'reverb')).toBe(1);
+      expect(workletLoads(addModule, 'chain')).toBe(1);
 
       actions.setAdded('reverb', true);
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, 'chain')).toBe(2);
       expect(model.$status.value.reverb).toBe('loading');
       expect(model.$effects.value.reverb.added).toBe(true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.reverb.input);
+      expect(told.setOrder).toHaveBeenLastCalledWith([SLOT.reverb]);
       await flush();
-      expect(model.$status.value.reverb).toBe('ready');
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.reverb.input);
+      expect(model.$status.value).toEqual(ALL('ready'));
+      expect(told.setOrder).toHaveBeenLastCalledWith([SLOT.reverb]);
+      expect(active('reverb')).toBe(true);
+      expect(chainNode(audioCtx).options.processorOptions.state.order).toEqual([SLOT.reverb]);
     });
 
     it('a retry that fails again leaves the effect added but out of the chain', async () => {
-      const { model, actions, synthCore, addModule } = setupFailing();
+      const { model, actions, told, addModule } = failing();
       await flush();
       addModule.mockRejectedValueOnce(new Error('offline'));
       actions.setAdded('reverb', true);
       await flush();
       expect(model.$status.value.reverb).toBe('failed');
       expect(model.$effects.value.reverb.added).toBe(true);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(told.setOrder).toHaveBeenLastCalledWith([]);
     });
 
     it('removing a failed effect does not retry', async () => {
-      const { model, actions, addModule } = setupFailing();
+      const { model, actions, addModule } = failing();
       await flush();
       actions.setAdded('reverb', false);
-      expect(workletLoads(addModule, 'reverb')).toBe(1);
+      expect(workletLoads(addModule, 'chain')).toBe(1);
       expect(model.$status.value.reverb).toBe('failed');
     });
 
-    it('retry loads a failed effect again without adding it, does nothing once it is ready', async () => {
-      const { model, actions, synthCore, addModule } = setupFailing();
+    it('retry loads a failed chain again without adding the effect, does nothing once it is ready', async () => {
+      const { model, actions, told, addModule } = failing();
       await flush();
       actions.retry('reverb');
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, 'chain')).toBe(2);
       expect(model.$status.value.reverb).toBe('loading');
       await flush();
       expect(model.$status.value.reverb).toBe('ready');
       expect(model.$effects.value.reverb.added).toBe(false);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(told.setOrder.mock.calls.every(([order]) => order.length === 0)).toBe(true);
       actions.retry('reverb');
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, 'chain')).toBe(2);
     });
 
-    it('a failed effect is inactive and passes the dry signal, retry activates it once ready', async () => {
-      const { model, actions } = setupFailing();
-      const { dry, wet, send } = model.slots.reverb;
+    it('a failed effect does not play, a retry has it play once ready', async () => {
+      const { model, actions, active } = failing();
       actions.setMix('reverb', 1);
       actions.setAdded('reverb', true);
       await flush();
       expect(model.$status.value.reverb).toBe('failed');
-      expect(lastGain(send)).toBe(0);
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
+      expect(active('reverb')).toBe(false);
 
       actions.retry('reverb');
       await flush();
       expect(model.$status.value.reverb).toBe('ready');
       expect(model.$effects.value.reverb.added).toBe(true);
-      expect(lastGain(send)).toBe(1);
-      expect(lastGain(dry)).toBeCloseTo(0);
-      expect(lastGain(wet)).toBeCloseTo(1);
+      expect(active('reverb')).toBe(true);
     });
 
-    it('a processor error deactivates the effect, a retry activates it again', async () => {
+    it('a processor error fails every effect, a retry makes the node again with the chain as it is', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { model, actions, synthCore } = setup();
-      const { send } = model.slots.reverb;
+      const { model, actions, audioCtx, node, told, active } = await ready();
       actions.setAdded('reverb', true);
-      await flush();
-      expect(lastGain(send)).toBe(1);
+      actions.setParam('reverb', 'decay', 5);
+      expect(active('reverb')).toBe(true);
 
-      // the slot's send feeds the reverb input, the reverb input feeds the worklet node
-      const reverbInput = (send.connect as jest.Mock).mock.calls[0][0] as GainNode;
-      const node = (reverbInput.connect as jest.Mock).mock.lastCall?.[0] as AudioWorkletNode;
       node.onprocessorerror?.call(node, new ErrorEvent('processorerror'));
-      expect(model.$status.value.reverb).toBe('failed');
-      expect(lastGain(send)).toBe(0);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(synthCore.fxOut);
+      expect(model.$status.value).toEqual(ALL('failed'));
+      expect(active('reverb')).toBe(false);
+      expect(told.setOrder).toHaveBeenLastCalledWith([]);
 
       actions.retry('reverb');
       await flush();
-      expect(model.$status.value.reverb).toBe('ready');
-      expect(lastGain(send)).toBe(1);
-      expect(synthCore.fxIn.connect).toHaveBeenLastCalledWith(model.slots.reverb.input);
+      expect(model.$status.value).toEqual(ALL('ready'));
+      expect(active('reverb')).toBe(true);
+      const next = chainNode(audioCtx);
+      expect(next).not.toBe(node);
+      expect(next.options.processorOptions.state).toMatchObject({
+        order: [SLOT.reverb],
+        slots: { reverb: { params: { decay: 5 } } },
+      });
+      expect(chainPosts(next)).toEqual([{ active: [SLOT.reverb, true] }]);
     });
 
-    it('an unsupported effect added by a snapshot is inactive and passes the dry signal', () => {
+    it('an effect that fails in the core is failed alone: out of the chain, the others play on', async () => {
+      const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { model, actions, node, posts, forget, active } = await ready();
+      actions.setAdded('delay', true);
+      actions.setAdded('reverb', true);
+      forget();
+      chainReports(node, { failed: [SLOT.reverb] });
+      expect(error).toHaveBeenCalled();
+      expect(model.$status.value).toEqual({ ...ALL('ready'), reverb: 'failed' });
+      expect(model.$effects.value.reverb.added).toBe(true);
+      expect(posts()).toEqual([{ order: [SLOT.delay] }, { active: [SLOT.reverb, false] }]);
+      expect(active('delay')).toBe(true);
+    });
+
+    it('a retry of an effect that failed in the core has it made again, back in the chain', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { model, actions, audioCtx, node, posts, forget } = await ready();
+      actions.setAdded('delay', true);
+      actions.setAdded('reverb', true);
+      chainReports(node, { failed: [SLOT.reverb] });
+      forget();
+      // (the retry of another effect is not for it)
+      actions.retry('delay');
+      expect(posts()).toEqual([]);
+
+      actions.retry('reverb');
+      // (in the order as one that loads, it plays once the node tells its unit is made)
+      expect(model.$status.value).toEqual({ ...ALL('ready'), reverb: 'loading' });
+      expect(posts()).toEqual([{ retry: SLOT.reverb }, { order: [SLOT.delay, SLOT.reverb] }]);
+      chainReports(node, { remade: SLOT.reverb });
+      expect(model.$status.value).toEqual(ALL('ready'));
+      expect(posts()).toEqual([
+        { retry: SLOT.reverb },
+        { order: [SLOT.delay, SLOT.reverb] },
+        { active: [SLOT.reverb, true] },
+      ]);
+      // the module had loaded: nothing is added again
+      expect(workletLoads(audioCtx.audioWorklet.addModule as jest.Mock, 'chain')).toBe(1);
+      expect(chainNodes(audioCtx)).toHaveLength(1);
+    });
+
+    it('adding an effect that failed in the core has it made again', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { model, actions, node, posted } = await ready();
+      chainReports(node, { failed: [SLOT.chorus] });
+      expect(model.$status.value.chorus).toBe('failed');
+      actions.setAdded('chorus', true);
+      expect(posted('retry')).toEqual([SLOT.chorus]);
+      chainReports(node, { remade: SLOT.chorus });
+      expect(model.$status.value.chorus).toBe('ready');
+      expect(posted('order')).toEqual([[SLOT.chorus]]);
+      expect(posted('active')).toEqual([[SLOT.chorus, true]]);
+    });
+
+    it('an unsupported effect added by a snapshot never plays', () => {
       withoutAudioWorklet();
-      const { model } = setup();
-      const { dry, wet, send } = model.slots.reverb;
+      const { model, told } = setup();
       applySnapshot({ fx: { reverb: { a: true, mix: 1 } } });
       expect(model.$effects.value.reverb).toMatchObject({ added: true, mix: 1 });
-      expect(lastGain(send)).toBe(0);
-      expect(lastGain(dry)).toBe(1);
-      expect(lastGain(wet)).toBe(0);
+      expect(told.setActive.mock.calls.some(([, active]) => active)).toBe(false);
     });
   });
 
@@ -968,6 +1007,42 @@ describe('fx', () => {
         },
         reverb: { a: false, on: true, mix: 0.3, ...REVERB_DEFAULTS },
       });
+    });
+
+    it('a snapshot applied reaches the chain: the order, the knobs, the mixes, what plays', async () => {
+      const { posts } = await ready();
+      applySnapshot({
+        fx: {
+          o: ['reverb', 'delay'],
+          reverb: { a: true, decay: 5, mix: 0, era: 0 },
+          delay: { a: true, on: false, fb: 0 },
+        },
+      });
+      const messages = posts();
+      expect(messages).toHaveLength(5);
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          { order: [SLOT.reverb, SLOT.delay] },
+          { params: [SLOT.reverb, { decay: 5, bandwidth: expect.any(Number), body: 0 }] },
+          { mix: [SLOT.reverb, 0] },
+          { active: [SLOT.reverb, true] },
+          { params: [SLOT.delay, { fb: 0 }] },
+        ])
+      );
+      // the snapshot before it gone: the chain is as it started
+      applySnapshot({});
+      // (the order first, then the effects: the two in their default order for a moment)
+      expect(posts().slice(5)).toHaveLength(6);
+      expect(posts().slice(5)).toEqual(
+        expect.arrayContaining([
+          { order: [SLOT.delay, SLOT.reverb] },
+          { order: [] },
+          { active: [SLOT.reverb, false] },
+          { params: [SLOT.reverb, { decay: 2, bandwidth: 10000, body: 1 }] },
+          { mix: [SLOT.reverb, 0.3] },
+          { params: [SLOT.delay, { fb: 0.5 }] },
+        ])
+      );
     });
 
     it('round-trips the reverb, falsy values included, missing keys are defaults', () => {
@@ -1116,206 +1191,415 @@ describe('fx', () => {
     const ENV = { attack: 0.1, hold: 0, decay: 0.1, sustain: 0.5, release: 0.2 };
     const FLAT = { attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 };
     const note = (start: number) => ({ envelopes: [FLAT, ENV, FLAT], start, release: null });
-    const setupModulated = () => {
-      const synthCore = createSynthCore();
-      const { fx, modulation, lfos, $fxNote, transport } = createFx(synthCore);
-      const [model, actions] = fx;
-      const setModulation = FX_TYPES.reduce(
-        (spies, type) => ({ ...spies, [type]: jest.spyOn(model.slots[type], 'setModulation') }),
-        {} as Record<(typeof FX_TYPES)[number], jest.SpyInstance>
-      );
-      return { model, actions, modulation, lfos, $fxNote, setModulation, transport };
-    };
+    // the sources of the routes (MOD_SOURCES): ENV 1–3, VELO, LFO 1–4
+    const [ENV2, ENV3, VELO, LFO2] = [1, 2, 3, 5];
+    const target = (type: FxType, param: string) =>
+      SLOT[type] * TARGET_KEYS + CHAIN_KEYS[type].indexOf(param);
+    const lfoTarget = (lfo: number, knob: (typeof LFO_KNOBS)[number]) =>
+      LFO_TARGET + (lfo - 1) * LFO_KEYS + LFO_KNOBS.indexOf(knob);
 
-    it('moves the knobs an LFO routes without a note, with the routes of the note to the knobs of the LFOs', async () => {
-      const { actions, modulation, setModulation } = setupModulated();
-      await flush();
+    it('the targets of the core: a slot every 32, its params by their keys, its mix the last; the LFOs after', () => {
+      expect([TARGET_KEYS, MIX_KEY, LFO_TARGET]).toEqual([32, 31, 160]);
+      expect(target('distortion', 'drive')).toBe(1);
+      expect(target('chorus', 'rate')).toBe(32);
+      expect(target('delay', 'time')).toBe(64);
+      expect(target('compressor', 'thresh')).toBe(97);
+      expect(target('reverb', 'size')).toBe(130);
+      expect(lfoTarget(1, 'rate')).toBe(160);
+      expect(lfoTarget(2, 'rate')).toBe(168);
+      expect(lfoTarget(4, 'phase')).toBe(188);
+    });
+
+    it('gives the chain the routes of an LFO without a note, with those of the note to the knobs of the LFOs', async () => {
+      const { actions, modulation, told } = await ready();
       actions.setAdded('reverb', true);
       modulation[1].addRoute('lfo2', 'reverb.size', 0.5);
       modulation[1].addRoute('env2', 'lfo2.rate', 0.25);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith({
-        note: null,
-        routes: [
-          { param: 'size', source: 5, amount: 0.5, min: 0, max: 1 },
-          {
-            param: 'lfo2.rate',
-            source: 1,
-            amount: expect.closeTo(0.25 * Math.log2(3200), 9),
-            min: 1 / 32,
-            max: 100,
-            scale: 'log',
-          },
-        ],
-      });
-      // an envelope alone without a note: nothing
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: LFO2, amount: 0.5, min: 0, max: 1 },
+        {
+          target: 168,
+          source: ENV2,
+          amount: expect.closeTo(0.25 * Math.log2(3200), 9),
+          min: 1 / 32,
+          max: 100,
+          scale: 'log',
+        },
+      ]);
+      // no route of an LFO any more: its knobs move nothing the chain plays
       modulation[1].removeRoute('lfo2', 'reverb.size');
       modulation[1].addRoute('env2', 'reverb.size', 0.5);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith(null);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: ENV2, amount: 0.5, min: 0, max: 1 },
+      ]);
     });
 
     it('bounds the routes to Time of the delay in BPM by its divisions at the tempo', async () => {
-      const { actions, modulation, $fxNote, setModulation, transport } = setupModulated();
-      await flush();
+      const { actions, modulation, $fxNote, told, transport } = await ready();
       actions.setAdded('delay', true);
       $fxNote.next(note(1));
       modulation[1].addRoute('env2', 'delay.time', 0.5);
-      const time = { param: 'time', source: 1, amount: 0.5 * 0.99 };
-      expect(setModulation.delay.mock.lastCall?.[0]?.routes).toEqual([{ ...time, min: 0.01, max: 1 }]);
+      const time = { target: 64, source: ENV2, amount: 0.5 * 0.99 };
+      expect(told.setRoutes).toHaveBeenLastCalledWith([{ ...time, min: 0.01, max: 1 }]);
       actions.setParam('delay', 'sync', 1);
       // 1/64 … 1 bar at 120, at 60
-      expect(setModulation.delay.mock.lastCall?.[0]?.routes).toEqual([{ ...time, min: 0.03125, max: 2 }]);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([{ ...time, min: 0.03125, max: 2 }]);
       transport[1].setBpm(60);
-      expect(setModulation.delay.mock.lastCall?.[0]?.routes).toEqual([{ ...time, min: 0.0625, max: 4 }]);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([{ ...time, min: 0.0625, max: 4 }]);
     });
 
     it('bounds the routes to Rate of the chorus in BPM by its divisions at the tempo', async () => {
-      const { actions, modulation, $fxNote, setModulation, transport } = setupModulated();
-      await flush();
+      const { actions, modulation, $fxNote, told, transport } = await ready();
       actions.setAdded('chorus', true);
       $fxNote.next(note(1));
       modulation[1].addRoute('env2', 'chorus.rate', 0.5);
       // a route of a knob of a pow scale: a share of its travel
-      const rate = { param: 'rate', source: 1, scale: 'pow' };
-      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
-        { ...rate, amount: 0.5, min: 0, max: 20 },
-      ]);
+      const rate = { target: 32, source: ENV2, scale: 'pow' };
+      expect(told.setRoutes).toHaveBeenLastCalledWith([{ ...rate, amount: 0.5, min: 0, max: 20 }]);
       actions.setParam('chorus', 'sync', 1);
       // 8 bar … 1/32 a cycle at 120, at 60
-      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
         { ...rate, amount: expect.closeTo(0.5 * (20 / 16) ** 0.25, 9), min: 1 / 16, max: 16 },
       ]);
       transport[1].setBpm(60);
-      expect(setModulation.chorus.mock.lastCall?.[0]?.routes).toEqual([
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
         { ...rate, amount: expect.closeTo(0.5 * (20 / 8) ** 0.25, 9), min: 1 / 32, max: 8 },
       ]);
     });
 
     it('bounds the routes to the knobs of an LFO in BPM by its divisions at the tempo', async () => {
-      const { actions, modulation, lfos, setModulation } = setupModulated();
-      await flush();
+      const { actions, modulation, lfos, told } = await ready();
       actions.setAdded('reverb', true);
       modulation[1].addRoute('lfo2', 'reverb.size', 0.5);
       modulation[1].addRoute('env2', 'lfo2.rate', 0.25);
       lfos[1].setBpm('lfo2', true);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith({
-        note: null,
-        routes: [
-          { param: 'size', source: 5, amount: 0.5, min: 0, max: 1 },
-          // 32 bar to 1/128 at 120 (1/256 is shorter than 10 ms there)
-          expect.objectContaining({ param: 'lfo2.rate', min: 1 / 64, max: 64, scale: 'log' }),
-        ],
-      });
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: LFO2, amount: 0.5, min: 0, max: 1 },
+        // 32 bar to 1/128 at 120 (1/256 is shorter than 10 ms there)
+        expect.objectContaining({ target: 168, min: 1 / 64, max: 64, scale: 'log' }),
+      ]);
     });
 
-    it('leaves out a route switched off: an LFO switched off moves nothing without a note', async () => {
-      const { actions, modulation, $fxNote, setModulation } = setupModulated();
-      await flush();
+    it('leaves out a route switched off', async () => {
+      const { actions, modulation, $fxNote, told } = await ready();
       actions.setAdded('reverb', true);
       modulation[1].addRoute('lfo2', 'reverb.size', 0.5);
       modulation[1].addRoute('env2', 'lfo2.rate', 0.25);
       modulation[1].setOff('env2', 'lfo2.rate', true);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith({
-        note: null,
-        routes: [{ param: 'size', source: 5, amount: 0.5, min: 0, max: 1 }],
-      });
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: LFO2, amount: 0.5, min: 0, max: 1 },
+      ]);
       modulation[1].setOff('lfo2', 'reverb.size', true);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith(null);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([]);
       // with a note too: no route on, nothing computed
       $fxNote.next(note(1));
       modulation[1].addRoute('env3', 'reverb.decay', 0.5);
       modulation[1].setOff('env3', 'reverb.decay', true);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith(null);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([]);
     });
 
-    it('gives every effect the LFOs: as they are at once, then every state', async () => {
+    it('gives the chain the LFOs: as they are at once, then every state', async () => {
       const synthCore = createSynthCore();
       const lfosModule = createLfos(synthCore);
-      const setLfos = jest.fn();
-      const { fx } = createFx(synthCore, createModulation(), lfosModule);
-      FX_TYPES.forEach((type) => (fx[0].slots[type].setLfos = setLfos));
+      const setLfos = jest.spyOn(synthCore[0].chain, 'setLfos');
+      createFx(synthCore, createModulation(), lfosModule);
+      // (a node made now starts there: no glide, no crossfade)
+      expect(setLfos).toHaveBeenCalledTimes(1);
+      expect(setLfos.mock.calls[0][0]).toMatchObject({ instantly: true });
+      expect(setLfos.mock.calls[0][0].lfos).toHaveLength(4);
       lfosModule[1].setMode('lfo3', 'free');
       // (a change within LFO_STATE_INTERVAL of the first state waits for it)
       await new Promise((resolve) => setTimeout(resolve, LFO_STATE_INTERVAL * 1000 + 5));
-      expect(setLfos).toHaveBeenCalledTimes(FX_TYPES.length);
+      expect(setLfos).toHaveBeenCalledTimes(2);
       expect(setLfos.mock.lastCall?.[0].lfos[2].mode).toBe(1);
+      expect(setLfos.mock.lastCall?.[0].instantly).toBeUndefined();
       await flush();
     });
 
-    it('gives an effect in the chain, on and ready its routes and the last note', async () => {
-      const { actions, modulation, $fxNote, setModulation } = setupModulated();
-      await flush();
+    it('the node gets the LFOs only while a route of an effect that plays reads one', async () => {
+      const { actions, modulation, lfos, posted, forget } = await ready();
+      const change = async (mode: 'free' | 'retrig') => {
+        lfos[1].setMode('lfo3', mode);
+        await new Promise((resolve) => setTimeout(resolve, LFO_STATE_INTERVAL * 1000 + 5));
+      };
+      modulation[1].addRoute('lfo2', 'reverb.size', 0.5);
+      await change('free');
+      // the reverb is not in the chain
+      expect(posted('lfos')).toEqual([]);
+
+      actions.setAdded('reverb', true);
+      // as they are, before the route that reads one
+      expect(posted('lfos')).toEqual([expect.objectContaining({ at: 0, instantly: true })]);
+      expect(posted('lfos')[0]?.lfos[2].mode).toBe(1);
+      expect(posted('lfos')[0]?.lfos.every(({ table }) => table instanceof Float32Array)).toBe(true);
+      await change('retrig');
+      expect(posted('lfos')).toHaveLength(2);
+      expect(posted('lfos')[1]?.lfos[2].mode).toBe(0);
+
+      actions.setOn('reverb', false);
+      forget();
+      await change('free');
+      expect(posted('lfos')).toEqual([]);
+    });
+
+    it('gives the chain the routes of an effect in the chain, on and ready, and the last note', async () => {
+      const { actions, modulation, $fxNote, posts, posted } = await ready();
       modulation[1].addRoute('env2', 'delay.time', 0.5);
       modulation[1].addRoute('env3', 'distortion.drive', 0.25);
       $fxNote.next(note(1));
-      // not added: nothing computed (null since the start)
-      expect(setModulation.delay).not.toHaveBeenCalled();
+      // not added: nothing computed
+      expect(posts()).toEqual([]);
 
       actions.setAdded('delay', true);
-      expect(setModulation.delay).toHaveBeenLastCalledWith({
-        note: note(1),
-        routes: [{ param: 'time', source: 1, amount: 0.5 * (1 - 0.01), min: 0.01, max: 1 }],
-      });
+      const routes = [{ target: 64, source: ENV2, amount: 0.5 * (1 - 0.01), min: 0.01, max: 1 }];
+      // the note of now with the first routes
+      expect(posts()).toContainEqual({ note: note(1), routes });
       // bypassed: nothing computed
       actions.setOn('delay', false);
-      expect(setModulation.delay).toHaveBeenLastCalledWith(null);
-      expect(setModulation.distortion).not.toHaveBeenCalled();
+      expect(posted('routes')).toEqual([routes, []]);
+      expect(posted('note')).toEqual([note(1)]);
+    });
+
+    it('an effect that is loading has no routes yet', async () => {
+      const { actions, modulation, told } = setup();
+      actions.setAdded('delay', true);
+      modulation[1].addRoute('env2', 'delay.fb', 0.5);
+      expect(told.setRoutes.mock.calls.every(([routes]) => routes.length === 0)).toBe(true);
+      await flush();
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 65, source: ENV2, amount: expect.closeTo(0.45, 9), min: 0, max: 0.9 },
+      ]);
     });
 
     it('a log knob moves in octaves, a route of amount 0 is left out', async () => {
-      const { actions, modulation, $fxNote, setModulation } = setupModulated();
-      await flush();
+      const { actions, modulation, $fxNote, told } = await ready();
       actions.setAdded('reverb', true);
       $fxNote.next(note(1));
       modulation[1].addRoute('env2', 'reverb.decay', 0.5);
       modulation[1].addRoute('env3', 'reverb.size', 0.5);
       modulation[1].setAmount('env3', 'reverb.size', 0);
-      expect(setModulation.reverb).toHaveBeenLastCalledWith({
-        note: note(1),
-        routes: [
-          {
-            param: 'decay',
-            source: 1,
-            amount: expect.closeTo(0.5 * Math.log2(200), 9),
-            min: 0.1,
-            max: 20,
-            scale: 'log',
-          },
-        ],
-      });
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        {
+          target: target('reverb', 'decay'),
+          source: ENV2,
+          amount: expect.closeTo(0.5 * Math.log2(200), 9),
+          min: 0.1,
+          max: 20,
+          scale: 'log',
+        },
+      ]);
+    });
+
+    it('a route to the mix of an effect moves the mix of its slot, a bipolar one says so', async () => {
+      const { actions, modulation, told } = await ready();
+      actions.setAdded('reverb', true);
+      actions.setAdded('chorus', true);
+      modulation[1].addRoute('lfo2', 'reverb.mix', 0.5, true);
+      modulation[1].addRoute('env3', 'chorus.mix', -0.25);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        // (the mix of the chorus is not the param `mix` of its core)
+        { target: 63, source: ENV3, amount: -0.25, min: 0, max: 1 },
+        { target: 159, source: LFO2, amount: 0.5, min: 0, max: 1, bipolar: true },
+      ]);
     });
 
     it('a new note starts the envelopes again, the same one (a note of a legato phrase) sends nothing', async () => {
-      const { actions, modulation, $fxNote, setModulation } = setupModulated();
-      await flush();
+      const { actions, modulation, $fxNote, told, posted } = await ready();
       actions.setAdded('delay', true);
       modulation[1].addRoute('env2', 'delay.fb', 0.5);
       $fxNote.next(note(1));
-      const calls = setModulation.delay.mock.calls.length;
+      const calls = told.setNote.mock.calls.length;
       $fxNote.next(note(1));
-      expect(setModulation.delay).toHaveBeenCalledTimes(calls);
+      expect(told.setNote).toHaveBeenCalledTimes(calls);
       $fxNote.next(note(2));
-      expect(setModulation.delay).toHaveBeenCalledTimes(calls + 1);
-      expect(setModulation.delay.mock.lastCall?.[0].note.start).toBe(2);
+      expect(told.setNote).toHaveBeenCalledTimes(calls + 1);
+      expect(told.setNote.mock.lastCall?.[0]?.start).toBe(2);
       $fxNote.next({ ...note(2), release: 3 });
-      expect(setModulation.delay.mock.lastCall?.[0].note.release).toBe(3);
+      expect(told.setNote.mock.lastCall?.[0]?.release).toBe(3);
+      // (the first routes came before any note)
+      expect(posted('note')).toEqual([null, note(1), note(2), { ...note(2), release: 3 }]);
+      // a preset switch pauses it
+      $fxNote.next(null);
+      expect(posted('note').pop()).toBeNull();
     });
 
-    it('a note at another velocity (of a legato phrase) sends nothing to an effect no route of which reads VELO', async () => {
-      const { actions, modulation, $fxNote, setModulation } = setupModulated();
-      await flush();
-      actions.setAdded('delay', true);
-      actions.setAdded('reverb', true);
+    it('the node gets no note while no route of an effect that plays follows it', async () => {
+      const { modulation, $fxNote, told, posts } = await ready();
       modulation[1].addRoute('env2', 'delay.fb', 0.5);
-      modulation[1].addRoute('velo', 'reverb.mix', 0.5);
-      $fxNote.next({ ...note(1), velo: 0.3, velocity: 0.3 });
-      const [delay, reverb] = [setModulation.delay.mock.calls.length, setModulation.reverb.mock.calls.length];
-      // the delay follows no velocity: its note has none
-      expect(setModulation.delay.mock.lastCall?.[0].note).toEqual(note(1));
+      $fxNote.next(note(1));
+      $fxNote.next({ ...note(1), release: 2 });
+      expect(told.setNote).toHaveBeenLastCalledWith({ ...note(1), release: 2 });
+      expect(posts()).toEqual([]);
+    });
 
+    it('a note at another velocity (of a legato phrase) sends nothing while no route reads VELO', async () => {
+      const { actions, modulation, $fxNote, told } = await ready();
+      actions.setAdded('delay', true);
+      modulation[1].addRoute('env2', 'delay.fb', 0.5);
+      $fxNote.next({ ...note(1), velo: 0.3, velocity: 0.3 });
+      // no velocity is followed: the note has none
+      expect(told.setNote).toHaveBeenLastCalledWith(note(1));
+      const calls = told.setNote.mock.calls.length;
       $fxNote.next({ ...note(1), velo: 0.9, velocity: 0.9 });
-      expect(setModulation.delay).toHaveBeenCalledTimes(delay);
-      expect(setModulation.reverb).toHaveBeenCalledTimes(reverb + 1);
-      expect(setModulation.reverb.mock.lastCall?.[0].note).toEqual({ ...note(1), velo: 0.9, velocity: 0.9 });
+      expect(told.setNote).toHaveBeenCalledTimes(calls);
+
+      // a route of VELO to an effect that doesn't play reads nothing
+      modulation[1].addRoute('velo', 'reverb.mix', 0.5);
+      expect(told.setNote).toHaveBeenCalledTimes(calls);
+      // it plays: the note with its velocity (the level of VELO, not the share of 127 the chart shows)
+      actions.setAdded('reverb', true);
+      expect(told.setNote).toHaveBeenCalledTimes(calls + 1);
+      expect(told.setNote).toHaveBeenLastCalledWith({ ...note(1), velo: 0.9 });
+      $fxNote.next({ ...note(1), velo: 0.2, velocity: 0.2 });
+      expect(told.setNote).toHaveBeenLastCalledWith({ ...note(1), velo: 0.2 });
+      expect(told.setRoutes.mock.lastCall?.[0]).toContainEqual({
+        target: 159,
+        source: VELO,
+        amount: 0.5,
+        min: 0,
+        max: 1,
+      });
+    });
+
+    describe('chainRoutes', () => {
+      const effects = () => setup().model.$effects.value;
+      const playing = (...types: FxType[]) =>
+        Object.fromEntries(FX_TYPES.map((type) => [type, types.includes(type)])) as Record<FxType, boolean>;
+      const fxTargets = Object.keys(MOD_TARGETS).filter((id) => MOD_TARGETS[id].kind === 'fx');
+      const lfoKnobs = Object.keys(MOD_TARGETS).filter((id) => MOD_TARGETS[id].kind === 'lfo');
+
+      it('none without routes, or with routes to the voices alone', () => {
+        expect(chainRoutes([], effects(), playing(...FX_TYPES), {}, 120)).toEqual([]);
+        const routes: ModRoute[] = [
+          { source: 'env1', target: 'filter.cutoff', amount: 0.5 },
+          { source: 'lfo1', target: 'osc1.wave', amount: 0.5 },
+          { source: 'env2', target: 'lfo1.rate', amount: 0.5 },
+        ];
+        expect(chainRoutes(routes, effects(), playing(...FX_TYPES), {}, 120)).toEqual([]);
+      });
+
+      it('every knob of every effect has a target of its own in the core', () => {
+        const routes = fxTargets.map((id): ModRoute => ({ source: 'env1', target: id, amount: 0.5 }));
+        const targets = chainRoutes(routes, effects(), playing(...FX_TYPES), {}, 120).map(
+          (route) => route.target
+        );
+        expect(targets).toHaveLength(fxTargets.length);
+        expect(new Set(targets).size).toBe(targets.length);
+        expect(targets).toEqual(
+          fxTargets.map((id) => {
+            const [type, param] = id.split('.') as [FxType, string];
+            const key = param === 'mix' ? MIX_KEY : CHAIN_KEYS[type].indexOf(param);
+            expect(key).toBeGreaterThanOrEqual(0);
+            return SLOT[type] * TARGET_KEYS + key;
+          })
+        );
+        targets.forEach((id) => expect(id).toBeLessThan(LFO_TARGET));
+        // a mix for each
+        expect(targets.filter((id) => id % TARGET_KEYS === MIX_KEY)).toEqual([31, 63, 95, 127, 159]);
+      });
+
+      it('every knob of every LFO has a target after those of the slots, 8 an LFO', () => {
+        const routes: ModRoute[] = [
+          { source: 'lfo1', target: 'delay.fb', amount: 0.1 },
+          ...lfoKnobs.map((id): ModRoute => ({ source: 'env1', target: id, amount: 0.5 })),
+        ];
+        const [own, ...knobs] = chainRoutes(routes, effects(), playing('delay'), {}, 120);
+        expect(own.target).toBe(65);
+        expect(lfoKnobs).toHaveLength(4 * LFO_KNOBS.length);
+        expect(knobs.map((route) => route.target)).toEqual(
+          [0, 1, 2, 3].flatMap((lfo) => LFO_KNOBS.map((_, knob) => 160 + lfo * 8 + knob))
+        );
+        expect(lfoKnobs[LFO_KNOBS.length * 2 + 3]).toBe('lfo3.smooth');
+        expect(knobs[LFO_KNOBS.length * 2 + 3].target).toBe(179);
+      });
+
+      it('an effect that does not play contributes no route', () => {
+        const routes: ModRoute[] = [
+          { source: 'env2', target: 'delay.time', amount: 0.5 },
+          { source: 'env3', target: 'reverb.size', amount: 0.5 },
+        ];
+        const all = effects();
+        expect(chainRoutes(routes, all, playing(), {}, 120)).toEqual([]);
+        expect(chainRoutes(routes, all, playing('reverb'), {}, 120)).toEqual([
+          { target: 130, source: ENV3, amount: 0.5, min: 0, max: 1 },
+        ]);
+        expect(
+          chainRoutes(routes, all, playing('delay', 'reverb'), {}, 120).map((route) => route.target)
+        ).toEqual([64, 130]);
+      });
+
+      it('the routes to the knobs of the LFOs come only with a route of an LFO to an effect that plays', () => {
+        const knob: ModRoute = { source: 'env2', target: 'lfo2.rate', amount: 0.25 };
+        const lfo: ModRoute = { source: 'lfo2', target: 'reverb.size', amount: 0.5 };
+        const env: ModRoute = { source: 'env1', target: 'reverb.size', amount: 0.5 };
+        const targets = (routes: ModRoute[], ...types: FxType[]) =>
+          chainRoutes(routes, effects(), playing(...types), {}, 120).map((route) => route.target);
+        expect(targets([knob, lfo], 'reverb')).toEqual([130, 168]);
+        // an envelope reads no LFO
+        expect(targets([knob, env], 'reverb')).toEqual([130]);
+        // the LFO moves a knob of an effect that doesn't play
+        expect(targets([knob, lfo], 'delay')).toEqual([]);
+        // switched off or of amount 0: left out
+        expect(targets([{ ...knob, off: true }, lfo], 'reverb')).toEqual([130]);
+        expect(targets([{ ...knob, amount: 0 }, lfo], 'reverb')).toEqual([130]);
+        expect(targets([knob, { ...lfo, off: true }], 'reverb')).toEqual([]);
+      });
+
+      it('the bounds: of the knob, of Time and Rate in BPM at the tempo, of an LFO in BPM its ranges', () => {
+        const routes: ModRoute[] = [
+          { source: 'lfo1', target: 'delay.time', amount: 0.5 },
+          { source: 'env1', target: 'chorus.rate', amount: 0.5 },
+          { source: 'env1', target: 'lfo1.rate', amount: 0.5 },
+        ];
+        const all = effects();
+        const bounds = (...args: Parameters<typeof chainRoutes>) =>
+          chainRoutes(...args).map(({ min, max }) => [min, max]);
+        expect(bounds(routes, all, playing('chorus', 'delay'), {}, 120)).toEqual([
+          [0, 20],
+          [0.01, 1],
+          [1 / 32, 100],
+        ]);
+        const synced = {
+          ...all,
+          delay: { ...all.delay, params: { ...all.delay.params, sync: 1 } },
+          chorus: { ...all.chorus, params: { ...all.chorus.params, sync: 1 } },
+        };
+        expect(bounds(routes, synced, playing('chorus', 'delay'), { 'lfo1.rate': [0.5, 8] }, 60)).toEqual([
+          [1 / 32, 8],
+          [0.0625, 4],
+          [0.5, 8],
+        ]);
+      });
+    });
+
+    describe('chainNote', () => {
+      const velo = [{ target: 159, source: VELO, amount: 0.5, min: 0, max: 1 }];
+      const env = [{ target: 65, source: ENV2, amount: 0.5, min: 0, max: 0.9 }];
+
+      it('no note: none', () => {
+        expect(chainNote(null, velo)).toBeNull();
+      });
+
+      it('the envelopes and their times, the levels they start from only when it has them', () => {
+        expect(chainNote({ ...note(1), velo: 0.5, velocity: 0.5 }, env)).toEqual(note(1));
+        expect(chainNote({ ...note(1), release: 2, from: [0, 0.4, 0] }, [])).toEqual({
+          ...note(1),
+          release: 2,
+          from: [0, 0.4, 0],
+        });
+        expect(chainNote(note(1), env)).not.toHaveProperty('from');
+      });
+
+      it('its velocity only while a route reads VELO, a level of 0 included; never the share of 127', () => {
+        expect(chainNote({ ...note(1), velo: 0.7, velocity: 0.6 }, velo)).toEqual({ ...note(1), velo: 0.7 });
+        expect(chainNote({ ...note(1), velo: 0, velocity: 0 }, [...env, ...velo])).toEqual({
+          ...note(1),
+          velo: 0,
+        });
+        expect(chainNote({ ...note(1), velo: 0.7 }, env)).not.toHaveProperty('velo');
+        // a note without one (the track before its first velocity)
+        expect(chainNote(note(1), velo)).not.toHaveProperty('velo');
+      });
     });
   });
 });

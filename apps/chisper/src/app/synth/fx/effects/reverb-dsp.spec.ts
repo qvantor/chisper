@@ -36,7 +36,6 @@ interface Change {
   params?: Partial<ReverbDspParams>;
   // the params are knobs the envelopes move
   routed?: boolean;
-  active?: boolean;
   // the tail is forgotten (a preset switch)
   clear?: boolean;
 }
@@ -61,10 +60,9 @@ const render = (
   params: Partial<ReverbDspParams>,
   seconds: number,
   input: Input = impulse,
-  changes: Change[] = [],
-  active = true
+  changes: Change[] = []
 ) => {
-  const dsp = create(SAMPLE_RATE, { params: { ...BASE, ...params }, active });
+  const dsp = create(SAMPLE_RATE, { params: { ...BASE, ...params } });
   const frames = Math.ceil((seconds * SAMPLE_RATE) / BLOCK) * BLOCK;
   const [L, R] = [new Float32Array(frames), new Float32Array(frames)];
   const block = new Float32Array(BLOCK);
@@ -75,7 +73,6 @@ const render = (
       .filter(({ at }) => Math.floor((at * SAMPLE_RATE) / BLOCK) * BLOCK === start)
       .forEach((change) => {
         if (change.params) dsp.set(change.params, change.routed);
-        if (change.active !== undefined) dsp.setActive(change.active);
         if (change.clear) dsp.clear();
       });
     for (let i = 0; i < BLOCK; i++) block[i] = input(start + i);
@@ -279,20 +276,28 @@ describe('the reverb', () => {
       }
     );
 
-    // an impulse at 0.05 s after the change at 0: the first sample out (the first early reflection) comes
-    // after the predelay and the first tap of the room at the time it passes
+    // an impulse at 0.05 s after the change at 0.01 s (a sound too quiet to hear has woken the reverb: a knob of
+    // one that never sounded is taken at once): the first sample out (the first early reflection) comes after
+    // the predelay and the first tap of the room at the time it passes
     it.each([
       ['predelay', { pre: 0 }, { pre: 0.1 }, 0.02],
       ['size', { size: 0 }, { size: 1 }, 0.002],
     ] as [string, Partial<ReverbDspParams>, Partial<ReverbDspParams>, number][])(
       '%s moved by an envelope follows it in 10 ms, a knob glides like tape',
       (_, from, to, earlier) => {
-        const pulse: Input = (frame) => impulse(frame - Math.round(0.05 * SAMPLE_RATE));
+        const pulse: Input = (at) => impulse(at - frame(0.05)) + 1e-8 * impulse(at);
         const onset = (changes: Change[], params = from) =>
-          render({ er: 1, ...params }, 0.3, pulse, changes).mono.findIndex((value) => value !== 0);
+          render({ er: 1, ...params }, 0.3, pulse, changes).mono.findIndex((value) => Math.abs(value) > 1e-6);
         const target = onset([], { ...from, ...to });
-        expect(Math.abs(onset([{ at: 0, params: to, routed: true }]) - target)).toBeLessThan(frame(0.0005));
-        expect(onset([{ at: 0, params: to }])).toBeLessThan(target - frame(earlier));
+        expect(Math.abs(onset([{ at: 0.01, params: to, routed: true }]) - target)).toBeLessThan(
+          frame(0.0005)
+        );
+        expect(onset([{ at: 0.01, params: to }])).toBeLessThan(target - frame(earlier));
+        // (before its first sound: there at once)
+        const first: Input = (at) => impulse(at - frame(0.05));
+        const fresh = (changes: Change[], params = from) =>
+          render({ er: 1, ...params }, 0.3, first, changes).mono.findIndex((value) => value !== 0);
+        expect(fresh([{ at: 0, params: to }])).toBe(fresh([], { ...from, ...to }));
       }
     );
   });
@@ -343,22 +348,7 @@ describe('the reverb', () => {
     });
   });
 
-  describe('active', () => {
-    it('inactive: fades out and stays silent, the old tail never comes back', () => {
-      const { mono } = render({ decay: 20 }, 1.5, noise(0.1), [
-        { at: 0.3, active: false },
-        { at: 1, active: true },
-      ]);
-      expect(levelDb(mono, 0.2, 0.3)).toBeGreaterThan(-60);
-      expect(mono.slice(frame(0.6)).every((value) => value === 0)).toBe(true);
-    });
-
-    it('created inactive: silent until activated', () => {
-      const { mono } = render({}, 0.6, noise(0.6), [{ at: 0.3, active: true }], false);
-      expect(mono.slice(0, frame(0.29)).every((value) => value === 0)).toBe(true);
-      expect(levelDb(mono, 0.4, 0.6)).toBeGreaterThan(-60);
-    });
-
+  describe('idle', () => {
     it('a drained tail is skipped, new input wakes it up with the current params', () => {
       const wake = 1.6;
       const input: Input = (frame) => impulse(frame) || impulse(frame - Math.round(wake * SAMPLE_RATE) / 1);
@@ -369,17 +359,18 @@ describe('the reverb', () => {
       expect(woken).toBeLessThan(0.25);
     });
 
-    it('created inactive: skips every block', () => {
-      const { idle } = render({}, 1, () => 0, [], false);
+    it('a reverb that never sounded skips its blocks from the first one', () => {
+      const { idle, mono } = render({}, 0.1, () => 0);
       expect(idle.every(Boolean)).toBe(true);
+      expect(mono.every((value) => value === 0)).toBe(true);
     });
 
-    it('created active: renders silence until its longest path has drained, then skips the blocks', () => {
+    it('renders a silence until its longest path has drained, then skips the blocks', () => {
       // the predelay at its most, the last early reflection, the diffusers and the longest line of the
-      // largest room: 0.561 s, 211 blocks at 48 kHz (a reverb added to the chain renders them)
-      const { idle } = render({}, 1, () => 0);
-      expect(idle.indexOf(true)).toBe(210);
-      expect(idle.slice(210).every(Boolean)).toBe(true);
+      // largest room: 0.561 s, 211 blocks at 48 kHz after the block of a sound (one too quiet to ring on)
+      const { idle } = render({}, 1, (at) => 2e-10 * impulse(at));
+      expect(idle.indexOf(true)).toBe(211);
+      expect(idle.slice(211).every(Boolean)).toBe(true);
     });
 
     it('clear forgets the tail at once, the next sound rings at the params as they are then', () => {
@@ -400,7 +391,7 @@ describe('the reverb', () => {
     });
 
     it('ignores unknown and missing params', () => {
-      const dsp = create(SAMPLE_RATE, { params: BASE, active: true });
+      const dsp = create(SAMPLE_RATE, { params: BASE });
       expect(() => dsp.set({ time: 1, decay: undefined } as never)).not.toThrow();
     });
   });

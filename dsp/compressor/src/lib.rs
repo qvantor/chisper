@@ -24,7 +24,6 @@ extern crate alloc;
 pub mod math;
 
 use alloc::{vec, vec::Vec};
-use wasm_rt as _;
 
 use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::simd::{F32x4, U32x4};

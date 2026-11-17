@@ -1,4 +1,3 @@
-import type { LfosState } from '../../common/lfo/lfo-curve';
 // the params, the options and the messages of the distortion (its Rust core, dsp/distortion: distortion-wasm.ts),
 // no signal processing here
 
@@ -13,13 +12,6 @@ export interface DistortionDspParams {
 
 export interface DistortionOptions {
   params: DistortionDspParams;
-  // the LFOs as they are when the node is made (stereo-processor.ts)
-  lfos?: LfosState;
-}
-
-// main thread → worklet: changed params
-export interface DistortionMessage {
-  params?: Partial<DistortionDspParams>;
 }
 
 // samples the output lags the input: the oversampling filters (4× in two stages: 15 samples each way in the sincs

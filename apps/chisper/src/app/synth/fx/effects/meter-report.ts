@@ -14,17 +14,6 @@ export interface Metered {
 
 export const metered = (metering: boolean): Metered => ({ metering, waited: 0, rested: false });
 
-// a core that tells its meter: `meter()` reads it into the same object every time, `idle`: nothing sounds in it
-interface MeterCore<Values> {
-  meter: () => Values;
-  readonly idle: boolean;
-}
-// with what its worklet posts of it: `message` is the one posted every time (the port copies it, its meter is
-// the values of the core: nothing is made on the audio thread)
-export type MeterDsp<Values> = MeterCore<Values> & Metered & { message: { meter: Values } };
-export const withMeter = <Core extends MeterCore<unknown>>(core: Core, metering: boolean) =>
-  Object.assign(core, metered(metering), { message: { meter: core.meter() as ReturnType<Core['meter']> } });
-
 // a watcher came (the next message is the meter as it is, at rest too) or the last one left
 export const watchMeter = (state: Metered, metering: boolean) => {
   state.metering = metering;
@@ -42,11 +31,4 @@ export const meterDue = (state: Metered & { readonly idle: boolean }, frames: nu
   if (idle && state.rested) return false;
   state.rested = idle;
   return true;
-};
-
-// after a block of `frames`: the message to post (its meter read off the core), null: none is due
-export const meterReport = <Values>(dsp: MeterDsp<Values>, frames: number, sampleRate: number) => {
-  if (!meterDue(dsp, frames, sampleRate)) return null;
-  dsp.meter();
-  return dsp.message;
 };

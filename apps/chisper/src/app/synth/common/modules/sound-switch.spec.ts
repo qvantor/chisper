@@ -7,7 +7,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve));
 
 const setup = async ({ running = true } = {}) => {
   const modules = createSynth();
-  const [{ audioCtx, fxOut, wavetables, masterLimiter }] = modules.synthCore;
+  const [{ audioCtx, chain, wavetables }] = modules.synthCore;
   const fx = createFx(modules.synthCore, modules.modulation, modules.lfos, modules.transport).fx;
   await flush();
   jest.useFakeTimers();
@@ -25,7 +25,11 @@ const setup = async ({ running = true } = {}) => {
   const pause = jest.spyOn(synthActions, 'pause');
   const resume = jest.spyOn(synthActions, 'resume');
   const clear = jest.spyOn(fx[1] as Pick<(typeof fx)[1], 'clear'>, 'clear');
-  const clearLimiter = jest.spyOn(masterLimiter, 'clear');
+  // the chain forgets the tails of its effects and its limiter in one message
+  const clearChain = jest.spyOn(chain, 'clear');
+  // the output of the chain: faded out by a mute, opened by an unmute
+  const mute = jest.spyOn(chain, 'mute');
+  const unmute = jest.spyOn(chain, 'unmute');
   const [osc1, osc2] = [modules.osc1[0], modules.osc2[0]];
   // the tables of both oscillators in the store (createSynth loads none: a loader that never resolves)
   [osc1, osc2].forEach(({ $waveTableLoading, $tableProgress }) => {
@@ -50,14 +54,15 @@ const setup = async ({ running = true } = {}) => {
     now = time;
     jest.advanceTimersByTime(ms);
   };
-  const gain = fxOut.gain as unknown as Record<
-    'cancelScheduledValues' | 'setValueAtTime' | 'linearRampToValueAtTime',
-    jest.Mock
-  >;
-  // the order of the last call of a method of the gain among all the mocks
-  const last = (method: keyof typeof gain) => gain[method].mock.invocationCallOrder.at(-1) ?? 0;
-  // the output opened again: a step to 1 after the ramp to 0
-  const opened = () => last('setValueAtTime') > last('linearRampToValueAtTime');
+  // the order of the last call of a mock among all the mocks
+  const last = (mock: jest.SpyInstance) => mock.mock.invocationCallOrder.at(-1) ?? 0;
+  // the output opened again: an unmute after the mute
+  const opened = () => last(unmute) > last(mute);
+  // what the node of the chain was told since the switch model started
+  const node = (chain.input.connect as jest.Mock).mock.calls[0][0] as AudioWorkletNode;
+  const told = (node.port.postMessage as jest.Mock).mock.calls.length;
+  const messages = () =>
+    (node.port.postMessage as jest.Mock).mock.calls.slice(told).map(([message]) => message);
   return {
     switchSound,
     $progress,
@@ -69,12 +74,14 @@ const setup = async ({ running = true } = {}) => {
     noise: modules.noise,
     sub: modules.sub,
     wavetables,
-    gain,
+    mute,
+    unmute,
+    messages,
     last,
     pause,
     resume,
     clear,
-    clearLimiter,
+    clearChain,
     render,
     opened,
   };
@@ -84,14 +91,14 @@ afterEach(() => jest.useRealTimers());
 
 describe('soundSwitch', () => {
   it('fades the output out and pauses the voices, applies the preset once the fade is rendered', async () => {
-    const { switchSound, gain, pause, clear, clearLimiter, render, opened } = await setup();
+    const { switchSound, mute, messages, pause, clear, clearChain, render, opened } = await setup();
     const apply = jest.fn();
 
     switchSound(apply);
 
-    expect(gain.cancelScheduledValues).toHaveBeenLastCalledWith(1);
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(1, 1);
-    expect(gain.linearRampToValueAtTime).toHaveBeenLastCalledWith(0, 1.02);
+    expect(mute.mock.calls).toEqual([[0.02]]);
+    // (with the time of the context: the fade ends 20 ms after it)
+    expect(messages()).toEqual([{ mute: 0.02, at: 1 }]);
     expect(pause).toHaveBeenCalledTimes(1);
     render(1.01);
     expect(apply).not.toHaveBeenCalled();
@@ -99,9 +106,12 @@ describe('soundSwitch', () => {
 
     render(1.02);
     expect(apply).toHaveBeenCalledTimes(1);
-    // after it: the delay makes its nodes at the knobs of the preset, from those before Time would glide
+    // after it: the effects start at the knobs of the preset, from those before Time of the delay would glide
+    expect(clear).toHaveBeenCalledTimes(1);
     expect(clear.mock.invocationCallOrder[0]).toBeGreaterThan(apply.mock.invocationCallOrder[0]);
-    expect(clearLimiter.mock.invocationCallOrder[0]).toBeGreaterThan(apply.mock.invocationCallOrder[0]);
+    // the tails of the effects and the limiter are forgotten together: one message to the chain
+    expect(clearChain).toHaveBeenCalledTimes(1);
+    expect(messages().at(-1)).toEqual({ clear: true });
     expect(opened()).toBe(false);
   });
 
@@ -133,7 +143,7 @@ describe('soundSwitch', () => {
   });
 
   it('opens the output after the clear messages reached the worklets, then the keys start on the preset', async () => {
-    const { switchSound, gain, last, resume, render, opened } = await setup();
+    const { switchSound, mute, unmute, messages, last, resume, render, opened } = await setup();
     switchSound(jest.fn());
     render(1.02);
     render(1.025);
@@ -143,13 +153,14 @@ describe('soundSwitch', () => {
     render(1.03);
 
     expect(opened()).toBe(true);
-    expect(gain.setValueAtTime).toHaveBeenLastCalledWith(1, 1.03);
-    expect(gain.cancelScheduledValues).toHaveBeenLastCalledWith(1.03);
+    expect(unmute).toHaveBeenCalledTimes(1);
+    // the clear reached the chain before its output opened
+    expect(messages().slice(-2)).toEqual([{ clear: true }, { unmute: true }]);
     // at once: nothing sounds before it, a fade would take the attacks of the keys
-    expect(resume.mock.invocationCallOrder[0]).toBeGreaterThan(last('setValueAtTime'));
+    expect(resume.mock.invocationCallOrder[0]).toBeGreaterThan(last(unmute));
     // over: the next preset fades out again
     switchSound(jest.fn());
-    expect(gain.linearRampToValueAtTime).toHaveBeenCalledTimes(2);
+    expect(mute).toHaveBeenCalledTimes(2);
   });
 
   it('a preset chosen during the fade replaces the one waiting for it', async () => {
@@ -291,7 +302,7 @@ describe('soundSwitch', () => {
   });
 
   it('a preset that throws still forgets the sound before and opens the output, its error goes on', async () => {
-    const { switchSound, gain, clear, clearLimiter, resume, render, opened } = await setup();
+    const { switchSound, mute, clear, clearChain, resume, render, opened } = await setup();
     const error = new Error('broken preset');
     switchSound(() => {
       throw error;
@@ -300,13 +311,13 @@ describe('soundSwitch', () => {
     expect(() => render(1.02)).toThrow(error);
 
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(clearLimiter).toHaveBeenCalledTimes(1);
+    expect(clearChain).toHaveBeenCalledTimes(1);
     render(1.03);
     expect(opened()).toBe(true);
     expect(resume).toHaveBeenCalledTimes(1);
     // over: the next preset fades out again
     switchSound(jest.fn());
-    expect(gain.linearRampToValueAtTime).toHaveBeenCalledTimes(2);
+    expect(mute).toHaveBeenCalledTimes(2);
   });
 
   it('a preset that throws while silent: the error reaches its caller, the output opens all the same', async () => {

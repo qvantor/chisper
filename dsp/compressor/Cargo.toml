@@ -10,6 +10,5 @@ publish = false
 workspace = true
 
 [dependencies]
-wasm-rt = { path = "../wasm-rt" }
 jsmath = { path = "../jsmath" }
 dsp-core = { path = "../dsp-core" }

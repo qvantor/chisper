@@ -1,5 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { NEUTRAL_PARAMS } from '../app/synth/common/chain/chain-params';
 import type { UnitExports } from '../app/synth/common/wasm/stereo-core';
 import type { DelayDspParams } from '../app/synth/fx/effects/delay-params';
 import { createDelayWasm } from '../app/synth/fx/effects/delay-wasm';
@@ -13,7 +14,7 @@ let core: UnitExports | undefined;
 // one instance for a spec file
 export const delayCore = () => (core ??= wasmCore<UnitExports>('chain'));
 
-export const DELAY_DEFAULTS: DelayDspParams = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
+export const DELAY_DEFAULTS = NEUTRAL_PARAMS.delay as unknown as DelayDspParams;
 
 export const renderDelay = (
   params: Partial<DelayDspParams>,

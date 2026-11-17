@@ -1,17 +1,21 @@
 //! The chain: the sound of the voices through the slots of the effects in their order, the master gain and the
 //! limiter, a block at a time. A slot mixes its effect in (`Law`): the dry signal, late by the latency of the
 //! effect, and the wet one, their gains gliding in 10 ms; a slot that is off passes its input and costs nothing
-//! once its effect has faded out (it is forgotten then). The effects render from one pair of buffers into another
+//! once its effect has faded out (it is forgotten then). A slot whose effect is late crosses between its input
+//! as it is and the late one as it starts and stops; a slot that sounds and leaves the order fades out where it
+//! is first (`pending`). The effects render from one pair of buffers into another
 //! (none works in place), a slot whose effect plays alone only swaps them.
 //!
 //! It is driven by events with a time (`push`: the params, the mix and the state of a slot, the order, the gains,
-//! the mute) taken at the first block at or after it, by the routes, the note and the LFOs of `modulation`, and
-//! tells what failed (`take_reports`). A trap inside an effect is not the end of the sound: the chain keeps in
-//! memory which stage it is at (`work`) before the call that may trap, `fail` drops that effect (its slot passes
-//! its input from then on) and `resume` finishes the block; the limiter that trapped leaves the master silent
-//! until it is made again (`retry`).
+//! the mute) taken at the first block at or after it (one without a time: at the next block, never before one
+//! with a time that came before it), by the routes, the note and the LFOs of `modulation`, and tells what failed
+//! (`take_reports`). A trap inside an effect is not the end of the sound: the chain keeps in memory which stage
+//! it is at (`work`) before every call of a unit that may trap (its block, a knob, a rest, its sound forgotten),
+//! `fail` drops that effect (its slot passes its input from then on) and `resume` finishes the block from the
+//! step it was at (`step`: an event that trapped is taken again without the unit); the limiter that trapped
+//! leaves the master silent until it is made again (`retry`).
 
-use alloc::{vec, vec::Vec};
+use alloc::{collections::VecDeque, vec, vec::Vec};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use dsp_core::blocks::{louder, loudest, Smoothed};
@@ -24,7 +28,7 @@ use crate::units::{law, Law, Unit, DELAY, LIMITER, MAX_METER, MAX_PARAMS, SLOTS}
 
 /// the events: the params of a slot (a: the slot, b: the bits of the keys, the values by key), its mix (a, b),
 /// whether it plays (a, b: not 0), the order (a: how many slots, the values: which), the master gain (a), the
-/// mute (a: the seconds of the fade), its end, everything forgotten (a preset switch), the gain before the slots
+/// mute (a: the seconds of the fade), its end, everything forgotten (a preset switch)
 pub const SET_PARAMS: u32 = 0;
 pub const SET_MIX: u32 = 1;
 pub const SET_ACTIVE: u32 = 2;
@@ -33,11 +37,27 @@ pub const MASTER_GAIN: u32 = 4;
 pub const MUTE: u32 = 5;
 pub const UNMUTE: u32 = 6;
 pub const CLEAR: u32 = 7;
-pub const PRE_GAIN: u32 = 8;
 
 /// the stage of the limiter (the slots are theirs by index)
 pub const LIMITER_STAGE: u32 = SLOTS as u32;
 const NO_WORK: u32 = u32::MAX;
+// the steps of a block, each taken up where a trap left it: the events due, the units that render nothing, the
+// knobs the routes move, the stages
+const EVENTS: u32 = 0;
+const REST: u32 = 1;
+const ROUTES: u32 = 2;
+const STAGES: u32 = 3;
+/// the calls of a unit a trap of the specs is in: its block, a knob, a rest, its sound forgotten; `AFTER`: past
+/// its stage, in none; `IN_NEW`: as a retry makes it
+pub const IN_PROCESS: u32 = 0;
+pub const IN_SET: u32 = 1;
+pub const IN_REST: u32 = 2;
+pub const IN_FORGET: u32 = 3;
+pub const AFTER: u32 = 4;
+pub const IN_NEW: u32 = 5;
+/// a trap of the specs that is in no stage
+#[cfg(any(test, feature = "perf"))]
+pub const OUTSIDE: u32 = LIMITER_STAGE + 1;
 const GLIDE: f64 = 0.01;
 const FADED: f64 = 1e-4;
 
@@ -57,9 +77,16 @@ struct Slot {
     live: bool,
     dry: Smoothed,
     wet: Smoothed,
+    // (an effect that is late) the gain of its input as it is: 1 while the slot is off, 0 while it plays (the
+    // dry signal is the late one then). The slot crosses from one to the other: no jump in time, no hole
+    direct: Smoothed,
     latency: usize,
     // the last `latency` samples of its input (L, R)
     held: [Vec<f32>; 2],
+    // the samples `held` still lacks after a start: the effect renders, its slot is a wire until it has them
+    warm: usize,
+    // out of the order to come: it fades out as one that is off, where it is
+    gone: bool,
 }
 
 pub struct Chain {
@@ -70,15 +97,20 @@ pub struct Chain {
     on: [bool; SLOTS],
     order: [usize; SLOTS],
     count: usize,
+    // the order to come, once the slots that leave it have faded out
+    pending: Option<([usize; SLOTS], usize)>,
     // (None: made without one, or it failed)
     limiter: Option<Unit>,
     limited: bool,
-    pre: f64,
     gain: f64,
     // the mute: its gain now, what it loses a sample (0: it holds)
     mute: f64,
     fade: f64,
-    events: Vec<Event>,
+    // the events to come by the frame each is taken at (its time; of one without a time `stamped`), those of one
+    // frame in the order they came
+    events: VecDeque<(f64, Event)>,
+    // the latest time an event came with
+    stamped: f64,
     modulation: Modulation,
     // what the wrapper writes the routes, a note and the LFOs into
     scratch: Vec<f64>,
@@ -91,26 +123,48 @@ pub struct Chain {
     cursor: usize,
     side: usize,
     silent: bool,
+    // the step of the block (`EVENTS`…), the kind to rest next, whether the slots are skipped, the knobs the
+    // routes move in this block (slot, key, value) and the one to set next
+    step: u32,
+    rested: usize,
+    resting: bool,
+    sets: Vec<(usize, usize, f64)>,
+    set_at: usize,
     // the stage a call that may trap is in, in memory before it
     work: u32,
     // the stages that failed since the last report (bits)
     reports: u32,
+    // the stage and the call (`IN_PROCESS`…) that trap
     #[cfg(any(test, feature = "perf"))]
-    trap: u32,
+    trap: (u32, u32),
     // (the specs of the crate: the slots are never skipped, what the rest is held to)
     #[cfg(test)]
     pub(crate) restless: bool,
 }
 
-fn targets(kind: usize, on: bool, mix: f64) -> (f64, f64) {
-    if !on {
-        return (1.0, 0.0);
+/// the dry and the wet gain of a mix by equal power (all wet: no dry signal at all, cos(π / 2) is 6e-17)
+pub fn equal_power(mix: f64) -> (f64, f64) {
+    if mix >= 1.0 {
+        (0.0, 1.0)
+    } else if mix <= 0.0 {
+        (1.0, 0.0)
+    } else {
+        (cos(mix * PI / 2.0), sin(mix * PI / 2.0))
     }
-    match law(kind as u32) {
+}
+
+// the gains of a slot: the dry one (of the input, late by the latency), the wet one, the direct one (`late`: of
+// the input as it is; a slot that is not late is a wire by its dry gain)
+fn targets(kind: usize, on: bool, mix: f64, late: bool) -> (f64, f64, f64) {
+    if !on {
+        return if late { (0.0, 0.0, 1.0) } else { (1.0, 0.0, 0.0) };
+    }
+    let (dry, wet) = match law(kind as u32) {
         Law::Inside(_) => (0.0, 1.0),
         Law::Linear => (1.0 - mix, mix),
-        Law::EqualPower => (cos(mix * PI / 2.0), sin(mix * PI / 2.0)),
-    }
+        Law::EqualPower => equal_power(mix),
+    };
+    (dry, wet, 0.0)
 }
 
 // out = dry · the input (late by `held`.len(), its samples before the block in `held`) + wet · out; the gains
@@ -158,6 +212,15 @@ fn mix_in(
     }
 }
 
+// out += direct · the input, the gain from its value at the start of the block to that at its end
+fn add_in(input: &[f32], out: &mut [f32], direct: (f64, f64)) {
+    let step = 1.0 / out.len() as f64;
+    for (i, (source, target)) in input.iter().zip(out.iter_mut()).enumerate() {
+        let gain = direct.0 + (direct.1 - direct.0) * ((i + 1) as f64 * step);
+        *target += gain as f32 * *source;
+    }
+}
+
 // the samples of the input before the next block: the last of `held` and of this one
 fn hold(held: &mut [f32], input: &[f32]) {
     let (latency, frames) = (held.len(), input.len());
@@ -176,15 +239,18 @@ impl Chain {
         Chain {
             rate: sample_rate,
             slots: core::array::from_fn(|kind| {
-                let unit = Unit::new(kind as u32, sample_rate, &params[kind], true);
+                let unit = Unit::new(kind as u32, sample_rate, &params[kind]);
                 let latency = unit.as_ref().map_or(0, |unit| unit.latency());
                 Slot {
                     unit,
                     live: false,
-                    dry: Smoothed::new(1.0, GLIDE, sample_rate),
+                    dry: Smoothed::new(if latency > 0 { 0.0 } else { 1.0 }, GLIDE, sample_rate),
                     wet: Smoothed::new(0.0, GLIDE, sample_rate),
+                    direct: Smoothed::new(if latency > 0 { 1.0 } else { 0.0 }, GLIDE, sample_rate),
                     latency,
                     held: [vec![0.0; latency], vec![0.0; latency]],
+                    warm: 0,
+                    gone: false,
                 }
             }),
             params: *params,
@@ -195,17 +261,18 @@ impl Chain {
             on: [false; SLOTS],
             order: [0; SLOTS],
             count: 0,
+            pending: None,
             limiter: if limited {
-                Unit::new(LIMITER, sample_rate, &[0.0; MAX_PARAMS], true)
+                Unit::new(LIMITER, sample_rate, &[0.0; MAX_PARAMS])
             } else {
                 None
             },
             limited,
-            pre: 1.0,
             gain: 1.0,
             mute: 1.0,
             fade: 0.0,
-            events: Vec::with_capacity(64),
+            events: VecDeque::with_capacity(64),
+            stamped: 0.0,
             modulation: Modulation::new(sample_rate),
             scratch: Vec::new(),
             data: Vec::new(),
@@ -214,10 +281,16 @@ impl Chain {
             cursor: 0,
             side: 0,
             silent: false,
+            step: EVENTS,
+            rested: 0,
+            resting: false,
+            // (a knob is set back or moved, never both in a block)
+            sets: Vec::with_capacity(SLOTS * MAX_PARAMS),
+            set_at: 0,
             work: NO_WORK,
             reports: 0,
             #[cfg(any(test, feature = "perf"))]
-            trap: NO_WORK,
+            trap: (NO_WORK, IN_PROCESS),
             #[cfg(test)]
             restless: false,
         }
@@ -272,35 +345,152 @@ impl Chain {
         }
     }
 
-    /// an event from frame `at` on (allocates when the queue grows: not while a block renders)
+    /// an event from frame `at` on (allocates when the queue grows: not while a block renders). One without a
+    /// time (`at` 0) is of now, and now is not before a time that came before it: an unmute sent after a mute
+    /// with a time is taken after it, even when no block was rendered between them
     pub fn push(&mut self, event: Event) {
-        let at = self
+        let due = if event.at > 0.0 {
+            self.stamped = max(self.stamped, event.at);
+            event.at
+        } else {
+            self.stamped
+        };
+        // (after those due by then: most often the last place)
+        let place = self
             .events
             .iter()
-            .take_while(|other| other.at <= event.at)
-            .count();
-        self.events.insert(at, event);
+            .rposition(|(other, _)| *other <= due)
+            .map_or(0, |last| last + 1);
+        self.events.insert(place, (due, event));
+    }
+
+    // on and in the order to come: its effect sounds
+    fn plays(&self, kind: usize) -> bool {
+        self.on[kind] && !self.slots[kind].gone
     }
 
     fn aim(&mut self, kind: usize) {
-        let (dry, wet) = targets(kind, self.on[kind], self.mix[kind]);
+        let late = self.slots[kind].latency > 0;
+        let (dry, wet, direct) = targets(kind, self.plays(kind), self.mix[kind], late);
         let slot = &mut self.slots[kind];
+        // (it has no late input yet: a wire until then)
+        if slot.warm > 0 {
+            return;
+        }
         // (a slot that renders nothing is where it goes at once)
         slot.dry.set(dry, !slot.live, None);
         slot.wet.set(wet, !slot.live, None);
+        slot.direct.set(direct, !slot.live, None);
     }
 
-    // the unit of a slot that stops rendering: forgotten, its slot a wire
+    // a call of the unit of `stage` that may trap comes next: the stage in memory before it
+    #[inline(always)]
+    fn begin(&mut self, stage: u32, _call: u32) {
+        self.work = stage;
+        compiler_fence(Ordering::SeqCst);
+        #[cfg(any(test, feature = "perf"))]
+        if self.trap == (stage, _call) {
+            panic!("a trap of the specs");
+        }
+    }
+
+    // the call is over: a trap from now on is in no stage
+    #[inline(always)]
+    fn end(&mut self) {
+        self.work = NO_WORK;
+        compiler_fence(Ordering::SeqCst);
+    }
+
+    // the params of the unit of a slot (one that failed has none)
+    fn set(&mut self, kind: usize, present: u32, values: &[f64; MAX_PARAMS], routed: bool) {
+        if self.slots[kind].unit.is_none() {
+            return;
+        }
+        self.begin(kind as u32, IN_SET);
+        if let Some(unit) = &mut self.slots[kind].unit {
+            unit.set(present, values, routed);
+        }
+        self.end();
+    }
+
+    // the unit of a slot that stops rendering: its slot a wire, then its sound forgotten (the call that may trap
+    // last: the slot is a wire whatever comes of it)
     fn stop(&mut self, kind: usize) {
         let slot = &mut self.slots[kind];
-        if let Some(unit) = &mut slot.unit {
-            unit.forget();
-        }
+        let late = slot.latency > 0;
         slot.live = false;
-        slot.dry.set(1.0, true, None);
+        slot.gone = false;
+        slot.warm = 0;
+        slot.dry.set(if late { 0.0 } else { 1.0 }, true, None);
         slot.wet.set(0.0, true, None);
+        slot.direct.set(if late { 1.0 } else { 0.0 }, true, None);
         slot.held[0].fill(0.0);
         slot.held[1].fill(0.0);
+        if slot.unit.is_none() {
+            return;
+        }
+        self.begin(kind as u32, IN_FORGET);
+        if let Some(unit) = &mut self.slots[kind].unit {
+            unit.forget();
+        }
+        self.end();
+    }
+
+    // a slot that is on renders from now on: its gains glide from those of a wire (an effect that is late: once
+    // the slot has the input it mixes in late)
+    fn start(&mut self, kind: usize) {
+        let slot = &mut self.slots[kind];
+        if self.on[kind] && slot.unit.is_some() && !slot.live {
+            slot.live = true;
+            slot.warm = slot.latency;
+        }
+        self.aim(kind);
+    }
+
+    // the order of an event: at once, or once the slots that sound and leave it have faded out (they stay where
+    // they are until then; a cut would click)
+    fn reorder(&mut self, order: [usize; SLOTS], count: usize) {
+        let mut waits = false;
+        for kind in 0..SLOTS {
+            let stays = order[..count].contains(&kind);
+            let here = self.order[..self.count].contains(&kind);
+            let slot = &mut self.slots[kind];
+            let gone = !stays && here && slot.live;
+            let changed = slot.gone != gone;
+            slot.gone = gone;
+            waits = waits || gone;
+            if changed {
+                self.aim(kind);
+            }
+        }
+        self.pending = Some((order, count));
+        if !waits {
+            self.settle();
+        }
+    }
+
+    // the order to come is the order once no slot that leaves it sounds
+    fn settle(&mut self) {
+        let Some((order, count)) = self.pending else {
+            return;
+        };
+        if self.slots.iter().any(|slot| slot.gone) {
+            return;
+        }
+        // (the order is the new one once every slot is where it goes: after a trap in a stop this is done again)
+        for kind in 0..SLOTS {
+            let stays = order[..count].contains(&kind);
+            if !stays && self.slots[kind].live {
+                self.stop(kind);
+            } else if stays && !self.order[..self.count].contains(&kind) {
+                // (new in the order: it fades in from a wire, whatever it was told while out of it)
+                self.stop(kind);
+                self.start(kind);
+            }
+        }
+        self.order = order;
+        self.count = count;
+        self.pending = None;
     }
 
     fn apply(&mut self, event: &Event) {
@@ -317,9 +507,7 @@ impl Chain {
                         }
                     }
                 }
-                if let Some(unit) = &mut self.slots[kind].unit {
-                    unit.set(direct, &event.values, false);
-                }
+                self.set(kind, direct, &event.values, false);
             }
             SET_MIX if kind < SLOTS => {
                 self.mix[kind] = event.b;
@@ -328,36 +516,32 @@ impl Chain {
                     if !(self.on[kind] && self.modulation.moves(kind, key)) {
                         let mut values = [0.0; MAX_PARAMS];
                         values[key] = event.b;
-                        if let Some(unit) = &mut self.slots[kind].unit {
-                            unit.set(1 << key, &values, false);
-                        }
+                        self.set(kind, 1 << key, &values, false);
                     }
                 }
                 self.aim(kind);
             }
             SET_ACTIVE if kind < SLOTS => {
                 self.on[kind] = event.b != 0.0;
-                // (it renders from now on: its gains glide from those of a wire)
-                if self.on[kind] && self.slots[kind].unit.is_some() {
-                    self.slots[kind].live = true;
-                }
-                self.aim(kind);
+                self.start(kind);
             }
             SET_ORDER => {
-                self.count = (event.a as usize).min(SLOTS);
-                for place in 0..self.count {
-                    self.order[place] = (event.values[place] as usize).min(SLOTS - 1);
+                let count = (event.a as usize).min(SLOTS);
+                let mut order = [0; SLOTS];
+                for place in 0..count {
+                    order[place] = (event.values[place] as usize).min(SLOTS - 1);
                 }
-                for kind in 0..SLOTS {
-                    if !self.order[..self.count].contains(&kind) && self.slots[kind].live {
-                        self.stop(kind);
-                    }
-                }
+                self.reorder(order, count);
             }
             MASTER_GAIN => self.gain = event.a,
-            PRE_GAIN => self.pre = event.a,
             MUTE => {
-                let frames = event.a * self.rate;
+                // (an event with a time: the fade ends `a` seconds after it, however late it is taken)
+                let late = if event.at > 0.0 {
+                    max(0.0, self.frame - event.at)
+                } else {
+                    0.0
+                };
+                let frames = event.a * self.rate - late;
                 self.mute = if frames >= 1.0 { 1.0 } else { 0.0 };
                 self.fade = if frames >= 1.0 { 1.0 / frames } else { 0.0 };
             }
@@ -366,16 +550,27 @@ impl Chain {
                 self.fade = 0.0;
             }
             CLEAR => {
+                // nothing sounds any more, so the order to come is the order at once; then every slot where its
+                // knobs have it (after the order: a slot new in it would fade in from a wire)
                 for kind in 0..SLOTS {
-                    let live = self.on[kind] && self.slots[kind].unit.is_some();
                     self.stop(kind);
-                    self.slots[kind].live = live;
+                }
+                self.settle();
+                for kind in 0..SLOTS {
+                    let slot = &mut self.slots[kind];
+                    slot.live = self.on[kind] && slot.unit.is_some();
+                    slot.warm = 0;
                     self.aim(kind);
                     self.slots[kind].dry.snap();
                     self.slots[kind].wet.snap();
+                    self.slots[kind].direct.snap();
                 }
-                if let Some(limiter) = &mut self.limiter {
-                    limiter.forget();
+                if self.limiter.is_some() {
+                    self.begin(LIMITER_STAGE, IN_FORGET);
+                    if let Some(limiter) = &mut self.limiter {
+                        limiter.forget();
+                    }
+                    self.end();
                 }
             }
             _ => {}
@@ -384,15 +579,30 @@ impl Chain {
 
     /// the block reserved, at `frame`: the events due, then the stages
     pub fn process(&mut self, frame: f64) {
-        self.work = NO_WORK;
-        compiler_fence(Ordering::SeqCst);
+        self.end();
         self.frame = frame;
         self.cursor = 0;
         self.side = 0;
-        while self.events.first().is_some_and(|event| event.at <= frame) {
-            let event = self.events.remove(0);
-            self.apply(&event);
+        self.step = EVENTS;
+        #[cfg(any(test, feature = "perf"))]
+        if self.trap.0 == OUTSIDE {
+            panic!("a trap of the specs");
         }
+        self.resume();
+    }
+
+    // the events due, the input and whether the slots are skipped
+    fn take(&mut self) {
+        let frame = self.frame;
+        // (an event leaves the queue once it is applied: one a unit trapped in is taken again, without the unit)
+        while let Some(&(due, event)) = self.events.front() {
+            if due > frame {
+                break;
+            }
+            self.apply(&event);
+            self.events.pop_front();
+        }
+        self.settle();
 
         // the input: a value that is not finite as 0 (it would stay in the state of an effect for good), whether
         // it is all 0
@@ -407,69 +617,123 @@ impl Chain {
             }
         }
         self.silent = peak == 0.0;
-        if self.pre != 1.0 && !self.silent {
-            let pre = self.pre as f32;
-            for value in in_l.iter_mut().chain(in_r.iter_mut()) {
-                *value *= pre;
-            }
-        }
 
         // nothing sounds and no slot has anything to play or to glide: the slots are skipped
-        let frames = self.frames;
         let resting = self.silent
             && self.order[..self.count].iter().all(|&kind| {
                 let slot = &self.slots[kind];
                 !slot.live
                     || (slot.unit.as_ref().is_none_or(|unit| unit.idle())
-                        && self.on[kind]
+                        && self.plays(kind)
+                        && slot.warm == 0
                         && slot.dry.from == slot.dry.value
                         && slot.wet.from == slot.wet.value
+                        && slot.direct.from == slot.direct.value
                         && slot.dry.step_done()
-                        && slot.wet.step_done())
+                        && slot.wet.step_done()
+                        && slot.direct.step_done())
             });
         #[cfg(test)]
         let resting = resting && !self.restless;
-        if resting {
-            for place in 0..self.count {
-                let slot = &mut self.slots[self.order[place]];
-                if let (true, Some(unit)) = (slot.live, &mut slot.unit) {
-                    unit.rest(frames);
-                }
-            }
-            self.cursor = self.count;
-        } else if !self.modulation.idle() {
-            let Chain {
-                modulation,
-                slots,
-                params,
-                mix,
-                on,
-                ..
-            } = self;
-            let bases = Bases { params, mix, on };
-            modulation.block(frame, frames, &bases, &mut |kind, key, value| {
-                let mut values = [0.0; MAX_PARAMS];
-                values[key] = value;
-                if let Some(unit) = &mut slots[kind].unit {
-                    unit.set(1 << key, &values, true);
-                }
-            });
-        }
-        self.resume();
+        self.resting = resting;
     }
 
-    /// the stages of the block from the cursor on (after `fail`: from the stage after the one that trapped)
+    // a unit that renders nothing in this block is left as a block of silence leaves it: the LFO of a chorus goes
+    // on in a slot that is off or out of the order too
+    fn rest(&mut self) {
+        while self.rested < SLOTS {
+            let kind = self.rested;
+            self.rested += 1;
+            let slot = &self.slots[kind];
+            let renders = !self.resting && slot.live && self.order[..self.count].contains(&kind);
+            if renders || slot.unit.is_none() {
+                continue;
+            }
+            self.begin(kind as u32, IN_REST);
+            let frames = self.frames;
+            if let Some(unit) = &mut self.slots[kind].unit {
+                unit.rest(frames);
+            }
+            self.end();
+        }
+    }
+
+    // the knobs the routes move in this block, for `route` to set (the modulation calls no unit: a unit that
+    // traps leaves it whole)
+    fn modulate(&mut self) {
+        self.sets.clear();
+        self.set_at = 0;
+        if self.resting {
+            self.cursor = self.count;
+        } else if !self.modulation.idle() {
+            // (a slot that fades out, off or out of the order to come, plays no more: its lines go to 0 with it;
+            // one that waits for the order to come is not in the chain yet: its lines start as it fades in from a
+            // wire; one that is late mixes nothing in until it has its late input)
+            let on: [bool; SLOTS] =
+                core::array::from_fn(|kind| self.plays(kind) && self.order[..self.count].contains(&kind));
+            let mixes: [bool; SLOTS] = core::array::from_fn(|kind| on[kind] && self.slots[kind].warm == 0);
+            let Chain {
+                modulation,
+                sets,
+                params,
+                mix,
+                ..
+            } = self;
+            let bases = Bases {
+                params,
+                mix,
+                on: &on,
+                mixes: &mixes,
+            };
+            modulation.block(self.frame, self.frames, &bases, &mut |kind, key, value| {
+                sets.push((kind, key, value))
+            });
+        }
+    }
+
+    fn route(&mut self) {
+        while self.set_at < self.sets.len() {
+            let (kind, key, value) = self.sets[self.set_at];
+            self.set_at += 1;
+            let mut values = [0.0; MAX_PARAMS];
+            values[key] = value;
+            self.set(kind, 1 << key, &values, true);
+        }
+    }
+
+    /// the block from the step it is at: all of it, or after `fail` what is left of it (in the stages: from the
+    /// one after the stage that trapped)
     pub fn resume(&mut self) {
+        if self.step == EVENTS {
+            self.take();
+            self.rested = 0;
+            self.step = REST;
+        }
+        if self.step == REST {
+            self.rest();
+            self.modulate();
+            self.step = ROUTES;
+        }
+        if self.step == ROUTES {
+            self.route();
+            self.step = STAGES;
+        }
         while self.cursor < self.count {
             let kind = self.order[self.cursor];
             self.slot(kind);
+            // (past its stage: a trap between two stages is of neither)
+            self.end();
+            #[cfg(any(test, feature = "perf"))]
+            if self.trap == (kind as u32, AFTER) {
+                panic!("a trap of the specs");
+            }
             self.cursor += 1;
         }
         if self.cursor == self.count {
             self.master();
             self.cursor += 1;
         }
-        self.work = NO_WORK;
+        self.end();
     }
 
     // the stage of a slot: its effect from the pair the sound is in into the other one, mixed in there
@@ -490,14 +754,9 @@ impl Chain {
                 self.buffer(to + 1),
             )
         };
-        let playing = self.on[kind];
-        let line = |index: usize| {
-            if playing {
-                self.modulation.line(index, self.frames)
-            } else {
-                None
-            }
-        };
+        let playing = self.plays(kind);
+        // (a line is added for as long as there is one: that of a slot that stops glides to 0 as it fades out)
+        let line = |index: usize| self.modulation.line(index, self.frames);
         let moves = if kind == DELAY as usize {
             Moves {
                 time: line(LINE_TIME),
@@ -517,31 +776,55 @@ impl Chain {
         let Some(unit) = &mut slot.unit else {
             return;
         };
-        slot.dry.step(frames);
-        slot.wet.step(frames);
+        let warming = slot.warm > 0;
+        if !warming {
+            slot.dry.step(frames);
+            slot.wet.step(frames);
+            slot.direct.step(frames);
+        }
 
         self.work = kind as u32;
         compiler_fence(Ordering::SeqCst);
         #[cfg(any(test, feature = "perf"))]
-        if self.trap == kind as u32 {
+        if self.trap == (kind as u32, IN_PROCESS) {
             panic!("a trap of the specs");
         }
         unit.process_moved(in_l, in_r, out_l, out_r, &moves);
 
+        if warming {
+            // (what it rendered is left where it is: the sound stays in the pair it is in)
+            hold(&mut slot.held[0], in_l);
+            hold(&mut slot.held[1], in_r);
+            slot.warm = slot.warm.saturating_sub(self.frames);
+            if slot.warm == 0 {
+                self.aim(kind);
+            }
+            return;
+        }
         let (dry, wet) = ((slot.dry.from, slot.dry.value), (slot.wet.from, slot.wet.value));
-        let alone = dry == (0.0, 0.0) && wet == (1.0, 1.0) && lines.0.is_none() && lines.1.is_none();
+        let direct = (slot.direct.from, slot.direct.value);
+        let alone = dry == (0.0, 0.0)
+            && wet == (1.0, 1.0)
+            && direct == (0.0, 0.0)
+            && lines.0.is_none()
+            && lines.1.is_none();
         if !alone {
             mix_in(in_l, &slot.held[0], out_l, dry, wet, lines);
             mix_in(in_r, &slot.held[1], out_r, dry, wet, lines);
         }
-        if slot.latency > 0 {
+        if direct != (0.0, 0.0) {
+            add_in(in_l, out_l, direct);
+            add_in(in_r, out_r, direct);
+        }
+        let late = slot.latency > 0;
+        if late {
             hold(&mut slot.held[0], in_l);
             hold(&mut slot.held[1], in_r);
         }
         self.side = other;
         self.silent = false;
         // off and faded out (80 dB under itself, a tenth of a second): nothing of it sounds any more
-        if !playing && wet.1 < FADED {
+        if !playing && wet.1 < FADED && (!late || dry.1 < FADED) {
             self.stop(kind);
         }
     }
@@ -596,7 +879,7 @@ impl Chain {
                 self.work = LIMITER_STAGE;
                 compiler_fence(Ordering::SeqCst);
                 #[cfg(any(test, feature = "perf"))]
-                if self.trap == LIMITER_STAGE {
+                if self.trap == (LIMITER_STAGE, IN_PROCESS) {
                     panic!("a trap of the specs");
                 }
                 limiter.process(in_l, in_r, out_l, out_r);
@@ -614,24 +897,30 @@ impl Chain {
     }
 
     /// after a trap: the stage it was in is dropped (an effect: its slot passes its input; the limiter: silence),
-    /// `resume` finishes the block. False: the trap was not in a stage (the block is whatever it is: the caller
-    /// plays silence)
+    /// `resume` finishes the block (a trap before the stages, in a knob, a rest or a sound forgotten: from the step
+    /// it was at). False: the trap was not in a stage (the block is whatever it is: the caller plays silence)
     pub fn fail(&mut self) -> bool {
         let stage = self.work;
         self.work = NO_WORK;
+        let staged = self.step == STAGES;
         if stage == LIMITER_STAGE {
             // (not dropped: its state is where the trap left it, a free could trap again)
             core::mem::forget(self.limiter.take());
-            // SAFETY: the buffers of the output, held once
-            let (out_l, out_r) = unsafe { (self.buffer(2), self.buffer(3)) };
-            out_l.fill(0.0);
-            out_r.fill(0.0);
-            self.cursor = self.count + 1;
+            if staged {
+                // SAFETY: the buffers of the output, held once
+                let (out_l, out_r) = unsafe { (self.buffer(2), self.buffer(3)) };
+                out_l.fill(0.0);
+                out_r.fill(0.0);
+                self.cursor = self.count + 1;
+            }
         } else if (stage as usize) < SLOTS {
             let slot = &mut self.slots[stage as usize];
             core::mem::forget(slot.unit.take());
             slot.live = false;
-            self.cursor += 1;
+            slot.gone = false;
+            if staged {
+                self.cursor += 1;
+            }
         } else {
             return false;
         }
@@ -645,26 +934,38 @@ impl Chain {
     }
 
     /// the unit of a stage made again (allocates: not while a block renders): an effect at its params, off until
-    /// its slot plays, or the limiter
-    pub fn retry(&mut self, stage: u32) {
+    /// its slot plays, or the limiter. Whether the stage has its unit now
+    pub fn retry(&mut self, stage: u32) -> bool {
         if stage == LIMITER_STAGE {
             if self.limited && self.limiter.is_none() {
-                self.limiter = Unit::new(LIMITER, self.rate, &[0.0; MAX_PARAMS], true);
+                self.limiter = Unit::new(LIMITER, self.rate, &[0.0; MAX_PARAMS]);
             }
-            return;
+            return !self.limited || self.limiter.is_some();
         }
         let kind = stage as usize;
-        if kind >= SLOTS || self.slots[kind].unit.is_some() {
-            return;
+        if kind >= SLOTS {
+            return false;
         }
-        let mut unit = Unit::new(stage, self.rate, &self.params[kind], true);
+        if self.slots[kind].unit.is_some() {
+            return true;
+        }
+        #[cfg(any(test, feature = "perf"))]
+        if self.trap == (stage, IN_NEW) {
+            panic!("a trap of the specs");
+        }
+        // (a trap as it is made leaves the slot without a unit: nothing of the retry is done)
+        let mut unit = Unit::new(stage, self.rate, &self.params[kind]);
         if let Some(unit) = &mut unit {
             unit.grow(self.frames);
         }
-        self.slots[kind].unit = unit;
+        let gone = self.slots[kind].gone;
         self.stop(kind);
-        self.slots[kind].live = self.on[kind] && self.slots[kind].unit.is_some();
-        self.aim(kind);
+        self.slots[kind].gone = gone;
+        self.slots[kind].unit = unit;
+        // (a knob a route moves: its value again, the unit is at the one of the knob)
+        self.modulation.renew(kind);
+        self.start(kind);
+        self.slots[kind].unit.is_some()
     }
 
     /// what a screen draws of the effect of a slot (`Unit::meter`), how many values
@@ -688,9 +989,15 @@ impl Chain {
         self.limiter.as_ref().map_or(0, |limiter| limiter.latency())
     }
 
-    /// the stage `stage` traps from now on (the specs)
+    /// the stage `stage` traps from now on, in its block (the specs)
     #[cfg(any(test, feature = "perf"))]
     pub fn trap(&mut self, stage: u32) {
-        self.trap = stage;
+        self.trap = (stage, IN_PROCESS);
+    }
+
+    /// the stage `stage` traps from now on in a call of its unit (`IN_SET`…; the specs)
+    #[cfg(any(test, feature = "perf"))]
+    pub fn trap_in(&mut self, stage: u32, call: u32) {
+        self.trap = (stage, call);
     }
 }

@@ -10,7 +10,8 @@
 //! params of every slot in the command buffer), chain_buffers reserves a block as unit_buffers does,
 //! chain_process renders it at a frame; chain_event queues an event with its time (the command buffer: its kind,
 //! a, b, values); the routes, the last note and the LFOs come through the scratch of the chain (chain_scratch);
-//! chain_fail and chain_resume after a trap, chain_reports what failed, chain_retry makes it again
+//! chain_fail and chain_resume after a trap, chain_reports what failed, chain_retry makes it again and tells
+//! whether it did
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -42,9 +43,9 @@ pub struct UnitIo {
 /// the values of the command buffer: the params of every slot of chain_new
 pub const COMMAND_LENGTH: usize = SLOTS * MAX_PARAMS;
 
-// the params of unit_new ([active, ...params]) and of unit_set ([the bits of the keys it changes (1 << key),
-// ...params]) in the order of the keys of the kind, written by the JS wrapper; unit_meter writes what it shows
-// into its first values
+// the params of unit_new ([a value no one reads, ...params]) and of unit_set ([the bits of the keys it changes
+// (1 << key), ...params]) in the order of the keys of the kind, written by the JS wrapper; unit_meter writes what
+// it shows into its first values
 static mut COMMAND: [f64; COMMAND_LENGTH] = [0.0; COMMAND_LENGTH];
 
 fn command() -> (f64, [f64; MAX_PARAMS]) {
@@ -59,12 +60,12 @@ pub extern "C" fn unit_command() -> *mut f64 {
     core::ptr::addr_of_mut!(COMMAND) as *mut f64
 }
 
-/// an effect of `kind` (`units`) at a rate, its options in the command buffer: active, then the params. Null
+/// an effect of `kind` (`units`) at a rate, its params in the command buffer (from its second value on). Null
 /// for a kind no one knows
 #[no_mangle]
 pub extern "C" fn unit_new(kind: u32, sample_rate: f64) -> *mut UnitIo {
-    let (active, params) = command();
-    match Unit::new(kind, sample_rate, &params, active != 0.0) {
+    let (_, params) = command();
+    match Unit::new(kind, sample_rate, &params) {
         Some(unit) => Box::into_raw(Box::new(UnitIo {
             unit,
             io: StereoIo::default(),
@@ -117,13 +118,6 @@ pub unsafe extern "C" fn unit_set(unit: *mut UnitIo, routed: bool) {
 /// # Safety
 /// `unit` comes from unit_new and was not freed
 #[no_mangle]
-pub unsafe extern "C" fn unit_set_active(unit: *mut UnitIo, active: bool) {
-    (*unit).unit.set_active(active);
-}
-
-/// # Safety
-/// `unit` comes from unit_new and was not freed
-#[no_mangle]
 pub unsafe extern "C" fn unit_clear(unit: *mut UnitIo) {
     (*unit).unit.forget();
 }
@@ -142,6 +136,15 @@ pub unsafe extern "C" fn unit_latency(unit: *mut UnitIo) -> usize {
     (*unit).unit.latency()
 }
 
+// the values of a meter into the command buffer, how many
+unsafe fn report(values: &[f64]) -> usize {
+    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
+    for (k, value) in values.iter().enumerate() {
+        *command.add(k) = *value;
+    }
+    values.len()
+}
+
 /// the meter into the command buffer (`Unit::meter`): how many values it wrote
 ///
 /// # Safety
@@ -150,11 +153,7 @@ pub unsafe extern "C" fn unit_latency(unit: *mut UnitIo) -> usize {
 pub unsafe extern "C" fn unit_meter(unit: *mut UnitIo) -> usize {
     let mut values = [0.0; MAX_METER];
     let count = (*unit).unit.meter(&mut values);
-    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
-    for (k, value) in values.iter().enumerate().take(count) {
-        *command.add(k) = *value;
-    }
-    count
+    report(&values[..count])
 }
 
 /// a chain at a rate, the params of its slots in the command buffer (MAX_PARAMS of each kind, one after another);
@@ -221,13 +220,13 @@ pub unsafe extern "C" fn chain_reports(chain: *mut Chain) -> u32 {
     (*chain).take_reports()
 }
 
-/// the unit of a stage that failed made again
+/// the unit of a stage that failed made again. 0: the stage has no unit still
 ///
 /// # Safety
 /// `chain` comes from chain_new and was not freed
 #[no_mangle]
-pub unsafe extern "C" fn chain_retry(chain: *mut Chain, stage: u32) {
-    (*chain).retry(stage);
+pub unsafe extern "C" fn chain_retry(chain: *mut Chain, stage: u32) -> u32 {
+    (*chain).retry(stage) as u32
 }
 
 /// an event from frame `at` on, in the command buffer: its kind (`chain::SET_PARAMS`…), a, b, then MAX_PARAMS
@@ -306,11 +305,7 @@ pub unsafe extern "C" fn chain_lfos(chain: *mut Chain, at: f64, instantly: u32) 
 pub unsafe extern "C" fn chain_meter(chain: *mut Chain, kind: usize) -> usize {
     let mut values = [0.0; MAX_METER];
     let count = (*chain).meter(kind, &mut values);
-    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
-    for (k, value) in values.iter().enumerate().take(count) {
-        *command.add(k) = *value;
-    }
-    count
+    report(&values[..count])
 }
 
 /// the effect of a slot has nothing to play
@@ -331,13 +326,88 @@ pub unsafe extern "C" fn chain_latency(chain: *mut Chain) -> usize {
     (*chain).latency()
 }
 
-/// the stage `stage` (a slot by its kind, then the limiter) traps from now on (the specs: only the perf build has
-/// it)
+/// the stage `stage` (a slot by its kind, then the limiter) traps from now on in `call` of its unit
+/// (`chain::IN_PROCESS`…; the specs: only the perf build has it)
 ///
 /// # Safety
 /// `chain` comes from chain_new and was not freed
 #[cfg(feature = "perf")]
 #[no_mangle]
-pub unsafe extern "C" fn chain_trap(chain: *mut Chain, stage: u32) {
-    (*chain).trap(stage);
+pub unsafe extern "C" fn chain_trap(chain: *mut Chain, stage: u32, call: u32) {
+    (*chain).trap_in(stage, call);
+}
+
+/// what the wrapper has to have as the core has it, into the command buffer (the specs: only the perf build has
+/// it; LAYOUT of chain-layout.spec.ts names the values in this order): the sizes, the targets of the routes, the
+/// stage of the limiter, the events, the knobs of an LFO, then of each kind: the kind, how many params it has,
+/// the key of its mix (-1: its slot mixes). How many values it wrote
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub extern "C" fn chain_layout() -> usize {
+    use dsp_core::lfo;
+    use units::{law, Law};
+    let mut values = alloc::vec![
+        SLOTS as f64,
+        MAX_PARAMS as f64,
+        MAX_METER as f64,
+        ROUTE as f64,
+        NOTE as f64,
+        LFO_STATE as f64,
+        (lfo::TABLE + 1) as f64,
+        modulation::ENVELOPES as f64,
+        modulation::LFO_SOURCE as f64,
+        lfo::LFOS as f64,
+        modulation::KEYS as f64,
+        modulation::MIX_KEY as f64,
+        modulation::LFO_TARGET as f64,
+        modulation::LFO_KEYS as f64,
+        chain::LIMITER_STAGE as f64,
+        chain::SET_PARAMS as f64,
+        chain::SET_MIX as f64,
+        chain::SET_ACTIVE as f64,
+        chain::SET_ORDER as f64,
+        chain::MASTER_GAIN as f64,
+        chain::MUTE as f64,
+        chain::UNMUTE as f64,
+        chain::CLEAR as f64,
+        lfo::RATE as f64,
+        lfo::DELAY as f64,
+        lfo::RISE as f64,
+        lfo::SMOOTH as f64,
+        lfo::PHASE as f64,
+    ];
+    for kind in [
+        units::DISTORTION,
+        units::CHORUS,
+        units::DELAY,
+        units::COMPRESSOR,
+        units::REVERB,
+    ] {
+        values.push(kind as f64);
+        values.push(units::key_names(kind).1 as f64);
+        values.push(match law(kind) {
+            Law::Inside(key) => key as f64,
+            _ => -1.0,
+        });
+    }
+    // SAFETY: one thread, under COMMAND_LENGTH values
+    unsafe { report(&values) }
+}
+
+/// the name of param `key` of a kind (`units::key_names`) into the command buffer, a value a character: how many
+/// (0: the kind has no such param, or it has no name)
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub extern "C" fn chain_key(kind: u32, key: usize) -> usize {
+    let (names, count) = units::key_names(kind);
+    if key >= count {
+        return 0;
+    }
+    let mut codes = [0.0; COMMAND_LENGTH];
+    let name = names[key].as_bytes();
+    for (code, byte) in codes.iter_mut().zip(name) {
+        *code = *byte as f64;
+    }
+    // SAFETY: one thread, a name is under COMMAND_LENGTH characters
+    unsafe { report(&codes[..name.len().min(COMMAND_LENGTH)]) }
 }

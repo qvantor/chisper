@@ -1,25 +1,10 @@
-import { mapValues, noop } from 'lodash';
-import { FX_MIX_PARAMS, FX_PARAMS } from '@chisper/preset-schema';
+import { FX_PARAMS } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
-import { COMPRESSOR_PROCESSOR } from '../../common/processors';
-import { createLfoFeed } from '../../common/lfo/lfo-curve';
 import { FxDefinition } from './types';
-import { createFxMeter } from './fx-meter';
 import { COMPRESSOR_MODES } from './compressor-modes';
-import {
-  bandThresholdsDb,
-  CompressorDspParams,
-  CompressorMessage,
-  CompressorMeterValues,
-  CompressorOptions,
-  levelGain,
-  makeupGain,
-  thresholdDb,
-} from './compressor-params';
+import { bandThresholdsDb, levelGain, makeupGain, thresholdDb } from './compressor-params';
 import { CompressorParam, COMPRESSOR_PRESETS } from './compressor-presets';
 import { formatDb, formatHz, formatMillis } from './format';
-import { createWorkletFx, STEREO_WORKLET_OPTIONS } from './worklet-fx';
-import { FxModMessage, isLfoSource } from './fx-modulation';
 
 const { multi, thresh, ratio, attack, release, gain, xlow, xhigh, below, low, mid, high, level } =
   FX_PARAMS.compressor;
@@ -32,9 +17,7 @@ export const formatBandThresholds = (value: number) =>
     .join(' / ')}dB`;
 const band = { precision: 10, fillFrom: 0, formatValue: formatDb };
 
-// The compressor runs in an audio worklet (its Rust core, dsp/compressor: compressor.worklet.ts):
-// input → worklet node → output (createWorkletFx); the module loads asynchronously, until then the input goes
-// nowhere and the params are kept, the node starts with them. It mixes the dry signal itself (mixInside: its
+// The compressor is a unit of the chain core (dsp/compressor). It mixes the dry signal itself (Law::Inside: its
 // bands are out of phase with the input, a mix in the slot would notch at the crossovers), so the mix of the slot
 // is one more of its params. Its meter is posted only while someone watches it
 export const compressor: FxDefinition<CompressorParam> = {
@@ -115,65 +98,7 @@ export const compressor: FxDefinition<CompressorParam> = {
     },
   },
   presets: COMPRESSOR_PRESETS,
-  create: (audioCtx) => {
-    const values: CompressorDspParams = {
-      ...mapValues(FX_PARAMS.compressor, (param) => param.default),
-      mix: FX_MIX_PARAMS.compressor.default,
-    };
-    const meters = createFxMeter<CompressorMeterValues>((message) => post(message));
-
-    // the node starts with the params and the LFOs kept until the module has loaded, its meter on if watched
-    const worklet = createWorkletFx(
-      audioCtx,
-      'compressor',
-      () => {
-        const lfos = feed.initial();
-        const processorOptions: CompressorOptions = {
-          params: { ...values },
-          ...(lfos && { lfos }),
-          ...(meters.watched() && { meter: true }),
-        };
-        return new AudioWorkletNode(audioCtx, COMPRESSOR_PROCESSOR, {
-          ...STEREO_WORKLET_OPTIONS,
-          processorOptions,
-        });
-      },
-      meters.take
-    );
-    const post = (message: CompressorMessage) => worklet.post(message);
-    // the LFOs, only while a route of one moves a knob
-    const feed = createLfoFeed((state) => {
-      const message: FxModMessage = { lfos: state };
-      worklet.post(message);
-    });
-
-    return {
-      input: worklet.input,
-      output: worklet.output,
-      $status: worklet.$status,
-      retry: worklet.retry,
-      mixInside: true,
-      // unknown keys are ignored
-      setParam: (key, value) => {
-        if (!(key in values)) return;
-        values[key as keyof CompressorDspParams] = value;
-        post({ params: { [key]: value } });
-      },
-      // no loops to drain: the closed send silences the input, and the worklet idles once it is silent
-      setActive: noop,
-      clear: worklet.clear,
-      // the worklet moves the knobs once per block (the LFOs as they are first, once a route reads one)
-      setModulation: (mod) => {
-        feed.use(!!mod && mod.routes.some(({ source }) => isLfoSource(source)));
-        const message: FxModMessage = { mod };
-        worklet.post(message);
-      },
-      setLfos: feed.take,
-      meter: meters.meter,
-      destroy: () => {
-        meters.clear();
-        worklet.destroy();
-      },
-    };
-  },
+  // (the mix of its slot is the mix inside the core)
+  core: (params) => params,
+  metered: true,
 };

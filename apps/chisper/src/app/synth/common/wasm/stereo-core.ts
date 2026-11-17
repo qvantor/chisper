@@ -1,11 +1,15 @@
+import { FX_KINDS, FxKind, LIMITER_STAGE, MAX_PARAMS } from '../chain/chain-params';
 import { CoreExports, createView } from './wasm-core';
 
 // the kinds of the units of the chain core (dsp/chain/src/units.rs): the effects in the order of FX_TYPES, then
 // the limiter
-export const UNIT = { distortion: 0, chorus: 1, delay: 2, compressor: 3, reverb: 4, limiter: 5 } as const;
+export const UNIT = {
+  ...Object.fromEntries(FX_KINDS.map((kind, index) => [kind, index])),
+  limiter: LIMITER_STAGE,
+} as Record<FxKind | 'limiter', number>;
 
 // the C ABI of an effect alone in the chain core (dsp/chain): unit_new makes one of a kind (its options in the
-// buffer of unit_command: active, then its params in the order of its keys), unit_buffers reserves a block of
+// buffer of unit_command, from its second value on, in the order of its keys), unit_buffers reserves a block of
 // `frames` (inL, inR, outL, outR one after another), unit_process renders it, unit_set changes the params of the
 // bits of the first value of the buffer (1 << key), unit_clear forgets the sound before, unit_meter writes what a
 // screen draws into the buffer
@@ -15,7 +19,6 @@ export interface UnitExports extends CoreExports {
   unit_buffers: (handle: number, frames: number) => number;
   unit_process: (handle: number) => void;
   unit_set: (handle: number, routed: boolean) => void;
-  unit_set_active: (handle: number, active: boolean) => void;
   unit_clear: (handle: number) => void;
   unit_idle: (handle: number) => number;
   unit_latency: (handle: number) => number;
@@ -23,8 +26,8 @@ export interface UnitExports extends CoreExports {
   unit_free: (handle: number) => void;
 }
 
-// the buffer of unit_command: the flag or the bits, then the params
-const COMMAND = 17;
+// the buffer of unit_command: the bits of unit_set, then the params
+const COMMAND = 1 + MAX_PARAMS;
 
 // copies `source` into the block, a shorter one padded with NaN (the TS cores read undefined there)
 const copyIn = (target: Float32Array, source: Float32Array) => {
@@ -35,7 +38,7 @@ const copyIn = (target: Float32Array, source: Float32Array) => {
   }
 };
 
-// process() of the StereoDsp of a core (stereo-processor.ts): the inputs into its memory, the block rendered, the
+// process() of a unit: the inputs into its memory, the block rendered, the
 // outputs out of it; clear() empties its state (a preset switch: the next sound starts at the params as they are
 // then); free() frees its handle (the processor is stopped)
 export const stereoCore = (exports: UnitExports, handle: number) => {
@@ -71,7 +74,7 @@ export const stereoCore = (exports: UnitExports, handle: number) => {
   };
 };
 
-// the dsp of a unit of `kind` with `params` (`keys` in its order; `active` is of the reverb): set() changes those
+// the dsp of a unit of `kind` with `params` (`keys` in its order): set() changes those
 // given (`routed`: a route moves them), idle says it has nothing to play; its `handle` and `command` (its buffer)
 // for what else it exports
 export const paramsCore = <K extends string>(
@@ -79,15 +82,14 @@ export const paramsCore = <K extends string>(
   kind: number,
   sampleRate: number,
   keys: readonly K[],
-  params: Record<K, number>,
-  active = true
+  params: Record<K, number>
 ) => {
   const view = createView(exports, Float64Array);
   // (a static of the core: it never moves)
   const at = exports.unit_command();
   const command = () => view(at, COMMAND);
   const options = command();
-  options[0] = active ? 1 : 0;
+  options[0] = 0;
   keys.forEach((key, i) => (options[1 + i] = params[key]));
   const handle = exports.unit_new(kind, sampleRate);
   const dsp = {
@@ -110,17 +112,3 @@ export const paramsCore = <K extends string>(
   };
   return { dsp, handle, command };
 };
-
-// the functions of a block compile lazily, on their first call: a dsp made while the module loads renders a few
-// blocks of an impulse (a silent input would leave an effect idle; over the ceiling of the limiter) and is freed,
-// so the first processor doesn't compile them in its constructor and its first block (the limiter 0.5 ms, the
-// reverb 0.9 in Node, the module 0.5 and 1.1 ms longer)
-export const prewarmStereo = (dsp: { process: StereoProcess; free: () => void }, blocks = 3) => {
-  const input = new Float32Array(128);
-  const [outL, outR] = [new Float32Array(128), new Float32Array(128)];
-  input[0] = 1.5;
-  for (let i = 0; i < blocks; i++) dsp.process(input, input, outL, outR);
-  dsp.free();
-};
-
-type StereoProcess = (inL: Float32Array, inR: Float32Array, outL: Float32Array, outR: Float32Array) => void;

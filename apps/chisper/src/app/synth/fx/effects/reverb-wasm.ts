@@ -1,41 +1,13 @@
+import { CHAIN_KEYS } from '../../common/chain/chain-params';
 import { paramsCore, UNIT, UnitExports } from '../../common/wasm/stereo-core';
 import type { ReverbDspParams, ReverbOptions } from './reverb-params';
 
-// the Rust core of the reverb (dsp/reverb, a unit of chain.wasm), with the API of createReverbDsp
+// the Rust core of the reverb (dsp/reverb, a unit of chain.wasm)
 
-// the params in the order of the core (dsp/reverb/src/lib.rs)
-export const REVERB_KEYS: readonly (keyof ReverbDspParams)[] = [
-  'lowcut',
-  'pre',
-  'size',
-  'decay',
-  'damp',
-  'bass',
-  'depth',
-  'sep',
-  'er',
-  'drive',
-  'bandwidth',
-  'body',
-];
+// the params in the order of the core (CHAIN_KEYS)
+export const REVERB_KEYS = CHAIN_KEYS.reverb as readonly (keyof ReverbDspParams)[];
 
 export type ReverbExports = UnitExports;
 
-export const createReverbWasm = (
-  exports: ReverbExports,
-  sampleRate: number,
-  { params, active }: ReverbOptions
-) => {
-  const { dsp, handle } = paramsCore<keyof ReverbDspParams>(
-    exports,
-    UNIT.reverb,
-    sampleRate,
-    REVERB_KEYS,
-    params,
-    !!active
-  );
-  // (assigned: `idle` of the dsp stays a getter)
-  return Object.assign(dsp, {
-    setActive: (value: boolean) => exports.unit_set_active(handle, value),
-  });
-};
+export const createReverbWasm = (exports: ReverbExports, sampleRate: number, { params }: ReverbOptions) =>
+  paramsCore<keyof ReverbDspParams>(exports, UNIT.reverb, sampleRate, REVERB_KEYS, params).dsp;

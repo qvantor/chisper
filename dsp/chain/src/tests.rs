@@ -113,7 +113,7 @@ fn unit_of(kind: u32, rate: f64, mix: f64) -> Unit {
     if let Law::Inside(key) = law(kind) {
         params[key] = mix;
     }
-    Unit::new(kind, rate, &params, true).unwrap()
+    Unit::new(kind, rate, &params).unwrap()
 }
 
 fn bits(data: &[f32]) -> Vec<u32> {
@@ -148,8 +148,8 @@ fn a_slot_alone_is_its_unit() {
     }
 }
 
-// after a clear a slot is where its knobs have it at once: all wet, the distortion and the reverb are their units
-// from the first block
+// after a clear a slot is where its knobs have it at once: all wet, the distortion, the delay and the reverb are
+// their units from the first block
 #[test]
 fn a_slot_all_wet_after_a_clear_is_its_unit() {
     let rate = 48000.0;
@@ -158,18 +158,11 @@ fn a_slot_all_wet_after_a_clear_is_its_unit() {
         let mut chain = chain_of(rate, &[kind], 1.0, false);
         chain.push(event(CLEAR, 0.0, 0.0, &[]));
         let out = render(&mut chain, &input, |_, _| {});
-        let mut unit = Unit::new(kind, rate, &params()[kind as usize], true).unwrap();
+        let mut unit = Unit::new(kind, rate, &params()[kind as usize]).unwrap();
         let alone = through(&mut unit, &input);
         assert!(sounds(&out));
-        if kind == DISTORTION {
-            // (linear: dry 0, wet 1)
-            same(&out, &alone, "the distortion");
-        } else {
-            // (equal power at 1: the dry gain is cos(π / 2), 6e-17, the wet one 1: within a bit of f32)
-            for (a, b) in out[0].iter().zip(&alone[0]) {
-                assert!((a - b).abs() <= 1e-7 * (1.0 + b.abs()));
-            }
-        }
+        // (all wet: no dry signal at all, by equal power too)
+        same(&out, &alone, "all wet");
     }
 }
 
@@ -181,7 +174,7 @@ fn a_slot_mixes_the_input_late_by_the_latency() {
     let mut chain = chain_of(rate, &[DISTORTION], 0.3, false);
     chain.push(event(CLEAR, 0.0, 0.0, &[]));
     let out = render(&mut chain, &input, |_, _| {});
-    let mut unit = Unit::new(DISTORTION, rate, &params()[0], true).unwrap();
+    let mut unit = Unit::new(DISTORTION, rate, &params()[0]).unwrap();
     let latency = unit.latency();
     assert_eq!(latency, 32);
     let alone = through(&mut unit, &input);
@@ -263,6 +256,128 @@ fn a_slot_fades_in_and_out() {
     assert!(chain.idle(COMPRESSOR as usize));
 }
 
+// a slot whose effect is late (the distortion, 32 samples) crosses from its input as it is to the late one and
+// back: no hole and no step as it starts and stops in a sound, a wire again once it is out
+#[test]
+fn a_late_slot_fades_in_and_out_of_a_sound() {
+    let rate = 48000.0;
+    let frames = 80 * BLOCK;
+    let steady = [vec![0.25f32; frames], vec![0.25f32; frames]];
+    // (a sine of 1 kHz: 32 samples are two thirds of its cycle)
+    let sine: Vec<f32> = (0..frames)
+        .map(|i| (0.25 * jsmath::sin(2.0 * jsmath::PI * 1000.0 * i as f64 / rate)) as f32)
+        .collect();
+    let most = (0.25 * 2.0 * jsmath::PI * 1000.0 / rate) as f32;
+    for (input, step) in [(steady, 0.02), ([sine.clone(), sine], 2.0 * most)] {
+        let mut chain = Chain::new(rate, &params(), false);
+        chain.push(event(SET_ORDER, 1.0, 0.0, &[DISTORTION as f64]));
+        chain.push(event(SET_MIX, DISTORTION as f64, 0.3, &[]));
+        let out = render(&mut chain, &input, |chain, at| {
+            if at == 10 * BLOCK {
+                chain.push(event(SET_ACTIVE, DISTORTION as f64, 1.0, &[]));
+            }
+            if at == 30 * BLOCK {
+                chain.push(event(SET_ACTIVE, DISTORTION as f64, 0.0, &[]));
+            }
+        });
+        assert_eq!(bits(&out[0][..10 * BLOCK]), bits(&input[0][..10 * BLOCK]));
+        for i in 1..frames {
+            assert!((out[0][i] - out[0][i - 1]).abs() < step, "a step at {i}");
+        }
+        // (it plays: the dry signal late, the wet one over it)
+        assert_ne!(
+            bits(&out[0][28 * BLOCK..29 * BLOCK]),
+            bits(&input[0][28 * BLOCK..29 * BLOCK])
+        );
+        assert_eq!(bits(&out[0][70 * BLOCK..]), bits(&input[0][70 * BLOCK..]));
+    }
+}
+
+// a slot that sounds and leaves the order fades out where it is, then the order is the new one; back in the
+// order before it is out, it plays on
+#[test]
+fn a_slot_that_leaves_the_order_fades_out() {
+    let rate = 48000.0;
+    let frames = 140 * BLOCK;
+    let input = [vec![0.25f32; frames], vec![0.25f32; frames]];
+    let steps = |out: &[Vec<f32>; 2]| {
+        for i in 1..frames {
+            assert!((out[0][i] - out[0][i - 1]).abs() < 0.02, "a step at {i}");
+        }
+    };
+    let mut chain = chain_of(rate, &[COMPRESSOR], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 30 * BLOCK {
+            chain.push(event(SET_ORDER, 0.0, 0.0, &[]));
+        }
+    });
+    assert!((out[0][30 * BLOCK - 1] - 0.25).abs() > 0.01);
+    steps(&out);
+    assert_eq!(bits(&out[0][70 * BLOCK..]), bits(&input[0][70 * BLOCK..]));
+    assert!(chain.idle(COMPRESSOR as usize));
+
+    // another slot takes its place once it is out, not before
+    let mut chain = chain_of(rate, &[COMPRESSOR], 1.0, false);
+    chain.push(event(SET_MIX, DISTORTION as f64, 1.0, &[]));
+    chain.push(event(SET_ACTIVE, DISTORTION as f64, 1.0, &[]));
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 30 * BLOCK {
+            chain.push(event(SET_ORDER, 1.0, 0.0, &[DISTORTION as f64]));
+        }
+    });
+    steps(&out);
+    // (the distortion plays at the end: not its input)
+    assert!((out[0][frames - 1] - 0.25).abs() > 0.01);
+    assert!(!chain.idle(DISTORTION as usize) && chain.idle(COMPRESSOR as usize));
+
+    // back in the order two blocks later: it plays on
+    let mut chain = chain_of(rate, &[COMPRESSOR], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 30 * BLOCK {
+            chain.push(event(SET_ORDER, 0.0, 0.0, &[]));
+        }
+        if at == 32 * BLOCK {
+            chain.push(event(SET_ORDER, 1.0, 0.0, &[COMPRESSOR as f64]));
+        }
+    });
+    steps(&out);
+    // (its effect went on all the while: the sound of a slot that never left)
+    let mut plain = chain_of(rate, &[COMPRESSOR], 1.0, false);
+    plain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let alone = render(&mut plain, &input, |_, _| {});
+    assert_ne!(
+        bits(&out[0][31 * BLOCK..32 * BLOCK]),
+        bits(&alone[0][31 * BLOCK..32 * BLOCK])
+    );
+    assert!((out[0][frames - 1] - alone[0][frames - 1]).abs() < 1e-6);
+    assert!((alone[0][frames - 1] - 0.25).abs() > 0.01);
+}
+
+// a mute with a time ends its fade that long after its time, however late it is taken
+#[test]
+fn a_mute_taken_late_ends_in_time() {
+    let rate = 48000.0;
+    let frames = 20 * BLOCK;
+    let input = [vec![0.5f32; frames], vec![0.5f32; frames]];
+    let mut chain = Chain::new(rate, &params(), false);
+    let out = render(&mut chain, &input, |chain, at| {
+        // (its time is 64 samples before the block that takes it: 64 of its 128 samples are left)
+        if at == 16 * BLOCK {
+            chain.push(Event {
+                at: (16 * BLOCK - 64) as f64,
+                ..event(MUTE, 128.0 / rate, 0.0, &[])
+            });
+        }
+    });
+    assert_eq!(out[0][16 * BLOCK - 1], 0.5);
+    assert_eq!(out[0][16 * BLOCK], 0.5);
+    assert_eq!(out[0][16 * BLOCK + 32], 0.25);
+    assert_eq!(out[0][16 * BLOCK + 64], 0.0);
+}
+
 // the blocks a silent chain skips leave what rendering them would have: the LFO of the chorus where it would be,
 // the next sound the same
 #[test]
@@ -318,6 +433,61 @@ fn an_event_is_taken_at_its_frame() {
     assert_eq!(out[0][18 * BLOCK], 0.125);
 }
 
+// an event without a time is never taken before one with a time that came before it: the mute, the clear and
+// the unmute of a preset switch that meet no block between them leave the output open
+#[test]
+fn an_event_without_a_time_follows_the_ones_before_it() {
+    let rate = 48000.0;
+    let frames = 12 * BLOCK;
+    let input = [vec![0.5f32; frames], vec![0.5f32; frames]];
+    let mut chain = Chain::new(rate, &params(), false);
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 4 * BLOCK {
+            chain.push(Event {
+                at: at as f64,
+                ..event(MUTE, 0.02, 0.0, &[])
+            });
+            chain.push(event(CLEAR, 0.0, 0.0, &[]));
+            chain.push(event(UNMUTE, 0.0, 0.0, &[]));
+            chain.push(event(MASTER_GAIN, 0.5, 0.0, &[]));
+        }
+        // (a time that has passed holds no one back)
+        if at == 8 * BLOCK {
+            chain.push(event(MASTER_GAIN, 1.0, 0.0, &[]));
+        }
+    });
+    assert_eq!(bits(&out[0][..4 * BLOCK]), bits(&input[0][..4 * BLOCK]));
+    assert!(out[0][4 * BLOCK..8 * BLOCK].iter().all(|value| *value == 0.25));
+    assert_eq!(bits(&out[0][8 * BLOCK..]), bits(&input[0][8 * BLOCK..]));
+}
+
+// the LFO of a chorus goes on in a slot that renders nothing (off, out of the order) as in one at rest: where a
+// unit left to rest that long has it
+#[test]
+fn the_lfo_of_a_chorus_goes_on_in_a_slot_that_is_off() {
+    let rate = 48000.0;
+    let blocks = 50;
+    let input = signal(14, blocks * BLOCK, 0.4);
+    let mut unit = unit_of(CHORUS, rate, 0.5);
+    for _ in 0..blocks {
+        unit.rest(BLOCK);
+    }
+    let mut rested = [0.0; MAX_METER];
+    unit.meter(&mut rested);
+    assert_ne!(rested[0], 0.0);
+
+    for order in [&[][..], &[CHORUS as f64][..]] {
+        let mut chain = Chain::new(rate, &params(), false);
+        chain.push(event(SET_ORDER, order.len() as f64, 0.0, order));
+        chain.push(event(SET_MIX, CHORUS as f64, 0.5, &[]));
+        let out = render(&mut chain, &input, |_, _| {});
+        same(&out, &input, "a slot that is off");
+        let mut values = [0.0; MAX_METER];
+        assert_eq!(chain.meter(CHORUS as usize, &mut values), 6);
+        assert_eq!(values[0].to_bits(), rested[0].to_bits());
+    }
+}
+
 // the limiter holds the output under its ceiling, late by its lookahead; without it the chain is its slots
 #[test]
 fn the_limiter_ends_the_chain() {
@@ -325,7 +495,7 @@ fn the_limiter_ends_the_chain() {
     let input = signal(7, 60 * BLOCK, 3.0);
     let mut chain = Chain::new(rate, &params(), true);
     let out = render(&mut chain, &input, |_, _| {});
-    let mut limiter = Unit::new(LIMITER, rate, &[0.0; MAX_PARAMS], true).unwrap();
+    let mut limiter = Unit::new(LIMITER, rate, &[0.0; MAX_PARAMS]).unwrap();
     assert_eq!(chain.latency(), limiter.latency());
     same(&out, &through(&mut limiter, &input), "the limiter");
     assert!(out[0].iter().all(|value| value.abs() <= 1.0));
@@ -347,7 +517,7 @@ fn the_params_of_an_event_reach_the_unit() {
             chain.push(event(SET_PARAMS, DISTORTION as f64, present, &values));
         }
     });
-    let mut unit = Unit::new(DISTORTION, rate, &params()[0], true).unwrap();
+    let mut unit = Unit::new(DISTORTION, rate, &params()[0]).unwrap();
     let mut alone = [Vec::new(), Vec::new()];
     for (part, set) in [(0..10 * BLOCK, false), (10 * BLOCK..40 * BLOCK, true)] {
         if set {
@@ -456,6 +626,278 @@ fn the_limiter_that_traps_leaves_silence() {
     assert!(sounds(&output(&mut chain)));
     // a trap that is in no stage: nothing to drop
     assert!(!chain.fail());
+    chain.trap(OUTSIDE);
+    assert!(trapped(&mut chain, &input, 20 * BLOCK));
+    assert!(!chain.fail());
+    assert_eq!(chain.take_reports(), 0);
+}
+
+// a block whose trap is in a stage is finished without it: whether it trapped
+fn finished(chain: &mut Chain, input: &[Vec<f32>; 2], at: usize) -> bool {
+    let failed = trapped(chain, input, at);
+    if failed {
+        assert!(chain.fail());
+        chain.resume();
+    }
+    failed
+}
+
+fn from(input: &[Vec<f32>; 2], at: usize) -> [Vec<f32>; 2] {
+    [input[0][at..].to_vec(), input[1][at..].to_vec()]
+}
+
+// a clear takes the order to come at once: a slot new in it is where its knobs have it from the first block, not
+// fading in from a wire once the order is taken
+#[test]
+fn a_clear_takes_the_order_to_come() {
+    let rate = 48000.0;
+    let input = signal(21, 40 * BLOCK, 0.4);
+    let mut chain = chain_of(rate, &[REVERB], 1.0, false);
+    chain.push(event(SET_MIX, DISTORTION as f64, 1.0, &[]));
+    chain.push(event(SET_ACTIVE, DISTORTION as f64, 1.0, &[]));
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 10 * BLOCK {
+            // (the reverb sounds: the order waits for it, the clear does not)
+            chain.push(event(SET_ORDER, 1.0, 0.0, &[DISTORTION as f64]));
+            chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        }
+    });
+    let rest = from(&input, 10 * BLOCK);
+    let alone = through(&mut unit_of(DISTORTION, rate, 1.0), &rest);
+    assert!(sounds(&alone));
+    same(&from(&out, 10 * BLOCK), &alone, "the order after a clear");
+}
+
+// a trap in a knob of an effect as an event sets it: the effect is dropped alone, the event and those after it
+// reach the others, the block is finished
+#[test]
+fn an_effect_that_traps_in_a_knob_leaves_the_others_playing() {
+    let rate = 48000.0;
+    let input = signal(22, 20 * BLOCK, 0.3);
+    let mut chain = chain_of(rate, &[DISTORTION, CHORUS, COMPRESSOR], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let mut distortion_unit = unit_of(DISTORTION, rate, 1.0);
+    let mut chorus_unit = unit_of(CHORUS, rate, 1.0);
+    let mut compressor_unit = unit_of(COMPRESSOR, rate, 1.0);
+    let mut level = [0.0; MAX_PARAMS];
+    level[distortion::LEVEL] = -6.0;
+    for block in 0..20 {
+        let at = block * BLOCK;
+        if block == 10 {
+            chain.trap_in(CHORUS, IN_SET);
+            let mut rate_of = [0.0; MAX_PARAMS];
+            rate_of[chorus::RATE] = 2.0;
+            chain.push(event(
+                SET_PARAMS,
+                CHORUS as f64,
+                (1 << chorus::RATE) as f64,
+                &rate_of,
+            ));
+            chain.push(event(
+                SET_PARAMS,
+                DISTORTION as f64,
+                (1 << distortion::LEVEL) as f64,
+                &level,
+            ));
+            distortion_unit.set(1 << distortion::LEVEL, &level, false);
+        }
+        assert_eq!(finished(&mut chain, &input, at), block == 10);
+        assert_eq!(chain.take_reports(), if block == 10 { 1 << CHORUS } else { 0 });
+        let piece = [
+            input[0][at..at + BLOCK].to_vec(),
+            input[1][at..at + BLOCK].to_vec(),
+        ];
+        let mut sound = through(&mut distortion_unit, &piece);
+        if block < 10 {
+            sound = through(&mut chorus_unit, &sound);
+        }
+        sound = through(&mut compressor_unit, &sound);
+        same(&output(&mut chain), &sound, "the block");
+    }
+    // made again: it tells so (a stage no one knows: not)
+    chain.trap(u32::MAX);
+    assert!(chain.retry(CHORUS));
+    assert!(chain.retry(CHORUS));
+    assert!(!chain.retry(LIMITER_STAGE + 1));
+}
+
+// a trap in a knob a route moves: the effect is dropped, its slot a wire from that block on
+#[test]
+fn an_effect_that_traps_in_a_knob_a_route_moves_is_dropped() {
+    let rate = 48000.0;
+    let input = signal(23, 20 * BLOCK, 0.3);
+    let mut chain = chain_of(rate, &[DISTORTION], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let mut routes = Vec::new();
+    route(
+        &mut routes,
+        DISTORTION as usize * KEYS + distortion::LEVEL,
+        0,
+        -12.0,
+        -24.0,
+        12.0,
+    );
+    chain.written(0).0.set_routes(&routes);
+    // (an envelope that rises all the while: the knob is set every block)
+    let played = note(0.0, 1.0, 1.0);
+    chain.written(0).0.set_note(true, &played);
+    for block in 0..20 {
+        let at = block * BLOCK;
+        if block == 10 {
+            chain.trap_in(DISTORTION, IN_SET);
+        }
+        assert_eq!(finished(&mut chain, &input, at), block == 10);
+        assert_eq!(
+            chain.take_reports(),
+            if block == 10 { 1 << DISTORTION } else { 0 }
+        );
+        let piece = [
+            input[0][at..at + BLOCK].to_vec(),
+            input[1][at..at + BLOCK].to_vec(),
+        ];
+        if block >= 10 {
+            same(&output(&mut chain), &piece, "a wire");
+        } else {
+            assert_ne!(bits(&output(&mut chain)[0]), bits(&piece[0]));
+        }
+    }
+}
+
+// a trap in the rest of an effect that renders nothing: it is dropped, the slots that play are their units
+#[test]
+fn an_effect_that_traps_at_rest_leaves_the_others_playing() {
+    let rate = 48000.0;
+    let input = signal(24, 20 * BLOCK, 0.3);
+    let mut chain = chain_of(rate, &[DISTORTION], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let mut failed = 0;
+    let mut out = [Vec::new(), Vec::new()];
+    for block in 0..20 {
+        if block == 10 {
+            chain.trap_in(CHORUS, IN_REST);
+        }
+        if finished(&mut chain, &input, block * BLOCK) {
+            failed += 1;
+            assert_eq!(chain.take_reports(), 1 << CHORUS);
+        }
+        let piece = output(&mut chain);
+        out[0].extend_from_slice(&piece[0]);
+        out[1].extend_from_slice(&piece[1]);
+    }
+    assert_eq!(failed, 1);
+    let mut values = [0.0; MAX_METER];
+    assert_eq!(chain.meter(CHORUS as usize, &mut values), 0);
+    same(
+        &out,
+        &through(&mut unit_of(DISTORTION, rate, 1.0), &input),
+        "the distortion",
+    );
+}
+
+// a trap as a clear forgets the sound of an effect: it is dropped, the clear reaches the others (the distortion is
+// its unit from that block on); of the limiter: the master is silent
+#[test]
+fn an_effect_that_traps_as_it_forgets_is_dropped() {
+    let rate = 48000.0;
+    let input = signal(25, 30 * BLOCK, 0.3);
+    let mut chain = chain_of(rate, &[REVERB, DISTORTION], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let mut out = [Vec::new(), Vec::new()];
+    for block in 0..30 {
+        if block == 10 {
+            chain.trap_in(REVERB, IN_FORGET);
+            chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        }
+        assert_eq!(finished(&mut chain, &input, block * BLOCK), block == 10);
+        assert_eq!(chain.take_reports(), if block == 10 { 1 << REVERB } else { 0 });
+        if block >= 10 {
+            let piece = output(&mut chain);
+            out[0].extend_from_slice(&piece[0]);
+            out[1].extend_from_slice(&piece[1]);
+        }
+    }
+    let alone = through(&mut unit_of(DISTORTION, rate, 1.0), &from(&input, 10 * BLOCK));
+    same(&out, &alone, "the distortion after the clear");
+
+    let mut chain = chain_of(rate, &[DISTORTION], 1.0, true);
+    for block in 0..10 {
+        assert!(!trapped(&mut chain, &input, block * BLOCK));
+    }
+    chain.trap_in(LIMITER_STAGE, IN_FORGET);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    assert!(finished(&mut chain, &input, 10 * BLOCK));
+    assert_eq!(chain.take_reports(), 1 << LIMITER_STAGE);
+    assert!(output(&mut chain)[0].iter().all(|value| *value == 0.0));
+    chain.trap(u32::MAX);
+    assert!(chain.retry(LIMITER_STAGE));
+    for block in 11..20 {
+        assert!(!trapped(&mut chain, &input, block * BLOCK));
+    }
+    assert!(sounds(&output(&mut chain)));
+}
+
+// a trap past the stage of an effect is of no stage: the effect before it is not the one dropped
+#[test]
+fn a_trap_between_two_stages_is_of_neither() {
+    let rate = 48000.0;
+    let input = signal(26, 20 * BLOCK, 0.3);
+    let mut chain = chain_of(rate, &[DISTORTION, COMPRESSOR], 1.0, false);
+    for block in 0..10 {
+        assert!(!trapped(&mut chain, &input, block * BLOCK));
+    }
+    chain.trap_in(DISTORTION, AFTER);
+    assert!(trapped(&mut chain, &input, 10 * BLOCK));
+    assert!(!chain.fail());
+    assert_eq!(chain.take_reports(), 0);
+}
+
+// a unit made again takes the knobs its routes move anew: not left at the knob until the route changes
+#[test]
+fn a_unit_made_again_follows_its_routes() {
+    let rate = 48000.0;
+    let input = signal(14, 60 * BLOCK, 0.2);
+    let run = |routed: bool| {
+        let mut chain = chain_of(rate, &[DISTORTION], 1.0, false);
+        chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        if routed {
+            // (VELO, held: the same value every block)
+            let mut routes = Vec::new();
+            route(
+                &mut routes,
+                DISTORTION as usize * KEYS + distortion::LEVEL,
+                3,
+                -12.0,
+                -24.0,
+                12.0,
+            );
+            chain.written(0).0.set_routes(&routes);
+            let played = note(0.0, 0.0, 1.0);
+            chain.written(0).0.set_note(true, &played);
+        }
+        let mut loud = 0.0f32;
+        for block in 0..60 {
+            if block == 10 {
+                chain.trap(DISTORTION);
+            }
+            if trapped(&mut chain, &input, block * BLOCK) {
+                assert!(chain.fail());
+                chain.resume();
+                chain.trap(u32::MAX);
+                chain.retry(DISTORTION);
+            }
+            if block >= 50 {
+                loud = output(&mut chain)[0]
+                    .iter()
+                    .fold(loud, |loud, value| loud.max(value.abs()));
+            }
+        }
+        loud
+    };
+    let (moved, still) = (run(true), run(false));
+    assert!(still > 0.05);
+    // (12 dB down: a quarter)
+    assert!(moved < 0.4 * still, "{moved} against {still}");
 }
 
 fn route(values: &mut Vec<f64>, target: usize, source: usize, amount: f64, min: f64, max: f64) {
@@ -498,7 +940,7 @@ fn a_route_moves_a_knob_of_a_unit_once_a_block() {
     chain.written(NOTE).0.set_note(true, &played);
     let out = render(&mut chain, &input, |_, _| {});
 
-    let mut unit = Unit::new(DISTORTION, rate, &params()[0], true).unwrap();
+    let mut unit = Unit::new(DISTORTION, rate, &params()[0]).unwrap();
     let mut alone = [Vec::new(), Vec::new()];
     let mut last = f64::NAN;
     for block in 0..40 {
@@ -620,6 +1062,93 @@ fn an_lfo_moves_the_lines_of_the_mix_and_of_the_delay() {
     let still = render(&mut plain, &clicks, |_, _| {});
     assert!(moved[0].iter().chain(&moved[1]).all(|value| value.is_finite()));
     assert_ne!(bits(&moved[0][tail..]), bits(&still[0][tail..]));
+}
+
+// a slot a route moves the mix of stops (off, or out of the order): the offset of the route goes down with its
+// gains, no step; as it starts, late, the offset comes in with them
+#[test]
+fn a_slot_that_stops_takes_the_lines_of_its_mix_down_with_it() {
+    let rate = 48000.0;
+    let frames = 80 * BLOCK;
+    let input = [vec![0.25f32; frames], vec![0.25f32; frames]];
+    for leaves in [false, true] {
+        let run = |routed: bool| {
+            let mut chain = Chain::new(rate, &params(), false);
+            chain.push(event(SET_ORDER, 1.0, 0.0, &[DISTORTION as f64]));
+            chain.push(event(SET_MIX, DISTORTION as f64, 0.2, &[]));
+            if routed {
+                // ENV 1 held at 1: the mix all wet
+                let mut routes = Vec::new();
+                route(
+                    &mut routes,
+                    DISTORTION as usize * KEYS + MIX_KEY,
+                    0,
+                    0.8,
+                    0.0,
+                    1.0,
+                );
+                chain.written(0).0.set_routes(&routes);
+                let played = note(0.0, BLOCK as f64 / rate, 1.0);
+                chain.written(0).0.set_note(true, &played);
+            }
+            render(&mut chain, &input, |chain, at| {
+                if at == 10 * BLOCK {
+                    chain.push(event(SET_ACTIVE, DISTORTION as f64, 1.0, &[]));
+                }
+                if at == 30 * BLOCK {
+                    chain.push(if leaves {
+                        event(SET_ORDER, 0.0, 0.0, &[])
+                    } else {
+                        event(SET_ACTIVE, DISTORTION as f64, 0.0, &[])
+                    });
+                }
+            })
+        };
+        let (moved, still) = (run(true), run(false));
+        assert!((moved[0][29 * BLOCK] - still[0][29 * BLOCK]).abs() > 0.01);
+        for i in 1..frames {
+            assert!((moved[0][i] - moved[0][i - 1]).abs() < 0.002, "a step at {i}");
+        }
+        assert_eq!(bits(&moved[0][70 * BLOCK..]), bits(&input[0][70 * BLOCK..]));
+    }
+}
+
+// a slot a route moves the mix of waits out of the order for one that leaves it to fade out: the offset of the
+// route comes in with its gains once it is in the order, not before (no step as the order settles)
+#[test]
+fn a_slot_that_waits_for_the_order_starts_the_lines_of_its_mix_in_it() {
+    let rate = 48000.0;
+    let frames = 140 * BLOCK;
+    let input = [vec![0.25f32; frames], vec![0.25f32; frames]];
+    let mut chain = chain_of(rate, &[COMPRESSOR], 1.0, false);
+    chain.push(event(SET_MIX, DELAY as f64, 0.2, &[]));
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    // ENV 1 held at 1: the mix all wet
+    let mut routes = Vec::new();
+    route(&mut routes, DELAY as usize * KEYS + MIX_KEY, 0, 0.8, 0.0, 1.0);
+    chain.written(0).0.set_routes(&routes);
+    let played = note(0.0, BLOCK as f64 / rate, 1.0);
+    chain.written(0).0.set_note(true, &played);
+    // the first block of the new order: the compressor has faded out and is forgotten
+    let mut settled = None;
+    let out = render(&mut chain, &input, |chain, at| {
+        if at == 30 * BLOCK {
+            chain.push(event(SET_ORDER, 1.0, 0.0, &[DELAY as f64]));
+            chain.push(event(SET_ACTIVE, COMPRESSOR as f64, 0.0, &[]));
+            chain.push(event(SET_ACTIVE, DELAY as f64, 1.0, &[]));
+        }
+        if at > 30 * BLOCK && settled.is_none() && chain.idle(COMPRESSOR as usize) {
+            settled = Some(at);
+        }
+    });
+    let settled = settled.unwrap();
+    assert!(settled > 32 * BLOCK);
+    // (the delay has no echo yet: its slot goes from a wire to no dry signal in 10 ms, the offset with it)
+    for i in settled..settled + 3 * BLOCK {
+        assert!((out[0][i] - out[0][i - 1]).abs() < 0.002, "a step at {i}");
+    }
+    assert!((out[0][settled] - 0.25).abs() < 0.002);
+    assert!(out[0][settled + 520].abs() < 0.01);
 }
 
 // every effect and the limiter at the rates of a render, 192 kHz too: finite, it sounds, under the ceiling

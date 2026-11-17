@@ -6,25 +6,31 @@
 //! A knob of a unit takes one value a block (`set`: the unit glides to it). The knobs of the delay and the mix
 //! of a slot are lines: the offset the routes move the knob by, a value a sample (worked out at points every 32
 //! samples of a block and its last sample, linear between them), added to the knob as it glides. A change of a
-//! line (a route, a knob, a new note) glides from where the line was in GLIDE: no step; a line gone goes to 0 so
+//! line (a route, a knob, a new note) glides from where the line was in GLIDE: no step; a line gone (its
+//! routes, or its slot stops playing) goes to 0 so, and the chain adds a line for as long as there is one: a slot
+//! that fades out takes its offset down with it.
 
 use alloc::{vec, vec::Vec};
 
 use dsp_core::envelope::{envelope_value, EnvelopeParams};
+use dsp_core::finite;
+use dsp_core::glided::glide_length;
 use dsp_core::lfo::{frac, Anchor, LfoBlock, LfoGlobal, LfoState, KNOBS, LFOS, PHASE, RATE, TABLE};
-use jsmath::{cos, max, min, pow, round, sin, sqrt, PI};
+use jsmath::{max, min, pow, sqrt};
 
+use crate::chain::equal_power;
 use crate::delay;
 use crate::units::{law, Law, DELAY as DELAY_SLOT, MAX_PARAMS, SLOTS};
 
 /// the sources: ENV 1–3, VELO, LFO 1–4 (MOD_SOURCES of the app)
 pub const ENVELOPES: usize = 3;
 pub const LFO_SOURCE: usize = 4;
-/// a target: slot · 32 + the key of a param of its unit, MIX_KEY its mix; from LFO_TARGET on lfo · 8 + a knob of
+/// a target: slot · 32 + the key of a param of its unit, MIX_KEY its mix; from LFO_TARGET on lfo · LFO_KEYS + a knob of
 /// an LFO (the routes of the note to its LFOs)
 pub const KEYS: usize = 32;
 pub const MIX_KEY: usize = 31;
 pub const LFO_TARGET: usize = SLOTS * KEYS;
+pub const LFO_KEYS: usize = 8;
 /// the values of a route: target, source, amount, min, max, scale (0 linear, 1 log, 2 pow), bipolar
 pub const ROUTE: usize = 7;
 /// the values of a note: start, release (seconds of the context; NaN: held), velo, whether it starts its
@@ -43,7 +49,6 @@ pub const LINE_MIX: usize = 6;
 pub const LINES: usize = LINE_MIX + 2 * SLOTS;
 
 const SEGMENT: usize = 32;
-const GLIDE: f64 = 0.01;
 const LOG: u32 = 1;
 const POW: u32 = 2;
 // the points an LFO steps through to a later frame at most: after a rest of the chain it goes on from there
@@ -94,8 +99,8 @@ fn mapped(map: Map, value: f64) -> f64 {
         Map::Linear => value,
         Map::PanLeft => max(0.0, value),
         Map::PanRight => max(0.0, -value),
-        Map::Dry => cos(value * PI / 2.0),
-        Map::Wet => sin(value * PI / 2.0),
+        Map::Dry => equal_power(value).0,
+        Map::Wet => equal_power(value).1,
         Map::DryLinear => 1.0 - value,
     }
 }
@@ -121,11 +126,14 @@ struct Moved {
     last: f64,
 }
 
-/// the knobs as the main thread has them: the params of each unit, the mix of each slot, whether it plays
+/// the knobs as the main thread has them: the params of each unit, the mix of each slot, whether it plays (on
+/// and in the order to come) and whether it mixes its effect in (it plays and has its late input: the lines of
+/// its mix start then)
 pub struct Bases<'a> {
     pub params: &'a [[f64; MAX_PARAMS]; SLOTS],
     pub mix: &'a [f64; SLOTS],
     pub on: &'a [bool; SLOTS],
+    pub mixes: &'a [bool; SLOTS],
 }
 
 pub struct Modulation {
@@ -177,14 +185,6 @@ fn level_of(note: &Note, source: usize, t: f64) -> f64 {
     }
 }
 
-fn finite(value: f64) -> f64 {
-    if value.is_finite() {
-        value
-    } else {
-        0.0
-    }
-}
-
 impl Modulation {
     pub fn new(sample_rate: f64) -> Modulation {
         let mut runners: [LfoBlock; LFOS] = core::array::from_fn(|_| LfoBlock::new(sample_rate, 0.0));
@@ -193,7 +193,7 @@ impl Modulation {
         }
         Modulation {
             rate: sample_rate,
-            glide: max(1.0, round(GLIDE * sample_rate)),
+            glide: glide_length(sample_rate),
             routes: Vec::new(),
             moved: Vec::new(),
             back: Vec::new(),
@@ -251,7 +251,7 @@ impl Modulation {
         for route in values.chunks_exact(ROUTE) {
             let target = finite(route[0]) as usize;
             let source = finite(route[1]) as usize;
-            if target >= LFO_TARGET + LFOS * 8 || source >= LFO_SOURCE + LFOS {
+            if target >= LFO_TARGET + LFOS * LFO_KEYS || source >= LFO_SOURCE + LFOS {
                 continue;
             }
             self.routes.push(Route {
@@ -289,9 +289,10 @@ impl Modulation {
     // the routes of a target: a knob of an LFO, a line, a knob of a unit
     fn place(&mut self, target: usize, group: Group) {
         if target >= LFO_TARGET {
-            let (lfo, knob) = ((target - LFO_TARGET) / 8, (target - LFO_TARGET) % 8);
+            let (lfo, knob) = ((target - LFO_TARGET) / LFO_KEYS, (target - LFO_TARGET) % LFO_KEYS);
             // (an LFO moves no knob of an LFO: the routes of the note, its envelopes and VELO)
-            let reads_lfo = self.routes[group.start..group.start + group.count]
+            let reads_lfo = self
+                .routes_of(group)
                 .iter()
                 .any(|route| route.source >= LFO_SOURCE);
             if knob < KNOBS && !reads_lfo {
@@ -429,6 +430,13 @@ impl Modulation {
         self.moved.iter().any(|knob| knob.slot == slot && knob.key == key)
     }
 
+    /// the unit of a slot was made again: the knobs of it the routes move are set anew in the next block
+    pub fn renew(&mut self, slot: usize) {
+        for knob in self.moved.iter_mut().filter(|knob| knob.slot == slot) {
+            knob.last = f64::NAN;
+        }
+    }
+
     /// nothing to work out: no route, no knob to put back, no line that still glides
     pub fn idle(&self) -> bool {
         self.routes.is_empty() && self.back.is_empty() && self.lines.iter().all(|line| line.idle)
@@ -476,7 +484,7 @@ impl Modulation {
             if group.count == 0 {
                 continue;
             }
-            let routes = &self.routes[group.start..group.start + group.count];
+            let routes = self.routes_of(*group);
             let knobs = global.knobs(t);
             let base = match knob {
                 RATE => 1.0 / global.period(t),
@@ -517,11 +525,15 @@ impl Modulation {
         self.runners[lfo].point(frame, &self.globals[lfo], &mods)
     }
 
+    fn routes_of(&self, group: Group) -> &[Route] {
+        &self.routes[group.start..group.start + group.count]
+    }
+
     // the sum of the routes of a knob at point `j` of the block at `frame`
     fn sum(&self, group: Group, frame: f64, j: usize) -> f64 {
         let t = (frame + self.points[j] as f64) / self.rate;
         let mut sum = 0.0;
-        for route in &self.routes[group.start..group.start + group.count] {
+        for route in self.routes_of(group) {
             let level = if route.source >= LFO_SOURCE {
                 self.levels[route.source - LFO_SOURCE][j]
             } else {
@@ -533,6 +545,15 @@ impl Modulation {
             sum += term(route, level);
         }
         sum
+    }
+
+    // the slot of a line sounds with it: a line of a mix once the slot mixes its effect in
+    fn plays(index: usize, slot: usize, bases: &Bases) -> bool {
+        if index >= LINE_MIX {
+            bases.mixes[slot]
+        } else {
+            bases.on[slot]
+        }
     }
 
     // the knob a line follows
@@ -592,15 +613,18 @@ impl Modulation {
         }
         let mut reads = [0usize; LFOS];
         for knob in self.moved.iter().filter(|knob| bases.on[knob.slot]) {
-            for route in &self.routes[knob.group.start..knob.group.start + knob.group.count] {
+            for route in self.routes_of(knob.group) {
                 if route.source >= LFO_SOURCE {
                     reads[route.source - LFO_SOURCE] = reads[route.source - LFO_SOURCE].max(1);
                 }
             }
         }
-        for line in self.lines.iter().filter(|line| bases.on[line.slot]) {
+        for (index, line) in self.lines.iter().enumerate() {
+            if !Self::plays(index, line.slot, bases) {
+                continue;
+            }
             let Some(group) = line.group else { continue };
-            for route in &self.routes[group.start..group.start + group.count] {
+            for route in self.routes_of(group) {
                 if route.source >= LFO_SOURCE {
                     reads[route.source - LFO_SOURCE] = self.points.len();
                 }
@@ -644,7 +668,7 @@ impl Modulation {
         for index in 0..LINES {
             let group = self.lines[index]
                 .group
-                .filter(|_| bases.on[self.lines[index].slot]);
+                .filter(|_| Self::plays(index, self.lines[index].slot, bases));
             if group.is_none() && self.lines[index].idle {
                 continue;
             }
@@ -658,11 +682,12 @@ impl Modulation {
                 self.lines[index].done = 0.0;
             }
             // the target at the points, linear between them
+            let rest = if group.is_some() { mapped(map, base) } else { 0.0 };
             let offset = |modulation: &Modulation, j: usize| match group {
                 Some(group) => {
                     let first = &modulation.routes[group.start];
                     let moved = clamp_to(moved_by(base, modulation.sum(group, frame, j), first), first);
-                    mapped(map, moved) - mapped(map, base)
+                    mapped(map, moved) - rest
                 }
                 None => 0.0,
             };
@@ -679,6 +704,8 @@ impl Modulation {
                 previous = value;
             }
             let line = &mut self.lines[index];
+            // (a line gone is no more once a block of it was all 0: the block its glide ends in still has it)
+            let over = group.is_none() && line.done >= glide;
             if line.done < glide {
                 if line.from.is_nan() {
                     line.from = line.last - values[0];
@@ -689,7 +716,7 @@ impl Modulation {
                 line.done += frames as f64;
             }
             line.last = values[frames - 1];
-            if group.is_none() && line.done >= glide {
+            if over {
                 line.idle = true;
                 line.last = 0.0;
             }

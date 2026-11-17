@@ -1,32 +1,18 @@
-import { mapValues, pick } from 'lodash';
+import { pick } from 'lodash';
 import {
   chorusDivisions,
   divisionSeconds,
-  FX_MIX_PARAMS,
   FX_PARAMS,
   nearestDivision,
   quartersOf,
-  TEMPO_DEFAULT,
   TEMPO_DIVISIONS,
 } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
-import { CHORUS_PROCESSOR } from '../../common/processors';
-import { createLfoFeed } from '../../common/lfo/lfo-curve';
 import { FxDefinition } from './types';
-import { isOn, OFF_ON, tempoSync } from './tempo-sync';
-import {
-  ChorusDspParams,
-  ChorusMessage,
-  ChorusMeterValues,
-  ChorusOptions,
-  depthMs,
-  levelGain,
-} from './chorus-params';
-import { createFxMeter } from './fx-meter';
+import { OFF_ON, tempoSync } from './tempo-sync';
+import { depthMs, levelGain } from './chorus-params';
 import { ChorusParam, CHORUS_PRESETS } from './chorus-presets';
 import { formatDb, formatHz, formatMillis } from './format';
-import { createWorkletFx, STEREO_WORKLET_OPTIONS } from './worklet-fx';
-import { FxModMessage, isLfoSource } from './fx-modulation';
 
 const { rate, sync, div, trip, dot, d1, d2, depth, fb, cut, hpf, level } = FX_PARAMS.chorus;
 
@@ -54,16 +40,13 @@ export const {
 
 const formatRate = (value: number) => `${value < 1 ? value.toFixed(3) : value.toFixed(2)}Hz`;
 const tap = { precision: 100, formatValue: formatMillis };
-// the knobs the worklet takes as they are (Rate goes there as the Hz in effect)
+// the knobs the core takes as they are (Rate goes there as the Hz in effect)
 const CORE_KNOBS = ['d1', 'd2', 'depth', 'fb', 'cut', 'hpf', 'level'] as const;
-const RATE_KNOBS: readonly ChorusParam[] = ['rate', 'sync', 'div', 'trip', 'dot'];
 
-// The chorus runs in an audio worklet (its Rust core, dsp/chorus: chorus.worklet.ts):
-// input → worklet node → output (createWorkletFx); the module loads asynchronously, until then the input goes
-// nowhere and the params are kept, the node starts with them. It mixes the dry signal itself (mixInside: the law
-// of its mix is its own), so the mix of the slot is one more of its params. In BPM a cycle of its LFO is a division
-// of the tempo: the worklet gets its Hz. Not active (out of the chain, bypassed) it has no feedback: its taps drain.
-// Its meter (the LFO of the core and the knobs of its taps, ChorusMeterValues) comes only while it is watched
+// The chorus is a unit of the chain core (dsp/chorus). It mixes the dry signal itself (Law::Inside: the law of
+// its mix is its own), so the mix of the slot is one more of its params. In BPM a cycle of its LFO is a division
+// of the tempo: the core gets its Hz. Its meter (the LFO of the core and the knobs of its taps, ChorusMeterValues)
+// comes only while it is watched
 export const chorus: FxDefinition<ChorusParam> = {
   label: 'Chorus',
   params: {
@@ -118,85 +101,7 @@ export const chorus: FxDefinition<ChorusParam> = {
   presets: CHORUS_PRESETS,
   paramChange: chorusParamChange,
   bounds: (params, bpm) => ({ rate: chorusRateBounds(params, bpm) }),
-  create: (audioCtx) => {
-    const values: Record<ChorusParam | 'mix', number> = {
-      ...mapValues(FX_PARAMS.chorus, (param) => param.default),
-      mix: FX_MIX_PARAMS.chorus.default,
-    };
-    // the tempo of the synth (BPM)
-    let bpm = TEMPO_DEFAULT;
-    let active = true;
-    const dspParams = (): ChorusDspParams => ({
-      ...pick(values, CORE_KNOBS),
-      rate: chorusRate(values, bpm),
-      mix: values.mix,
-    });
-
-    const meters = createFxMeter<ChorusMeterValues>((message) => post(message));
-
-    // the node starts with the params and the LFOs kept until the module has loaded, its meter on if watched
-    const worklet = createWorkletFx(
-      audioCtx,
-      'chorus',
-      () => {
-        const lfos = feed.initial();
-        const processorOptions: ChorusOptions = {
-          params: dspParams(),
-          ...(lfos && { lfos }),
-          ...(!active && { inactive: true }),
-          ...(meters.watched() && { meter: true }),
-        };
-        return new AudioWorkletNode(audioCtx, CHORUS_PROCESSOR, {
-          ...STEREO_WORKLET_OPTIONS,
-          processorOptions,
-        });
-      },
-      meters.take
-    );
-    const post = (message: ChorusMessage) => worklet.post(message);
-    // the LFOs, only while a route of one moves a knob
-    const feed = createLfoFeed((state) => {
-      const message: FxModMessage = { lfos: state };
-      worklet.post(message);
-    });
-
-    return {
-      input: worklet.input,
-      output: worklet.output,
-      $status: worklet.$status,
-      retry: worklet.retry,
-      mixInside: true,
-      // unknown keys are ignored
-      setParam: (key, value) => {
-        if (!(key in values)) return;
-        values[key as ChorusParam | 'mix'] = value;
-        if (RATE_KNOBS.includes(key as ChorusParam)) post({ params: { rate: chorusRate(values, bpm) } });
-        else post({ params: { [key]: value } });
-      },
-      // not active: no feedback, the taps drain instead of ringing on
-      setActive: (next) => {
-        if (next === active) return;
-        active = next;
-        post({ active });
-      },
-      clear: worklet.clear,
-      // the worklet moves the knobs once per block (the LFOs as they are first, once a route reads one)
-      setModulation: (mod) => {
-        feed.use(!!mod && mod.routes.some(({ source }) => isLfoSource(source)));
-        const message: FxModMessage = { mod };
-        worklet.post(message);
-      },
-      setLfos: feed.take,
-      // in BPM a new tempo is a new rate
-      setTempo: (next) => {
-        bpm = next;
-        if (isOn(values.sync)) post({ params: { rate: chorusRate(values, bpm) } });
-      },
-      meter: meters.meter,
-      destroy: () => {
-        meters.clear();
-        worklet.destroy();
-      },
-    };
-  },
+  // Rate in BPM as the Hz of its division at the tempo (the mix of its slot is the mix inside the core)
+  core: (params, bpm) => ({ ...pick(params, CORE_KNOBS), rate: chorusRate(params, bpm) }),
+  metered: true,
 };

@@ -1,4 +1,4 @@
-// the envelopes ENV 1–3 as functions of time, shared by the voice worklet, the fx worklets, the main thread
+// the envelopes ENV 1–3 as functions of time, shared by the voice worklet, the chain worklet, the main thread
 // and the specs: no imports. Times in seconds from the start of the envelope (the note on, in legato the
 // start of the phrase). The stages: attack 0 → 1, hold at 1, decay 1 → sustain, sustain until the release;
 // the release goes from the level it starts at to 0 in `release` seconds, whatever that level. An envelope

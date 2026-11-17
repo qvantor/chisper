@@ -1,5 +1,4 @@
-import type { StopMessage } from '../../fx/effects/stereo-processor';
-import type { VoiceEvent, VoiceEventsMessage, VoicesReportMessage } from './voice-options';
+import type { StopMessage, VoiceEvent, VoiceEventsMessage, VoicesReportMessage } from './voice-options';
 
 // the processor of the voices of the wavetable oscillator worklet (wavetable-osc.worklet.ts), one node per
 // context: every note plays in it. No import of the core, the worklet passes its voices. It runs in the

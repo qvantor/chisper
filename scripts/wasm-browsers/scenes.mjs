@@ -366,88 +366,176 @@ const COMPRESSOR = {
 // the knobs of a fresh chorus (FX_PARAMS.chorus without its tempo, and its mix)
 const CHORUS = { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 };
 
+// the knobs of a fresh distortion and of a fresh delay (FX_PARAMS, the time of the delay in seconds)
+const DISTORTION = { mode: 0, drive: 8, tone: 20000, level: 0 };
+const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
+const KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+const NEUTRAL = {
+  distortion: DISTORTION,
+  chorus: CHORUS,
+  delay: DELAY,
+  compressor: COMPRESSOR,
+  reverb: REVERB,
+};
+
+// the state a chain is made with (ChainState of chain-params.ts): `kinds` in the chain in this order, each playing
+// at its mix (`slots`: the params and the mix of a kind over the fresh ones), `rest` over it (the routes, the note,
+// the LFOs)
+const chainState = (kinds, slots = {}, rest = {}) => ({
+  slots: Object.fromEntries(
+    KINDS.map((kind) => [
+      kind,
+      {
+        params: { ...NEUTRAL[kind], ...slots[kind]?.params },
+        mix: slots[kind]?.mix ?? 1,
+        active: kinds.includes(kind),
+      },
+    ])
+  ),
+  order: kinds.map((kind) => KINDS.indexOf(kind)),
+  masterGain: 1,
+  muted: false,
+  routes: [],
+  note: null,
+  lfos: null,
+  meters: [],
+  ...rest,
+});
+
+// a scene of the chain: the node of the worklet made with a state (its params go only there), the core in Node
+// made with the same one; a block of the core at its frame. `alone`: its effects without the limiter after them,
+// what the null test holds to a reference from before the chain (an effect was a core of its own then; a chain
+// with no effect is its limiter)
+const chainScene = (name, state, scene) => {
+  const make = (limited) => (dsp, wasm) => {
+    const chain = dsp.createChainWasm(wasm.chain, RATE, state, { limited });
+    let frame = 0;
+    return {
+      process: (inL, inR, outL, outR) => {
+        chain.process(inL, inR, outL, outR, frame);
+        frame += outL.length;
+      },
+      free: chain.free,
+    };
+  };
+  return {
+    name,
+    module: 'chain',
+    processor: 'chisper-chain',
+    options: { ...STEREO, processorOptions: { state } },
+    create: make(true),
+    ...(state.order.length > 0 && { alone: make(false) }),
+    ...scene,
+  };
+};
+
+// a target of a route in the core (modulation.rs): slot · 32 + the key of a param in the order of its kind, 31 the
+// mix of the slot
+const target = (kind, key) =>
+  KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(NEUTRAL[kind]).indexOf(key));
+const HELD = { attack: 0.05, hold: 0, decay: 0.2, sustain: 0.6, release: 0.3 };
+// LFO 1 a free sine of 5 Hz, LFO 2 one of 0.7 Hz that starts with the note and rises
+const LFOS = {
+  at: 0,
+  instantly: true,
+  lfos: [
+    { mode: 1, delay: 0, rise: 0, smooth: 0, phase: 0, anchor: { time: 0, phase: 0, period: 0.2 } },
+    {
+      mode: 0,
+      delay: 0.05,
+      rise: 0.2,
+      smooth: 0.01,
+      phase: 0.25,
+      anchor: { time: 0, phase: 0, period: 1.4 },
+    },
+    { mode: 1, delay: 0, rise: 0, smooth: 0, phase: 0, anchor: { time: 0, phase: 0, period: 1 } },
+    { mode: 1, delay: 0, rise: 0, smooth: 0, phase: 0, anchor: { time: 0, phase: 0, period: 1 } },
+  ],
+};
+
 export const SCENES = [
-  {
-    name: 'limiter, a chord 12 dB over',
-    module: 'limiter',
-    processor: 'chisper-limiter',
-    options: STEREO,
-    frames: RATE / 2,
-    amplitude: 2,
-    create: (dsp, wasm) => dsp.createLimiterWasm(wasm.limiter, RATE),
-  },
-  {
-    name: 'limiter, notes and silences: idle and woken',
-    module: 'limiter',
-    processor: 'chisper-limiter',
-    options: STEREO,
+  chainScene('limiter, a chord 12 dB over', chainState([]), { frames: RATE / 2, amplitude: 2 }),
+  chainScene('limiter, notes and silences: idle and woken', chainState([]), {
     frames: 2 * RATE,
     input: () => notesAndSilences(2 * RATE),
-    create: (dsp, wasm) => dsp.createLimiterWasm(wasm.limiter, RATE),
-  },
-  {
-    name: 'reverb, the 70s era',
-    module: 'reverb',
-    processor: 'chisper-reverb',
-    options: { ...STEREO, processorOptions: { params: REVERB, active: true } },
-    frames: RATE,
-    amplitude: 0.5,
-    create: (dsp, wasm) => dsp.createReverbWasm(wasm.reverb, RATE, { params: REVERB, active: true }),
-  },
-  ...[0, 1].map((mode) => ({
-    name: `distortion, ${mode ? 'hard' : 'soft'} clip at 9 dB, tone 6 kHz`,
-    module: 'distortion',
-    processor: 'chisper-distortion',
-    options: { ...STEREO, processorOptions: { params: { mode, drive: 9, tone: 6000, level: -2 } } },
-    frames: RATE / 2,
-    amplitude: 0.6,
-    create: (dsp, wasm) =>
-      dsp.createDistortionWasm(wasm.distortion, RATE, { params: { mode, drive: 9, tone: 6000, level: -2 } }),
-  })),
+  }),
+  chainScene('reverb, the 70s era', chainState(['reverb']), { frames: RATE, amplitude: 0.5 }),
+  ...[0, 1].map((mode) =>
+    chainScene(
+      `distortion, ${mode ? 'hard' : 'soft'} clip at 9 dB, tone 6 kHz`,
+      chainState(['distortion'], { distortion: { params: { mode, drive: 9, tone: 6000, level: -2 } } }),
+      { frames: RATE / 2, amplitude: 0.6 }
+    )
+  ),
   // one band deep under its threshold, then three bands pressed down and lifted: notes and silences (the gains
   // move, the core goes idle and wakes)
   ...[
-    ['one band, fast and deep', { multi: 0, thresh: 0.75, ratio: 8, attack: 2, release: 60, gain: 0.1 }],
-    ['three bands, down and up', { multi: 1, ratio: 20, below: 0.75, low: 4, mid: -2, high: 6, mix: 0.8 }],
-  ].map(([name, changes]) => {
-    const params = { ...COMPRESSOR, ...changes };
-    return {
-      name: `compressor, ${name}`,
-      module: 'compressor',
-      processor: 'chisper-compressor',
-      options: { ...STEREO, processorOptions: { params } },
+    ['one band, fast and deep', { multi: 0, thresh: 0.75, ratio: 8, attack: 2, release: 60, gain: 0.1 }, 1],
+    ['three bands, down and up', { multi: 1, ratio: 20, below: 0.75, low: 4, mid: -2, high: 6 }, 0.8],
+  ].map(([name, params, mix]) =>
+    chainScene(`compressor, ${name}`, chainState(['compressor'], { compressor: { params, mix } }), {
       frames: 2 * RATE,
       input: () => notesAndSilences(2 * RATE),
-      create: (dsp, wasm) => dsp.createCompressorWasm(wasm.compressor, RATE, { params }),
-    };
-  }),
+    })
+  ),
   // a fresh chorus (a slow LFO over all of its depth), then a fast one with a high feedback through a high pass:
   // notes and silences (the taps move, the core goes idle and wakes)
   ...[
     ['fresh', {}],
     ['fast, a high feedback, a high pass', { rate: 7, d1: 18, d2: 9, depth: 3, fb: 0.9, cut: 700, hpf: 1 }],
-  ].map(([name, changes]) => {
-    const params = { ...CHORUS, ...changes };
-    return {
-      name: `chorus, ${name}`,
-      module: 'chorus',
-      processor: 'chisper-chorus',
-      options: { ...STEREO, processorOptions: { params } },
+  ].map(([name, params]) =>
+    chainScene(`chorus, ${name}`, chainState(['chorus'], { chorus: { params, mix: 0.5 } }), {
       frames: 2 * RATE,
       input: () => notesAndSilences(2 * RATE),
-      create: (dsp, wasm) => dsp.createChorusWasm(wasm.chorus, RATE, { params }),
-    };
-  }),
+    })
+  ),
+  // the echoes of a short time between two samples, then ping-pong with a channel late through a narrow bandpass
+  ...[
+    ['normal', { time: 0.0123, fb: 0.7 }],
+    ['ping-pong, a channel late', { time: 0.031, fb: 0.8, mode: 1, pan: 0.011, freq: 2500, q: 2 }],
+  ].map(([name, params]) =>
+    chainScene(`delay, ${name}`, chainState(['delay'], { delay: { params, mix: 0.4 } }), {
+      frames: 2 * RATE,
+      input: () => notesAndSilences(2 * RATE),
+    })
+  ),
+  // every effect in its slot, each mixed by its law, the knobs moved by the envelopes and the LFOs of a note: the
+  // level of the distortion, the time and the feedback of the delay, the mix of the reverb, the rate of an LFO
+  chainScene(
+    'the whole chain, its knobs moved by a note',
+    chainState(
+      ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
+      {
+        distortion: { mix: 0.7 },
+        chorus: { mix: 0.5 },
+        delay: { params: { time: 0.05 }, mix: 0.3 },
+        compressor: { mix: 1 },
+        reverb: { mix: 0.3 },
+      },
+      {
+        masterGain: 0.8,
+        lfos: LFOS,
+        note: { envelopes: [HELD, HELD, HELD], start: 0.1, release: 1.2, velo: 0.8 },
+        routes: [
+          { target: target('distortion', 'level'), source: 0, amount: -9, min: -24, max: 12 },
+          { target: target('delay', 'time'), source: 4, amount: 0.004, min: 0.01, max: 1 },
+          { target: target('delay', 'fb'), source: 3, amount: 0.3, min: 0, max: 0.9 },
+          { target: target('reverb', 'mix'), source: 5, amount: 0.5, min: 0, max: 1 },
+          { target: target('chorus', 'mix'), source: 1, amount: 0.4, min: 0, max: 1 },
+          { target: target('compressor', 'thresh'), source: 4, amount: 0.3, min: 0, max: 1, bipolar: true },
+          // (the note to the rate of LFO 2: 160 + lfo · 8 + the knob)
+          { target: 160 + 8, source: 0, amount: 1, min: 0.01, max: 100, scale: 'log' },
+        ],
+      }
+    ),
+    { frames: 2 * RATE, input: () => notesAndSilences(2 * RATE) }
+  ),
 ]
   .map((scene) => ({ rate: RATE, ...scene }))
   .concat(OSC_SCENES);
 
 const ENTRY = `
-export { createLimiterWasm } from './apps/chisper/src/app/synth/common/limiter/limiter-wasm';
-export { createReverbWasm } from './apps/chisper/src/app/synth/fx/effects/reverb-wasm';
-export { createDistortionWasm } from './apps/chisper/src/app/synth/fx/effects/distortion-wasm';
-export { createCompressorWasm } from './apps/chisper/src/app/synth/fx/effects/compressor-wasm';
-export { createChorusWasm } from './apps/chisper/src/app/synth/fx/effects/chorus-wasm';
+export { createChainWasm } from './apps/chisper/src/app/synth/common/chain/chain-wasm';
 export {
   createOscScope,
   createTableStoreWasm,

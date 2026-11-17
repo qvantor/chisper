@@ -1,6 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
 import { isWorkletSupported, loadWorklet, workletUrl } from '../../fx/effects/load-worklet';
-import type { StopMessage } from '../../fx/effects/stereo-processor';
 import { createLfoFeed, LfosState } from '../lfo/lfo-curve';
 import { isLfoSource } from '../../fx/effects/fx-modulation';
 import type {
@@ -18,6 +17,7 @@ import type {
   StoreStoredMessage,
   StoreTableMessage,
   VoiceEvent,
+  StopMessage,
   VoiceEventsMessage,
   VoiceFilterOptions,
   VoiceModuleKnobs,

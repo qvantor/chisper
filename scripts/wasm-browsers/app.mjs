@@ -41,7 +41,7 @@ const withTables = (osc1, osc2) => ({
 });
 // the heavy patch with every LFO on: LFO 1 on the wave of both oscillators (ENV 2 on its Rate), LFO 2 free on the
 // cutoff (bipolar) and the drive of the distortion, LFO 3 on the size and the early reflections (a fader) of the
-// reverb (its worklet), LFO 4 on the time and the bandpass of the delay (the lines of fx-mod, its chart); the sub on
+// reverb, LFO 4 on the time and the bandpass of the delay (the lines of the chain core, its chart); the sub on
 // (a saw an octave down), LFO 2 on its Coarse, LFO 4 on its level (the marks of its knobs); the compressor added
 // (three bands, down and up: its meter draws while its panel shows), LFO 3 on its threshold; the chorus added,
 // LFO 4 on its cutoff
@@ -206,7 +206,7 @@ try {
         Object.values(statuses.fx).every((status) => status === 'ready'),
         JSON.stringify(statuses.fx)
       );
-      const wanted = ['limiter', 'wavetable-osc', 'distortion', 'chorus', 'compressor', 'reverb', 'fx-mod'];
+      const wanted = ['chain', 'wavetable-osc'];
       check(
         'the bundles load',
         wanted.every((bundle) => loaded.includes(bundle)),

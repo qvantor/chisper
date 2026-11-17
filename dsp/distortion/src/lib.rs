@@ -14,7 +14,6 @@
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
-use wasm_rt as _;
 
 use core::ops::{Add, Mul, Sub};
 use dsp_core::biquad::FilterType;

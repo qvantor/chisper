@@ -1,3 +1,4 @@
+import { LFO_KNOBS, LFO_SOURCE, ROUTE_SCALES } from '../../common/chain/chain-params';
 import { EnvelopeParams, envelopeValue } from '../../common/envelope/envelope-curve';
 import {
   createLfoGlobal,
@@ -26,7 +27,7 @@ export interface FxNote {
 }
 
 // the scale of a knob: linear, log (octaves), pow (a share of its travel: the times of the LFOs)
-export type FxScale = 'linear' | 'log' | 'pow';
+export type FxScale = (typeof ROUTE_SCALES)[number];
 
 // a route to a knob of an effect or of an LFO (lfo2.rate: the routes of the note to the knobs of its LFOs): `source`
 // (an envelope, the velocity after them, an LFO after it: MOD_SOURCES.indexOf) moves `param` by amount × its level
@@ -50,14 +51,8 @@ export interface FxModulation {
   routes: FxRoute[];
 }
 
-// main thread → fx worklet: the modulation, the LFOs (lfo-curve.ts: their knobs, clocks and shapes)
-export interface FxModMessage {
-  mod?: FxModulation | null;
-  lfos?: LfosState;
-}
-
-// the index of LFO 1 among the sources (MOD_SOURCES: ENV 1–3, VELO, LFO 1–4)
-export const LFO_SOURCE = 4;
+// (the index of LFO 1 among the sources)
+export { LFO_SOURCE };
 const LFO_COUNT = 4;
 
 // `source` reads an envelope (else the velocity, VELO, the same all along the note, or an LFO)
@@ -137,8 +132,15 @@ export const routesByParam = (routes: FxRoute[]) =>
   }, {});
 
 // a route to a knob of an LFO: lfo1.rate…
-const LFO_KNOB = /^lfo([1-4])\.(rate|delay|rise|smooth|phase)$/;
+const LFO_KNOB = new RegExp(`^lfo([1-4])\\.(${LFO_KNOBS.join('|')})$`);
 export const isLfoKnob = (param: string) => LFO_KNOB.test(param);
+// its LFO (from 0) and its knob (the index in LFO_KNOBS); null: another param
+export const lfoKnobOf = (param: string) => {
+  const match = LFO_KNOB.exec(param);
+  return (
+    match && { lfo: Number(match[1]) - 1, knob: LFO_KNOBS.indexOf(match[2] as (typeof LFO_KNOBS)[number]) }
+  );
+};
 
 // the LFOs of the last note, as the voices run them (the main thread: the marks of the knobs and the dot of the
 // chart; an fx worklet: its knobs): their states (setLfos), a runner of each from the start of the envelopes of the

@@ -46,6 +46,78 @@ pub const MAX_PARAMS: usize = 16;
 /// the most values a meter gives
 pub const MAX_METER: usize = 8;
 
+/// the params of a kind by the names the app has them under (CHAIN_KEYS of chain-params.ts), each at its key in
+/// its crate, and how many there are: a spec holds the app to them (a param without a name is "")
+#[cfg(feature = "perf")]
+pub fn key_names(kind: u32) -> ([&'static str; MAX_PARAMS], usize) {
+    let mut names = [""; MAX_PARAMS];
+    let mut name = |key: usize, text: &'static str| names[key] = text;
+    let count = match kind {
+        DISTORTION => {
+            name(distortion::MODE, "mode");
+            name(distortion::DRIVE, "drive");
+            name(distortion::TONE, "tone");
+            name(distortion::LEVEL, "level");
+            distortion::PARAMS
+        }
+        CHORUS => {
+            name(chorus::RATE, "rate");
+            name(chorus::D1, "d1");
+            name(chorus::D2, "d2");
+            name(chorus::DEPTH, "depth");
+            name(chorus::FB, "fb");
+            name(chorus::CUT, "cut");
+            name(chorus::HPF, "hpf");
+            name(chorus::LEVEL, "level");
+            name(chorus::MIX, "mix");
+            chorus::PARAMS
+        }
+        DELAY => {
+            name(crate::delay::TIME, "time");
+            name(crate::delay::FB, "fb");
+            name(crate::delay::MODE, "mode");
+            name(crate::delay::PAN, "pan");
+            name(crate::delay::FREQ, "freq");
+            name(crate::delay::Q, "q");
+            crate::delay::PARAMS
+        }
+        COMPRESSOR => {
+            name(compressor::MULTI, "multi");
+            name(compressor::THRESH, "thresh");
+            name(compressor::RATIO, "ratio");
+            name(compressor::ATTACK, "attack");
+            name(compressor::RELEASE, "release");
+            name(compressor::GAIN, "gain");
+            name(compressor::XLOW, "xlow");
+            name(compressor::XHIGH, "xhigh");
+            name(compressor::BELOW, "below");
+            name(compressor::LOW, "low");
+            name(compressor::MID, "mid");
+            name(compressor::HIGH, "high");
+            name(compressor::LEVEL, "level");
+            name(compressor::MIX, "mix");
+            compressor::PARAMS
+        }
+        REVERB => {
+            name(reverb::LOWCUT, "lowcut");
+            name(reverb::PRE, "pre");
+            name(reverb::SIZE, "size");
+            name(reverb::DECAY, "decay");
+            name(reverb::DAMP, "damp");
+            name(reverb::BASS, "bass");
+            name(reverb::DEPTH, "depth");
+            name(reverb::SEP, "sep");
+            name(reverb::ER, "er");
+            name(reverb::DRIVE, "drive");
+            name(reverb::BANDWIDTH, "bandwidth");
+            name(reverb::BODY, "body");
+            reverb::PARAMS
+        }
+        _ => 0,
+    };
+    (names, count)
+}
+
 pub enum Unit {
     Distortion(Box<Distortion>),
     Chorus(Box<Chorus>),
@@ -60,15 +132,14 @@ fn head<const N: usize>(params: &[f64; MAX_PARAMS]) -> [f64; N] {
 }
 
 impl Unit {
-    /// an effect of `kind` at `sample_rate`, its params in the order of its crate; `active` is of the reverb (an
-    /// inactive one fades out). None for a kind no one knows
-    pub fn new(kind: u32, sample_rate: f64, params: &[f64; MAX_PARAMS], active: bool) -> Option<Unit> {
+    /// an effect of `kind` at `sample_rate`, its params in the order of its crate. None for a kind no one knows
+    pub fn new(kind: u32, sample_rate: f64, params: &[f64; MAX_PARAMS]) -> Option<Unit> {
         Some(match kind {
             DISTORTION => Unit::Distortion(Box::new(Distortion::new(sample_rate, &head(params)))),
             CHORUS => Unit::Chorus(Box::new(Chorus::new(sample_rate, &head(params)))),
             DELAY => Unit::Delay(Box::new(Delay::new(sample_rate, &head(params)))),
             COMPRESSOR => Unit::Compressor(Box::new(Compressor::new(sample_rate, &head(params)))),
-            REVERB => Unit::Reverb(Box::new(Reverb::new(sample_rate, &head(params), active))),
+            REVERB => Unit::Reverb(Box::new(Reverb::new(sample_rate, &head(params)))),
             LIMITER => Unit::Limiter(Box::new(Limiter::new(sample_rate))),
             _ => return None,
         })
@@ -94,12 +165,6 @@ impl Unit {
                 unit.set(&changes[..count], routed);
             }
             Unit::Limiter(_) => {}
-        }
-    }
-
-    pub fn set_active(&mut self, active: bool) {
-        if let Unit::Reverb(unit) = self {
-            unit.set_active(active);
         }
     }
 

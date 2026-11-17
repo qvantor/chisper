@@ -16,7 +16,7 @@ const args = parseArgs(process.argv.slice(2));
 const browsers = (args.browsers ?? 'chromium,webkit,firefox').split(',');
 const scenes = SCENES.filter(({ name }) => !args.only || name.includes(args.only));
 const worklets = path.join(root, 'tmp/worklets');
-if (!fs.existsSync(path.join(worklets, 'limiter.js')))
+if (!fs.existsSync(path.join(worklets, 'chain.js')))
   throw new Error('tmp/worklets has no bundles: run `npm run wasm && npm run worklets` first');
 
 // the worklet bundles and an empty page on localhost (a secure context: AudioWorklet)

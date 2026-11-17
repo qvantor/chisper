@@ -1,4 +1,3 @@
-import type { LfosState } from '../../common/lfo/lfo-curve';
 // the params, the options and the messages of the chorus (its Rust core, dsp/chorus: chorus-wasm.ts), no signal
 // processing here
 
@@ -20,20 +19,6 @@ export interface ChorusDspParams {
 
 export interface ChorusOptions {
   params: ChorusDspParams;
-  // the LFOs as they are when the node is made (stereo-processor.ts)
-  lfos?: LfosState;
-  // out of the chain or bypassed already
-  inactive?: boolean;
-  // the meter is watched already
-  meter?: boolean;
-}
-
-// main thread → worklet: changed params; `active` false while the effect is out of the chain or bypassed (no
-// feedback then: its taps drain, an old tail never comes back); `meter` asks for the meter (true) or stops it
-export interface ChorusMessage {
-  params?: Partial<ChorusDspParams>;
-  active?: boolean;
-  meter?: boolean;
 }
 
 // what a screen draws the taps of: the LFO of the core (cycles: it starts with its node and never stops, no one
@@ -49,12 +34,21 @@ export interface ChorusMeterValues {
   cut: number;
   idle: boolean;
 }
-
-// worklet → main thread, about 30 times a second while the meter is asked for and the core is not idle (idle:
-// once)
-export interface ChorusMeterMessage {
-  meter: ChorusMeterValues;
-}
+// reads the meter of the core (`Unit::meter` of dsp/chain/src/units.rs: its values in this order) into the same
+// object every time: nothing is made on the audio thread, who keeps the values copies them
+export const chorusMeterReader = () => {
+  const meter: ChorusMeterValues = { phase: 0, rate: 0, d1: 0, d2: 0, depth: 0, cut: 0, idle: true };
+  return (values: ArrayLike<number>, idle: boolean) => {
+    meter.phase = values[0];
+    meter.rate = values[1];
+    meter.d1 = values[2];
+    meter.d2 = values[3];
+    meter.depth = values[4];
+    meter.cut = values[5];
+    meter.idle = idle;
+    return meter;
+  };
+};
 
 // the laws of the knobs, as measured (dsp/chorus/src/lib.rs has them too): the ms the depth moves a tap by at the
 // top of its LFO, the level (0..4, 1 at the middle)

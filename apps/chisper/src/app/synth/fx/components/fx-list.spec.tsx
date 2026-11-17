@@ -8,6 +8,7 @@ import { renderWithFx } from '../../../../test-utils/fx-wrapper';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import { applySnapshot } from '../../../app';
+import { CHAIN_MODULE, CHAIN_PROCESSOR } from '../../common/chain/chain-params';
 import { FX_REGISTRY } from '../effects';
 import { FxList } from './fx-list';
 import { FX_COLORS } from './fx-colors';
@@ -18,16 +19,16 @@ const setup = (ui = <FxList />) => {
   return { fx, user: userEvent.setup() };
 };
 
-// the reverb module loads asynchronously
+// the module of the chain loads asynchronously
 const flush = () => act(() => new Promise((resolve) => setTimeout(resolve)));
 
-// the first load of the reverb module fails (404, offline), the next ones and the limiter module succeed;
+// the first load of the module of the chain fails (404, offline), the next ones and the other modules succeed;
 // test-setup restores the mock
 const failFirstWorkletLoad = () => {
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
   let failed = false;
   const addModule = jest.fn((url: string) => {
-    if (failed || !url.endsWith(`/reverb.js`)) return Promise.resolve();
+    if (failed || !url.endsWith(`/${CHAIN_MODULE}.js`)) return Promise.resolve();
     failed = true;
     return Promise.reject(new Error('404'));
   });
@@ -36,6 +37,24 @@ const failFirstWorkletLoad = () => {
     get: () => ({ addModule }),
   });
   return addModule;
+};
+
+interface NodeStub extends AudioWorkletNode {
+  name: string;
+  port: AudioWorkletNode['port'] & { postMessage: jest.Mock };
+}
+// the node of the chain once it is made (test-setup restores the stub)
+const recordChainNode = () => {
+  const created: NodeStub[] = [];
+  const Stub = globalThis.AudioWorkletNode;
+  class Recording extends Stub {
+    constructor(context: BaseAudioContext, name: string, options?: AudioWorkletNodeOptions) {
+      super(context, name, options);
+      created.push(this as unknown as NodeStub);
+    }
+  }
+  Object.assign(globalThis, { AudioWorkletNode: Recording });
+  return () => created.find(({ name }) => name === CHAIN_PROCESSOR) as NodeStub;
 };
 
 // the sortable item is a button with the same name, the lamp is the one with aria-pressed
@@ -140,23 +159,36 @@ describe('FxList', () => {
   describe('unavailable effects', () => {
     afterEach(() => jest.restoreAllMocks());
 
-    it('without AudioWorklet the reverb says why and can not be turned on, the delay works', async () => {
+    // every effect is a unit of the chain: its worklet
+    it('without AudioWorklet every effect says why and can not be turned on', async () => {
       withoutAudioWorklet();
       const { fx, user } = setup();
-      const row = getRowOf('Reverb');
-      expect(row).toHaveTextContent('Not supported by this browser');
-      expect(row).toHaveClass('unavailable', 'unsupported');
-      expect(getLampOf('Reverb')).toHaveAccessibleDescription('Not supported by this browser');
+      for (const type of FX_TYPES) {
+        const { label } = FX_REGISTRY[type];
+        const row = getRowOf(label);
+        expect(row).toHaveTextContent('Not supported by this browser');
+        expect(row).toHaveClass('unavailable', 'unsupported');
+        expect(getLampOf(label)).toHaveAccessibleDescription('Not supported by this browser');
 
-      await user.click(row);
-      await user.click(getLampOf('Reverb'));
-      expect(fx[0].$effects.value.reverb.added).toBe(false);
-      expect(getLampOf('Reverb')).toHaveAttribute('aria-pressed', 'false');
+        await user.click(row);
+        await user.click(getLampOf(label));
+        expect(fx[0].$effects.value[type].added).toBe(false);
+        expect(getLampOf(label)).toHaveAttribute('aria-pressed', 'false');
+      }
+    });
 
+    it('with it no effect has a warning, each can be turned on while the chain loads and once it is ready', async () => {
+      const { fx, user } = setup();
       await user.click(getRowOf('Delay'));
       expect(fx[0].$effects.value.delay.added).toBe(true);
-      expect(getRowOf('Delay')).not.toHaveClass('unavailable');
-      expect(getLampOf('Delay')).not.toHaveAttribute('aria-describedby');
+      await flush();
+      await user.click(getRowOf('Reverb'));
+      expect(fx[0].$effects.value.reverb.added).toBe(true);
+      FX_TYPES.forEach((type) => {
+        const { label } = FX_REGISTRY[type];
+        expect(getRowOf(label)).not.toHaveClass('unavailable');
+        expect(getLampOf(label)).not.toHaveAttribute('aria-describedby');
+      });
     });
 
     it('on a page that is not a secure context the warning asks for https', () => {
@@ -184,33 +216,49 @@ describe('FxList', () => {
       expect(fx[0].$effects.value.reverb.added).toBe(false);
     });
 
-    it('the fx screen works without AudioWorklet, the rack shows only the usable effects', () => {
+    it('the fx screen works without AudioWorklet, the rack shows only the usable effects: none', () => {
       withoutAudioWorklet();
       setup(<FxScreen />);
       act(() => applySnapshot({ fx: { reverb: { a: true }, delay: { a: true } } }));
-      // the delay is in the list and in the rack, the reverb only in the list
-      expect(screen.getAllByText('Delay')).toHaveLength(2);
+      // both only in the list, not in the rack
+      expect(screen.getAllByText('Delay')).toHaveLength(1);
       expect(screen.getAllByText('Reverb')).toHaveLength(1);
     });
 
-    it('a failed load says so, a click on the row loads it again and turns it on', async () => {
+    it('the rack shows the effects added once the chain can play them', async () => {
+      setup(<FxScreen />);
+      act(() => applySnapshot({ fx: { reverb: { a: true }, delay: { a: true } } }));
+      await flush();
+      // in the list and in the rack
+      expect(screen.getAllByText('Delay')).toHaveLength(2);
+      expect(screen.getAllByText('Reverb')).toHaveLength(2);
+      expect(screen.getAllByText('Chorus')).toHaveLength(1);
+    });
+
+    it('a failed load says so on every effect, a click on a row loads the chain again and turns it on', async () => {
       const addModule = failFirstWorkletLoad();
       const { fx, user } = setup();
       await flush();
       const row = getRowOf('Reverb');
-      expect(row).toHaveTextContent('Failed to load');
+      FX_TYPES.forEach((type) =>
+        expect(getRowOf(FX_REGISTRY[type].label)).toHaveTextContent('Failed to load')
+      );
       expect(getLampOf('Reverb')).toHaveAccessibleDescription('Failed to load');
       expect(row).toHaveClass('unavailable');
       expect(row).not.toHaveClass('unsupported');
 
       await user.click(row);
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
       expect(fx[0].$effects.value.reverb.added).toBe(true);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
       expect(getRowOf('Reverb')).not.toHaveTextContent('Failed to load');
       expect(getRowOf('Reverb')).toHaveClass('on');
       expect(getLampOf('Reverb')).toHaveAttribute('aria-pressed', 'true');
+      // the others came back with it, not turned on
+      expect(getRowOf('Delay')).not.toHaveTextContent('Failed to load');
+      expect(getRowOf('Delay')).not.toHaveClass('unavailable');
+      expect(fx[0].$effects.value.delay.added).toBe(false);
     });
 
     it('a failed effect that is added: Retry loads it again and keeps it added', async () => {
@@ -223,7 +271,7 @@ describe('FxList', () => {
       expect(getRowOf('Reverb')).toHaveClass('on', 'unavailable');
 
       await user.click(screen.getByRole('button', { name: 'Retry Reverb' }));
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
       expect(fx[0].$effects.value.reverb.added).toBe(true);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
@@ -240,7 +288,7 @@ describe('FxList', () => {
       await user.click(getRowOf('Reverb'));
       expect(fx[0].$effects.value.reverb.added).toBe(false);
       expect(fx[0].$status.value.reverb).toBe('failed');
-      expect(workletLoads(addModule, 'reverb')).toBe(1);
+      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(1);
       expect(getLampOf('Reverb')).toHaveAttribute('aria-pressed', 'false');
     });
 
@@ -250,10 +298,36 @@ describe('FxList', () => {
       await flush();
       screen.getByRole('button', { name: 'Retry Reverb' }).focus();
       await user.keyboard('{Enter}');
-      expect(workletLoads(addModule, 'reverb')).toBe(2);
+      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
       expect(fx[0].$effects.value.reverb.added).toBe(false);
+    });
+
+    it('an effect that failed alone inside the chain says so, the others play on; Retry makes it again', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const chainNode = recordChainNode();
+      const { fx, user } = setup();
+      act(() => applySnapshot({ fx: { reverb: { a: true }, delay: { a: true } } }));
+      await flush();
+      const node = chainNode();
+      const reverb = FX_TYPES.indexOf('reverb');
+      act(() => node.port.onmessage?.({ data: { failed: [reverb] } } as MessageEvent));
+      expect(fx[0].$status.value).toMatchObject({ reverb: 'failed', delay: 'ready' });
+      expect(getRowOf('Reverb')).toHaveTextContent('Failed to load');
+      expect(getRowOf('Reverb')).toHaveClass('on', 'unavailable');
+      expect(getRowOf('Delay')).not.toHaveClass('unavailable');
+      expect(screen.queryByRole('button', { name: 'Retry Delay' })).not.toBeInTheDocument();
+
+      node.port.postMessage.mockClear();
+      await user.click(screen.getByRole('button', { name: 'Retry Reverb' }));
+      // its unit in the core, not the module
+      expect(node.port.postMessage).toHaveBeenCalledWith({ retry: reverb });
+      act(() => node.port.onmessage?.({ data: { remade: reverb } } as MessageEvent));
+      expect(fx[0].$status.value.reverb).toBe('ready');
+      expect(fx[0].$effects.value.reverb.added).toBe(true);
+      expect(getRowOf('Reverb')).not.toHaveClass('unavailable');
+      expect(screen.queryByRole('button', { name: 'Retry Reverb' })).not.toBeInTheDocument();
     });
   });
 });

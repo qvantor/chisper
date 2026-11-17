@@ -549,11 +549,13 @@ impl Delay {
         } else {
             0.0
         };
-        let longest = max(self.time.value, self.time.target)
-            + PAN_MAX * self.sample_rate
-            + QUANTUM
-            + LOOP_LATE as f64
-            + n;
+        // (a route on Time reads a line anywhere: an echo may be as late as the line is long)
+        let time = if moves.time.is_some() {
+            self.longest
+        } else {
+            max(self.time.value, self.time.target)
+        };
+        let longest = time + PAN_MAX * self.sample_rate + QUANTUM + LOOP_LATE as f64 + n;
         if self.quiet_frames > longest && self.silent_frames > longest {
             self.forget();
         }
@@ -685,6 +687,50 @@ mod tests {
             .collect();
         assert_eq!(loud, vec![441, 441 + 569, 441 + 2 * 569]);
         assert!(out[1].iter().all(|value| *value == 0.0));
+    }
+
+    // a route that moves Time past its knob: the echo of a short sound comes after the knob moved, not after the
+    // knob (the lines are not forgotten before it); without the route the delay goes idle after its knob
+    #[test]
+    fn an_echo_a_route_moves_later_still_comes() {
+        let rate = 48000.0;
+        let frames = 48000;
+        let mut input = [vec![0.0f32; frames], vec![0.0f32; frames]];
+        for i in 0..960 {
+            input[0][i] = 0.5;
+            input[1][i] = 0.5;
+        }
+        let offsets = vec![0.4f64; 128];
+        let run = |moved: bool| {
+            let mut delay = Delay::new(rate, &[0.05, 0.0, 0.0, 0.0, 1000.0, 0.01]);
+            let mut out = [vec![0.0f32; frames], vec![0.0f32; frames]];
+            let mut idle_at = None;
+            for at in (0..frames).step_by(128) {
+                let moves = Moves {
+                    time: moved.then_some(&offsets[..]),
+                    ..Moves::default()
+                };
+                let [left, right] = &mut out;
+                delay.process(
+                    &input[0][at..at + 128],
+                    &input[1][at..at + 128],
+                    &mut left[at..at + 128],
+                    &mut right[at..at + 128],
+                    &moves,
+                );
+                if delay.idle() && idle_at.is_none() && at > 960 {
+                    idle_at = Some(at);
+                }
+            }
+            (out, idle_at)
+        };
+        let (moved, _) = run(true);
+        let echo = (0.45 * rate) as usize;
+        assert!(moved[0][..echo - 128].iter().all(|value| value.abs() < 1e-6));
+        assert!(moved[0][echo..echo + 2048].iter().any(|value| value.abs() > 0.01));
+        let (still, idle_at) = run(false);
+        assert!(still[0][2400..4800].iter().any(|value| value.abs() > 0.01));
+        assert!(idle_at.is_some());
     }
 
     // NaN or an infinity past the chain (it zeroes them, process doesn't) goes into a line: the block it would

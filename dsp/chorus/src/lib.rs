@@ -22,8 +22,6 @@
 
 extern crate alloc;
 
-use wasm_rt as _;
-
 use dsp_core::blocks::{louder, loudest, Rows, Smoothed};
 use dsp_core::simd::{F32x4, F64x2};
 use jsmath::{exp, floor, max, min, pow, sin, PI};
