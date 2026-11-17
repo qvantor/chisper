@@ -248,7 +248,7 @@ describe('the chorus against the Audio Unit', () => {
     }
   });
 
-  it('mixes by its own law, then the level', () => {
+  it('mixes by its own law, the level of the wet signal alone', () => {
     const parts = (params: Params) => {
       const [found] = tapped({ ...BOTH, ...params }, 0.005, Math.round(0.012 * RATE));
       return [
@@ -271,10 +271,11 @@ describe('the chorus against the Audio Unit', () => {
       expect(Math.abs(ownWet / wettest - wet / measuredWettest)).toBeLessThan(0.01);
     }
     const [middleDry, middleWet] = parts({ mix: 0.5 });
-    const [, measuredDry, measuredWet] = MEASURED.level.find(([knob]) => knob === 0.5) ?? [0, 0, 0];
-    for (const [knob, dry, wet] of MEASURED.level) {
+    const [, , measuredWet] = MEASURED.level.find(([knob]) => knob === 0.5) ?? [0, 0, 0];
+    // (a deliberate difference: the level of the Audio Unit is of the dry signal too, ours keeps it as it is)
+    for (const [knob, , wet] of MEASURED.level) {
       const [ownDry, ownWet] = parts({ mix: 0.5, level: knob });
-      expect(Math.abs(dB(ownDry / middleDry) - (dry - measuredDry))).toBeLessThan(0.5);
+      expect(Math.abs(dB(ownDry / middleDry))).toBeLessThan(0.01);
       expect(Math.abs(dB(ownWet / middleWet) - (wet - measuredWet))).toBeLessThan(0.5);
     }
     // the dry signal at no mix as it came (the wet one of two taps as loud as it: the gains of the filter, which

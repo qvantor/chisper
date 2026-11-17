@@ -1,12 +1,10 @@
 import { FilterType } from '@chisper/preset-schema';
 import { applySnapshot, getSnapshot } from '../../../app';
-import { createSynthCore, initModel } from '../../../../test-utils/models';
+import { createFilter } from '../../../../test-utils/models';
 import { defaultFilterRanges, rangesOf } from '../constants';
-import { filter } from './filter';
 
 const setup = () => {
-  const synthCore = createSynthCore();
-  const [model, actions] = initModel(filter({ synthCore }), 'filter', undefined);
+  const [model, actions] = createFilter();
   // the values the voices get
   const played: unknown[] = [];
   model.$voiceFilter.subscribe((value) => played.push(value));

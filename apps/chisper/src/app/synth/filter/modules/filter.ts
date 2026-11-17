@@ -3,12 +3,13 @@ import { isEqual, mapValues } from 'lodash';
 import { FilterRange, FilterRanges, FilterParams, valueScale } from '@chisper/ui-kit';
 import { ObjectBS, PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
-import { FILTER_TYPES, FilterType, isWebFilterType } from '@chisper/preset-schema';
+import { FilterType, isFilterType, isWebFilterType } from '@chisper/preset-schema';
 import { SynthCoreModule } from '../../common/modules/synth-core';
 import type { VoiceFilterOptions } from '../../common/wavetable/voice-options';
 import { urlSnapshotPlugin } from '../../../app';
 import {
   defaultFilterRanges,
+  filterDefaultsOf,
   rangesOf,
   resonanceTravelOf,
   variationDefaultOf,
@@ -22,9 +23,6 @@ interface Dependencies {
 
 export type FilterValues = Omit<FilterParams, 'type'>;
 
-// the knobs of an empty filter
-const FILTER_DEFAULTS: FilterValues = { cutoff: 440, resonance: 0, gain: 1, drive: 0, variation: 0 };
-
 // the travel of a knob (its share of the range, as the knob spreads it): Res of a type of a BiquadFilterNode (dB or a
 // Q) and of a model type (%) are other units, a change of type between the two keeps where the knob is
 const travelOf = ({ min, max, mode = 'linear' }: FilterRange) =>
@@ -33,9 +31,7 @@ const travelOf = ({ min, max, mode = 'linear' }: FilterRange) =>
 // of a snapshot: the type whose units Res is in (`rt`, one that uses it; else a Biquad LP) and what Var is (`vk`, else
 // Comp), for a type that doesn't use them
 const unitsOf = (rt: unknown): FilterType =>
-  (FILTER_TYPES as readonly unknown[]).includes(rt) && !resonanceTravelOf(rt as FilterType).disabled
-    ? (rt as FilterType)
-    : 'lowpass';
+  isFilterType(rt) && !resonanceTravelOf(rt).disabled ? rt : 'lowpass';
 const kindOf = (vk: unknown): VariationKind => (vk === 'eq' ? 'eq' : 'comp');
 
 // the filter of the voices: each note filters its oscillators (voice-filter.ts), before its volume, so its
@@ -46,7 +42,7 @@ export const filter = ({ synthCore: [{ audioCtx }] }: Dependencies) =>
     const $active = new PrimitiveBS<boolean>(false);
     const $ranges = new ObjectBS<FilterRanges>(defaultFilterRanges);
     const $filterType = new PrimitiveBS<FilterType>('lowpass');
-    const $filter = new ObjectBS<FilterValues>(FILTER_DEFAULTS);
+    const $filter = new ObjectBS<FilterValues>(filterDefaultsOf('lowpass'));
     // what Var is of the last type that used it (Comp, the Gain of the band of an EQ type): a type between two that
     // use it keeps it
     const $variationKind = new PrimitiveBS<VariationKind>('comp');
@@ -164,15 +160,14 @@ export const filter = ({ synthCore: [{ audioCtx }] }: Dependencies) =>
           try {
             if (snap.a !== undefined) $active.next(snap.a);
             // (a url snapshot skips the schema: a type this client doesn't know keeps the one it has)
-            const known = (FILTER_TYPES as readonly string[]).includes(snap.t as string);
-            const type = known ? (snap.t as FilterType) : $filterType.value;
+            const type = isFilterType(snap.t) ? snap.t : $filterType.value;
+            const defaults = filterDefaultsOf(type);
             $filter.next({
-              cutoff: snap.cut ?? FILTER_DEFAULTS.cutoff,
-              resonance: snap.res ?? FILTER_DEFAULTS.resonance,
-              gain: snap.gain ?? FILTER_DEFAULTS.gain,
-              drive: snap.dr ?? FILTER_DEFAULTS.drive,
-              // (the Gain of the band of an EQ type: 0 dB)
-              variation: snap.v ?? variationDefaultOf(type),
+              cutoff: snap.cut ?? defaults.cutoff,
+              resonance: snap.res ?? defaults.resonance,
+              gain: snap.gain ?? defaults.gain,
+              drive: snap.dr ?? defaults.drive,
+              variation: snap.v ?? defaults.variation,
             });
             // type goes after values, so the new values are clamped by the type ranges
             $filterType.next(type);

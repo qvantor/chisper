@@ -3,6 +3,9 @@
 // opens a fresh page for each run. What doesn't need a browser is computed in the Jest specs (README: what
 // moved to the specs)
 
+// (the model types of the filter as the chart has them; Node strips the types)
+import { MODEL_FILTER_TYPES } from '../../libs/math/src/filter/model.ts';
+
 // the tables the cases play (their keys in the bucket, 256 frames each)
 export const TABLES = {
   saw303: 'ESW Core Tables/Analog/ESW Analog - 303 Saw.wav',
@@ -199,32 +202,6 @@ const fxOnly = (type, values = {}) => ({
 });
 const matrixCase = (id, title, snapshot) => ({ id, group: 'matrix', title, snapshot, notes: HELD });
 
-const MODEL = [
-  'ladder6',
-  'ladder12',
-  'ladder18',
-  'ladder24',
-  'low6',
-  'low12',
-  'low18',
-  'low24',
-  'high6',
-  'high12',
-  'high18',
-  'high24',
-  'band12',
-  'band24',
-  'peak12',
-  'peak24',
-  'notch12',
-  'notch24',
-  'loweq6',
-  'loweq12',
-  'bandeq12',
-  'higheq6',
-  'higheq12',
-];
-const EQ = (type) => type.includes('eq');
 const filterCases = () => [
   matrixCase('lowpass rest', 'web lowpass at rest', {
     ...LIGHT,
@@ -239,7 +216,7 @@ const filterCases = () => [
       'filter.gain',
     ])
   ),
-  ...MODEL.flatMap((type) => {
+  ...MODEL_FILTER_TYPES.flatMap((type) => {
     const filter = { a: true, t: type, cut: 1200, res: 50, dr: 0, v: 0 };
     const knobs = ['filter.cutoff', 'filter.resonance', 'filter.drive', 'filter.var', 'filter.gain'];
     return [

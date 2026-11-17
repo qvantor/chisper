@@ -104,7 +104,7 @@ impl ModelType {
     /// the gain of FAT of its design at the resonance and the variation (0..1): 1 of a type without it (those
     /// designed by the variation and the one-poles)
     pub fn fat_of(self, resonance: f64, variation: f64) -> f64 {
-        if self.designed_by() != [true, false] {
+        if !self.has_fat() {
             return 1.0;
         }
         fat_factor(min(max(resonance, 0.0), 1.0), min(max(variation, 0.0), 1.0))
@@ -1134,20 +1134,26 @@ pub struct Coefs {
     pub sat: [[f32; 8]; 2],
 }
 
+/// the coefficients in f32 of a state variable filter of g, k and the shares of its taps (the input, the band, the
+/// low): with d = 1 + g (g + k), c = 2 g (g + k) / d, 2 g / d and 2 g² / d of the integrators, then the input, the
+/// band halved and the low halved (worked out in doubles: of a model type and of a BiquadFilterNode alike)
+#[inline(always)]
+pub fn svf_coefs(g: f64, k: f64, mix: [f64; 3]) -> [f32; 6] {
+    let d = 1.0 + g * (g + k);
+    [
+        2.0 * g * (g + k) / d,
+        2.0 * g / d,
+        2.0 * g * g / d,
+        mix[0],
+        mix[1] / 2.0,
+        mix[2] / 2.0,
+    ]
+    .map(|value| value as f32)
+}
+
 impl Coefs {
     pub fn of(design: &ModelDesign, drive: f64) -> Coefs {
-        let svf = |s: &SvfSection| {
-            let d = 1.0 + s.g * (s.g + s.k);
-            [
-                2.0 * s.g * (s.g + s.k) / d,
-                2.0 * s.g / d,
-                2.0 * s.g * s.g / d,
-                s.mix[0],
-                s.mix[1] / 2.0,
-                s.mix[2] / 2.0,
-            ]
-            .map(|value| value as f32)
-        };
+        let svf = |s: &SvfSection| svf_coefs(s.g, s.k, s.mix);
         let pole = design.pole.unwrap_or_default();
         let sat = design.sat;
         let saturation = |i: usize| {

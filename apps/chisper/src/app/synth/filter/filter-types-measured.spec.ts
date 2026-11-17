@@ -145,13 +145,13 @@ describe('the model types of the filter against the Audio Unit', () => {
 
   it('Drive is a gain of (1 + d)⁴ into the filter', () => {
     MEASURED.driveLaw.forEach(([drive, gain]) => {
-      expect(Math.abs(dB((1 + drive) ** 4) - gain)).toBeLessThan(0.05);
+      expect(Math.abs(dB(filterModel.driveGain(drive)) - gain)).toBeLessThan(0.05);
     });
   });
 
   it('the curve of Drive: its level and its odd harmonics on a sine', () => {
     // the fundamental and the third of x - x³/(3 UT²) clipped at UT, of a sine of amplitude A × (1 + d)⁴
-    const UT = 4.933;
+    const UT = filterModel.DRIVE_UT;
     const curve = (u: number) =>
       Math.abs(u) < UT ? u - (u * u * u) / (3 * UT * UT) : Math.sign(u) * ((2 * UT) / 3);
     const harmonic = (k: number, amplitude: number) => {
@@ -163,7 +163,7 @@ describe('the model types of the filter against the Audio Unit', () => {
     MEASURED.driveCurves
       .filter(([type]) => type === 'Low 12')
       .forEach(([, drive, amplitude, gain, harmonics]) => {
-        const u = amplitude * (1 + drive) ** 4;
+        const u = amplitude * filterModel.driveGain(drive);
         const [h1, h3] = [harmonic(1, u), harmonic(3, u)];
         expect(Math.abs(dB(h1 / amplitude) - gain)).toBeLessThan(0.1);
         // (a third under -100 dB: the measurement's floor)

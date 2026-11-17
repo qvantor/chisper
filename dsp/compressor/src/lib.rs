@@ -8,8 +8,9 @@
 //!   nothing here.
 //!
 //! The mix is inside: the dry signal is the sum of the bands before their gains, in phase with them (a mix outside
-//! would notch at the crossovers); then the level. Deliberate differences: the ratio stops before the limiter of the
-//! Audio Unit (another circuit, with a latency), the thresholds, ratios and dead bands of each band are its defaults.
+//! would notch at the crossovers); the level is of the compressed signal alone (at no mix the dry signal is as it
+//! came). Deliberate differences: the ratio stops before the limiter of the Audio Unit (another circuit, with a
+//! latency), the thresholds, ratios and dead bands of each band are its defaults.
 //!
 //! All of it in lanes of f32 (dsp_core::simd): the band splitting is state variable filters (a low cutoff holds
 //! in f32), four samples of the one band circuit are a lane each for its log2 and 2^x (math.rs: bits and
@@ -343,7 +344,7 @@ impl Compressor {
         let level = 4.0 * self.value(LEVEL) * self.value(LEVEL);
         let makeup = 1.0 + MAKEUP * min(max(self.value(GAIN), 0.0), 1.0);
         self.gains = Gains {
-            dry: ((1.0 - mix) * level) as f32,
+            dry: (1.0 - mix) as f32,
             wet: (mix * makeup * level) as f32,
             bands: [LOW, MID, HIGH].map(|key| pow(10.0, self.value(key) / 20.0) as f32),
         };

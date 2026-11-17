@@ -1002,16 +1002,7 @@ pub fn svf_into(
             )
         }
     };
-    let d = 1.0 + g * (g + k);
-    *out = [
-        2.0 * g * (g + k) / d,
-        2.0 * g / d,
-        2.0 * g * g / d,
-        mix[0],
-        mix[1] / 2.0,
-        mix[2] / 2.0,
-    ]
-    .map(|value| value as f32);
+    *out = filter_model::svf_coefs(g, k, mix);
     k
 }
 
@@ -1062,19 +1053,10 @@ pub fn run(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
 fn run_frozen(fade: &mut Fade, a: usize, b: usize, left: &mut [f32], right: &mut [f32]) {
     match fade.kind {
         Kind::Web(_) => {
-            let [l1, r1, l2, r2] = fade.web_state;
-            let mut ic1 = F32x4::new(l1, r1, 0.0, 0.0);
-            let mut ic2 = F32x4::new(l2, r2, 0.0, 0.0);
+            let [mut ic1, mut ic2] = web_lanes(fade.web_state);
             let c = fade.web.map(F32x4::splat);
-            for i in a..b {
-                let y = tick(&c, &mut ic1, &mut ic2, F32x4::new(left[i], right[i], 0.0, 0.0)).lanes();
-                left[i] = y[0];
-                right[i] = y[1];
-            }
-            ic1 = ic1.flush();
-            ic2 = ic2.flush();
-            let (ic1, ic2) = (ic1.lanes(), ic2.lanes());
-            fade.web_state = [ic1[0], ic1[1], ic2[0], ic2[1]];
+            web_span(&c, &mut ic1, &mut ic2, a, b, left, right);
+            fade.web_state = web_state_of(ic1, ic2);
         }
         Kind::Model(ty) => {
             let c = LaneCoefs::of(&fade.model.coefs, &fade.model.coefs);
@@ -1166,12 +1148,7 @@ fn model_span(
         right[i] = y[1];
     }
     *lanes = state;
-    if let (false, Some(last)) = (layout.drive, last) {
-        filter_model::drive_rest(c, lanes, last);
-    }
-    if !layout.sat {
-        filter_model::keep_steps(c, lanes);
-    }
+    end_span(layout, c, lanes, last);
 }
 
 #[inline(never)]
@@ -1199,29 +1176,54 @@ fn run_alone(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
         }
         return;
     }
-    let [l1, r1, l2, r2] = pass.web().0;
-    let mut ic1 = F32x4::new(l1, r1, 0.0, 0.0);
-    let mut ic2 = F32x4::new(l2, r2, 0.0, 0.0);
+    let [mut ic1, mut ic2] = web_lanes(pass.web().0);
     let mut s = pass.a;
     while s < pass.b {
         pass.step(s);
         let e = pass.next;
         let c = pass.web().1.map(F32x4::splat);
-        let (left, right) = (&mut left[..e], &mut right[..e]);
-        for i in s..e {
-            let y = tick(&c, &mut ic1, &mut ic2, F32x4::new(left[i], right[i], 0.0, 0.0)).lanes();
-            left[i] = y[0];
-            right[i] = y[1];
-        }
-        // (the tail of a filter decays: no denormals in its state)
-        ic1 = ic1.flush();
-        ic2 = ic2.flush();
+        web_span(&c, &mut ic1, &mut ic2, s, e, left, right);
         s = e;
     }
-    let (ic1, ic2) = (ic1.lanes(), ic2.lanes());
     if let Engine::Web { state, .. } = &mut pass.engine {
-        **state = [ic1[0], ic1[1], ic2[0], ic2[1]];
+        **state = web_state_of(ic1, ic2);
     }
+}
+
+// the integrators of a voice alone (lanes 0 and 1) of a filter of a BiquadFilterNode out of its state [ic1 of L and
+// R, ic2 of L and R], and back
+#[inline(always)]
+fn web_lanes([l1, r1, l2, r2]: [f32; 4]) -> [F32x4; 2] {
+    [F32x4::new(l1, r1, 0.0, 0.0), F32x4::new(l2, r2, 0.0, 0.0)]
+}
+#[inline(always)]
+fn web_state_of(ic1: F32x4, ic2: F32x4) -> [f32; 4] {
+    let (ic1, ic2) = (ic1.lanes(), ic2.lanes());
+    [ic1[0], ic1[1], ic2[0], ic2[1]]
+}
+
+// the samples s..e of a voice alone through a filter of a BiquadFilterNode, its integrators flushed after them (the
+// tail of a filter decays: no denormals in its state)
+#[inline(always)]
+fn web_span(
+    c: &[F32x4; 6],
+    ic1: &mut F32x4,
+    ic2: &mut F32x4,
+    s: usize,
+    e: usize,
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    let (left, right) = (&mut left[..e], &mut right[..e]);
+    // (the integrators in locals, as `model_span` keeps its state)
+    let (mut x1, mut x2) = (*ic1, *ic2);
+    for i in s..e {
+        let y = tick(c, &mut x1, &mut x2, F32x4::new(left[i], right[i], 0.0, 0.0)).lanes();
+        left[i] = y[0];
+        right[i] = y[1];
+    }
+    *ic1 = x1.flush();
+    *ic2 = x2.flush();
 }
 
 /// the channels of two voices of `n` samples through their filters, in place: a voice in the lanes 0 and 1, the
@@ -1375,18 +1377,8 @@ fn run_model_group(layout: Layout, passes: &mut [Pass], outs: &mut [[&mut [f32];
         }
         lanes = [first, second];
         for (pair, lanes) in lanes.iter_mut().enumerate() {
-            if !layout.drive {
-                filter_model::drive_rest(&c[pair], lanes, last[pair]);
-            }
-            if !layout.sat {
-                filter_model::keep_steps(&c[pair], lanes);
-            }
-            let ends = voices(pair).map(|voice| e == passes[voice].next);
-            if ends[0] || ends[1] {
-                let mut flushed = *lanes;
-                flushed.flush();
-                *lanes = flushed.pick(lanes, halves_of(ends));
-            }
+            end_span(layout, &c[pair], lanes, Some(last[pair]));
+            flush_halves(lanes, voices(pair).map(|voice| e == passes[voice].next));
         }
         s = e;
     }
@@ -1463,23 +1455,13 @@ fn run_model_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]
                 i += 1;
             }
             lanes = state;
-            if !layout.drive {
-                filter_model::drive_rest(&c, &mut lanes, last);
-            }
-            if !layout.sat {
-                filter_model::keep_steps(&c, &mut lanes);
-            }
+            end_span(layout, &c, &mut lanes, Some(last));
             if let Some(kept) = kept {
                 // (the lanes of the voice that played, the others as they were)
                 lanes = lanes.pick(&kept, halves_of([on_p, on_q]));
             }
             // (the state of a voice is flushed where its own span ends, as `run` does)
-            let ends = [p.active && e == p.next, q.active && e == q.next];
-            if ends[0] || ends[1] {
-                let mut flushed = lanes;
-                flushed.flush();
-                lanes = flushed.pick(&lanes, halves_of(ends));
-            }
+            flush_halves(&mut lanes, [p.active && e == p.next, q.active && e == q.next]);
         }
         s = e;
     }
@@ -1498,6 +1480,28 @@ fn fresh_steps(c: &LaneCoefs, lanes: &mut LaneState, fresh: [bool; 2]) {
         let mut steps = *lanes;
         filter_model::keep_steps(c, &mut steps);
         *lanes = steps.pick(lanes, halves_of(fresh));
+    }
+}
+
+// the end of a span of the lanes: without the curve of Drive its state takes the last input of the span (`last`: none
+// of an empty one), without the saturation the steps of the small signal
+#[inline(always)]
+fn end_span(layout: Layout, c: &LaneCoefs, lanes: &mut LaneState, last: Option<F32x4>) {
+    if let (false, Some(last)) = (layout.drive, last) {
+        filter_model::drive_rest(c, lanes, last);
+    }
+    if !layout.sat {
+        filter_model::keep_steps(c, lanes);
+    }
+}
+
+// the state of the voices of the halves whose spans end (`ends` of each half) flushed, the others' as it is
+#[inline(always)]
+fn flush_halves(lanes: &mut LaneState, ends: [bool; 2]) {
+    if ends[0] || ends[1] {
+        let mut flushed = *lanes;
+        flushed.flush();
+        *lanes = flushed.pick(lanes, halves_of(ends));
     }
 }
 

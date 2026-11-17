@@ -4,8 +4,9 @@
 //! depth × a triangle LFO (the taps of a channel half a cycle apart, the right channel a quarter ahead of the
 //! left), the delay following its target through one pole of 20 ms (so the triangle is rounded, and a knob
 //! glides). The taps of a channel × 0.5 each go through a state variable filter of two passes a sample (low or
-//! high pass, its resonance fixed), outside the feedback; the mix is inside (wet sin²(π mix / 2), dry 1 - wet²),
-//! then the level (× 4 knob²).
+//! high pass, its resonance fixed), outside the feedback, then the level (× 4 knob²); the mix is inside (wet
+//! sin²(π mix / 2), dry 1 - wet²). A deliberate difference: the level of the Audio Unit is of the dry signal too,
+//! ours of the wet one alone (at no mix what goes in comes out as it is).
 //!
 //! The lines are `Rows` of f32: four samples of time of a tap in the lanes of a read (so a group of four samples
 //! is four reads and four writes), while every delay stays over the five samples a group needs written before it;
@@ -235,7 +236,7 @@ impl Chorus {
         let knob = clamp(self.value(CUT), 20.0, 20000.0);
         let cutoff = 50.0 * pow(knob / 50.0, 0.95);
         self.gains = Gains {
-            dry: ((1.0 - wet * wet) * level) as f32,
+            dry: (1.0 - wet * wet) as f32,
             wet: (0.5 * wet * level) as f32,
             feedback: clamp(self.value(FB), 0.0, MAX_FEEDBACK) as f32,
             coefficient: min(2.0 * sin(PI * cutoff / (2.0 * rate)), MAX_COEFFICIENT),

@@ -118,6 +118,40 @@ fn the_bands_sum_to_an_allpass() {
     }
 }
 
+// the level is of the compressed signal alone: at no mix the output is the same at any level, at half a mix the
+// level moves only the compressed half
+#[test]
+fn the_level_is_of_the_compressed_signal() {
+    let input = program(20000, 5);
+    let rendered = |multi: f64, mix: f64, level: f64| {
+        let mut knobs = params(multi, 0.0);
+        knobs[THRESH] = 0.6;
+        knobs[MIX] = mix;
+        knobs[LEVEL] = level;
+        let mut compressor = Compressor::new(48000.0, &knobs);
+        render(&mut compressor, &input, &mut || BLOCK)
+    };
+    for multi in [0.0, 1.0] {
+        let dry = rendered(multi, 0.0, 0.5);
+        assert!(rms(&dry) > 0.01);
+        for level in [0.0, 0.25, 1.0] {
+            assert!(
+                bits(&rendered(multi, 0.0, level)) == bits(&dry),
+                "multi {multi}, level {level}"
+            );
+        }
+        // the compressed half at level 1 is 4 times the one at level 0.5
+        let half = rendered(multi, 0.5, 0.5);
+        let loud = rendered(multi, 0.5, 1.0);
+        let worst = (0..dry.len())
+            .map(|i| ((loud[i] - 0.5 * dry[i]) - 4.0 * (half[i] - 0.5 * dry[i])).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-5, "multi {multi}: {worst}");
+        let compressed: Vec<f32> = (0..dry.len()).map(|i| half[i] - 0.5 * dry[i]).collect();
+        assert!(rms(&compressed) > 1e-3, "multi {multi}");
+    }
+}
+
 // the gains of the bands every SPAN samples, linear between: what differs from gains worked out at every sample
 // is 30 dB under the signal and more, on a program that jumps by 60 dB (where the gains move tens of dB in a
 // millisecond)

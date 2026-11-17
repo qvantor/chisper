@@ -190,21 +190,23 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   band (the louder channel at every sample against the threshold, the reduction smoothed in dB) or three (LR4
   crossovers on state variable filters, the mean square of each band held and released, compressed down and up,
   the gains every `SPAN` samples). It mixes inside (`FxCore.mixInside`: the slot passes the core alone and gives it
-  the mix as a param, its routes with the others) and posts its meter only while watched (`FxCore.meter`,
-  `report` of `registerStereoProcessor`); its knobs keep the laws of the Audio Unit (`thresh`, `gain`, `level` are
-  knob positions, `compressor-params.ts` has their laws). Not done: its limiter at the top of the ratio.
+  the mix as a param, its routes with the others; the level is of the compressed signal alone) and posts its meter
+  only while watched (`FxCore.meter`, `report` of `registerStereoProcessor`); its knobs keep the laws of the Audio
+  Unit (`thresh`, `gain`, `level` are knob positions, `compressor-params.ts` has their laws). Not done: its limiter
+  at the top of the ratio.
 - Chorus (`dsp/chorus`, measured: `dsp/measurements/chorus.json`, `chorus-measured.spec.ts`): four taps, two a
   channel, each a line of its own fed back into itself, moved by one triangle LFO (the taps of a channel half a cycle
   apart, the channels a quarter) through a pole of 20 ms; a state variable filter of two passes a sample after them,
-  outside the feedback; the mix inside by its own law (`mixInside`), then the level. In BPM a cycle of the LFO is a
-  division (`chorusDivisions`): the main thread gives the core its Hz. Not active it has no feedback. A read of a
-  group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the first: not the bits of
-  `read4`), a sample alone its lane of that four: how a block is cut changes no sample. Deliberate differences: its
-  LFO never stops in a silence, a tap keeps the highs the one of the Audio Unit loses over 12 kHz, its phase is not
-  kept in a preset. Its screen (`chorus-screen.tsx`) draws the taps and drags their delays and the depth: the core tells
-  its LFO and the knobs of the taps as it has them (`fx_meter`, posted as the meter of the compressor is, only while
-  watched: `meter-report.ts` in the worklets, `createFxMeter` on the main thread), between two posts the main thread
-  moves the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
+  outside the feedback; the level of the wet signal alone, the mix inside by its own law (`mixInside`). In BPM a
+  cycle of the LFO is a division (`chorusDivisions`): the main thread gives the core its Hz. Not active it has no
+  feedback. A read of a group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the
+  first: not the bits of `read4`), a sample alone its lane of that four: how a block is cut changes no sample.
+  Deliberate differences: its level is not of the dry signal, its LFO never stops in a silence, a tap keeps the
+  highs the one of the Audio Unit loses over 12 kHz, its phase is not kept in a preset. Its screen
+  (`chorus-screen.tsx`) draws the taps and drags their delays and the depth: the core tells its LFO and the knobs of
+  the taps as it has them (`fx_meter`, posted as the meter of the compressor is, only while watched:
+  `meter-report.ts` in the worklets, `createFxMeter` on the main thread), between two posts the main thread moves
+  the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
 - Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
   destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
   module fails, the app works without that effect; until `ready` a slot passes only the dry signal.
