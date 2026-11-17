@@ -2,8 +2,8 @@
 // load, the test hook of the perf build (window.__chisperPerf) driven from Node
 import fs from 'fs';
 import path from 'path';
-import { fileName, WAVETABLES_ORIGIN } from '../bench-common.mjs';
-import { SCENE_RATE, sleep, tablesDir } from './util.mjs';
+import { fileName, NOISES_ORIGIN, WAVETABLES_ORIGIN } from '../bench-common.mjs';
+import { noisesDir, SCENE_RATE, sleep, tablesDir } from './util.mjs';
 
 // headed by default: the audio output of headless Chromium is muted (its callbacks and latency are not real);
 // a headless Chromium is the same binary (channel 'chromium', not the headless shell): its processes are found
@@ -56,10 +56,12 @@ export const openPage = async (
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url());
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue();
-    if (url.origin !== WAVETABLES_ORIGIN) return route.abort();
-    // a table from the domain of its bucket: the one downloaded (the page is cross-origin isolated, a CORS
-    // response passes; a tree from before the domains asks the functions of the server, site.mjs)
-    const file = path.join(tablesDir, fileName(decodeURIComponent(url.pathname)));
+    const dir =
+      url.origin === WAVETABLES_ORIGIN ? tablesDir : url.origin === NOISES_ORIGIN ? noisesDir : null;
+    if (!dir) return route.abort();
+    // a table (or a noise sample) from the domain of its bucket: the one downloaded (the page is cross-origin
+    // isolated, a CORS response passes; a tree from before the domains asks the functions of the server, site.mjs)
+    const file = path.join(dir, fileName(decodeURIComponent(url.pathname)));
     const headers = { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
     return fs.existsSync(file)
       ? route.fulfill({ status: 200, headers, contentType: 'audio/wav', body: fs.readFileSync(file) })

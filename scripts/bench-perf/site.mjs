@@ -5,8 +5,8 @@
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
-import { downloadTables as download, fileName } from '../bench-common.mjs';
-import { appDir, exec, out, require, root, siteDir, sourceStamp, tablesDir } from './util.mjs';
+import { downloadTables as download, fileName, NOISES_ORIGIN } from '../bench-common.mjs';
+import { appDir, exec, noisesDir, out, require, root, siteDir, sourceStamp, tablesDir } from './util.mjs';
 
 const probeFile = path.join(out, 'perf/probe.js');
 const stampFile = path.join(out, 'site-stamp.txt');
@@ -14,6 +14,9 @@ const stampFile = path.join(out, 'site-stamp.txt');
 // the tables of the cases, once; those bench-osc has downloaded are copied
 export const downloadTables = (keys) =>
   download(keys, tablesDir, { cacheDirs: [path.join(root, 'tmp/bench-osc/tables')] });
+
+// the noise samples of a case (a preset with its noise on), once, from the domain of their bucket
+export const downloadNoises = (keys) => download(keys, noisesDir, { origin: NOISES_ORIGIN });
 
 // the perf build (`npm run build:perf`), again only when the app, the libs or the dependencies changed
 export const buildSite = async ({ force = false } = {}) => {
@@ -61,8 +64,8 @@ const TYPES = {
   '.txt': 'text/plain',
 };
 
-// the tree of the wavetables list (get-wavetables-list) of the served tables
-const tableTree = (keys) => {
+// the tree of the list of the served files (get-wavetables-list, get-noises-list)
+const fileTree = (keys, dir) => {
   const roots = [];
   for (const key of keys) {
     const folders = key.split('/').slice(0, -1);
@@ -72,7 +75,7 @@ const tableTree = (keys) => {
       if (!folder) level.push((folder = { name, children: [] }));
       level = folder.children;
     }
-    const file = path.join(tablesDir, fileName(key));
+    const file = path.join(dir, fileName(key));
     level.push({ Key: key, Size: fs.existsSync(file) ? fs.statSync(file).size : 0 });
   }
   return roots;
@@ -87,8 +90,9 @@ const HEADERS = {
 };
 
 // the server of a run, on a free port of localhost: a perf build (`site`: the one of the working tree, or of the
-// reference of an A/B run), its probe (`probe`, buildProbe) and the tables
-export const serve = ({ keys, site = siteDir, probe = probeFile }) =>
+// reference of an A/B run), its probe (`probe`, buildProbe), the tables and the noise samples (`noises`: the
+// keys of a case that plays one, none for the scenes: they play it off)
+export const serve = ({ keys, noises = [], site = siteDir, probe = probeFile }) =>
   new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, 'http://localhost');
@@ -98,9 +102,9 @@ export const serve = ({ keys, site = siteDir, probe = probeFile }) =>
       };
       if (url.pathname.startsWith('/api/')) return send(404);
       if (url.pathname === '/.netlify/functions/get-wavetables-list')
-        return send(200, JSON.stringify(tableTree(keys)), TYPES['.json']);
-      // (no sample of the noise: the scenes play it off)
-      if (url.pathname === '/.netlify/functions/get-noises-list') return send(200, '[]', TYPES['.json']);
+        return send(200, JSON.stringify(fileTree(keys, tablesDir)), TYPES['.json']);
+      if (url.pathname === '/.netlify/functions/get-noises-list')
+        return send(200, JSON.stringify(fileTree(noises, noisesDir)), TYPES['.json']);
       // (the link of a table of a tree from before the domains of the buckets, an A/B reference)
       if (url.pathname === '/.netlify/functions/get-wavetable') {
         const id = url.searchParams.get('id') ?? '';

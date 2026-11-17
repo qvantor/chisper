@@ -3,6 +3,8 @@
 // opens a fresh page for each run. What doesn't need a browser is computed in the Jest specs (README: what
 // moved to the specs)
 
+import fs from 'fs';
+import path from 'path';
 // (the model types of the filter as the chart has them; Node strips the types)
 import { MODEL_FILTER_TYPES } from '../../libs/math/src/filter/model.ts';
 
@@ -348,9 +350,30 @@ export const LATENCY_CASES = [
   },
 ];
 
-// the cases of a run: all of them, or those --only names (ids, or the groups cpu and latency)
-export const selectCases = ({ only }) => {
-  const all = [...CPU_CASES, ...LATENCY_CASES];
+// a preset of a database as a case (--preset=<file>: its `data`, as `select data from presets` gives it): the 12
+// notes held through it, a CPU case as S5. The id is P1; a tree that can't take its snapshot fails the case
+export const presetCase = (file) => {
+  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return {
+    id: 'P1',
+    group: 'cpu',
+    title: `the preset ${path.basename(file)}, 12 notes`,
+    snapshot,
+    notes: HELD,
+  };
+};
+
+// the files a snapshot plays: the keys of its tables (the oscillators, off or on: an oscillator that is off still
+// loads its table) and of its noise sample
+export const snapshotFiles = (snapshot) => ({
+  tables: ['osc1', 'osc2'].map((name) => snapshot[name]?.p?.at(-1)).filter(Boolean),
+  noises: [snapshot.noise?.p?.at(-1)].filter(Boolean),
+});
+
+// the cases of a run: all of them, or those --only names (ids, or the groups cpu and latency); `preset`: the file
+// of the preset case, which comes after them
+export const selectCases = ({ only, preset }) => {
+  const all = [...CPU_CASES, ...(preset ? [presetCase(preset)] : []), ...LATENCY_CASES];
   if (only === 'matrix') {
     const match = process.env.MATRIX_MATCH && new RegExp(process.env.MATRIX_MATCH);
     return match ? MATRIX_CASES.filter(({ id }) => match.test(id)) : MATRIX_CASES;

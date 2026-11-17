@@ -5,7 +5,7 @@
 //   npx -y -p playwright@1.50.1 node scripts/bench-perf/run.mjs [--against=<ref>] [--browsers=chromium,webkit]
 //     [--only=S5,L1,L3,dsp|cpu|latency] [--dsp=reverb,chord] [--runs=5] [--update-baseline] [--headless]
 //     [--keep-traces]
-//     [--dump-trace] [--rebuild]
+//     [--dump-trace] [--rebuild] [--preset=<file of the data of a preset: case P1>]
 // --against: an A/B run, the code of the commit <ref> (main, HEAD: the uncommitted changes) and the working tree
 // alternate in one session; only its regressions fail (a baseline of another session only warns of drift)
 import fs from 'fs';
@@ -22,8 +22,8 @@ import { runDspBenchmarks } from './dsp.mjs';
 import { runLatencyCase } from './latency.mjs';
 import { prepareReference } from './reference.mjs';
 import { evaluate, loadBaseline, summarizeCpu, updateBaseline, writeReport } from './report.mjs';
-import { clipSteps, selectCases, TABLES } from './scenes.mjs';
-import { buildProbe, buildSite, downloadTables, serve } from './site.mjs';
+import { clipSteps, presetCase, selectCases, snapshotFiles, TABLES } from './scenes.mjs';
+import { buildProbe, buildSite, downloadNoises, downloadTables, serve } from './site.mjs';
 import {
   fixed,
   git,
@@ -243,7 +243,8 @@ const runCpuCase = async ({ launched, origins, kase }) => {
 
 const main = async () => {
   const started = Date.now();
-  const cases = selectCases({ only: args.only });
+  const preset = args.preset ? path.resolve(args.preset) : null;
+  const cases = selectCases({ only: args.only, preset });
   const dsp = !args.only || args.only.split(',').includes('dsp');
   const [machineInfo, gitInfo, pre] = await Promise.all([machine(), git(), preflight()]);
   pre.issues.forEach((issue) => console.log(`preflight: ${issue}`));
@@ -270,12 +271,17 @@ const main = async () => {
     }
     if (cases.length) {
       const playwright = loadPlaywright();
-      const keys = Object.values(TABLES);
+      const files = preset ? snapshotFiles(presetCase(preset).snapshot) : { tables: [], noises: [] };
+      const keys = [...new Set([...Object.values(TABLES), ...files.tables])];
+      const { noises } = files;
       await downloadTables(keys);
+      await downloadNoises(noises);
       await buildSite({ force: args.rebuild === 'true' });
-      const servers = [await serve({ keys })];
+      const servers = [await serve({ keys, noises })];
       if (reference)
-        servers.push(await serve({ keys, site: reference.siteDir, probe: await buildProbe(reference.dir) }));
+        servers.push(
+          await serve({ keys, noises, site: reference.siteDir, probe: await buildProbe(reference.dir) })
+        );
       const [current, other] = servers.map(({ port }) => `http://localhost:${port}/`);
       const origins = { current, reference: other ?? null };
       try {
