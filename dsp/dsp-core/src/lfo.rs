@@ -353,6 +353,8 @@ pub struct LfoBlock {
     out: f64,
     // the frame of the last point (NaN: none yet)
     last: f64,
+    // no note runs it (free())
+    noteless: bool,
     coefficients: [Coefficient; 3],
     next_coefficient: usize,
     flat_until: f64,
@@ -372,6 +374,7 @@ impl LfoBlock {
             delta: 0.0,
             out: f64::NAN,
             last: f64::NAN,
+            noteless: false,
             coefficients: [Coefficient {
                 smooth: f64::NAN,
                 frames: f64::NAN,
@@ -400,7 +403,26 @@ impl LfoBlock {
         self.delta = 0.0;
         self.out = f64::NAN;
         self.last = f64::NAN;
+        self.noteless = false;
         self.flat_until = f64::NEG_INFINITY;
+    }
+
+    /// no note: on the clock, its Delay and Rise passed (the knobs of the effects without a note)
+    pub fn free(&mut self) {
+        self.start = f64::NEG_INFINITY;
+        self.restart = f64::INFINITY;
+        self.t_d = f64::NEG_INFINITY;
+        self.phase_d = 0.0;
+        self.delta = 0.0;
+        self.out = f64::NAN;
+        self.last = f64::NAN;
+        self.noteless = true;
+        self.flat_until = f64::NEG_INFINITY;
+    }
+
+    /// the frame of its last point (NaN: none yet) and its level there
+    pub fn last(&self) -> (f64, f64) {
+        (self.last, self.out)
     }
 
     /// it starts again at `frame` (mono: the envelopes start again there): its Delay and Rise again, retrig its
@@ -481,7 +503,7 @@ impl LfoBlock {
             }
         }
         let clock = lfo.clock(t);
-        let theta = if knobs.mode == FREE {
+        let theta = if self.noteless || knobs.mode == FREE {
             clock + self.delta
         } else {
             clock - self.phase_d + self.delta

@@ -1,4 +1,4 @@
-import bytes from '@chisper/wasm/chorus.wasm';
+import bytes from '@chisper/wasm/chain.wasm';
 import { CHORUS_PROCESSOR } from '../../common/processors';
 import { prewarmStereo } from '../../common/wasm/stereo-core';
 import { instantiateCore } from '../../common/wasm/wasm-core';

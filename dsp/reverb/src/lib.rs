@@ -1,9 +1,7 @@
 //! The reverb (the tables of reverb-decay.ts and reverb-era.ts of the app; the goldens hold its sound): a 16-line
 //! FDN with early reflections, input diffusion and the input stage of the eras. The input stage runs in doubles,
 //! both channels in the lanes; the lines, their allpasses and shelves and the early reflections in f32, four lines
-//! in the lanes (their delays in doubles). The C ABI of a stereo core (fx_new, fx_buffers, fx_process, fx_free) and
-//! fx_set, fx_set_active, fx_clear, fx_idle; the params of fx_new and fx_set come through fx_command
-//! (reverb-wasm.ts wraps it)
+//! in the lanes (their delays in doubles). A unit of the chain core (dsp/chain)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -14,7 +12,6 @@ use wasm_rt as _;
 
 use dsp_core::biquad::{Biquad, FilterType};
 use dsp_core::blocks::{peak, Lines, Rows, Smoothed, StereoDelayLine, StereoFixedAllpass};
-use dsp_core::io::StereoIo;
 use dsp_core::simd::{F32x4, F64x2};
 use dsp_core::stereo::{QuadBiquad, StereoBiquad};
 use dsp_core::tanh::tanh4;
@@ -281,7 +278,6 @@ pub struct Reverb {
     // (the spec of the crate: every sample a chunk of its own, what the chunks are held to)
     #[cfg(test)]
     sample_by_sample: bool,
-    pub io: StereoIo,
 }
 
 /// the most samples of a chunk of a block (process)
@@ -388,7 +384,6 @@ impl Reverb {
             }),
             #[cfg(test)]
             sample_by_sample: false,
-            io: StereoIo::default(),
         };
         reverb.update_input();
         reverb.update_decay();
@@ -735,7 +730,7 @@ impl Reverb {
         }
         let output_peak = max(output_peak.lo(), output_peak.hi());
 
-        // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
+        // the last line: a block that isn't finite (its input is: the chain; NaN through a path no one saw) would
         // stay in the lines until the reverb is off: forgotten, the block is silence
         if output_peak.is_nan() || output_peak > f32::MAX as f64 {
             self.clear();
@@ -758,94 +753,6 @@ impl Reverb {
             self.idle = true;
         }
     }
-
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        // (NaN or an infinity of the graph as 0: one would stay in the lines until the reverb is off)
-        io.finite_inputs();
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
-}
-
-// the params of fx_new ([active, ...PARAMS]) and fx_set ([count, key, value, …]), written by the JS wrapper
-static mut COMMAND: [f64; 2 * PARAMS + 2] = [0.0; 2 * PARAMS + 2];
-
-fn command() -> &'static [f64; 2 * PARAMS + 2] {
-    // SAFETY: one thread (the audio thread of the scope); the wrapper writes it right before the call reading it
-    unsafe { &*core::ptr::addr_of!(COMMAND) }
-}
-
-/// the buffer the wrapper writes the params of fx_new and fx_set into
-#[no_mangle]
-pub extern "C" fn fx_command() -> *mut f64 {
-    core::ptr::addr_of_mut!(COMMAND) as *mut f64
-}
-
-/// a reverb at the rate of the context, its options in the command buffer: active, then the params
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Reverb {
-    let command = command();
-    let params: [f64; PARAMS] = core::array::from_fn(|key| command[1 + key]);
-    Box::into_raw(Box::new(Reverb::new(sample_rate, &params, command[0] != 0.0)))
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(reverb: *mut Reverb) {
-    drop(Box::from_raw(reverb));
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(reverb: *mut Reverb, frames: usize) -> *mut f32 {
-    (*reverb).io.reserve(frames)
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(reverb: *mut Reverb) {
-    (*reverb).process_io();
-}
-
-/// the params changed, in the command buffer: their count, then key and value of each
-///
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set(reverb: *mut Reverb, routed: bool) {
-    let command = command();
-    let count = (command[0] as usize).min(PARAMS);
-    let mut changes = [(0usize, 0.0f64); PARAMS];
-    for (i, change) in changes.iter_mut().enumerate().take(count) {
-        *change = (command[1 + 2 * i] as usize, command[2 + 2 * i]);
-    }
-    (*reverb).set(&changes[..count], routed);
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set_active(reverb: *mut Reverb, active: bool) {
-    (*reverb).set_active(active);
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(reverb: *mut Reverb) {
-    (*reverb).forget();
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(reverb: *mut Reverb) -> bool {
-    (*reverb).idle()
 }
 
 #[cfg(test)]
@@ -855,7 +762,7 @@ mod tests {
 
     const BLOCK: usize = 128;
 
-    // NaN or an infinity past the io (process_io zeroes them, process doesn't): its block is silence, the lines
+    // NaN or an infinity past the chain (it zeroes them, process doesn't): its block is silence, the lines
     // forget it, the next blocks sound, a silence drains
     #[test]
     fn a_block_that_is_not_finite_is_forgotten() {

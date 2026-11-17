@@ -1,9 +1,10 @@
 # the DSP of the audio worklets in Rust → wasm32 (scripts/wasm.mjs, `npm run wasm`): one .wasm per worklet
-# bundle, the JS of a worklet only wraps its processor. jsmath and dsp-core are shared; every value is worked out
+# bundle (the chain: the effects, the master and the limiter; the oscillator), the JS of a worklet only wraps its
+# processor. jsmath and dsp-core are shared; every value is worked out
 # as the TS cores do it (the specs compare the bits)
 [workspace]
 resolver = "2"
-members = ["jsmath", "jsmath-check", "wasm-rt", "dsp-core", "limiter", "reverb", "distortion", "compressor", "chorus", "wavetable-osc"]
+members = ["jsmath", "jsmath-check", "wasm-rt", "dsp-core", "limiter", "reverb", "distortion", "compressor", "chorus", "chain", "wavetable-osc"]
 
 [workspace.package]
 version = "0.1.0"

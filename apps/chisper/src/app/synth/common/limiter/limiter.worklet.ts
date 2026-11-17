@@ -1,4 +1,4 @@
-import bytes from '@chisper/wasm/limiter.wasm';
+import bytes from '@chisper/wasm/chain.wasm';
 import { registerStereoProcessor } from '../../fx/effects/stereo-processor';
 import { LIMITER_PROCESSOR } from '../processors';
 import { prewarmStereo } from '../wasm/stereo-core';

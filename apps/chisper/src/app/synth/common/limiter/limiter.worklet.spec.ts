@@ -14,7 +14,7 @@ describe('limiter wasm worklet', () => {
   it('registers the limiter processor with the Rust core at the context rate', () => {
     expect(processors[LIMITER_PROCESSOR]).toBeDefined();
     const processor = new processors[LIMITER_PROCESSOR]({});
-    const node = createLimiterWasm(wasmCore<LimiterExports>('limiter'), 44100);
+    const node = createLimiterWasm(wasmCore<LimiterExports>('chain'), 44100);
     const input = block((i) => 0.5 * Math.sin(i / 3));
     const [outL, outR, nodeL, nodeR] = [0, 1, 2, 3].map(() => new Float32Array(128));
     for (let i = 0; i < 4; i++) {

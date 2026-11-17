@@ -1,8 +1,8 @@
-import { paramsCore, ParamsCoreExports } from '../../common/wasm/stereo-core';
+import { paramsCore, UNIT, UnitExports } from '../../common/wasm/stereo-core';
 import type { CompressorDspParams, CompressorOptions } from './compressor-params';
 import type { CompressorMeterValues } from './compressor-params';
 
-// the Rust core of the compressor (dsp/compressor, compressor.wasm): a highpass, then one band (the louder channel
+// the Rust core of the compressor (dsp/compressor, a unit of chain.wasm): a highpass, then one band (the louder channel
 // against the threshold, the reduction smoothed by the attack and the release) or three (crossovers, the mean
 // square of each band compressed down and up), the mix inside, the level
 
@@ -24,10 +24,7 @@ export const COMPRESSOR_KEYS: readonly (keyof CompressorDspParams)[] = [
   'mix',
 ];
 
-export interface CompressorExports extends ParamsCoreExports {
-  // writes the meter into the first values of the buffer of the params
-  fx_meter: (handle: number) => void;
-}
+export type CompressorExports = UnitExports;
 
 export const createCompressorWasm = (
   exports: CompressorExports,
@@ -36,6 +33,7 @@ export const createCompressorWasm = (
 ) => {
   const { dsp, handle, command } = paramsCore<keyof CompressorDspParams>(
     exports,
+    UNIT.compressor,
     sampleRate,
     COMPRESSOR_KEYS,
     params
@@ -48,7 +46,7 @@ export const createCompressorWasm = (
     // the gains of the bands and the peak of the input of the last block (its values hold until the next call:
     // who keeps them copies them)
     meter: (): CompressorMeterValues => {
-      exports.fx_meter(handle);
+      exports.unit_meter(handle);
       const buffer = command();
       gains[0] = buffer[0];
       gains[1] = buffer[1];

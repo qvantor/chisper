@@ -11,7 +11,7 @@ const PARAM_KEYS = Object.keys(FX_PARAMS.distortion).sort();
 
 const SAMPLE_RATE = 48000;
 const BLOCK = 128;
-const core = wasmCore<DistortionExports>('distortion');
+const core = wasmCore<DistortionExports>('chain');
 
 // dB of a preset against the dry sound for the reference sine (a note at the fx input), mixed like the fx
 // slot mixes the distortion: linearly, with the dry signal delayed by the latency

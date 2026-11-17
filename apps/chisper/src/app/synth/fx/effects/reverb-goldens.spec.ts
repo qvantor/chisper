@@ -21,7 +21,7 @@ import { createReverbWasm, REVERB_KEYS, ReverbExports } from './reverb-wasm';
 // the Rust core of the reverb (dsp/reverb): the bits of every output sample of every block on the golden scenarios
 // (their hashes in dsp/goldens/reverb.json), and random ones: finite
 
-const core = wasmCore<ReverbExports>('reverb');
+const core = wasmCore<ReverbExports>('chain');
 const goldens = createGoldens('reverb');
 afterAll(() => goldens.save());
 

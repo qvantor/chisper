@@ -23,8 +23,8 @@ import { createOnsetDetector, PROBE_DEFAULTS } from './probe-dsp';
 const BLOCK = 128;
 const RATES = [44100, 48000, 96000];
 // the Rust cores, an instance each for the spec (a scope)
-const limiterCore = wasmCore<LimiterExports>('limiter');
-const distortionCore = wasmCore<DistortionExports>('distortion');
+const limiterCore = wasmCore<LimiterExports>('chain');
+const distortionCore = wasmCore<DistortionExports>('chain');
 const createLimiterDsp = (rate: number) => createLimiterWasm(limiterCore, rate);
 // the latency of the oversampler of the distortion: half of it is its interpolation, half its decimation
 const OVERSAMPLER_LATENCY = DISTORTION_LATENCY;

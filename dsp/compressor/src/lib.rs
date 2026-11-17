@@ -15,8 +15,7 @@
 //! All of it in lanes of f32 (dsp_core::simd): the band splitting is state variable filters (a low cutoff holds
 //! in f32), four samples of the one band circuit are a lane each for its log2 and 2^x (math.rs: bits and
 //! polynomials, no jsmath in a sample), the three bands are the lanes of one detector, their gain worked out every
-//! SPAN samples and linear between. A fade between the circuits runs both. The C ABI of a stereo core and fx_set,
-//! fx_clear, fx_idle, fx_meter; the params of fx_new and fx_set come through fx_command (compressor-wasm.ts)
+//! SPAN samples and linear between. A fade between the circuits runs both. A unit of the chain core (dsp/chain)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
@@ -24,11 +23,10 @@ extern crate alloc;
 
 pub mod math;
 
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 use wasm_rt as _;
 
 use dsp_core::blocks::{louder, loudest, Smoothed};
-use dsp_core::io::StereoIo;
 use dsp_core::simd::{F32x4, U32x4};
 use jsmath::{cos, exp, log10, log2, max, min, pow, sin, PI, SQRT2};
 use math::{exp2, log2 as log2_lanes};
@@ -236,7 +234,6 @@ pub struct Compressor {
     meter: Meter,
     #[cfg(test)]
     every_sample: bool,
-    pub io: StereoIo,
 }
 
 // a param as it is kept: the mode is 0 or 1
@@ -279,7 +276,6 @@ impl Compressor {
             meter: Meter::default(),
             #[cfg(test)]
             every_sample: false,
-            io: StereoIo::default(),
         };
         compressor.grow(BLOCK);
         compressor.update();
@@ -294,8 +290,14 @@ impl Compressor {
         self.meter
     }
 
-    // the buffers of blocks of `frames` (allocates: not while a block renders)
-    fn grow(&mut self, frames: usize) {
+    /// a block of silence while idle, nothing rendered: the meter at rest (what `process` does then)
+    pub fn rest(&mut self) {
+        self.meter.input = 0.0;
+        self.meter.gains = [0.0; 3];
+    }
+
+    /// the buffers of blocks of `frames` (allocates: not while a block renders)
+    pub fn grow(&mut self, frames: usize) {
         for buffer in self.work.iter_mut() {
             if buffer.len() < frames {
                 *buffer = vec![0.0; frames];
@@ -710,7 +712,7 @@ impl Compressor {
             single * (1.0 - share) + bands * share
         });
 
-        // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
+        // the last line: a block that isn't finite (its input is: the chain; NaN through a path no one saw) would
         // stay in the state for good: forgotten, the block is silence
         let output = louder(loudest(out_l), loudest(out_r));
         if !output.is_finite() {
@@ -725,103 +727,6 @@ impl Compressor {
         if self.quiet_frames > n && output < SILENCE && self.rested() {
             self.forget();
         }
-    }
-
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        // (NaN or an infinity of the graph as 0: one would silence the effect for good)
-        io.finite_inputs();
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
-}
-
-// the params of fx_new and of fx_set in the order of the keys, after the bits of the keys fx_set changes (1 << key),
-// written by the JS wrapper; fx_meter writes what it shows into its first values
-static mut COMMAND: [f64; PARAMS + 1] = [0.0; PARAMS + 1];
-
-fn command() -> (u32, [f64; PARAMS]) {
-    // SAFETY: one thread (the audio thread of the scope); the wrapper writes it right before the call reading it
-    let command = unsafe { *core::ptr::addr_of!(COMMAND) };
-    (command[0] as u32, core::array::from_fn(|key| command[1 + key]))
-}
-
-#[no_mangle]
-pub extern "C" fn fx_command() -> *mut f64 {
-    core::ptr::addr_of_mut!(COMMAND) as *mut f64
-}
-
-/// a compressor at the rate of the context, its params in the command buffer
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Compressor {
-    Box::into_raw(Box::new(Compressor::new(sample_rate, &command().1)))
-}
-
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(compressor: *mut Compressor) {
-    drop(Box::from_raw(compressor));
-}
-
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(compressor: *mut Compressor, frames: usize) -> *mut f32 {
-    let compressor = &mut *compressor;
-    // the block buffers grow here, not while it renders
-    compressor.grow(frames);
-    compressor.io.reserve(frames)
-}
-
-/// # Safety
-/// `compressor` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(compressor: *mut Compressor) {
-    (*compressor).process_io();
-}
-
-/// the params that changed, in the command buffer
-///
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set(compressor: *mut Compressor) {
-    let (present, changes) = command();
-    (*compressor).set(present, &changes);
-}
-
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(compressor: *mut Compressor) {
-    (*compressor).forget();
-}
-
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(compressor: *mut Compressor) -> bool {
-    (*compressor).idle()
-}
-
-/// the meter into the command buffer: the gains of the three bands (dB), the peak of the input
-///
-/// # Safety
-/// `compressor` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_meter(compressor: *mut Compressor) {
-    let meter = (*compressor).meter();
-    let values = [
-        meter.gains[0] as f64,
-        meter.gains[1] as f64,
-        meter.gains[2] as f64,
-        meter.input as f64,
-    ];
-    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
-    for (k, value) in values.iter().enumerate() {
-        *command.add(k) = *value;
     }
 }
 

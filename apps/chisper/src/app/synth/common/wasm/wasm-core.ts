@@ -13,8 +13,8 @@ export interface CoreExports {
 // the calls of a block, guarded where they are called (no closure per block: stereo-core.ts,
 // wavetable-osc-wasm.ts), and a getter read every block (it reads a field: it can't trap)
 const UNGUARDED = new Set([
-  'fx_process',
-  'fx_buffers',
+  'unit_process',
+  'unit_buffers',
   'osc_voice_process',
   'osc_io',
   'osc_voice_started_at',

@@ -1,13 +1,30 @@
 import { CoreExports, createView } from './wasm-core';
 
-// the C ABI of the stereo cores (dsp/limiter, dsp/reverb, dsp/distortion): fx_buffers reserves a block of
-// `frames` (inL, inR, outL, outR one after another), fx_process renders it, fx_clear forgets the sound before
-export interface StereoCoreExports extends CoreExports {
-  fx_buffers: (handle: number, frames: number) => number;
-  fx_process: (handle: number) => void;
-  fx_clear: (handle: number) => void;
-  fx_free: (handle: number) => void;
+// the kinds of the units of the chain core (dsp/chain/src/units.rs): the effects in the order of FX_TYPES, then
+// the limiter
+export const UNIT = { distortion: 0, chorus: 1, delay: 2, compressor: 3, reverb: 4, limiter: 5 } as const;
+
+// the C ABI of an effect alone in the chain core (dsp/chain): unit_new makes one of a kind (its options in the
+// buffer of unit_command: active, then its params in the order of its keys), unit_buffers reserves a block of
+// `frames` (inL, inR, outL, outR one after another), unit_process renders it, unit_set changes the params of the
+// bits of the first value of the buffer (1 << key), unit_clear forgets the sound before, unit_meter writes what a
+// screen draws into the buffer
+export interface UnitExports extends CoreExports {
+  unit_command: () => number;
+  unit_new: (kind: number, sampleRate: number) => number;
+  unit_buffers: (handle: number, frames: number) => number;
+  unit_process: (handle: number) => void;
+  unit_set: (handle: number, routed: boolean) => void;
+  unit_set_active: (handle: number, active: boolean) => void;
+  unit_clear: (handle: number) => void;
+  unit_idle: (handle: number) => number;
+  unit_latency: (handle: number) => number;
+  unit_meter: (handle: number) => number;
+  unit_free: (handle: number) => void;
 }
+
+// the buffer of unit_command: the flag or the bits, then the params
+const COMMAND = 17;
 
 // copies `source` into the block, a shorter one padded with NaN (the TS cores read undefined there)
 const copyIn = (target: Float32Array, source: Float32Array) => {
@@ -21,7 +38,7 @@ const copyIn = (target: Float32Array, source: Float32Array) => {
 // process() of the StereoDsp of a core (stereo-processor.ts): the inputs into its memory, the block rendered, the
 // outputs out of it; clear() empties its state (a preset switch: the next sound starts at the params as they are
 // then); free() frees its handle (the processor is stopped)
-export const stereoCore = (exports: StereoCoreExports, handle: number) => {
+export const stereoCore = (exports: UnitExports, handle: number) => {
   // a view per channel: no array is created per block
   const [viewInL, viewInR, viewOutL, viewOutR] = [0, 1, 2, 3].map(() => createView(exports));
   let freed = false;
@@ -29,14 +46,14 @@ export const stereoCore = (exports: StereoCoreExports, handle: number) => {
     process: (inL: Float32Array, inR: Float32Array, outL: Float32Array, outR: Float32Array) => {
       const frames = outL.length;
       const bytes = 4 * frames;
-      // (guarded here, not by instantiateCore: no closure per block; fx_buffers grows the block)
+      // (guarded here, not by instantiateCore: no closure per block; unit_buffers grows the block)
       const stack = exports.__stack_pointer.value;
       let at: number;
       try {
-        at = exports.fx_buffers(handle, frames);
+        at = exports.unit_buffers(handle, frames);
         copyIn(viewInL(at, frames), inL);
         copyIn(viewInR(at + bytes, frames), inR);
-        exports.fx_process(handle);
+        exports.unit_process(handle);
       } catch (error) {
         exports.__stack_pointer.value = stack;
         throw error;
@@ -45,42 +62,37 @@ export const stereoCore = (exports: StereoCoreExports, handle: number) => {
       outL.set(viewOutL(at + 2 * bytes, frames));
       outR.set(viewOutR(at + 3 * bytes, frames));
     },
-    clear: () => exports.fx_clear(handle),
+    clear: () => exports.unit_clear(handle),
     free: () => {
       if (freed) return;
       freed = true;
-      exports.fx_free(handle);
+      exports.unit_free(handle);
     },
   };
 };
 
-// a stereo core with keyed params (dsp/distortion, dsp/compressor, dsp/chorus)
-export interface ParamsCoreExports extends StereoCoreExports {
-  // the buffer of the params of fx_new and fx_set: the bits of the keys fx_set changes, then the params
-  fx_command: () => number;
-  fx_new: (sampleRate: number) => number;
-  fx_set: (handle: number) => void;
-  fx_idle: (handle: number) => number;
-}
-
-// the dsp of a core of `params` (`keys` in its order): set() changes those given, idle says it has nothing to play;
-// its `handle` and `command` (its buffer) for what else it exports
+// the dsp of a unit of `kind` with `params` (`keys` in its order; `active` is of the reverb): set() changes those
+// given (`routed`: a route moves them), idle says it has nothing to play; its `handle` and `command` (its buffer)
+// for what else it exports
 export const paramsCore = <K extends string>(
-  exports: ParamsCoreExports,
+  exports: UnitExports,
+  kind: number,
   sampleRate: number,
   keys: readonly K[],
-  params: Record<K, number>
+  params: Record<K, number>,
+  active = true
 ) => {
   const view = createView(exports, Float64Array);
   // (a static of the core: it never moves)
-  const at = exports.fx_command();
-  const command = () => view(at, keys.length + 1);
+  const at = exports.unit_command();
+  const command = () => view(at, COMMAND);
   const options = command();
+  options[0] = active ? 1 : 0;
   keys.forEach((key, i) => (options[1 + i] = params[key]));
-  const handle = exports.fx_new(sampleRate);
+  const handle = exports.unit_new(kind, sampleRate);
   const dsp = {
     ...stereoCore(exports, handle),
-    set: (changes: Partial<Record<K, number>>) => {
+    set: (changes: Partial<Record<K, number>>, routed = false) => {
       const buffer = command();
       let present = 0;
       for (let i = 0; i < keys.length; i++) {
@@ -90,10 +102,10 @@ export const paramsCore = <K extends string>(
         buffer[1 + i] = value;
       }
       buffer[0] = present;
-      exports.fx_set(handle);
+      exports.unit_set(handle, routed);
     },
     get idle() {
-      return exports.fx_idle(handle) !== 0;
+      return exports.unit_idle(handle) !== 0;
     },
   };
   return { dsp, handle, command };

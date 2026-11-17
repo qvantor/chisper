@@ -14,10 +14,10 @@ extern crate alloc;
 
 use wasm_rt as _;
 
-pub mod envelope;
+// (the envelopes, the LFOs and the glides are of dsp-core: the chain runs them for the knobs of the effects)
+pub use dsp_core::{envelope, glided, lfo};
+
 pub mod filter;
-pub mod glided;
-pub mod lfo;
 pub mod modulation;
 pub mod noise;
 pub mod scope;

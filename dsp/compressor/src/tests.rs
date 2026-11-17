@@ -238,7 +238,7 @@ fn a_silence_rests_the_core_at_a_small_below_and_under_a_route() {
     }
 }
 
-// NaN or an infinity past the io (process_io zeroes them, process doesn't): its block is silence, the state
+// NaN or an infinity past the chain (it zeroes them, process doesn't): its block is silence, the state
 // forgets it, the next blocks sound
 #[test]
 fn a_block_that_is_not_finite_is_forgotten() {
