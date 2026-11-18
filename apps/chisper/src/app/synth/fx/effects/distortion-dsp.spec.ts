@@ -14,7 +14,7 @@ import { DISTORTION_MODES } from './distortion-modes';
 import { createDistortionWasm, DistortionExports } from './distortion-wasm';
 
 // the Rust core (dsp/distortion), one instance of it for the spec (a scope)
-const core = wasmCore<DistortionExports>('distortion');
+const core = wasmCore<DistortionExports>('chain');
 const create = (sampleRate: number, options: DistortionOptions) =>
   createDistortionWasm(core, sampleRate, options);
 

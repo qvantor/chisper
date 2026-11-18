@@ -1,153 +1,106 @@
 import { mapValues } from 'lodash';
 import { divisionIndex, FX_PARAMS, TEMPO_DIVISIONS } from '@chisper/preset-schema';
-import { delay, DELAY_LINE_MAX, delayParamChange, delayStepsOf, delayTime, delayTimeBounds } from './delay';
-import type { FxMod } from './fx-mod';
-import { DELAY_LINES } from './fx-mod-params';
-
-// the gains are found through the graph: the mocked createDelay also creates a gain for delayTime
-const setup = () => {
-  const audioCtx = new AudioContext();
-  const createDelay = jest.spyOn(audioCtx, 'createDelay');
-  const createBiquadFilter = jest.spyOn(audioCtx, 'createBiquadFilter');
-  const createChannelSplitter = jest.spyOn(audioCtx, 'createChannelSplitter');
-  const createChannelMerger = jest.spyOn(audioCtx, 'createChannelMerger');
-  const core = delay.create(audioCtx);
-
-  const results = <T>(spy: jest.SpyInstance) => spy.mock.results.map(({ value }) => value as T);
-  const targets = (node: AudioNode) => (node.connect as jest.Mock).mock.calls.map(([target]) => target);
-  const [lineL, lineR, offL, offR] = results<DelayNode>(createDelay);
-  const [bpL, bpR] = results<BiquadFilterNode>(createBiquadFilter);
-  const [splitter] = results<ChannelSplitterNode>(createChannelSplitter);
-  const [merger] = results<ChannelMergerNode>(createChannelMerger);
-  const [inL, inR, inX] = targets(splitter) as GainNode[];
-  const [fbLL, fbLR] = targets(bpL) as GainNode[];
-  const [fbRR, fbRL] = targets(bpR) as GainNode[];
-
-  return {
-    core,
-    createDelay,
-    createBiquadFilter,
-    input: core.input as GainNode,
-    splitter,
-    merger,
-    lines: [lineL, lineR],
-    offsets: [offL, offR],
-    filters: [bpL, bpR],
-    inputs: { l: inL, r: inR, x: inX },
-    feedbacks: { ll: fbLL, rr: fbRR, lr: fbLR, rl: fbRL },
-  };
-};
+import { DELAY_DEFAULTS, renderDelay } from '../../../../test-utils/delay-render';
+import { CHAIN_KEYS, NEUTRAL_PARAMS } from '../../common/chain/chain-params';
+import {
+  delay,
+  delayDivisionOf,
+  delayDivisionSeconds,
+  delayParamChange,
+  delayStepsOf,
+  delayTime,
+  delayTimeBounds,
+} from './delay';
+import { DELAY_LINE_MAX } from './delay-params';
+import { DELAY_PRESETS } from './delay-presets';
 
 const FX_DEFAULTS = mapValues(FX_PARAMS.delay, (param) => param.default);
 
-// changes after create are smoothed, the initial values are set instantly
-const lastValue = (param: AudioParam) => (param.setTargetAtTime as jest.Mock).mock.lastCall?.[0];
-const initialValue = (param: AudioParam) => {
-  expect(param.setTargetAtTime).not.toHaveBeenCalled();
-  return (param.setValueAtTime as jest.Mock).mock.lastCall?.[0];
+const RATE = 44100;
+// the samples of Time in the renders (10 ms), what the feedback of a line comes late by (a render quantum)
+const TIME = 441;
+const LATE = 128;
+
+// both channels silent but a click at their first sample
+const click = (left: number, right: number, frames = 4096): [Float32Array, Float32Array] => {
+  const channels: [Float32Array, Float32Array] = [new Float32Array(frames), new Float32Array(frames)];
+  channels[0][0] = left;
+  channels[1][0] = right;
+  return channels;
 };
-const initialGains = (nodes: Record<string, GainNode>) =>
-  Object.fromEntries(Object.entries(nodes).map(([key, node]) => [key, initialValue(node.gain)]));
-const gains = (nodes: Record<string, GainNode>) =>
-  Object.fromEntries(Object.entries(nodes).map(([key, node]) => [key, lastValue(node.gain)]));
+// where the echoes start: the samples over a level that follow 64 quieter ones
+const echoes = (data: Float32Array, level = 0.03) =>
+  [...data.keys()].filter(
+    (i) =>
+      Math.abs(data[i]) > level && data.subarray(Math.max(0, i - 64), i).every((v) => Math.abs(v) <= level)
+  );
+const peak = (data: Float32Array) => data.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
 
 describe('delay', () => {
-  it('upmixes the input to stereo and outputs the merger', () => {
-    const { core, input, splitter, merger } = setup();
-    expect(core.output).toBe(merger);
-    expect(input).toMatchObject({
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-    });
-    expect(input.connect).toHaveBeenCalledWith(splitter);
-  });
-
-  it('wires the lines through the bandpass filters, the feedback paths and the offsets', () => {
-    const { splitter, lines, filters, offsets, merger, inputs, feedbacks } = setup();
-    expect((splitter.connect as jest.Mock).mock.calls).toEqual([
-      [inputs.l, 0],
-      [inputs.r, 1],
-      [inputs.x, 1],
-    ]);
-    expect(inputs.l.connect).toHaveBeenCalledWith(lines[0]);
-    expect(inputs.x.connect).toHaveBeenCalledWith(lines[0]);
-    expect(inputs.r.connect).toHaveBeenCalledWith(lines[1]);
-    expect(lines[0].connect).toHaveBeenCalledWith(filters[0]);
-    expect(lines[1].connect).toHaveBeenCalledWith(filters[1]);
-    expect(filters[0].connect).toHaveBeenCalledWith(feedbacks.ll);
-    expect(filters[0].connect).toHaveBeenCalledWith(feedbacks.lr);
-    expect(filters[1].connect).toHaveBeenCalledWith(feedbacks.rr);
-    expect(filters[1].connect).toHaveBeenCalledWith(feedbacks.rl);
-    expect(feedbacks.ll.connect).toHaveBeenCalledWith(lines[0]);
-    expect(feedbacks.rl.connect).toHaveBeenCalledWith(lines[0]);
-    expect(feedbacks.rr.connect).toHaveBeenCalledWith(lines[1]);
-    expect(feedbacks.lr.connect).toHaveBeenCalledWith(lines[1]);
-    expect(offsets[0].connect).toHaveBeenCalledWith(merger, 0, 0);
-    expect(offsets[1].connect).toHaveBeenCalledWith(merger, 0, 1);
-    filters.forEach((filter) => expect(filter.type).toBe('bandpass'));
-  });
-
-  it('sets the defaults instantly on create, so the feedback never ramps down from gain 1', () => {
-    const { lines, filters, offsets, inputs, feedbacks } = setup();
-    lines.forEach((line) => expect(initialValue(line.delayTime)).toBe(0.2));
-    offsets.forEach((offset) => expect(initialValue(offset.delayTime)).toBe(0));
-    filters.forEach((filter) => {
-      expect(initialValue(filter.frequency)).toBe(1000);
-      expect(initialValue(filter.Q)).toBe(0.01);
-    });
-    expect(initialGains(inputs)).toEqual({ l: 1, r: 1, x: 0 });
-    expect(initialGains(feedbacks)).toEqual({ ll: 0.5, rr: 0.5, lr: 0, rl: 0 });
-    expect(feedbacks.ll.gain.setValueAtTime).toHaveBeenCalledWith(0.5, 0);
-  });
-
-  it('smooths changes after create', () => {
-    const { core, lines, feedbacks } = setup();
-    const created = (feedbacks.ll.gain.setValueAtTime as jest.Mock).mock.calls.length;
-    core.setParam('time', 0.3);
-    core.setActive(false);
-    lines.forEach((line) =>
-      expect(line.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.3, 0, expect.any(Number))
+  it('a knob for every param of the schema with its range, the switches of BPM not targets of the routes', () => {
+    const { params } = delay;
+    expect(Object.keys(params).sort()).toEqual(Object.keys(FX_PARAMS.delay).sort());
+    (Object.keys(FX_PARAMS.delay) as (keyof typeof FX_PARAMS.delay)[]).forEach((key) =>
+      expect(params[key]).toMatchObject(FX_PARAMS.delay[key])
     );
-    expect(feedbacks.ll.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, expect.any(Number));
-    expect(feedbacks.ll.gain.setValueAtTime).toHaveBeenCalledTimes(created);
+    (['mode', 'sync', 'div', 'trip', 'dot'] as const).forEach((key) =>
+      expect(params[key].options?.length).toBeGreaterThan(1)
+    );
+    expect(params.mode.options?.map(({ id }) => id)).toEqual(['normal', 'ping-pong']);
+    expect(params.sync.options?.map(({ id }) => id)).toEqual(['ms', 'bpm']);
+    expect(params.div.options?.map(({ id }) => id)).toEqual(TEMPO_DIVISIONS.map(({ id }) => id));
+    (['time', 'fb', 'pan', 'freq', 'q'] as const).forEach((key) =>
+      expect(params[key].options).toBeUndefined()
+    );
+    // a route is `<source>:<effect>.<param>`: lower case letters and digits
+    Object.keys(params).forEach((key) => expect(key).toMatch(/^[a-z][a-z0-9]*$/));
+    expect(delay.label).toBe('Delay');
+    expect(delay.presets).toBe(DELAY_PRESETS);
+    expect(delay.metered).toBeUndefined();
   });
 
-  it('glides time slowly like tape, the other params stay fast', () => {
-    const { core, lines, offsets, filters, feedbacks } = setup();
-    core.setParam('time', 0.5);
-    core.setParam('pan', 0.01);
-    core.setParam('freq', 2000);
-    core.setParam('q', 1);
-    core.setParam('fb', 0.4);
-    lines.forEach((line) => expect(line.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.5, 0, 0.1));
-    expect(offsets[0].delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.01, 0, 0.01);
-    filters.forEach((filter) => {
-      expect(filter.frequency.setTargetAtTime).toHaveBeenLastCalledWith(2000, 0, 0.01);
-      expect(filter.Q.setTargetAtTime).toHaveBeenLastCalledWith(1, 0, 0.01);
+  it('the core takes its knobs as they are, falsy ones included, Time as the seconds of its echoes', () => {
+    expect(delay.core(FX_DEFAULTS, 120, RATE)).toEqual(DELAY_DEFAULTS);
+    const params = { ...FX_DEFAULTS, time: 0.45, fb: 0, mode: 1, pan: -0.02, freq: 3000, q: 2 };
+    expect(delay.core(params, 120, RATE)).toEqual({
+      time: 0.45,
+      fb: 0,
+      mode: 1,
+      pan: -0.02,
+      freq: 3000,
+      q: 2,
     });
-    expect(feedbacks.ll.gain.setTargetAtTime).toHaveBeenLastCalledWith(0.4, 0, 0.01);
+    expect(delay.core({ ...params, pan: 0, mode: 0 }, 120, RATE)).toMatchObject({ pan: 0, mode: 0 });
+    // the rate of the context changes nothing
+    expect(delay.core(params, 120, 96000)).toEqual(delay.core(params, 120, RATE));
+  });
+
+  it('gives the core every param of its kind and no other, the defaults those a chain starts with', () => {
+    const tempo = ['sync', 'div', 'trip', 'dot'];
+    DELAY_PRESETS.forEach(({ params }) => {
+      const keys = Object.keys(delay.core(params, 120, RATE));
+      expect([...keys].sort()).toEqual([...CHAIN_KEYS.delay].sort());
+      keys.forEach((key) => expect(tempo).not.toContain(key));
+    });
+    expect(delay.core(FX_DEFAULTS, 120, RATE)).toEqual(NEUTRAL_PARAMS.delay);
   });
 
   describe('in BPM', () => {
     const at = (id: string) => divisionIndex(id);
 
-    it('plays the division of Time at the tempo, gliding like tape', () => {
-      const { core, lines } = setup();
-      core.setParam('div', at('1/4'));
+    // the seconds of the echoes the core gets
+    const time = (params: Record<string, number>, bpm: number) =>
+      delay.core({ ...FX_DEFAULTS, ...params }, bpm, RATE)['time'];
+
+    it('plays the division of Time at the tempo', () => {
       // MS: the division waits
-      lines.forEach((line) => expect(line.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.2, 0, 0.1));
-      core.setParam('sync', 1);
-      lines.forEach((line) => expect(line.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.5, 0, 0.1));
-      core.setParam('div', at('1/8D'));
-      core.setParam('dot', 1);
-      expect(lastValue(lines[0].delayTime)).toBe(0.375);
-      // a new tempo glides there too
-      core.setTempo?.(60);
-      lines.forEach((line) => expect(line.delayTime.setTargetAtTime).toHaveBeenLastCalledWith(0.75, 0, 0.1));
+      expect(time({ div: at('1/4') }, 120)).toBe(0.2);
+      expect(time({ div: at('1/4'), sync: 1 }, 120)).toBe(0.5);
+      expect(time({ div: at('1/8D'), sync: 1, dot: 1 }, 120)).toBe(0.375);
+      // a new tempo: the division there
+      expect(time({ div: at('1/8D'), sync: 1, dot: 1 }, 60)).toBe(0.75);
       // back to MS: Time
-      core.setParam('sync', 0);
-      expect(lastValue(lines[0].delayTime)).toBe(0.2);
+      expect(time({ div: at('1/8D'), sync: 0, dot: 1 }, 60)).toBe(0.2);
     });
 
     it('steps Time through the same array for the same switches', () => {
@@ -188,29 +141,21 @@ describe('delay', () => {
     });
 
     it('takes the straight division of a triplet or a dotted one its switch is off for', () => {
-      const { core, lines } = setup();
-      core.setParam('sync', 1);
-      core.setParam('div', at('1/4T'));
-      expect(lastValue(lines[0].delayTime)).toBe(0.5);
-      core.setParam('trip', 1);
-      expect(lastValue(lines[0].delayTime)).toBeCloseTo(1 / 3, 12);
+      expect(time({ sync: 1, div: at('1/4T') }, 120)).toBe(0.5);
+      expect(time({ sync: 1, div: at('1/4T'), trip: 1 }, 120)).toBeCloseTo(1 / 3, 12);
+      expect(delayDivisionOf({ ...FX_DEFAULTS, sync: 1, div: at('1/4T') })).toBe(at('1/4'));
     });
 
-    it('plays a bar at 60 BPM at most: 4 s, its lines that long', () => {
-      const { core, lines } = setup();
-      core.setTempo?.(20);
-      core.setParam('sync', 1);
-      core.setParam('div', at('1 bar'));
-      expect(lastValue(lines[0].delayTime)).toBe(4);
+    it('plays a bar at 60 BPM at most: 4 s, a line that long', () => {
+      expect(time({ sync: 1, div: at('1 bar') }, 20)).toBe(4);
+      expect(delayDivisionSeconds(at('1 bar'), 60)).toBe(4);
+      expect(delayDivisionSeconds(at('1 bar'), 59)).toBe(4);
       expect(delayTime({ ...FX_DEFAULTS, sync: 1, div: at('1/4') }, 120)).toBe(0.5);
       expect(DELAY_LINE_MAX).toBe(4);
     });
 
     it('a new tempo in MS changes nothing', () => {
-      const { core, lines } = setup();
-      const calls = (lines[0].delayTime.setTargetAtTime as jest.Mock).mock.calls.length;
-      core.setTempo?.(60);
-      expect((lines[0].delayTime.setTargetAtTime as jest.Mock).mock.calls.length).toBe(calls);
+      expect(delay.core(FX_DEFAULTS, 60, RATE)).toEqual(delay.core(FX_DEFAULTS, 120, RATE));
     });
 
     it('bounds the routes to Time by its divisions at the tempo, 4 s at most', () => {
@@ -219,165 +164,74 @@ describe('delay', () => {
       expect(delayTimeBounds({ ...FX_DEFAULTS, sync: 1 }, 120)).toEqual([0.03125, 2]);
       // with TRIP from 1/64T, a bar at 40 longer than the lines
       expect(delayTimeBounds({ ...FX_DEFAULTS, sync: 1, trip: 1 }, 40)).toEqual([1.5 / 16 / (3 / 2), 4]);
+      // the definition gives them by the knob
+      expect(delay.bounds?.(FX_DEFAULTS, 120)).toEqual({ time: undefined });
+      expect(delay.bounds?.({ ...FX_DEFAULTS, sync: 1 }, 120)).toEqual({ time: [0.03125, 2] });
+      expect(delay.paramChange).toBe(delayParamChange);
     });
   });
 
-  it('normal: each line feeds itself, ping-pong: the mono sum bounces between the lines', () => {
-    const { core, inputs, feedbacks } = setup();
-    core.setParam('fb', 0.6);
-    expect(gains(inputs)).toEqual({ l: 1, r: 1, x: 0 });
-    expect(gains(feedbacks)).toEqual({ ll: 0.6, rr: 0.6, lr: 0, rl: 0 });
-
-    core.setParam('mode', 1);
-    expect(gains(inputs)).toEqual({ l: 0.5, r: 0, x: 0.5 });
-    expect(gains(feedbacks)).toEqual({ ll: 0, rr: 0, lr: 0.6, rl: 0.6 });
-
-    core.setParam('fb', 0.2);
-    expect(gains(feedbacks)).toEqual({ ll: 0, rr: 0, lr: 0.2, rl: 0.2 });
-
-    core.setParam('mode', 0);
-    expect(gains(inputs)).toEqual({ l: 1, r: 1, x: 0 });
-    expect(gains(feedbacks)).toEqual({ ll: 0.2, rr: 0.2, lr: 0, rl: 0 });
-  });
-
-  it('kills every feedback path while inactive, also after a mode change', () => {
-    const { core, feedbacks } = setup();
-    core.setActive(false);
-    expect(gains(feedbacks)).toEqual({ ll: 0, rr: 0, lr: 0, rl: 0 });
-
-    core.setParam('mode', 1);
-    core.setParam('fb', 0.5);
-    expect(gains(feedbacks)).toEqual({ ll: 0, rr: 0, lr: 0, rl: 0 });
-
-    core.setActive(true);
-    expect(gains(feedbacks)).toEqual({ ll: 0, rr: 0, lr: 0.5, rl: 0.5 });
-  });
-
-  it('time sets both lines, freq and q set both filters', () => {
-    const { core, lines, filters } = setup();
-    core.setParam('time', 0.45);
-    core.setParam('freq', 3000);
-    core.setParam('q', 2);
-    lines.forEach((line) => expect(lastValue(line.delayTime)).toBe(0.45));
-    filters.forEach((filter) => {
-      expect(lastValue(filter.frequency)).toBe(3000);
-      expect(lastValue(filter.Q)).toBe(2);
-    });
-  });
-
-  it('sizes the lines for 4 s (a bar at 60 BPM) and the offsets for the 50ms Haas range', () => {
-    const { createDelay } = setup();
-    expect(createDelay.mock.calls).toEqual([[4], [4], [0.05], [0.05]]);
-  });
-
-  it('pan delays the right channel when negative (echoes on the left) and the left one when positive', () => {
-    const { core, offsets } = setup();
-    core.setParam('pan', -0.02);
-    expect(offsets.map((offset) => lastValue(offset.delayTime))).toEqual([0, 0.02]);
-    core.setParam('pan', 0.025);
-    expect(offsets.map((offset) => lastValue(offset.delayTime))).toEqual([0.025, 0]);
-    core.setParam('pan', 0);
-    expect(offsets.map((offset) => lastValue(offset.delayTime))).toEqual([0, 0]);
-  });
-
-  it('ignores unknown params', () => {
-    const { core, lines } = setup();
-    core.setParam('unknown', 1);
-    lines.forEach((line) => expect(initialValue(line.delayTime)).toBe(0.2));
-  });
-
-  it('destroy disconnects every node', () => {
-    const { core, input, splitter, merger, lines, filters, offsets, inputs, feedbacks } = setup();
-    core.destroy();
-    [
-      input,
-      splitter,
-      merger,
-      ...lines,
-      ...filters,
-      ...offsets,
-      ...Object.values(inputs),
-      ...Object.values(feedbacks),
-    ].forEach((node) => expect(node.disconnect).toHaveBeenCalled());
-  });
-
-  describe('clear', () => {
-    // the nodes made by clear: the delays and the bandpasses created after the first ones
-    const cleared = (spy: jest.SpyInstance, from: number) =>
-      spy.mock.results.slice(from).map(({ value }) => value);
-
-    it('makes the lines, the bandpasses and the offsets again and wires them as the first ones', () => {
-      const {
-        core,
-        createDelay,
-        createBiquadFilter,
-        splitter,
-        merger,
-        lines,
-        filters,
-        offsets,
-        inputs,
-        feedbacks,
-      } = setup();
-      core.clear?.();
-      expect(createDelay.mock.calls.slice(4)).toEqual([[4], [4], [0.05], [0.05]]);
-      const [lineL, lineR, offL, offR] = cleared(createDelay, 4) as DelayNode[];
-      const [bpL, bpR] = cleared(createBiquadFilter, 2) as BiquadFilterNode[];
-      [...lines, ...filters, ...offsets, ...Object.values(inputs), ...Object.values(feedbacks)].forEach(
-        (node) => expect(node.disconnect).toHaveBeenCalled()
-      );
-      expect(splitter.disconnect).not.toHaveBeenCalled();
-      expect(inputs.l.connect).toHaveBeenLastCalledWith(lineL);
-      expect(inputs.x.connect).toHaveBeenLastCalledWith(lineL);
-      expect(inputs.r.connect).toHaveBeenLastCalledWith(lineR);
-      expect(lineL.connect).toHaveBeenCalledWith(bpL);
-      expect(lineR.connect).toHaveBeenCalledWith(bpR);
-      expect(bpL.connect).toHaveBeenCalledWith(feedbacks.ll);
-      expect(bpL.connect).toHaveBeenCalledWith(feedbacks.lr);
-      expect(bpR.connect).toHaveBeenCalledWith(feedbacks.rr);
-      expect(bpR.connect).toHaveBeenCalledWith(feedbacks.rl);
-      expect(feedbacks.ll.connect).toHaveBeenLastCalledWith(lineL);
-      expect(feedbacks.rl.connect).toHaveBeenLastCalledWith(lineL);
-      expect(feedbacks.rr.connect).toHaveBeenLastCalledWith(lineR);
-      expect(feedbacks.lr.connect).toHaveBeenLastCalledWith(lineR);
-      expect(offL.connect).toHaveBeenCalledWith(merger, 0, 0);
-      expect(offR.connect).toHaveBeenCalledWith(merger, 0, 1);
-      [bpL, bpR].forEach((filter) => expect(filter.type).toBe('bandpass'));
+  // the unit of the chain core (dsp/chain/src/delay.rs): delay-measured and delay-goldens hold its sound
+  describe('in the core', () => {
+    it('normal: each line feeds itself, an echo Time and a quantum after the one before, quieter by the feedback', () => {
+      const { left, right } = renderDelay({ time: TIME / RATE, fb: 0.5 }, click(1, 0));
+      expect(echoes(left).slice(0, 3)).toEqual([TIME, 2 * TIME + LATE, 3 * TIME + 2 * LATE]);
+      expect(peak(right)).toBe(0);
+      const levels = [0, 1, 2].map((n) => peak(left.subarray(n * (TIME + LATE) + TIME - 8).subarray(0, 64)));
+      // (the bandpass in the feedback spreads an echo: its peak a little under the feedback)
+      expect(levels[1] / levels[0]).toBeGreaterThan(0.4);
+      expect(levels[1] / levels[0]).toBeLessThanOrEqual(0.5);
+      expect(levels[2] / levels[1]).toBeGreaterThan(0.4);
+      expect(levels[2] / levels[1]).toBeLessThanOrEqual(0.5);
     });
 
-    it('sets the new nodes at the knobs instantly (no chirp from their defaults), later changes glide', () => {
-      const { core, createDelay, createBiquadFilter } = setup();
-      core.setParam('time', 0.45);
-      core.setParam('pan', -0.02);
-      core.setParam('freq', 3000);
-      core.setParam('q', 2);
-      core.clear?.();
-      const [lineL, lineR, offL, offR] = cleared(createDelay, 4) as DelayNode[];
-      const filters = cleared(createBiquadFilter, 2) as BiquadFilterNode[];
-      [lineL, lineR].forEach((line) => expect(initialValue(line.delayTime)).toBe(0.45));
-      expect([offL, offR].map((offset) => initialValue(offset.delayTime))).toEqual([0, 0.02]);
-      filters.forEach((filter) => {
-        expect(initialValue(filter.frequency)).toBe(3000);
-        expect(initialValue(filter.Q)).toBe(2);
-      });
-      core.setParam('time', 0.3);
-      [lineL, lineR].forEach((line) => expect(lastValue(line.delayTime)).toBe(0.3));
+    it('no feedback: one echo', () => {
+      const { left } = renderDelay({ time: TIME / RATE, fb: 0 }, click(1, 0));
+      expect(echoes(left)).toEqual([TIME]);
+      expect(peak(left.subarray(TIME + 256))).toBeLessThan(1e-3);
     });
 
-    it('keeps the gains: the feedback of the mode, killed while inactive', () => {
-      const { core, feedbacks } = setup();
-      core.setParam('fb', 0.6);
-      core.setActive(false);
-      const before = gains(feedbacks);
-      core.clear?.();
-      expect(gains(feedbacks)).toEqual(before);
+    it('ping-pong: the mono sum goes into the left line, the echoes alternate between the channels', () => {
+      const one = renderDelay({ time: TIME / RATE, fb: 0.5, mode: 1 }, click(1, 0));
+      // (only the way from the left line to the right one is a quantum late)
+      expect(echoes(one.left).slice(0, 2)).toEqual([TIME, 3 * TIME + LATE]);
+      expect(echoes(one.right).slice(0, 2)).toEqual([2 * TIME + LATE, 4 * TIME + 2 * LATE]);
+      // half of a click of one channel, whichever it is
+      const other = renderDelay({ time: TIME / RATE, fb: 0.5, mode: 1 }, click(0, 1));
+      expect(other.left).toEqual(one.left);
+      expect(other.right).toEqual(one.right);
+      const normal = renderDelay({ time: TIME / RATE, fb: 0.5 }, click(1, 0));
+      expect(one.left[TIME]).toBeCloseTo(normal.left[TIME] / 2, 6);
     });
 
-    it('destroy disconnects the new nodes', () => {
-      const { core, createDelay } = setup();
-      core.clear?.();
-      core.destroy();
-      cleared(createDelay, 4).forEach((node) => expect(node.disconnect).toHaveBeenCalled());
+    it('pan delays the right channel of the echoes when negative, the left one when positive', () => {
+      const run = (pan: number) => renderDelay({ time: TIME / RATE, fb: 0.5, pan }, click(1, 1));
+      const centre = run(0);
+      expect(echoes(centre.left)[0]).toBe(TIME);
+      expect(echoes(centre.right)[0]).toBe(TIME);
+      const toLeft = run(-0.01);
+      expect(echoes(toLeft.left)[0]).toBe(TIME);
+      expect(echoes(toLeft.right).slice(0, 2)).toEqual([2 * TIME, 3 * TIME + LATE]);
+      const toRight = run(0.01);
+      expect(echoes(toRight.left).slice(0, 2)).toEqual([2 * TIME, 3 * TIME + LATE]);
+      expect(echoes(toRight.right)[0]).toBe(TIME);
+      // the late channel is the other one, late (read between two samples: not to the bit)
+      toRight.right
+        .subarray(0, 2048)
+        .forEach((value, i) => expect(Math.abs(toRight.left[i + TIME] - value)).toBeLessThan(1e-3));
+    });
+
+    it('a line is never read under a render quantum: the shortest echo', () => {
+      const { left } = renderDelay({ time: 0.001, fb: 0.5 }, click(1, 0));
+      expect(echoes(left).slice(0, 2)).toEqual([LATE, 3 * LATE]);
+    });
+
+    it('Freq and Q are the bandpass of the echoes: a narrow one rings quieter', () => {
+      const wide = renderDelay({ time: TIME / RATE, fb: 0, freq: 1000, q: 0.01 }, click(1, 0));
+      const narrow = renderDelay({ time: TIME / RATE, fb: 0, freq: 1000, q: 8 }, click(1, 0));
+      expect(peak(wide.left)).toBeGreaterThan(0.8);
+      expect(peak(narrow.left)).toBeLessThan(0.2);
+      expect(peak(narrow.left)).toBeGreaterThan(0);
     });
   });
 
@@ -392,127 +246,5 @@ describe('delay', () => {
     const format = delay.params.freq.formatValue;
     expect(format?.(440)).toBe('440Hz');
     expect(format?.(2500)).toBe('2.5kHz');
-  });
-
-  describe('modulation', () => {
-    const ENV = { attack: 0.1, hold: 0, decay: 0.1, sustain: 0.5, release: 0.2 };
-    const note = { envelopes: [ENV, ENV, ENV], start: 1, release: null };
-    const route = (param: string, amount: number, min: number, max: number) => ({
-      param,
-      source: 1,
-      amount,
-      min,
-      max,
-    });
-    // the delay with the lines of an fx-mod: the line, the knob and the params of each set
-    const setupLines = () => {
-      const fxMod = { set: jest.fn() };
-      const audioCtx = new AudioContext();
-      const createDelay = jest.spyOn(audioCtx, 'createDelay');
-      const createBiquadFilter = jest.spyOn(audioCtx, 'createBiquadFilter');
-      const core = delay.create(audioCtx, fxMod as unknown as FxMod);
-      const results = <T>(spy: jest.SpyInstance) => spy.mock.results.map(({ value }) => value as T);
-      const targets = (node: AudioNode) => (node.connect as jest.Mock).mock.calls.map(([target]) => target);
-      const [lineL, lineR, offL, offR] = results<DelayNode>(createDelay);
-      const [bpL, bpR] = results<BiquadFilterNode>(createBiquadFilter);
-      const [fbLL, fbLR] = targets(bpL) as GainNode[];
-      const [fbRR, fbRL] = targets(bpR) as GainNode[];
-      const lineOf = (index: number) =>
-        fxMod.set.mock.calls
-          .filter(([line]) => line === index)
-          .at(-1)
-          ?.slice(1) as [unknown, AudioParam[]];
-      return {
-        core,
-        fxMod,
-        lineOf,
-        createDelay,
-        lines: [lineL, lineR],
-        offsets: [offL, offR],
-        filters: [bpL, bpR],
-        feedbacks: { ll: fbLL, rr: fbRR, lr: fbLR, rl: fbRL },
-      };
-    };
-
-    it('works the bandpass out once per block: its Freq and Q are k-rate', () => {
-      const { filters } = setup();
-      filters.forEach((filter) => {
-        expect(filter.frequency.automationRate).toBe('k-rate');
-        expect(filter.Q.automationRate).toBe('k-rate');
-      });
-    });
-
-    it('a knob its routes move is a line of fx-mod on its params: Time on both lines, Freq and Q on both bandpasses', () => {
-      const { core, lineOf, lines, filters } = setupLines();
-      const time = route('time', 0.4, 0.01, 1);
-      const freq = { ...route('freq', 2, 50, 17000), scale: 'log' as const };
-      core.setModulation({ note, routes: [time, freq] });
-      expect(lineOf(DELAY_LINES.time)).toEqual([
-        { routes: [time], base: 0.2, map: 'linear' },
-        [lines[0].delayTime, lines[1].delayTime],
-      ]);
-      expect(lineOf(DELAY_LINES.freq)).toEqual([
-        { routes: [freq], base: 1000, map: 'linear' },
-        [filters[0].frequency, filters[1].frequency],
-      ]);
-      // in BPM the line of Time from the seconds of its division at the tempo
-      core.setParam('sync', 1);
-      expect(lineOf(DELAY_LINES.time)[0]).toEqual({ routes: [time], base: 0.25, map: 'linear' });
-      core.setTempo?.(60);
-      expect(lineOf(DELAY_LINES.time)[0]).toEqual({ routes: [time], base: 0.5, map: 'linear' });
-      // the others have none
-      expect(lineOf(DELAY_LINES.q)?.[0]).toBeNull();
-    });
-
-    it('moves the feedback on the gains of the mode while it is active, the pan on the delay of each side', () => {
-      const { core, lineOf, feedbacks, offsets } = setupLines();
-      const fb = route('fb', 0.3, 0, 0.9);
-      const pan = route('pan', 0.05, -0.05, 0.05);
-      core.setModulation({ note, routes: [fb, pan] });
-      expect(lineOf(DELAY_LINES.fb)).toEqual([
-        { routes: [fb], base: 0.5, map: 'linear' },
-        [feedbacks.ll.gain, feedbacks.rr.gain],
-      ]);
-      expect(lineOf(DELAY_LINES.fbX)).toEqual([null, []]);
-      expect(lineOf(DELAY_LINES.panL)).toEqual([
-        { routes: [pan], base: 0, map: 'panL' },
-        [offsets[0].delayTime],
-      ]);
-      expect(lineOf(DELAY_LINES.panR)).toEqual([
-        { routes: [pan], base: 0, map: 'panR' },
-        [offsets[1].delayTime],
-      ]);
-      // ping-pong: the line of the gains between the lines comes in, the other one goes (its offset glides to 0 on
-      // the gains it was on: fx-mod disconnects them after)
-      core.setParam('mode', 1);
-      expect(lineOf(DELAY_LINES.fb)).toEqual([null, []]);
-      expect(lineOf(DELAY_LINES.fbX)).toEqual([
-        { routes: [fb], base: 0.5, map: 'linear' },
-        [feedbacks.lr.gain, feedbacks.rl.gain],
-      ]);
-      // inactive: no feedback, the lines drain
-      core.setActive(false);
-      expect(lineOf(DELAY_LINES.fb)).toEqual([null, []]);
-      expect(lineOf(DELAY_LINES.fbX)).toEqual([null, []]);
-    });
-
-    it('a knob turned gives its line its value, routes gone none; the knob glides as ever (Time with its tape glide)', () => {
-      const { core, lineOf, lines } = setupLines();
-      const time = route('time', 0.4, 0.01, 1);
-      core.setModulation({ note, routes: [time] });
-      core.setParam('time', 0.5);
-      expect(lineOf(DELAY_LINES.time)?.[0]).toEqual({ routes: [time], base: 0.5, map: 'linear' });
-      expect((lines[0].delayTime.setTargetAtTime as jest.Mock).mock.lastCall).toEqual([0.5, 0, 0.1]);
-      core.setModulation(null);
-      expect(lineOf(DELAY_LINES.time)).toEqual([null, [lines[0].delayTime, lines[1].delayTime]]);
-    });
-
-    it('clear puts the lines on the params of the new nodes', () => {
-      const { core, lineOf, createDelay } = setupLines();
-      core.setModulation({ note, routes: [route('time', 0.4, 0.01, 1)] });
-      core.clear?.();
-      const [l, r] = createDelay.mock.results.slice(4, 6).map(({ value }) => value as DelayNode);
-      expect(lineOf(DELAY_LINES.time)?.[1]).toEqual([l.delayTime, r.delayTime]);
-    });
   });
 });

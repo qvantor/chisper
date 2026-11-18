@@ -19,6 +19,7 @@
     "scripts/wasm-browsers/run.mjs",
     "scripts/wasm-browsers/app.mjs",
     "scripts/renders/run.mjs",
+    "scripts/delay-native/run.mjs",
     "scripts/noises/process.mjs",
     "scripts/noises/add.mjs",
     "scripts/noises/upload.mjs",

@@ -8,6 +8,7 @@ import { require, root } from '../bench-common.mjs';
 export { loadPlaywright, parseArgs, require, root } from '../bench-common.mjs';
 export const out = path.join(root, 'tmp/bench-perf');
 export const tablesDir = path.join(out, 'tables');
+export const noisesDir = path.join(out, 'noises');
 export const tracesDir = path.join(out, 'traces');
 // the folder of the app in a tree (the repo, the worktree of a reference): apps/waveform in a tree from before the
 // rename to Chisper; its perf build is that folder of dist with -perf

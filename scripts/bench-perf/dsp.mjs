@@ -26,30 +26,47 @@ const TS_CORES = [
 ];
 
 // the Rust cores (dsp/, `npm run wasm`: tmp/wasm, as in production) of the tree that has them: its facade and
-// the bytes of the core
+// the bytes of the core. An effect is a module of its own in a tree before the chain core, a unit of chain.wasm
+// (`within`) from it on: its cases keep their names, an A/B run pairs them
 const WASM_CORES = [
   {
+    core: 'chain',
+    facade: 'src/app/synth/common/chain/chain-wasm',
+    create: 'createChainWasm',
+  },
+  {
+    core: 'delay',
+    within: 'chain',
+    facade: 'src/app/synth/fx/effects/delay-wasm',
+    create: 'createDelayWasm',
+  },
+  {
     core: 'limiter',
+    within: 'chain',
     facade: 'src/app/synth/common/limiter/limiter-wasm',
     create: 'createLimiterWasm',
   },
   {
     core: 'reverb',
+    within: 'chain',
     facade: 'src/app/synth/fx/effects/reverb-wasm',
     create: 'createReverbWasm',
   },
   {
     core: 'distortion',
+    within: 'chain',
     facade: 'src/app/synth/fx/effects/distortion-wasm',
     create: 'createDistortionWasm',
   },
   {
     core: 'compressor',
+    within: 'chain',
     facade: 'src/app/synth/fx/effects/compressor-wasm',
     create: 'createCompressorWasm',
   },
   {
     core: 'chorus',
+    within: 'chain',
     facade: 'src/app/synth/fx/effects/chorus-wasm',
     create: 'createChorusWasm',
   },
@@ -75,11 +92,12 @@ const VOICE_OPTIONS = 'src/app/synth/common/wavetable/voice-options';
 // instantiates them (one instance per core, as one AudioWorkletGlobalScope)
 export const loadDsp = async (source = root, name) => {
   const app = path.join(source, appDir(source));
-  const cores = WASM_CORES.filter(
-    ({ core, facade }) =>
-      fs.existsSync(path.join(app, `${facade}.ts`)) &&
-      fs.existsSync(path.join(source, `tmp/wasm/${core}.wasm`))
-  );
+  const built = (name) => name && fs.existsSync(path.join(source, `tmp/wasm/${name}.wasm`));
+  // (the file of each: the module it is a unit of in a tree that has that one, else its own; a file of its own
+  // left in tmp/wasm by a build of before is not of this tree)
+  const cores = WASM_CORES.filter(({ facade }) => fs.existsSync(path.join(app, `${facade}.ts`)))
+    .map((entry) => ({ ...entry, file: [entry.within, entry.core].find(built) }))
+    .filter(({ file }) => file);
   const exports = (module, name) => {
     const file = path.join(app, `${module}.ts`);
     return fs.existsSync(file) && new RegExp(`export const ${name}\\b`).test(fs.readFileSync(file, 'utf8'));
@@ -104,12 +122,19 @@ export const loadDsp = async (source = root, name) => {
     .map(([module, create]) => `export { ${create} } from './${module}';\n`)
     .join('')}`;
   const dsp = await loadApp({ source, resolveDir: app, contents, name });
-  const wasm = Object.fromEntries(
-    cores.map(({ core }) => {
-      const module = new WebAssembly.Module(fs.readFileSync(path.join(source, `tmp/wasm/${core}.wasm`)));
-      return [core, instantiate ? dsp.instantiateCore(module) : new WebAssembly.Instance(module).exports];
-    })
-  );
+  // (one instance per file, as one AudioWorkletGlobalScope)
+  const instances = new Map();
+  const instance = (file) => {
+    if (!instances.has(file)) {
+      const module = new WebAssembly.Module(fs.readFileSync(path.join(source, `tmp/wasm/${file}.wasm`)));
+      instances.set(
+        file,
+        instantiate ? dsp.instantiateCore(module) : new WebAssembly.Instance(module).exports
+      );
+    }
+    return instances.get(file);
+  };
+  const wasm = Object.fromEntries(cores.map(({ core, file }) => [core, instance(file)]));
   return { ...dsp, wasm, modelFilters: dsp.VOICE_FILTER_TYPES?.includes('ladder24') ?? false };
 };
 
@@ -594,6 +619,67 @@ const createCases = (dsp) => {
       at = (at + BLOCK) % (source.length - BLOCK);
     };
   };
+  // a chain with `kinds` playing (the knobs of the heavy patch), `moved`: by the LFOs
+  const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
+  const CHAIN_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+  const chainOf =
+    (kinds, source, moved = false) =>
+    () => {
+      const neutral = {
+        distortion: { mode: 0, drive: 8, tone: 20000, level: 0 },
+        chorus: { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 },
+        delay: DELAY,
+        compressor: {
+          ...{ multi: 0, thresh: 0.6, ratio: 4, attack: 90, release: 90, gain: 0, xlow: 131, xhigh: 2500 },
+          ...{ below: 0, low: 0, mid: 0, high: 0, level: 0.5, mix: 1 },
+        },
+        reverb: { ...REVERB, decay: 3 },
+      };
+      const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3 };
+      const target = (kind, key) =>
+        CHAIN_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
+      const lfo = {
+        mode: 1,
+        delay: 0,
+        rise: 0,
+        smooth: 0,
+        phase: 0,
+        anchor: { time: 0, phase: 0, period: 0.31 },
+      };
+      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, {
+        slots: Object.fromEntries(
+          CHAIN_KINDS.map((kind) => [
+            kind,
+            { params: neutral[kind], mix: mixes[kind], active: kinds.includes(kind) },
+          ])
+        ),
+        order: kinds.map((kind) => CHAIN_KINDS.indexOf(kind)),
+        masterGain: 1,
+        muted: false,
+        routes: moved
+          ? [
+              { target: target('distortion', 'level'), source: 4, amount: -6, min: -24, max: 12 },
+              { target: target('compressor', 'thresh'), source: 5, amount: 0.3, min: 0, max: 1 },
+              { target: target('delay', 'time'), source: 6, amount: 0.01, min: 0.01, max: 1 },
+              { target: target('reverb', 'mix'), source: 7, amount: 0.4, min: 0, max: 1 },
+            ]
+          : [],
+        note: null,
+        lfos: moved ? { at: 0, instantly: true, lfos: [lfo, lfo, lfo, lfo] } : null,
+        meters: [],
+      });
+      let at = 0;
+      let frame = 0;
+      const inL = new Float32Array(BLOCK);
+      const inR = new Float32Array(BLOCK);
+      return () => {
+        inL.set(source.subarray(at, at + BLOCK));
+        inR.set(source.subarray(at, at + BLOCK));
+        chain.process(inL, inR, outL, outR, frame);
+        at = (at + BLOCK) % (source.length - BLOCK);
+        frame += BLOCK;
+      };
+    };
   const input = noise(RATE, 0.5);
   const hits = input.map((value, i) => (i % (RATE / 5) < RATE / 20 ? value : 0));
   // (a threshold the noise is over)
@@ -729,13 +815,9 @@ const createCases = (dsp) => {
       { reverb: [input] },
       dsp.wasm.reverb &&
         ((source) =>
-          effect(
-            () => dsp.createReverbWasm(dsp.wasm.reverb, RATE, { params: REVERB, active: true }).process,
-            source
-          )),
+          effect(() => dsp.createReverbWasm(dsp.wasm.reverb, RATE, { params: REVERB }).process, source)),
       dsp.createReverbDsp &&
-        ((source) =>
-          effect(() => dsp.createReverbDsp(RATE, { params: REVERB, active: true }).process, source))
+        ((source) => effect(() => dsp.createReverbDsp(RATE, { params: REVERB }).process, source))
     ),
     // no modulation: the delays of the lines at rest; the 70s era: its tube and its bandwidth
     ...withTs(
@@ -744,8 +826,7 @@ const createCases = (dsp) => {
         'reverb 70s': [{ ...REVERB, drive: 0.15, bandwidth: 6500, body: 2 }],
       },
       dsp.wasm.reverb &&
-        ((params) =>
-          effect(() => dsp.createReverbWasm(dsp.wasm.reverb, RATE, { params, active: true }).process, input)),
+        ((params) => effect(() => dsp.createReverbWasm(dsp.wasm.reverb, RATE, { params }).process, input)),
       null
     ),
     ...withTs(
@@ -804,6 +885,25 @@ const createCases = (dsp) => {
         ((source) => effect(() => dsp.createLimiterWasm(dsp.wasm.limiter, RATE).process, source)),
       dsp.createLimiterDsp && ((source) => effect(() => dsp.createLimiterDsp(RATE).process, source))
     ),
+    // the delay of the chain core alone: its echoes held (a copy and a pass of lanes), then its Time on the way
+    ...(dsp.wasm.delay && {
+      delay: effect(() => dsp.createDelayWasm(dsp.wasm.delay, RATE, DELAY).process, input),
+      'delay ping-pong, a channel late': effect(
+        () => dsp.createDelayWasm(dsp.wasm.delay, RATE, { ...DELAY, mode: 1, pan: 0.01 }).process,
+        input
+      ),
+    }),
+    // the whole chain of a tree that has it in one core (what the node of the worklet runs a block): the heavy
+    // patch of the browser cases (S5: distortion, delay, reverb), every effect, the same with the knobs moved by
+    // LFOs (the level of the distortion and the threshold of the compressor a block, the time of the delay and the
+    // mix of the reverb a sample), a chain at rest
+    ...(dsp.wasm.chain && {
+      'chain S5': chainOf(['distortion', 'delay', 'reverb'], input),
+      'chain every effect': chainOf(CHAIN_KINDS, input),
+      'chain every effect, lfos': chainOf(CHAIN_KINDS, input, true),
+      'chain no effect': chainOf([], input),
+      'chain at rest': chainOf(CHAIN_KINDS, new Float32Array(RATE)),
+    }),
   };
 };
 

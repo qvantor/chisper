@@ -39,13 +39,16 @@ describe('MasterHandle', () => {
 
   it('sets the master gain from dB, above 0 dB it drives the limiter', () => {
     const { synthCore, props } = setup();
-    const [{ $masterGain, masterGain }] = synthCore;
+    const [{ $masterGain, chain }] = synthCore;
+    const setMasterGain = jest.spyOn(chain, 'setMasterGain');
     act(() => props().onChange?.(6));
     expect($masterGain.value).toBeCloseTo(1.9953, 4);
-    expect(masterGain.gain.value).toBeCloseTo(1.9953, 4);
+    // the gain of the chain, before its limiter
+    expect(setMasterGain).toHaveBeenLastCalledWith($masterGain.value);
     expect(props().value).toBeCloseTo(6, 10);
     act(() => props().onChange?.(-12.5));
     expect($masterGain.value).toBeCloseTo(0.2371, 4);
+    expect(setMasterGain).toHaveBeenLastCalledWith($masterGain.value);
     expect(props().value).toBeCloseTo(-12.5, 10);
   });
 

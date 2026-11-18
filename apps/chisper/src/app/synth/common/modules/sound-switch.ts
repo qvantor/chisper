@@ -28,11 +28,11 @@ const MAX_SILENCE = 2000;
 const POLL = 10;
 
 // a preset switch silences the synth: no mix of the presets (the voices and the tails of the one before with the
-// knobs of the next one, the knobs of the next one on the tables of the one before). The output (fxOut, after
+// knobs of the next one, the knobs of the next one on the tables of the one before). The output (of the chain, after
 // the tails of the fx) fades out as a stolen voice does (KILL_FADE) and the voices with it, the keys held wait
-// (synth pause); once the audio thread has rendered the silence the preset is applied (the chain rewired then
-// doesn't click) and the fx and the limiter forget the sound before (after it: the delay makes its nodes at the
-// knobs of the preset, from those before Time would glide); the output opens at once (nothing sounds before it,
+// (synth pause); once the audio thread has rendered the silence the preset is applied (a new order of the chain
+// then doesn't click) and the fx and the limiter forget the sound before (after it: the effects start at the
+// knobs of the preset, from those before Time of the delay would glide); the output opens at once (nothing sounds before it,
 // a fade would take the attacks of the keys) when the tables of its oscillators on, the sample of its noise on and
 // the shape of its sub on (built at once, no part of the progress) are played, then the keys
 // still held start on it (synth resume). A preset chosen meanwhile replaces one waiting for the fade, after it is
@@ -45,7 +45,7 @@ const POLL = 10;
 // MAX_SILENCE. A source turned on after it, a load after the one of a source ended or replacing it (a table picked
 // meanwhile) aren't part of the switch
 const createSoundSwitch = ({
-  synthCore: [{ audioCtx, masterLimiter, wavetables }, { mute, unmute }],
+  synthCore: [{ audioCtx, wavetables }, { mute, unmute }],
   synth: [{ voicing }, { pause, resume }],
   fx: [, { clear }],
   oscillator,
@@ -128,7 +128,6 @@ const createSoundSwitch = ({
       next();
     } finally {
       clear();
-      masterLimiter.clear();
       wait(SWITCH_LEAD);
       followLoads();
     }

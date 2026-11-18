@@ -1,9 +1,5 @@
-import type { BehaviorSubject } from 'rxjs';
 import type { HandleProps } from '@chisper/ui-kit';
 import type { ParamRange } from '@chisper/preset-schema';
-import type { LfosState } from '../../common/lfo/lfo-curve';
-import type { FxMod } from './fx-mod';
-import type { FxModulation } from './fx-modulation';
 
 export type FxParamDef = Pick<HandleProps, 'name' | 'mode' | 'precision' | 'formatValue' | 'fillFrom'> &
   ParamRange & {
@@ -14,50 +10,15 @@ export type FxParamDef = Pick<HandleProps, 'name' | 'mode' | 'precision' | 'form
     control?: 'fader';
   };
 
-// loading: the worklet module is being added; unsupported: no AudioWorklet in this browser or context
-// (old Safari, http on a LAN IP); failed: the module or the node failed, retry() loads it again
+// the status of an effect, that of the chain it plays in (common/chain/chain.ts). loading: the module of the chain
+// is being added; unsupported: no AudioWorklet or no wasm SIMD in this browser or context (old Safari, http on a
+// LAN IP); failed: the module or the node failed, or the effect itself did inside the core (the others play on),
+// retry() loads or makes it again
 export type FxStatus = 'loading' | 'ready' | 'unsupported' | 'failed';
 
-// a loading effect is already in the chain (it passes the dry signal until its node exists), an unavailable
-// one is not
+// a loading effect is already in the chain (its slot passes its input until the node exists), an unavailable one
+// is not
 export const isFxUsable = (status: FxStatus) => status === 'loading' || status === 'ready';
-
-// the effect itself (the wet signal), mix and bypass are added around it by createFxSlot
-export interface FxCore {
-  input: AudioNode;
-  output: AudioNode;
-  setParam: (key: string, value: number) => void;
-  // removed from the chain or bypassed: internal loops must die out, so a stale tail doesn't come back
-  setActive: (active: boolean) => void;
-  // the tail is forgotten at once, its loops and lines start empty (a preset switch, the output muted);
-  // absent: it has none
-  clear?: () => void;
-  // its knobs follow the envelopes and the LFOs of the last note (fx-modulation.ts); null: they are at their own
-  // values
-  setModulation: (mod: FxModulation | null) => void;
-  // the LFOs from the time of a state on (absent: it runs none)
-  setLfos?: (state: LfosState) => void;
-  // the tempo of the synth, BPM (absent: it takes none)
-  setTempo?: (bpm: number) => void;
-  destroy: () => void;
-  // effects loaded asynchronously (audio worklets, see createWorkletFx), absent: always ready
-  $status?: BehaviorSubject<FxStatus>;
-  // loads a failed effect again
-  retry?: () => void;
-  // seconds the output lags the input (linear phase oversampling), createFxSlot delays the dry signal as
-  // much, so the mix doesn't comb filter; absent: no latency
-  latency?: number;
-  // the wet signal is the dry one reshaped, in time with it (a distortion): they add up like one sound, so
-  // the mix is linear, an equal-power crossfade would be up to 3 dB louder in between; absent: equal power
-  // (echoes and reverb add up like unrelated sounds)
-  linearMix?: boolean;
-  // the core mixes the dry signal itself (its param `mix`, moved by its own routes): its wet signal is out of
-  // phase with the dry one of the slot (the crossovers of a compressor: a mix outside would notch at them), so the
-  // slot passes only the core while it is on
-  mixInside?: boolean;
-  // what it shows of its work, while someone watches (absent: nothing)
-  meter?: FxMeter;
-}
 
 // watch(listener): the values of the effect (CompressorMeterValues of compressor-params.ts, ChorusMeterValues of
 // chorus-params.ts) about 30 times a second until the function it returns is called
@@ -89,6 +50,9 @@ export interface FxDefinition<K extends string = string> {
   // the bounds of the routes to its knobs at a tempo, by param (Time of the delay in BPM: within its divisions);
   // absent or none for a param: the range of its knob
   bounds?: (params: Record<string, number>, bpm: number) => Partial<Record<string, [number, number]>>;
-  // (the knobs of native nodes follow their routes by the lines of `fxMod`)
-  create: (audioCtx: BaseAudioContext, fxMod?: FxMod) => FxCore;
+  // its params as the core of the chain takes them (CHAIN_KEYS of its kind) at a tempo (BPM) and a rate: a knob in
+  // BPM as what its division is there, an era as the values of its stage. The mix is of its slot
+  core: (params: Record<K, number>, bpm: number, sampleRate: number) => Record<string, number>;
+  // it tells a meter while a screen watches it (FxSlot.meter)
+  metered?: boolean;
 }

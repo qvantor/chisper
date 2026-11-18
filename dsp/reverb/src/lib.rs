@@ -1,20 +1,16 @@
 //! The reverb (the tables of reverb-decay.ts and reverb-era.ts of the app; the goldens hold its sound): a 16-line
 //! FDN with early reflections, input diffusion and the input stage of the eras. The input stage runs in doubles,
 //! both channels in the lanes; the lines, their allpasses and shelves and the early reflections in f32, four lines
-//! in the lanes (their delays in doubles). The C ABI of a stereo core (fx_new, fx_buffers, fx_process, fx_free) and
-//! fx_set, fx_set_active, fx_clear, fx_idle; the params of fx_new and fx_set come through fx_command
-//! (reverb-wasm.ts wraps it)
+//! in the lanes (their delays in doubles). A unit of the chain core (dsp/chain)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
-use wasm_rt as _;
 
 use dsp_core::biquad::{Biquad, FilterType};
 use dsp_core::blocks::{peak, Lines, Rows, Smoothed, StereoDelayLine, StereoFixedAllpass};
-use dsp_core::io::StereoIo;
 use dsp_core::simd::{F32x4, F64x2};
 use dsp_core::stereo::{QuadBiquad, StereoBiquad};
 use dsp_core::tanh::tanh4;
@@ -265,8 +261,6 @@ pub struct Reverb {
     values: [Smoothed; PARAMS],
     targets: [f64; PARAMS],
     line_scale: Smoothed,
-    active: bool,
-    fade: Smoothed,
     idle: bool,
     quiet_frames: f64,
     drain_frames: f64,
@@ -281,7 +275,6 @@ pub struct Reverb {
     // (the spec of the crate: every sample a chunk of its own, what the chunks are held to)
     #[cfg(test)]
     sample_by_sample: bool,
-    pub io: StereoIo,
 }
 
 /// the most samples of a chunk of a block (process)
@@ -289,13 +282,12 @@ const CHUNK: usize = 64;
 const LINES: usize = LINE_TIMES.len();
 
 // The samples of a chunk between its passes. Of each sample: its share of the block and the scale of the lines there
-// (the glides), the fade, the diffused input of the lines (left, right, left, right), the early reflections. Of
+// (the glides), the diffused input of the lines (left, right, left, right), the early reflections. Of
 // each line a row of its samples (four in a row are the lanes of a pass over time): its output; the sums of the
 // lines of each lane, the reflection of them all
 struct Chunk {
     t: [f64; CHUNK],
     factor: [f64; CHUNK],
-    fade: [f64; CHUNK],
     diffused: [F32x4; CHUNK],
     early: [F32x4; CHUNK],
     outs: [[f32; CHUNK]; LINES],
@@ -304,7 +296,7 @@ struct Chunk {
 }
 
 impl Reverb {
-    pub fn new(sample_rate: f64, params: &[f64; PARAMS], active: bool) -> Reverb {
+    pub fn new(sample_rate: f64, params: &[f64; PARAMS]) -> Reverb {
         let samples = |seconds: f64| seconds * sample_rate;
         let total_loop = total_loop();
         let max_factor = size_factor(MAX_SIZE);
@@ -364,9 +356,8 @@ impl Reverb {
                 SIZE_GLIDE,
                 sample_rate,
             ),
-            active,
-            fade: Smoothed::new(if active { 1.0 } else { 0.0 }, GLIDE, sample_rate),
-            idle: !active,
+            // (its lines are empty: nothing to clear, a knob set before its first sound is taken at once)
+            idle: true,
             quiet_frames: 0.0,
             drain_frames,
             input,
@@ -379,7 +370,6 @@ impl Reverb {
             chunk: Box::new(Chunk {
                 t: [0.0; CHUNK],
                 factor: [0.0; CHUNK],
-                fade: [0.0; CHUNK],
                 diffused: [F32x4::default(); CHUNK],
                 early: [F32x4::default(); CHUNK],
                 outs: [[0.0; CHUNK]; LINES],
@@ -388,7 +378,6 @@ impl Reverb {
             }),
             #[cfg(test)]
             sample_by_sample: false,
-            io: StereoIo::default(),
         };
         reverb.update_input();
         reverb.update_decay();
@@ -541,11 +530,6 @@ impl Reverb {
             .set(factor, self.idle, if size_changed { glide } else { None });
     }
 
-    pub fn set_active(&mut self, value: bool) {
-        self.active = value;
-        self.fade.set(if value { 1.0 } else { 0.0 }, false, None);
-    }
-
     /// the tail is forgotten (a preset switch, the output muted): as once drained, the lines are empty, the next
     /// sound starts at the params as they are then, no glide from those of before
     pub fn forget(&mut self) {
@@ -576,7 +560,7 @@ impl Reverb {
             0.0
         };
         if self.idle {
-            if !self.active || self.quiet_frames != 0.0 {
+            if self.quiet_frames != 0.0 {
                 out_l.fill(0.0);
                 out_r.fill(0.0);
                 return;
@@ -596,7 +580,6 @@ impl Reverb {
             self.update_decay();
         }
         self.step_all(&[SIZE, DEPTH, PRE, SEP, ER, DRIVE], n);
-        self.fade.step(n);
         self.update_mod(n);
 
         let rate = self.sample_rate;
@@ -604,7 +587,6 @@ impl Reverb {
         let (size_from, size_value) = (self.values[SIZE].from, self.values[SIZE].value);
         let (scale_from, scale_value) = (self.line_scale.from, self.line_scale.value);
         let (pre_from, pre_value) = (self.values[PRE].from, self.values[PRE].value);
-        let (fade_from, fade_value) = (self.fade.from, self.fade.value);
         let width = self.values[SEP].value;
         let er = self.values[ER].value;
         let drive = self.values[DRIVE].value;
@@ -635,7 +617,6 @@ impl Reverb {
                 let predelay = (pre_from + (pre_value - pre_from) * t) * rate;
                 chunk.t[k] = t;
                 chunk.factor[k] = scale_from + (scale_value - scale_from) * t;
-                chunk.fade[k] = fade_from + (fade_value - fade_from) * t;
 
                 let banded = input.bandwidth[0].process(F64x2::new(in_l[s] as f64, in_r[s] as f64));
                 let mut x = input.bandwidth[1].process(banded);
@@ -697,13 +678,12 @@ impl Reverb {
             }
             // (the quads of a sample together: the shelves of each wait for their sample before, not for each other)
             for k in 0..length {
-                let gain4 = F32x4::splat(chunk.fade[k] as f32);
                 let feedback = F32x4::splat(chunk.feedback[k]);
                 for (q, quad) in self.quads.iter_mut().enumerate() {
                     let row = |row: usize| chunk.outs[4 * q + row][k];
                     let out = F32x4::new(row(0), row(1), row(2), row(3));
                     let line_in = chunk.diffused[k] * quad.input + out - feedback;
-                    let y = quad.high.process(quad.low.process(line_in * quad.gain * gain4));
+                    let y = quad.high.process(quad.low.process(line_in * quad.gain));
                     quad.delay.write(k, y);
                     if k + 1 == length {
                         self.outs[q] = out;
@@ -716,7 +696,6 @@ impl Reverb {
 
             for k in 0..length {
                 let s = from + k;
-                let gain = chunk.fade[k];
                 let tail = F32x4::new(
                     chunk.tail[0][k],
                     chunk.tail[1][k],
@@ -725,8 +704,8 @@ impl Reverb {
                 );
                 // mid/side: L = M + w·S, R = M - w·S
                 let (side_l, side_r) = sides(er4 * chunk.early[k] + tail_level * tail);
-                let y_l = gain * ((side_l * (1.0 + width)) / 2.0 + (side_r * (1.0 - width)) / 2.0);
-                let y_r = gain * ((side_r * (1.0 + width)) / 2.0 + (side_l * (1.0 - width)) / 2.0);
+                let y_l = (side_l * (1.0 + width)) / 2.0 + (side_r * (1.0 - width)) / 2.0;
+                let y_r = (side_r * (1.0 + width)) / 2.0 + (side_l * (1.0 - width)) / 2.0;
                 out_l[s] = y_l as f32;
                 out_r[s] = y_r as f32;
                 output_peak = output_peak.max(F64x2::new(y_l, y_r).abs());
@@ -735,7 +714,7 @@ impl Reverb {
         }
         let output_peak = max(output_peak.lo(), output_peak.hi());
 
-        // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
+        // the last line: a block that isn't finite (its input is: the chain; NaN through a path no one saw) would
         // stay in the lines until the reverb is off: forgotten, the block is silence
         if output_peak.is_nan() || output_peak > f32::MAX as f64 {
             self.clear();
@@ -745,107 +724,18 @@ impl Reverb {
             return;
         }
 
-        // the inactive reverb has faded out, a quiet one has drained: forget the tail, skip the next blocks
-        let faded = !self.active && self.fade.value == 0.0;
+        // a quiet one has drained: forget the tail, skip the next blocks
         let drained = self.quiet_frames > self.drain_frames
             && output_peak < SILENCE
             && self
                 .outs
                 .iter()
                 .all(|value| value.lanes().iter().all(|lane| (lane.abs() as f64) < SILENCE));
-        if faded || drained {
+        if drained {
             self.clear();
             self.idle = true;
         }
     }
-
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        // (NaN or an infinity of the graph as 0: one would stay in the lines until the reverb is off)
-        io.finite_inputs();
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
-}
-
-// the params of fx_new ([active, ...PARAMS]) and fx_set ([count, key, value, …]), written by the JS wrapper
-static mut COMMAND: [f64; 2 * PARAMS + 2] = [0.0; 2 * PARAMS + 2];
-
-fn command() -> &'static [f64; 2 * PARAMS + 2] {
-    // SAFETY: one thread (the audio thread of the scope); the wrapper writes it right before the call reading it
-    unsafe { &*core::ptr::addr_of!(COMMAND) }
-}
-
-/// the buffer the wrapper writes the params of fx_new and fx_set into
-#[no_mangle]
-pub extern "C" fn fx_command() -> *mut f64 {
-    core::ptr::addr_of_mut!(COMMAND) as *mut f64
-}
-
-/// a reverb at the rate of the context, its options in the command buffer: active, then the params
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Reverb {
-    let command = command();
-    let params: [f64; PARAMS] = core::array::from_fn(|key| command[1 + key]);
-    Box::into_raw(Box::new(Reverb::new(sample_rate, &params, command[0] != 0.0)))
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(reverb: *mut Reverb) {
-    drop(Box::from_raw(reverb));
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(reverb: *mut Reverb, frames: usize) -> *mut f32 {
-    (*reverb).io.reserve(frames)
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(reverb: *mut Reverb) {
-    (*reverb).process_io();
-}
-
-/// the params changed, in the command buffer: their count, then key and value of each
-///
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set(reverb: *mut Reverb, routed: bool) {
-    let command = command();
-    let count = (command[0] as usize).min(PARAMS);
-    let mut changes = [(0usize, 0.0f64); PARAMS];
-    for (i, change) in changes.iter_mut().enumerate().take(count) {
-        *change = (command[1 + 2 * i] as usize, command[2 + 2 * i]);
-    }
-    (*reverb).set(&changes[..count], routed);
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set_active(reverb: *mut Reverb, active: bool) {
-    (*reverb).set_active(active);
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(reverb: *mut Reverb) {
-    (*reverb).forget();
-}
-
-/// # Safety
-/// `reverb` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(reverb: *mut Reverb) -> bool {
-    (*reverb).idle()
 }
 
 #[cfg(test)]
@@ -855,7 +745,7 @@ mod tests {
 
     const BLOCK: usize = 128;
 
-    // NaN or an infinity past the io (process_io zeroes them, process doesn't): its block is silence, the lines
+    // NaN or an infinity past the chain (it zeroes them, process doesn't): its block is silence, the lines
     // forget it, the next blocks sound, a silence drains
     #[test]
     fn a_block_that_is_not_finite_is_forgotten() {
@@ -865,7 +755,7 @@ mod tests {
         let sine: Vec<f32> = (0..BLOCK).map(|i| (0.5 * sin(i as f64 * 0.21)) as f32).collect();
         let silence = vec![0.0; BLOCK];
         for special in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut reverb = Reverb::new(48000.0, &params, true);
+            let mut reverb = Reverb::new(48000.0, &params);
             let mut poisoned = sine.clone();
             poisoned[17] = special;
             let (mut out_l, mut out_r) = (vec![0.0; BLOCK], vec![0.0; BLOCK]);
@@ -915,8 +805,8 @@ mod tests {
         };
         for rate in [22050.0, 44100.0, 96000.0] {
             let params = [20.0, 0.01, 0.0, 0.3, 6000.0, 1.0, 1.0, 1.0, 0.5, 0.2, 9000.0, 2.0];
-            let mut chunked = Reverb::new(rate, &params, true);
-            let mut single = Reverb::new(rate, &params, true);
+            let mut chunked = Reverb::new(rate, &params);
+            let mut single = Reverb::new(rate, &params);
             single.sample_by_sample = true;
             let mut sounded = 0;
             for block in 0..120 {

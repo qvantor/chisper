@@ -1,37 +1,15 @@
-import { FX_PARAMS } from '@chisper/preset-schema';
+import { mapValues, omit } from 'lodash';
+import { FX_MIX_PARAMS, FX_PARAMS } from '@chisper/preset-schema';
 import { COMPRESSOR_DEFAULTS as DEFAULTS } from '../../../../test-utils/compressor-render';
-import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
-import { COMPRESSOR_PROCESSOR } from '../../common/processors';
+import { CHAIN_KEYS, NEUTRAL_PARAMS } from '../../common/chain/chain-params';
 import { compressor, formatBandThresholds } from './compressor';
 import { COMPRESSOR_MODES } from './compressor-modes';
 import { bandThresholdsDb, levelGain, makeupGain, thresholdDb } from './compressor-params';
+import { COMPRESSOR_PRESETS } from './compressor-presets';
 import { COMPRESSOR_KEYS } from './compressor-wasm';
-import { WORKLETS_PATH } from './load-worklet';
-import type { CompressorMeterValues } from './compressor-params';
 
-interface WorkletNodeStub extends AudioWorkletNode {
-  name: string;
-  options: AudioWorkletNodeOptions;
-  port: AudioWorkletNode['port'] & { postMessage: jest.Mock };
-}
-
-// the module loads asynchronously: the node exists after the pending promises settle
-const flush = () => new Promise((resolve) => setTimeout(resolve));
-
-const setup = () => {
-  const audioCtx = new AudioContext();
-  const createGain = jest.spyOn(audioCtx, 'createGain');
-  const core = compressor.create(audioCtx);
-  const [input, output] = createGain.mock.results.map(({ value }) => value as GainNode);
-  // the input connects to the worklet node once it is created
-  const node = () => (input.connect as jest.Mock).mock.calls[0]?.[0] as WorkletNodeStub | undefined;
-  const messages = () => node()?.port.postMessage.mock.calls.map(([message]) => message);
-  // a message of the processor
-  const receive = (data: unknown) => node()?.port.onmessage?.({ data } as MessageEvent);
-  return { audioCtx, core, input, output, node, messages, receive };
-};
-
-const METER: CompressorMeterValues = { gains: [-3, -6, 2], input: 0.5 };
+const SCHEMA_DEFAULTS = mapValues(FX_PARAMS.compressor, (param) => param.default);
+const RATE = 48000;
 
 describe('compressor', () => {
   it('the laws of its knobs: the threshold, the makeup and the level in dB, the times in ms', () => {
@@ -77,119 +55,30 @@ describe('compressor', () => {
     Object.keys(compressor.params).forEach((key) => expect(key).toMatch(/^[a-z][a-z0-9]*$/));
   });
 
-  it('passes input and output gains at once, the worklet node joins them after the module loads', async () => {
-    const { audioCtx, core, input, output, node } = setup();
-    expect(core.input).toBe(input);
-    expect(core.output).toBe(output);
-    expect(node()).toBeUndefined();
-    await flush();
-    expect(audioCtx.audioWorklet.addModule).toHaveBeenCalledWith(
-      new URL(`${WORKLETS_PATH}compressor.js`, document.baseURI).href
-    );
-    expect(node()?.name).toBe(COMPRESSOR_PROCESSOR);
-    expect(node()?.connect).toHaveBeenCalledWith(output);
-    expect(node()?.options).toMatchObject({ numberOfInputs: 1, outputChannelCount: [2], channelCount: 2 });
+  it('the core takes its knobs as they are, falsy ones included, at any tempo and rate', () => {
+    expect(compressor.core(SCHEMA_DEFAULTS, 120, RATE)).toEqual(omit(DEFAULTS, 'mix'));
+    const params = { ...SCHEMA_DEFAULTS, multi: 1, thresh: 0, gain: 0, below: 0, level: 0, mid: -6 };
+    expect(compressor.core(params, 120, RATE)).toEqual(params);
+    expect(compressor.core(params, 60, 96000)).toEqual(params);
   });
 
-  it('mixes inside: no latency, no linear mix of the slot', () => {
-    const { core } = setup();
-    expect(core.mixInside).toBe(true);
-    expect(core.latency).toBeUndefined();
-    expect(core.linearMix).toBeUndefined();
-  });
-
-  it('starts the processor with the defaults, the mix among them, its meter off', async () => {
-    const { node } = setup();
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({ params: DEFAULTS });
-  });
-
-  it('keeps the params set before the module loads, falsy ones and the mix included', async () => {
-    const { core, node } = setup();
-    core.setParam('thresh', 0);
-    core.setParam('multi', 1);
-    core.setParam('mix', 0);
-    core.setParam('level', 0);
-    core.setParam('unknown', 5);
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({
-      params: { ...DEFAULTS, thresh: 0, multi: 1, mix: 0, level: 0 },
+  it('gives the core the params of its kind but the mix: the mix of its slot is the mix inside', () => {
+    COMPRESSOR_PRESETS.forEach(({ params }) => {
+      const keys = Object.keys(compressor.core(params, 120, RATE));
+      keys.forEach((key) => expect(CHAIN_KEYS.compressor).toContain(key));
+      expect([...keys, 'mix'].sort()).toEqual([...CHAIN_KEYS.compressor].sort());
     });
-    expect(node()?.port.postMessage).not.toHaveBeenCalled();
+    // the defaults: those a chain starts with
+    expect({ ...compressor.core(SCHEMA_DEFAULTS, 120, RATE), mix: FX_MIX_PARAMS.compressor.default }).toEqual(
+      NEUTRAL_PARAMS.compressor
+    );
   });
 
-  it('posts every changed param and the routes of its knobs, ignores unknown keys', async () => {
-    const { core, messages } = setup();
-    await flush();
-    core.setParam('multi', 0);
-    core.setParam('mix', 0.5);
-    core.setParam('below', 0);
-    core.setParam('nope', 1);
-    const route = { param: 'mix', source: 1, amount: 0.5, min: 0, max: 1 };
-    core.setModulation({ note: null, routes: [route] });
-    core.setModulation(null);
-    expect(messages()).toEqual([
-      { params: { multi: 0 } },
-      { params: { mix: 0.5 } },
-      { params: { below: 0 } },
-      { mod: { note: null, routes: [route] } },
-      { mod: null },
-    ]);
-  });
-
-  it('its meter: asked of the processor while watched, each watcher gets its values', async () => {
-    const { core, messages, receive } = setup();
-    await flush();
-    const [first, second] = [jest.fn(), jest.fn()];
-    const stopFirst = core.meter?.watch(first);
-    expect(messages()).toEqual([{ meter: true }]);
-    const stopSecond = core.meter?.watch(second);
-    expect(messages()).toHaveLength(1);
-    receive({ meter: METER });
-    expect(first).toHaveBeenCalledWith(METER);
-    expect(second).toHaveBeenCalledWith(METER);
-    // another message of the processor is not a meter
-    receive({ other: 1 });
-    receive(null);
-    expect(first).toHaveBeenCalledTimes(1);
-    stopFirst?.();
-    expect(messages()).toHaveLength(1);
-    receive({ meter: METER });
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(second).toHaveBeenCalledTimes(2);
-    stopSecond?.();
-    expect(messages()).toEqual([{ meter: true }, { meter: false }]);
-  });
-
-  it('a meter watched before the module loads: the node starts with it on', async () => {
-    const { core, node } = setup();
-    const stop = core.meter?.watch(jest.fn());
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({ params: DEFAULTS, meter: true });
-    stop?.();
-    expect(node()?.port.postMessage).toHaveBeenCalledWith({ meter: false });
-  });
-
-  it('clear and destroy reach the processor, a destroyed one tells its watchers nothing', async () => {
-    const { core, messages, node, receive } = setup();
-    await flush();
-    const watcher = jest.fn();
-    core.meter?.watch(watcher);
-    core.clear?.();
-    const stub = node();
-    core.destroy();
-    expect(messages()).toEqual([{ meter: true }, { clear: true }, { stop: true }]);
-    stub?.port.onmessage?.({ data: { meter: METER } } as MessageEvent);
-    receive({ meter: METER });
-    expect(watcher).not.toHaveBeenCalled();
-  });
-
-  it('without AudioWorklet it is unsupported: no node, its status says so', async () => {
-    withoutAudioWorklet();
-    const { core, node } = setup();
-    await flush();
-    expect(core.$status?.value).toBe('unsupported');
-    expect(node()).toBeUndefined();
-    jest.restoreAllMocks();
+  it('tells a meter while a screen watches it, follows no tempo, its routes are within its knobs', () => {
+    expect(compressor.metered).toBe(true);
+    expect(compressor.paramChange).toBeUndefined();
+    expect(compressor.bounds).toBeUndefined();
+    expect(compressor.label).toBe('Compressor');
+    expect(compressor.presets).toBe(COMPRESSOR_PRESETS);
   });
 });

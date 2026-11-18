@@ -16,18 +16,13 @@
 //! slope of the line), a sample alone its lane of that four: how a block is cut never changes a sample. The filter is doubles (its
 //! integrators at a low cutoff). A short delay with a feedback is a flanger: the same lines.
 //!
-//! The C ABI of a stereo core and fx_set, fx_clear, fx_idle, fx_meter (what a screen draws its taps of); the
-//! params of fx_new and fx_set come through fx_command (chorus-wasm.ts)
+//! A unit of the chain core (dsp/chain); its meter is what a screen draws its taps of
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 extern crate alloc;
 
-use alloc::boxed::Box;
-use wasm_rt as _;
-
 use dsp_core::blocks::{louder, loudest, Rows, Smoothed};
-use dsp_core::io::StereoIo;
 use dsp_core::simd::{F32x4, F64x2};
 use jsmath::{exp, floor, max, min, pow, sin, PI};
 
@@ -163,7 +158,6 @@ pub struct Chorus {
     silent_frames: f64,
     #[cfg(test)]
     sample_by_sample: bool,
-    pub io: StereoIo,
 }
 
 impl Chorus {
@@ -188,7 +182,6 @@ impl Chorus {
             silent_frames: 0.0,
             #[cfg(test)]
             sample_by_sample: false,
-            io: StereoIo::default(),
         };
         chorus.update();
         chorus.from = chorus.targets(0.0);
@@ -201,6 +194,12 @@ impl Chorus {
 
     fn value(&self, key: usize) -> f64 {
         self.values[key].value
+    }
+
+    /// a block of silence while idle, nothing rendered: the LFO goes on (what `process` does then)
+    pub fn rest(&mut self, frames: usize) {
+        self.phase += clamp(self.value(RATE), 0.0, MAX_RATE) * frames as f64 / self.sample_rate;
+        self.phase -= floor(self.phase);
     }
 
     pub fn meter(&self) -> Meter {
@@ -437,7 +436,7 @@ impl Chorus {
             s += count;
         }
 
-        // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
+        // the last line: a block that isn't finite (its input is: the chain; NaN through a path no one saw) would
         // stay in the lines for good: forgotten, the block is silence
         let output = louder(loudest(out_l), loudest(out_r));
         let state = max(
@@ -461,103 +460,6 @@ impl Chorus {
         if self.quiet_frames > longest && self.silent_frames > longest {
             self.forget();
         }
-    }
-
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        // (NaN or an infinity of the graph as 0: one would stay in a line for good)
-        io.finite_inputs();
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
-}
-
-// the params of fx_new and of fx_set in the order of the keys, after the bits of the keys fx_set changes (1 << key),
-// written by the JS wrapper
-static mut COMMAND: [f64; PARAMS + 1] = [0.0; PARAMS + 1];
-
-fn command() -> (u32, [f64; PARAMS]) {
-    // SAFETY: one thread (the audio thread of the scope); the wrapper writes it right before the call reading it
-    let command = unsafe { *core::ptr::addr_of!(COMMAND) };
-    (command[0] as u32, core::array::from_fn(|key| command[1 + key]))
-}
-
-#[no_mangle]
-pub extern "C" fn fx_command() -> *mut f64 {
-    core::ptr::addr_of_mut!(COMMAND) as *mut f64
-}
-
-/// a chorus at the rate of the context, its params in the command buffer
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Chorus {
-    Box::into_raw(Box::new(Chorus::new(sample_rate, &command().1)))
-}
-
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(chorus: *mut Chorus) {
-    drop(Box::from_raw(chorus));
-}
-
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(chorus: *mut Chorus, frames: usize) -> *mut f32 {
-    (*chorus).io.reserve(frames)
-}
-
-/// # Safety
-/// `chorus` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(chorus: *mut Chorus) {
-    (*chorus).process_io();
-}
-
-/// the params that changed, in the command buffer
-///
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set(chorus: *mut Chorus) {
-    let (present, changes) = command();
-    (*chorus).set(present, &changes);
-}
-
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(chorus: *mut Chorus) {
-    (*chorus).forget();
-}
-
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(chorus: *mut Chorus) -> bool {
-    (*chorus).idle()
-}
-
-/// the meter into the command buffer: the LFO (cycles), then the rate, the delays, the depth and the cutoff as
-/// they are
-///
-/// # Safety
-/// `chorus` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_meter(chorus: *mut Chorus) {
-    let meter = (*chorus).meter();
-    let values = [
-        meter.phase,
-        meter.rate,
-        meter.d1,
-        meter.d2,
-        meter.depth,
-        meter.cut,
-    ];
-    let command = core::ptr::addr_of_mut!(COMMAND) as *mut f64;
-    for (k, value) in values.iter().enumerate() {
-        *command.add(k) = *value;
     }
 }
 

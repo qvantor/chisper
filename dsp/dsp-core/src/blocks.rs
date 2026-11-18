@@ -423,6 +423,11 @@ impl Smoothed {
         self.value = self.target;
     }
 
+    /// at its target: a step would change nothing
+    pub fn step_done(&self) -> bool {
+        self.value == self.target
+    }
+
     /// true while gliding
     pub fn step(&mut self, frames: f64) -> bool {
         self.from = self.value;

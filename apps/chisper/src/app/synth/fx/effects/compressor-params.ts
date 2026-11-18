@@ -1,4 +1,3 @@
-import type { LfosState } from '../../common/lfo/lfo-curve';
 // the params, the options and the messages of the compressor (its Rust core, dsp/compressor: compressor-wasm.ts),
 // no signal processing here
 
@@ -25,16 +24,6 @@ export interface CompressorDspParams {
 
 export interface CompressorOptions {
   params: CompressorDspParams;
-  // the LFOs as they are when the node is made (stereo-processor.ts)
-  lfos?: LfosState;
-  // the meter is watched already
-  meter?: boolean;
-}
-
-// main thread → worklet: changed params; `meter` asks for the meter (true) or stops it
-export interface CompressorMessage {
-  params?: Partial<CompressorDspParams>;
-  meter?: boolean;
 }
 
 // the gains of the bands (dB: under 0 a reduction, over it a boost of its upward compression) and the peak of its
@@ -43,12 +32,19 @@ export interface CompressorMeterValues {
   gains: [number, number, number];
   input: number;
 }
-
-// worklet → main thread, about 30 times a second while the meter is asked for and something sounds: the gain of
-// the low, mid and high bands (all three the one of the one band circuit) and the peak of the input
-export interface CompressorMeterMessage {
-  meter: CompressorMeterValues;
-}
+// reads the meter of the core (`Unit::meter` of dsp/chain/src/units.rs: its values in this order) into the same
+// object every time: nothing is made on the audio thread, who keeps the values copies them
+export const compressorMeterReader = () => {
+  const gains: CompressorMeterValues['gains'] = [0, 0, 0];
+  const meter: CompressorMeterValues = { gains, input: 0 };
+  return (values: ArrayLike<number>) => {
+    gains[0] = values[0];
+    gains[1] = values[1];
+    gains[2] = values[2];
+    meter.input = values[3];
+    return meter;
+  };
+};
 
 // the laws of the knobs, as measured: the threshold of the one band circuit (dB of a peak at the output of the
 // synth; -120 dB at the top of the knob), the makeup gain (1..32) and the level (0..4, 1 at the middle)

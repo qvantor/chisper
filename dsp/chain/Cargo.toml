@@ -1,0 +1,27 @@
+[package]
+name = "chain"
+description = "The chain worklet core: the effects in their slots, the master gain and the limiter in one module"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+wasm-rt = { path = "../wasm-rt" }
+jsmath = { path = "../jsmath" }
+dsp-core = { path = "../dsp-core" }
+limiter = { path = "../limiter" }
+reverb = { path = "../reverb" }
+distortion = { path = "../distortion" }
+compressor = { path = "../compressor" }
+chorus = { path = "../chorus" }
+
+[features]
+# what only the specs call (as __PERF__ of the TS): a trap on demand
+perf = []

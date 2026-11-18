@@ -95,7 +95,7 @@ describe('the calls of a core put its stack pointer back when they trap', () => 
   });
 
   it('a stereo core: its constructor and its blocks', () => {
-    const core = wasmCore<DistortionExports>('distortion');
+    const core = wasmCore<DistortionExports>('chain');
     const { __stack_pointer: stack } = core;
     const top = stack.value;
     const create = () =>

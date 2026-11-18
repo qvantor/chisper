@@ -13,7 +13,7 @@ Chisper is an experimental browser wavetable synth (TypeScript + Web Audio API, 
 - `netlify/` — Functions v2 (presets, usage, clips, bucket lists) and their specs; Postgres for presets and clips
   (`db/migrations/`, applied manually, in order; a change of the preset schema has no file there: the presets are
   rewritten by `scripts/presets/rehash.mjs`, a dry run unless `--apply`).
-- `dsp/` — the DSP of the audio worklets in Rust → wasm32.
+- `dsp/` — the DSP of the audio worklets in Rust → wasm32 (two cores: the chain, the oscillator).
 
 Deployed to Netlify at chisper.qvantor.org (`waveform.qvantor.org` is an old alias that `netlify.toml` redirects).
 
@@ -69,13 +69,16 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `scripts/wasm-browsers/run.mjs` — bit parity of the wasm cores in browsers vs Node; `app.mjs` — the app in each
   browser (sound, no glitches, no paints over the LFOs).
 - `node scripts/null-test/run.mjs --against=<ref> [--only=…] [--limit=<dB>]` — the scenes of the browser parity
-  rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal.
+  rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal (a scene of a core
+  `<ref>` has not, the chain: against the scene of that name as `<ref>` renders it, ours without the limiter).
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
   `dsp/measurements/*.json`, which the specs compare the engine with. An effect of its rack goes into its state
   (`state.mjs`), a signal of ours through it as a one-shot sample of its noise oscillator; renders of different
   samples never run at once (a block renders one sample after another, never back to one: a host has played the
   sample before it, twice alike) and each is rendered until two in a row agree (now and then one is of another
   state). An effect sleeps in a silence: a signal that reads its LFO keeps a quiet tone under it.
+- `scripts/delay-native/run.mjs` — the delay of the native nodes the app played before the chain core, rendered in
+  Chromium into `dsp/measurements/delay.json` (the reference `delay-measured.spec.ts` holds the core to).
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
   `tmp/noises/`. `upload.mjs` writes to the production bucket: dry run unless `--apply`, only when the user asks.
 
@@ -94,10 +97,10 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   goes through `dsp/jsmath` (`dsp/clippy.toml` disallows `f64::sin`, `exp`, `powf`, `max`, `min`, `mul_add`…).
   What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut; the filter of a voice
   is a state variable filter, which holds a low cutoff in f32), the gain path of the limiter, the delays of the
-  reverb lines, the filter of the chorus and the delays of its taps, the phase a voice keeps between spans (a whole
-  number of 2^-52 of a cycle). A pass that reorders
-  a loop (the chunks of the reverb, the voices filtered in pairs) gives the bits of the plain order: its cargo
-  test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
+  reverb lines, the filter of the chorus and the delays of its taps, the bandpass and the times of the delay, the
+  phase a voice keeps between spans (a whole number of 2^-52 of a cycle). A pass that reorders
+  a loop (the chunks of the reverb, the voices filtered in pairs, the segments of the delay, the blocks a silent
+  chain skips) gives the bits of the plain order: its cargo test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
   flush-to-zero). Any change of the bits is an explicit golden update, checked by the quality specs with their
   tolerances as they are and by `node scripts/null-test/run.mjs --against=<ref>` (the difference from a commit, dB
   under the signal). Goldens specs import `test-utils/js-math.ts` first.
@@ -135,7 +138,7 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   `offline-engine.ts` renders the voices on the real core.
 - antd under test gives every component the id `test-id`: the setup mocks its `useId` (`test-utils/rc-use-id.ts`).
   `ResizeObserver` is stubbed.
-- Count `addModule` calls with `workletLoads` (the synth core adds limiter and wavetable-osc itself).
+- Count `addModule` calls with `workletLoads` (the synth core adds chain and wavetable-osc itself).
 - Presets specs without the synth pass `immediateSoundSwitch` of test-utils.
 - Server specs: the DB is the fake `sql` tag of `netlify/tests/fake-sql.ts` (records queries, answers by regex).
 - DSP specs: `<module>-dsp.spec.ts` (the core through its facade), `<module>-goldens.spec.ts` (golden scenarios and
@@ -171,48 +174,79 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 
 ### Audio graph (`synth/common/modules`)
 
-- `synth-core.ts` owns the single `AudioContext` and the wavetable engine:
-  `voices node → preGain → fxIn → [fx chain] → fxOut → masterGain → masterLimiter → destination`. Every note plays
-  in the one voices node (the filter is inside each voice). Header analysers tap the output after the limiter and
-  sleep when nothing sounds.
+- `synth-core.ts` owns the single `AudioContext`, the wavetable engine and the chain:
+  `voices node → chain.input → [the chain node: fx slots → mute · master gain → limiter] → chain.output →
+destination`. Every note plays in the one voices node (the filter is inside each voice), everything after it in
+  the one chain node. Header analysers tap the output after the limiter and sleep when nothing sounds.
+- The chain (`synth/common/chain/`, core `dsp/chain`): one worklet node with one core for the effects, the master
+  gain and the limiter. `chain.ts` (main thread) keeps its whole state and tells the node in messages only, no
+  AudioParam (`ChainMessage` of `chain-params.ts`; an event may carry its time `at`, the node is made with the state
+  in `processorOptions`); `chain.worklet.ts` is a thin wrapper of `chain-wasm.ts`, the facade a render on the main
+  thread drives the same way. In the core (`chain.rs`): events queued by frame (one without a time is never
+  taken before one with a time sent before it), a slot per effect in the order
+  (`Law`: equal power, linear for the distortion, inside for the chorus and the compressor; the dry signal late by
+  the latency of the effect; gains glide 10 ms; a slot that is off is a wire and its effect forgotten once faded;
+  a slot whose effect is late crosses between its input as it is and the late one as it starts and stops; one that
+  sounds and leaves the order fades out where it is, the new order waits for it), the mute (with a time: its fade
+  ends that long after it, however late the message comes) and the master gain, the limiter (`chain_new` without it for a render at another rate). A silent chain
+  skips its slots (`Unit::rest`: the bits of rendering them). A trap inside an effect (its block, a knob, a rest, its sound forgotten: every call of a unit)
+  drops that effect alone (`work` in memory before the call, `chain_fail`/`chain_resume` from the `step` the block
+  was at, an event that trapped taken again without the unit; the limiter: the master silent) and is told back
+  (`status(stage)` 'failed'; `retryStage`: 'loading' until the node tells the unit is made, `remade`, or failed
+  again); a trap that is in no stage ends the node (`broken`: the chain is
+  'failed', a retry makes a node of the state). What trapped is never freed: a stage, and a node after `broken`,
+  is made again `MAX_REMAKES` times at most. The numbers of the ABI the wrapper has of its own (`chain-params.ts`)
+  are held to the core by `chain-layout.spec.ts` (`chain_layout`/`chain_key` of the perf build: a new param is
+  named in `key_names` of `units.rs` too). Until the module is ready the master is silent (no fallback); a failure
+  shows a toast with Retry (`retryAudio`). `unit_*` of the same core is one effect alone (the specs, the benches).
 - Latency (`synth/common/latency/`): `latencyHint` is chosen at context creation (a change reloads the page); only
   desktop Chromium honours it. Modes auto/low/normal (localStorage `latencyMode`); auto falls back to normal after
   dropouts (`playbackStats.underrunEvents`).
-- Master limiter (`synth/common/limiter/`, core `dsp/limiter`): stereo true-peak brickwall at −0.5 dBTP. Until it
-  is ready the master is silent (no fallback); a failure shows a toast with Retry (`retryAudio`).
+- Master limiter (core `dsp/limiter`, the last stage of the chain): stereo true-peak brickwall at −0.5 dBTP.
 - FX (`synth/fx/`): effects are defined in `FX_REGISTRY` (`fx/effects/`) with params/ranges from `FX_PARAMS` of
-  `libs/preset-schema`; a new effect type = a registry entry + its preset schema. `createFxSlot` wraps each (mix
-  crossfade, bypass, dry delay for cores with latency). Default order `FX_TYPES` (distortion, chorus, delay,
-  compressor, reverb); `FX_SLOTS` of `fx-mod-params.ts` is their count (it can't import the schema).
-  Delay is native nodes; reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip
-  antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables), the chorus and the compressor are
-  wasm worklets.
+  `libs/preset-schema`; a definition gives its params as the core takes them (`core()`: a knob in BPM at the tempo,
+  the era of the reverb as the values of its stage; `CHAIN_KEYS` of `chain-params.ts` is their order in the crate).
+  `createFxSlot` is what the fx model tells the chain of an effect (params, mix, whether it plays). Default order
+  `FX_TYPES` (distortion, chorus, delay, compressor, reverb), `FX_KINDS` of `chain-params.ts` mirrors it (it can't
+  import the schema). A new effect type = a registry entry + its preset schema + a `Unit` of `dsp/chain/src/units.rs`
+  (no crate, bundle, facade or processor of its own). Reverb (16-line FDN), distortion (4× oversampled in two
+  stages, the hard clip antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables),
+  chorus, compressor and delay are units of the chain core.
+- Delay (`dsp/chain/src/delay.rs`, held to renders of the native nodes it replaced: `scripts/delay-native/`,
+  `dsp/measurements/delay.json`, `delay-measured.spec.ts`): a line a channel read as a `DelayNode` reads it (linear,
+  times in f32), a bandpass in the form of a `BiquadFilterNode` inside the feedback (its coefficients once a block),
+  normal or ping-pong, Pan a channel of the echoes late; Time glides through a pole of 100 ms a sample (a tape),
+  poles snap as Chromium's `setTargetAtTime` does. Deliberate copy of that graph: what a line feeds back comes a
+  quantum late with the gain of then (`LOOP_LATE`: an echo is Time + 128 samples after the one before; of ping-pong
+  only left → right), the sound the presets were made with.
 - Compressor (`dsp/compressor`, measured: `dsp/measurements/compressor.json`, `compressor-measured.spec.ts`): one
   band (the louder channel at every sample against the threshold, the reduction smoothed in dB) or three (LR4
   crossovers on state variable filters, the mean square of each band held and released, compressed down and up,
-  the gains every `SPAN` samples). It mixes inside (`FxCore.mixInside`: the slot passes the core alone and gives it
-  the mix as a param, its routes with the others; the level is of the compressed signal alone) and posts its meter
-  only while watched (`FxCore.meter`, `report` of `registerStereoProcessor`); its knobs keep the laws of the Audio
+  the gains every `SPAN` samples). It mixes inside (`Law::Inside`: the slot passes the effect alone and gives it
+  the mix as a param, its routes with the others; the level is of the compressed signal alone) and its meter is
+  posted only while watched (`Unit::meter`, `chain.watch`); its knobs keep the laws of the Audio
   Unit (`thresh`, `gain`, `level` are knob positions, `compressor-params.ts` has their laws). Not done: its limiter
   at the top of the ratio.
 - Chorus (`dsp/chorus`, measured: `dsp/measurements/chorus.json`, `chorus-measured.spec.ts`): four taps, two a
   channel, each a line of its own fed back into itself, moved by one triangle LFO (the taps of a channel half a cycle
   apart, the channels a quarter) through a pole of 20 ms; a state variable filter of two passes a sample after them,
-  outside the feedback; the level of the wet signal alone, the mix inside by its own law (`mixInside`). In BPM a
-  cycle of the LFO is a division (`chorusDivisions`): the main thread gives the core its Hz. Not active it has no
-  feedback. A read of a group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the
+  outside the feedback; the level of the wet signal alone, the mix inside by its own law (`Law::Inside`). In BPM a
+  cycle of the LFO is a division (`chorusDivisions`): the main thread gives the core its Hz. A read of a group of four samples is `Rows::read4_line` (the shares of its samples in f32 from the
   first: not the bits of `read4`), a sample alone its lane of that four: how a block is cut changes no sample.
   Deliberate differences: its level is not of the dry signal, its LFO never stops in a silence, a tap keeps the
   highs the one of the Audio Unit loses over 12 kHz, its phase is not kept in a preset. Its screen
   (`chorus-screen.tsx`) draws the taps and drags their delays and the depth: the core tells its LFO and the knobs of
-  the taps as it has them (`fx_meter`, posted as the meter of the compressor is, only while watched:
-  `meter-report.ts` in the worklets, `createFxMeter` on the main thread), between two posts the main thread moves
+  the taps as it has them (its meter, posted as the one of the compressor is, only while watched:
+  `meter-report.ts` in the worklet, `createFxMeter` on the main thread), between two posts the main thread moves
   the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
-- Worklet effects build on `createWorkletFx` (`fx/effects/worklet-fx.ts`: loading, `$status`, `retry`, `stop` on
-  destroy) and register with `registerStereoProcessor` (`stereo-processor.ts`). Without AudioWorklet or when a
-  module fails, the app works without that effect; until `ready` a slot passes only the dry signal.
-- Knob modulation of native params (delay, slot gains) goes through the fx-mod worklet (`fx-mod.ts`, its lines add
-  offsets to the params); distortion and reverb modulate inside their worklets (`fx-modulation.ts`).
+- Without AudioWorklet or wasm SIMD, or when the module of the chain fails, no effect and no sound; until `ready`
+  nothing plays. One effect failing in the core leaves the others playing.
+- Knob modulation of the effects is in the core (`dsp/chain/src/modulation.rs`; the envelopes and the LFOs of the
+  last note, `dsp-core/src/{envelope,lfo}.rs` as the voices run them, worked out once for the chain and only while
+  a route moves a knob of an effect that plays): a knob of a unit one value a block, the knobs of the delay and the
+  mix of a slot as lines, an offset a sample added to the knob as it glides. The fx model sends the routes of the
+  effects that play as targets of the core (`chainRoutes`), the note and the LFO states only while a route reads
+  them; `fx-modulation.ts` keeps the same sums on the main thread for the marks of the knobs and the charts.
 
 ### Oscillators and voices (`synth/common/wavetable`, `dsp/wavetable-osc`)
 
@@ -289,14 +323,16 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 
 ### Rust cores (`dsp/`)
 
-- One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `limiter`, `reverb`,
-  `distortion`, `compressor`, `chorus`, `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, `F64x2`
-  lanes), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
+- One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `chain` (the effects
+  `limiter`, `reverb`, `distortion`, `compressor`, `chorus` are its rlibs, the delay, the slots and the modulation
+  its modules) and `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay
+  blocks, lanes, the envelopes and the LFOs), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.
-- A bundle `<name>.worklet.ts` registers its processors (names in `common/processors.ts`); its facade
-  `<name>-wasm.ts` wraps the core. Effect cores expose `fx_new`, `fx_buffers`, `fx_process`, `fx_clear`, `fx_free`,
-  `fx_command`. A new one is also named in `WASM_MODULES` (`wasm-support.ts`), `CORES` of `scripts/wasm.mjs`, the
-  `worklets` script of `package.json`, the scenes of `scripts/wasm-browsers/scenes.mjs`. Specs import the wasm bytes via `@chisper/wasm/<name>.wasm` (`apps/chisper/wasm-babel-plugin.js`).
+- A bundle `<name>.worklet.ts` registers its processors; its facade `<name>-wasm.ts` wraps the core
+  (`fx/effects/<effect>-wasm.ts`: an effect as a unit, for the specs and the benches). A new bundle is also named
+  in `WASM_MODULES` (`wasm-support.ts`), `CORES` of `scripts/wasm.mjs`, the `worklets` script of `package.json`,
+  the scenes of `scripts/wasm-browsers/scenes.mjs`. Specs import the wasm bytes via `@chisper/wasm/<name>.wasm`
+  (`apps/chisper/wasm-babel-plugin.js`).
 - NaN/±Inf input is taken as 0 by the effects, the decoded files and the worker.
 
 ### Snapshots

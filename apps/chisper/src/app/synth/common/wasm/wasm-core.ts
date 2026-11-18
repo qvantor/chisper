@@ -10,11 +10,15 @@ export interface CoreExports {
   __stack_pointer: WebAssembly.Global;
 }
 
-// the calls of a block, guarded where they are called (no closure per block: stereo-core.ts,
+// the calls of a block, guarded where they are called (no closure per block: stereo-core.ts, chain-wasm.ts,
 // wavetable-osc-wasm.ts), and a getter read every block (it reads a field: it can't trap)
 const UNGUARDED = new Set([
-  'fx_process',
-  'fx_buffers',
+  'unit_process',
+  'unit_buffers',
+  'chain_process',
+  'chain_buffers',
+  'chain_resume',
+  'chain_reports',
   'osc_voice_process',
   'osc_io',
   'osc_voice_started_at',

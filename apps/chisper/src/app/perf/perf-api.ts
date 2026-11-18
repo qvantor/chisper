@@ -144,9 +144,8 @@ export const createPerfApi = (models: PerfModels) => {
   };
   const stopRuns = () => generation++;
 
-  // the probe of the onsets (probe.worklet.ts, served by the runner): input 0 the voices (preGain, before the
-  // filter and the effects), 1 the output (after the limiter); the core disconnects preGain whenever its mid
-  // nodes change, the probe connects it again
+  // the probe of the onsets (probe.worklet.ts, served by the runner): input 0 the voices (the input of
+  // the chain, before the effects), 1 the output (after the limiter)
   let probe: AudioWorkletNode | null = null;
   let onsets: ProbeOnsetMessage[] = [];
   // one probe however many installs: one before the module has loaded shares the first; a removal meanwhile
@@ -166,7 +165,7 @@ export const createPerfApi = (models: PerfModels) => {
     core.output.connect(node, 0, 1);
     node.connect(audioCtx.destination);
     // the voices before the fx (the filter is in each voice)
-    core.preGain.connect(node, 0, 0);
+    core.input.connect(node, 0, 0);
     probe = node;
   };
   const installProbe = (url: string, options: Partial<ProbeOptions> = {}) => {
@@ -181,7 +180,7 @@ export const createPerfApi = (models: PerfModels) => {
     installing = null;
     if (!probe) return;
     probe.port.postMessage({ stop: true });
-    core.preGain.disconnect(probe);
+    core.input.disconnect(probe);
     core.output.disconnect(probe);
     probe.disconnect();
     probe = null;

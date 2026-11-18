@@ -1,13 +1,6 @@
 // the worklet modules with a Rust core (dsp/): they need wasm SIMD (the cores are built with it), Safari 16.4+;
-// without it a module is unsupported (the limiter and the oscillators are silent, the oscillators show why)
-export const WASM_MODULES: readonly string[] = [
-  'limiter',
-  'reverb',
-  'distortion',
-  'compressor',
-  'chorus',
-  'wavetable-osc',
-];
+// without it a module is unsupported (the chain: the master is silent; the oscillators show why)
+export const WASM_MODULES: readonly string[] = ['chain', 'wavetable-osc'];
 
 // a module of one SIMD instruction (i8x16.splat, i8x16.popcnt)
 const SIMD_PROBE = new Uint8Array([

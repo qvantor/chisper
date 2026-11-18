@@ -1,8 +1,7 @@
 //! The distortion (the curves of distortion-modes.ts of the app; the goldens hold its sound): drive → 4× oversampled
 //! curve of the mode × its makeup gain → tone lowpass × level → DC blocker, the blocks skipped once silent. The
 //! oversampled part runs in f32 (four taps of a FIR, four points of the curve in the lanes, a rational tanh), the
-//! tone, the level and the DC blocker in f64. The C ABI of a stereo core and fx_set, fx_clear, fx_idle; the params of
-//! fx_new and fx_set come through fx_command (distortion-wasm.ts wraps it).
+//! tone, the level and the DC blocker in f64. A unit of the chain core (dsp/chain).
 //! The hard clip is antialiased on top of the oversampling (the mean of the curve between two points: its harmonics
 //! fold back less than at 8×): a chain of its own with the same latency (dsp_core::stereo::Chain). A fade
 //! between modes runs both chains, each with its curve and gains, their outputs added at the input rate; the chains
@@ -14,14 +13,12 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, vec, vec::Vec};
-use wasm_rt as _;
+use alloc::{vec, vec::Vec};
 
 use core::ops::{Add, Mul, Sub};
 use dsp_core::biquad::FilterType;
 use dsp_core::blocks::{peak, Smoothed};
 use dsp_core::consts::MAKEUP_TABLES;
-use dsp_core::io::StereoIo;
 use dsp_core::simd::F64x2;
 use dsp_core::stereo::{Chain, StereoBiquad, StereoDcBlocker, CHAIN_LATENCY, INPUT_CARRY};
 use jsmath::{max, min, pow, round};
@@ -138,7 +135,6 @@ pub struct Distortion {
     idle: bool,
     quiet_frames: f64,
     rung_out: bool,
-    pub io: StereoIo,
 }
 
 impl Distortion {
@@ -170,7 +166,6 @@ impl Distortion {
             idle: true,
             quiet_frames: 0.0,
             rung_out: false,
-            io: StereoIo::default(),
         };
         distortion.grow(BLOCK);
         distortion.running[distortion.chain_of(mode)] = true;
@@ -200,8 +195,8 @@ impl Distortion {
         );
     }
 
-    // the buffers of blocks of `frames` (allocates: not while a block renders)
-    fn grow(&mut self, frames: usize) {
+    /// the buffers of blocks of `frames` (allocates: not while a block renders)
+    pub fn grow(&mut self, frames: usize) {
         self.buffers.grow(frames);
         for chain in self.chains.iter_mut() {
             chain.grow(frames);
@@ -459,7 +454,7 @@ impl Distortion {
 
         let output_peak = self.render(in_l, in_r, out_l, out_r, frames);
 
-        // the last line: a block that isn't finite (its input is: process_io; NaN through a path no one saw) would
+        // the last line: a block that isn't finite (its input is: the chain; NaN through a path no one saw) would
         // stay in the state for good, silent from then on: forgotten, the block is silence
         if output_peak.is_nan() || output_peak > f32::MAX as f64 {
             self.clear();
@@ -473,84 +468,6 @@ impl Distortion {
             self.forget();
         }
     }
-
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        // (NaN or an infinity of the graph as 0: one would silence the effect for good)
-        io.finite_inputs();
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
-}
-
-// the params of fx_new and of fx_set in the order of the keys, after the bits of the keys fx_set changes (1 << key),
-// written by the JS wrapper
-static mut COMMAND: [f64; PARAMS + 1] = [0.0; PARAMS + 1];
-
-fn command() -> (u32, [f64; PARAMS]) {
-    // SAFETY: one thread (the audio thread of the scope); the wrapper writes it right before the call reading it
-    let command = unsafe { *core::ptr::addr_of!(COMMAND) };
-    (command[0] as u32, core::array::from_fn(|key| command[1 + key]))
-}
-
-#[no_mangle]
-pub extern "C" fn fx_command() -> *mut f64 {
-    core::ptr::addr_of_mut!(COMMAND) as *mut f64
-}
-
-/// a distortion at the rate of the context, its params in the command buffer
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Distortion {
-    Box::into_raw(Box::new(Distortion::new(sample_rate, &command().1)))
-}
-
-/// # Safety
-/// `distortion` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(distortion: *mut Distortion) {
-    drop(Box::from_raw(distortion));
-}
-
-/// # Safety
-/// `distortion` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(distortion: *mut Distortion, frames: usize) -> *mut f32 {
-    let distortion = &mut *distortion;
-    // the block buffers grow here, not while it renders
-    distortion.grow(frames);
-    distortion.io.reserve(frames)
-}
-
-/// # Safety
-/// `distortion` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(distortion: *mut Distortion) {
-    (*distortion).process_io();
-}
-
-/// the params that changed, in the command buffer
-///
-/// # Safety
-/// `distortion` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_set(distortion: *mut Distortion) {
-    let (present, changes) = command();
-    (*distortion).set(present, &changes);
-}
-
-/// # Safety
-/// `distortion` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(distortion: *mut Distortion) {
-    (*distortion).forget();
-}
-
-/// # Safety
-/// `distortion` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(distortion: *mut Distortion) -> bool {
-    (*distortion).idle()
 }
 
 #[cfg(test)]
@@ -597,7 +514,7 @@ mod tests {
         rendered
     }
 
-    // NaN or an infinity past the io (process_io zeroes them, process doesn't): its block is silence, the state
+    // NaN or an infinity past the chain (it zeroes them, process doesn't): its block is silence, the state
     // forgets it, the next blocks sound, a silence goes idle
     #[test]
     fn a_block_that_is_not_finite_is_forgotten() {

@@ -1,41 +1,32 @@
 import { FX_MIX_PARAMS, FX_PARAMS, normalizePreset } from '@chisper/preset-schema';
 import { mapValues } from 'lodash';
-import { wasmCore } from '../../../../test-utils/wasm';
-import { mixGains } from './create-fx-slot';
+import { chainState, makeChain, renderChain } from '../../../../test-utils/chain-render';
 import { DISTORTION_LATENCY, REFERENCE_PEAK } from './distortion-params';
-import { createDistortionWasm, DistortionExports } from './distortion-wasm';
 import { DISTORTION_PRESETS } from './distortion-presets';
 import { findFxPreset } from '.';
 
 const PARAM_KEYS = Object.keys(FX_PARAMS.distortion).sort();
 
 const SAMPLE_RATE = 48000;
-const BLOCK = 128;
-const core = wasmCore<DistortionExports>('distortion');
 
-// dB of a preset against the dry sound for the reference sine (a note at the fx input), mixed like the fx
-// slot mixes the distortion: linearly, with the dry signal delayed by the latency
+// dB of a preset against the dry sound for the reference sine (a note at the fx input), mixed as the chain mixes
+// the distortion in its slot: linearly, with the dry signal late by the latency
 const loudnessDb = (id: string) => {
   const preset = DISTORTION_PRESETS.find((item) => item.id === id);
   if (!preset) throw new Error(id);
-  const dsp = createDistortionWasm(core, SAMPLE_RATE, { params: preset.params });
-  const input = (frame: number) =>
-    frame < 0 ? 0 : REFERENCE_PEAK * Math.sin((2 * Math.PI * 220 * frame) / SAMPLE_RATE);
-  const [dryGain, wetGain] = mixGains(preset.mix, true);
   const frames = 16384;
-  const [inL, outL, outR] = [0, 1, 2].map(() => new Float32Array(BLOCK));
+  const input = Float32Array.from(
+    { length: frames },
+    (_, frame) => REFERENCE_PEAK * Math.sin((2 * Math.PI * 220 * frame) / SAMPLE_RATE)
+  );
+  const state = chainState(['distortion'], preset.mix, { distortion: { params: preset.params } });
+  const { left } = renderChain(makeChain(state, SAMPLE_RATE), [input, input]);
   let dry = 0;
   let mixed = 0;
-  for (let start = 0; start < frames; start += BLOCK) {
-    for (let i = 0; i < BLOCK; i++) inL[i] = input(start + i);
-    dsp.process(inL, inL, outL, outR);
-    // the second half, settled
-    if (start < frames / 2) continue;
-    for (let i = 0; i < BLOCK; i++) {
-      const x = input(start + i - DISTORTION_LATENCY);
-      dry += x * x;
-      mixed += (dryGain * x + wetGain * outL[i]) ** 2;
-    }
+  // the second half, settled
+  for (let i = frames / 2; i < frames; i++) {
+    dry += input[i - DISTORTION_LATENCY] ** 2;
+    mixed += left[i] ** 2;
   }
   return 10 * Math.log10(mixed / dry);
 };

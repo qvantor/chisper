@@ -1,7 +1,7 @@
-import { divisionIndex, FX_PARAMS, TEMPO_DIVISIONS } from '@chisper/preset-schema';
+import { mapValues, omit } from 'lodash';
+import { divisionIndex, FX_MIX_PARAMS, FX_PARAMS, TEMPO_DIVISIONS } from '@chisper/preset-schema';
 import { CHORUS_DEFAULTS as DEFAULTS, TAP_LATENCY_MS } from '../../../../test-utils/chorus-render';
-import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
-import { CHORUS_PROCESSOR } from '../../common/processors';
+import { CHAIN_KEYS, NEUTRAL_PARAMS } from '../../common/chain/chain-params';
 import {
   chorus,
   chorusDivisionHz,
@@ -11,37 +11,13 @@ import {
   chorusRateBounds,
   chorusStepsOf,
 } from './chorus';
-import { ChorusMeterValues, depthMs, levelGain } from './chorus-params';
+import { depthMs, levelGain } from './chorus-params';
+import { CHORUS_PRESETS } from './chorus-presets';
 import { CHORUS_KEYS } from './chorus-wasm';
-import { WORKLETS_PATH } from './load-worklet';
 
-interface WorkletNodeStub extends AudioWorkletNode {
-  name: string;
-  options: AudioWorkletNodeOptions;
-  port: AudioWorkletNode['port'] & { postMessage: jest.Mock };
-}
+const RATE = 48000;
 
-// the module loads asynchronously: the node exists after the pending promises settle
-const flush = () => new Promise((resolve) => setTimeout(resolve));
-
-const setup = () => {
-  const audioCtx = new AudioContext();
-  const createGain = jest.spyOn(audioCtx, 'createGain');
-  const core = chorus.create(audioCtx);
-  const [input, output] = createGain.mock.results.map(({ value }) => value as GainNode);
-  // the input connects to the worklet node once it is created
-  const node = () => (input.connect as jest.Mock).mock.calls[0]?.[0] as WorkletNodeStub | undefined;
-  const messages = () => node()?.port.postMessage.mock.calls.map(([message]) => message);
-  // a message of the processor
-  const receive = (data: unknown) => node()?.port.onmessage?.({ data } as MessageEvent);
-  return { audioCtx, core, input, output, node, messages, receive };
-};
-
-const METER: ChorusMeterValues = { phase: 0.25, rate: 2, d1: 5, d2: 0, depth: 26, cut: 1000, idle: false };
-
-const SCHEMA_DEFAULTS = Object.fromEntries(
-  Object.entries(FX_PARAMS.chorus).map(([key, { default: value }]) => [key, value])
-);
+const SCHEMA_DEFAULTS = mapValues(FX_PARAMS.chorus, (param) => param.default);
 const ids = (steps: readonly number[]) => steps.map((step) => TEMPO_DIVISIONS[step].id);
 
 describe('chorus', () => {
@@ -128,164 +104,66 @@ describe('chorus', () => {
     });
   });
 
-  it('passes input and output gains at once, the worklet node joins them after the module loads', async () => {
-    const { audioCtx, core, input, output, node } = setup();
-    expect(core.input).toBe(input);
-    expect(core.output).toBe(output);
-    expect(node()).toBeUndefined();
-    await flush();
-    expect(audioCtx.audioWorklet.addModule).toHaveBeenCalledWith(
-      new URL(`${WORKLETS_PATH}chorus.js`, document.baseURI).href
-    );
-    expect(node()?.name).toBe(CHORUS_PROCESSOR);
-    expect(node()?.connect).toHaveBeenCalledWith(output);
-    expect(node()?.options).toMatchObject({ numberOfInputs: 1, outputChannelCount: [2], channelCount: 2 });
-  });
-
-  it('mixes inside: no latency, no linear mix of the slot', () => {
-    const { core } = setup();
-    expect(core.mixInside).toBe(true);
-    expect(core.latency).toBeUndefined();
-    expect(core.linearMix).toBeUndefined();
-  });
-
-  it('its meter: asked of the processor while watched, each watcher gets its values', async () => {
-    const { core, messages, receive } = setup();
-    await flush();
-    const [first, second] = [jest.fn(), jest.fn()];
-    const stopFirst = core.meter?.watch(first);
-    expect(messages()).toEqual([{ meter: true }]);
-    const stopSecond = core.meter?.watch(second);
-    expect(messages()).toHaveLength(1);
-    receive({ meter: METER });
-    expect(first).toHaveBeenCalledWith(METER);
-    expect(second).toHaveBeenCalledWith(METER);
-    // another message of the processor is not a meter
-    receive({ other: 1 });
-    receive(null);
-    expect(first).toHaveBeenCalledTimes(1);
-    stopFirst?.();
-    // (left twice: once)
-    stopFirst?.();
-    expect(messages()).toHaveLength(1);
-    receive({ meter: METER });
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(second).toHaveBeenCalledTimes(2);
-    stopSecond?.();
-    expect(messages()).toEqual([{ meter: true }, { meter: false }]);
-  });
-
-  it('a meter watched before the module loads: the node starts with it on', async () => {
-    const { core, node } = setup();
-    const stop = core.meter?.watch(jest.fn());
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({ params: DEFAULTS, meter: true });
-    stop?.();
-    expect(node()?.port.postMessage).toHaveBeenCalledWith({ meter: false });
-  });
-
-  it('a destroyed one tells its watchers nothing', async () => {
-    const { core, node } = setup();
-    await flush();
-    const watcher = jest.fn();
-    core.meter?.watch(watcher);
-    const stub = node();
-    core.destroy();
-    stub?.port.onmessage?.({ data: { meter: METER } } as MessageEvent);
-    expect(watcher).not.toHaveBeenCalled();
-  });
-
-  it('starts the processor with the defaults, the mix among them', async () => {
-    const { node } = setup();
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({ params: DEFAULTS });
-  });
-
-  it('keeps what is set before the module loads: falsy params, the mix, BPM at the tempo, not active', async () => {
-    const { core, node } = setup();
-    core.setParam('depth', 0);
-    core.setParam('hpf', 1);
-    core.setParam('mix', 0);
-    core.setParam('level', 0);
-    core.setParam('unknown', 5);
-    core.setParam('sync', 1);
-    core.setParam('div', divisionIndex('1/4'));
-    core.setTempo?.(90);
-    core.setActive(false);
-    await flush();
-    expect(node()?.options.processorOptions).toEqual({
-      params: { ...DEFAULTS, depth: 0, hpf: 1, mix: 0, level: 0, rate: 1.5 },
-      inactive: true,
+  it('the core takes its knobs as they are, falsy ones included, Rate as the Hz in effect', () => {
+    expect(chorus.core(SCHEMA_DEFAULTS, 120, RATE)).toEqual(omit(DEFAULTS, 'mix'));
+    const params = { ...SCHEMA_DEFAULTS, rate: 0, depth: 0, fb: 0, hpf: 1, level: 0, d2: 3 };
+    expect(chorus.core(params, 120, RATE)).toEqual({
+      rate: 0,
+      d1: SCHEMA_DEFAULTS.d1,
+      d2: 3,
+      depth: 0,
+      fb: 0,
+      cut: SCHEMA_DEFAULTS.cut,
+      hpf: 1,
+      level: 0,
     });
-    expect(node()?.port.postMessage).not.toHaveBeenCalled();
+    // the rate of the context changes nothing
+    expect(chorus.core(params, 120, 96000)).toEqual(chorus.core(params, 120, RATE));
   });
 
-  it('posts every changed param and the routes of its knobs, ignores unknown keys', async () => {
-    const { core, messages } = setup();
-    await flush();
-    core.setParam('fb', 0);
-    core.setParam('mix', 0.25);
-    core.setParam('d2', 3);
-    core.setParam('nope', 1);
-    const route = { param: 'depth', source: 1, amount: 4, min: 0, max: 26 };
-    core.setModulation({ note: null, routes: [route] });
-    core.setModulation(null);
-    expect(messages()).toEqual([
-      { params: { fb: 0 } },
-      { params: { mix: 0.25 } },
-      { params: { d2: 3 } },
-      { mod: { note: null, routes: [route] } },
-      { mod: null },
-    ]);
-  });
-
-  it('Rate reaches the processor as the Hz in effect: its knob, in BPM its division at the tempo', async () => {
-    const { core, messages } = setup();
-    await flush();
-    core.setParam('rate', 0);
-    core.setParam('div', divisionIndex('1/2'));
-    core.setParam('sync', 1);
-    core.setTempo?.(60);
-    core.setParam('trip', 1);
-    core.setParam('div', divisionIndex('1/2T'));
-    core.setParam('sync', 0);
+  it('Rate reaches the core as the Hz in effect: its knob, in BPM its division at the tempo', () => {
+    const rate = (params: Partial<typeof SCHEMA_DEFAULTS>, bpm: number) =>
+      chorus.core({ ...SCHEMA_DEFAULTS, ...params }, bpm, RATE)['rate'];
+    const half = { rate: 0, div: divisionIndex('1/2') };
+    // HZ: the division waits
+    expect(rate(half, 120)).toBe(0);
+    expect(rate({ ...half, sync: 1 }, 120)).toBe(1);
+    expect(rate({ ...half, sync: 1 }, 60)).toBe(0.5);
+    // a triplet is a step only with TRIP: its straight division without
+    const triplet = { ...half, sync: 1, div: divisionIndex('1/2T') };
+    expect(rate(triplet, 60)).toBe(0.5);
+    expect(rate({ ...triplet, trip: 1 }, 60)).toBeCloseTo(0.75, 9);
+    // the top of Rate at most
+    expect(rate({ sync: 1, div: divisionIndex('1/32') }, 300)).toBe(FX_PARAMS.chorus.rate.max);
     // a tempo in Hz changes nothing
-    core.setTempo?.(140);
-    expect(messages()).toEqual([
-      { params: { rate: 0 } },
-      { params: { rate: 0 } },
-      { params: { rate: 1 } },
-      { params: { rate: 0.5 } },
-      { params: { rate: 0.5 } },
-      { params: { rate: expect.closeTo(0.75, 9) } },
-      { params: { rate: 0 } },
-    ]);
+    expect(rate({ rate: 3 }, 140)).toBe(3);
   });
 
-  it('tells the processor when it is not active (no feedback: its taps drain), once per change', async () => {
-    const { core, messages } = setup();
-    await flush();
-    core.setActive(true);
-    core.setActive(false);
-    core.setActive(false);
-    core.setActive(true);
-    expect(messages()).toEqual([{ active: false }, { active: true }]);
+  it('gives the core the params of its kind but the mix: the mix of its slot is the mix inside', () => {
+    const tempo = ['sync', 'div', 'trip', 'dot'];
+    CHORUS_PRESETS.forEach(({ params }) => {
+      const keys = Object.keys(chorus.core(params, 120, RATE));
+      keys.forEach((key) => expect(CHAIN_KEYS.chorus).toContain(key));
+      keys.forEach((key) => expect(tempo).not.toContain(key));
+      expect([...keys, 'mix'].sort()).toEqual([...CHAIN_KEYS.chorus].sort());
+    });
+    // the defaults: those a chain starts with
+    expect({ ...chorus.core(SCHEMA_DEFAULTS, 120, RATE), mix: FX_MIX_PARAMS.chorus.default }).toEqual(
+      NEUTRAL_PARAMS.chorus
+    );
   });
 
-  it('clear and destroy reach the processor', async () => {
-    const { core, messages } = setup();
-    await flush();
-    core.clear?.();
-    core.destroy();
-    expect(messages()).toEqual([{ clear: true }, { stop: true }]);
+  it('follows the tempo by its definition: a change of the user, the bounds of the routes to Rate', () => {
+    expect(chorus.paramChange).toBe(chorusParamChange);
+    const bpm = { ...SCHEMA_DEFAULTS, sync: 1 };
+    expect(chorus.bounds?.(SCHEMA_DEFAULTS, 120)).toEqual({ rate: undefined });
+    expect(chorus.bounds?.(bpm, 120)).toEqual({ rate: [1 / 16, 16] });
+    expect(chorus.bounds?.(bpm, 60)).toEqual({ rate: [1 / 32, 8] });
   });
 
-  it('without AudioWorklet it is unsupported: no node, its status says so', async () => {
-    withoutAudioWorklet();
-    const { core, node } = setup();
-    await flush();
-    expect(core.$status?.value).toBe('unsupported');
-    expect(node()).toBeUndefined();
-    jest.restoreAllMocks();
+  it('tells a meter while a screen watches it', () => {
+    expect(chorus.metered).toBe(true);
+    expect(chorus.label).toBe('Chorus');
+    expect(chorus.presets).toBe(CHORUS_PRESETS);
   });
 });

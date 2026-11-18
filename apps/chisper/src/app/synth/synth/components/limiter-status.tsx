@@ -6,7 +6,7 @@ import { useSynthCore } from '../../common/modules';
 
 const LIMITER_TOAST = 'limiter-failed';
 
-// the synth is silent without its master limiter (master-limiter.ts): a failed one shows a toast on every
+// the synth is silent without its master limiter (the last stage of the chain): a failed one shows a toast on every
 // screen until it loads again, its Retry loads it (with the oscillators, if they failed too). An unsupported
 // one isn't shown: the oscillators need the same, they tell why over their waves (OscillatorStatus). Renders
 // nothing

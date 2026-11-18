@@ -1,17 +1,14 @@
 //! The master limiter (the goldens hold its sound): a stereo linked, true peak (its interpolation in f32, the
-//! gain in doubles: under the ceiling the output is the input to the bit), lookahead brickwall limiter that skips the blocks of silence once it has let go. The C ABI
-//! of a stereo core: fx_new, fx_buffers, fx_process, fx_clear, fx_latency, fx_idle, fx_free (limiter-wasm.ts wraps
-//! it)
+//! gain in doubles: under the ceiling the output is the input to the bit), lookahead brickwall limiter that skips the blocks of silence once it has let go. A unit of
+//! the chain core (dsp/chain)
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 extern crate alloc;
 
-use alloc::{boxed::Box, vec, vec::Vec};
-use wasm_rt as _;
+use alloc::{vec, vec::Vec};
 
 use dsp_core::consts::CEILING;
-use dsp_core::io::StereoIo;
 use dsp_core::true_peak::{StereoTruePeak, TRUE_PEAK_DELAY, TRUE_PEAK_TAPS};
 use dsp_core::{finite, power_of_two_above};
 use jsmath::{exp, log10, max, min, pow, round};
@@ -193,7 +190,6 @@ pub struct Limiter {
     // it has let go and its input has been +0 long enough: a block of +0 changes nothing but the places in its
     // rings, it is skipped (`skip`), its output +0
     rest: bool,
-    pub io: StereoIo,
 }
 
 impl Limiter {
@@ -222,7 +218,6 @@ impl Limiter {
             zeros: 0,
             rest_after: latency.max(TRUE_PEAK_TAPS),
             rest: false,
-            io: StereoIo::default(),
         }
     }
 
@@ -354,71 +349,11 @@ impl Limiter {
         self.zeros = 0;
         self.rest = false;
     }
-
-    // the block reserved in `io`
-    fn process_io(&mut self) {
-        let mut io = core::mem::take(&mut self.io);
-        let (in_l, in_r, out_l, out_r) = io.split();
-        self.process(in_l, in_r, out_l, out_r);
-        self.io = io;
-    }
 }
 
 // every sample of the block is +0 (−0 and NaN are not)
 fn zero(block: &[f32]) -> bool {
     block.iter().fold(0, |bits, value| bits | value.to_bits()) == 0
-}
-
-/// a limiter at the rate of the context
-#[no_mangle]
-pub extern "C" fn fx_new(sample_rate: f64) -> *mut Limiter {
-    Box::into_raw(Box::new(Limiter::new(sample_rate)))
-}
-
-/// # Safety
-/// `limiter` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_free(limiter: *mut Limiter) {
-    drop(Box::from_raw(limiter));
-}
-
-/// room for a block of `frames`: the address of inL, inR, outL and outR one after another
-///
-/// # Safety
-/// `limiter` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_buffers(limiter: *mut Limiter, frames: usize) -> *mut f32 {
-    (*limiter).io.reserve(frames)
-}
-
-/// # Safety
-/// `limiter` comes from fx_new and was not freed, its buffers reserved for the block
-#[no_mangle]
-pub unsafe extern "C" fn fx_process(limiter: *mut Limiter) {
-    (*limiter).process_io();
-}
-
-/// # Safety
-/// `limiter` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_clear(limiter: *mut Limiter) {
-    (*limiter).forget();
-}
-
-/// the next block of silence is skipped (the specs)
-///
-/// # Safety
-/// `limiter` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_idle(limiter: *mut Limiter) -> bool {
-    (*limiter).idle()
-}
-
-/// # Safety
-/// `limiter` comes from fx_new and was not freed
-#[no_mangle]
-pub unsafe extern "C" fn fx_latency(limiter: *mut Limiter) -> usize {
-    (*limiter).latency
 }
 
 #[cfg(test)]

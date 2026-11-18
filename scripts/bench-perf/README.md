@@ -117,8 +117,9 @@ reference may have no setting. A baseline of before it was taken at normal (256 
   an extra worklet (`probe.worklet.ts`, served by the runner) hears before the filter and after the limiter
   (L1).
 - **The DSP** (Node): voices (held, a moving position on 16 frames and on 256, a chord of 12 notes × 2 × u8 struck every 40 blocks:
-  its attack, the direct path and the mix builds under the budget), table building, reverb, distortion,
-  limiter, ns per sample divided by the ns of a
+  its attack, the direct path and the mix builds under the budget), table building, the effects and the limiter
+  each alone (units of the chain core; in a tree before it their own cores, under the same names), the whole chain
+  (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), ns per sample divided by the ns of a
   fixed multiply-add of the same run (the speed of the machine out), 7 samples each. V8, not JSC: it catches
   algorithmic regressions (a hot loop that boxes doubles) the operation counts of the specs can't. A module with
   a Rust core (`dsp/`, `tmp/wasm` of the tree) runs it under the names of its cases; a tree of before stage 5 of

@@ -6,9 +6,13 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 // (the domains of the buckets as the app has them; Node strips the types)
-import { bucketUrl, WAVETABLES_ORIGIN } from '../apps/chisper/src/app/synth/services/buckets.ts';
+import {
+  bucketUrl,
+  NOISES_ORIGIN,
+  WAVETABLES_ORIGIN,
+} from '../apps/chisper/src/app/synth/services/buckets.ts';
 
-export { WAVETABLES_ORIGIN };
+export { NOISES_ORIGIN, WAVETABLES_ORIGIN };
 
 // (fileURLToPath: in a URL a path with spaces or non-ASCII letters is percent-encoded)
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,7 +70,7 @@ export const fileName = (key) => key.split('/').at(-1);
 
 // the tables of the bucket of the site (their keys) into `dir`, once, from its domain (public: no keys); a table
 // already in one of `cacheDirs` is copied
-export const downloadTables = async (keys, dir, { cacheDirs = [] } = {}) => {
+export const downloadTables = async (keys, dir, { cacheDirs = [], origin = WAVETABLES_ORIGIN } = {}) => {
   fs.mkdirSync(dir, { recursive: true });
   const missing = [];
   for (const key of keys) {
@@ -79,7 +83,7 @@ export const downloadTables = async (keys, dir, { cacheDirs = [] } = {}) => {
     else missing.push(key);
   }
   for (const key of missing) {
-    const url = bucketUrl(WAVETABLES_ORIGIN, key);
+    const url = bucketUrl(origin, key);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`${url} responded ${res.status}`);
     fs.writeFileSync(path.join(dir, fileName(key)), Buffer.from(await res.arrayBuffer()));
