@@ -1,10 +1,6 @@
-// the names of the wavetable oscillator worklet (wavetable-osc.worklet.ts) and the params of a voice, shared by
-// the main thread, the worklet and the specs: no imports
-
-// one node of a context plays every voice (both oscillators of each), their params from the events of the main
-// thread; the store holds the tables of the context
-export const VOICES_PROCESSOR = 'chisper-wavetable-voices';
-export const STORE_PROCESSOR = 'chisper-wavetable-store';
+// the params of a voice of the wavetable oscillator, shared by the main thread, the worklet (engine.worklet.ts: one
+// node of a context plays every voice, both oscillators of each, their params from the events of the main thread)
+// and the specs: no imports
 
 // the continuous controls of an oscillator, each a param of the voice per oscillator (position1, position2…): the
 // knob is its value, automated by the events of the main thread; the envelopes move it in the voice (its routes)

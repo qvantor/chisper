@@ -1,6 +1,7 @@
 # Oscillator benchmark
 
-The wavetable oscillator worklet (`apps/chisper/src/app/synth/common/wavetable`) against a native
+The wavetable oscillator (`apps/chisper/src/app/synth/common/wavetable`, played by the engine worklet with its
+chain a wire: no effect, no limiter) against a native
 `OscillatorNode` with the `PeriodicWave` of the same frame, in Chromium, WebKit and Firefox. A manual check,
 not part of CI.
 

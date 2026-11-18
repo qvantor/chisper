@@ -11,7 +11,7 @@ export interface CoreExports {
 }
 
 // the calls of a block, guarded where they are called (no closure per block: stereo-core.ts, chain-wasm.ts,
-// wavetable-osc-wasm.ts), and a getter read every block (it reads a field: it can't trap)
+// wavetable-osc-wasm.ts, engine-wasm.ts), and a getter read every block (it reads a field: it can't trap)
 const UNGUARDED = new Set([
   'unit_process',
   'unit_buffers',
@@ -26,6 +26,8 @@ const UNGUARDED = new Set([
   'osc_scope_resume',
   'osc_scope_output',
   'osc_scope_reports',
+  'engine_process',
+  'engine_resume',
 ]);
 
 // every other function of the core puts the stack pointer back when it traps: a trap (an allocation that failed,

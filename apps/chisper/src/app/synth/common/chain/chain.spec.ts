@@ -8,10 +8,11 @@ import {
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import type { FxStatus } from '../../fx/effects/types';
+import { createEngineNode, EngineNode } from '../engine/engine-node';
+import { ENGINE_PROCESSOR, PROBED_NODE_OPTIONS } from '../engine/engine-params';
 import type { LfosState } from '../lfo/lfo-curve';
 import { createChain } from './chain';
 import {
-  CHAIN_PROCESSOR,
   ChainNote,
   ChainRoute,
   FX_KINDS,
@@ -32,16 +33,18 @@ const setup = ({ failFirstLoad = false } = {}) => {
   const audioCtx = new AudioContext();
   const addModule = audioCtx.audioWorklet?.addModule as jest.Mock | undefined;
   if (failFirstLoad) addModule?.mockRejectedValueOnce(new Error('404'));
-  const chain = createChain(audioCtx);
+  // (the node of a synth core: the LFOs are told it, not the chain)
+  const engine = createEngineNode(audioCtx);
+  const chain = createChain(audioCtx, engine);
   const statuses: FxStatus[] = [];
   chain.$status.subscribe((status) => statuses.push(status));
   const stages = () => STAGES.map((stage) => chain.status(stage).value);
-  return { audioCtx, addModule, chain, statuses, stages };
+  return { audioCtx, addModule, engine, chain, statuses, stages };
 };
 
 // a chain whose node exists, what it was posted so far forgotten
-const ready = async () => {
-  const context = setup();
+const ready = async (options?: Parameters<typeof setup>[0]) => {
+  const context = setup(options);
   await flush();
   const node = chainNode(context.audioCtx);
   return { ...context, node, posts: () => chainPosts(node) };
@@ -71,39 +74,31 @@ describe('createChain', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('the module and the node', () => {
-    it('adds the module of the chain once and is silent while it loads', () => {
+    it('adds the module of the engine once and is silent while it loads', () => {
       const { audioCtx, addModule, chain, statuses, stages } = setup();
       expect(statuses).toEqual(['loading']);
       expect(stages()).toEqual(STAGES.map(() => 'loading'));
-      expect(workletLoads(addModule as jest.Mock, 'chain')).toBe(1);
+      expect(workletLoads(addModule as jest.Mock, 'engine')).toBe(1);
       expect(addModule).toHaveBeenCalledTimes(1);
+      // no fallback: no node, nothing plays unlimited
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      // no fallback: nothing plays unlimited
-      expect(chain.input.connect).not.toHaveBeenCalled();
+      expect(chain.output.connect).not.toHaveBeenCalled();
     });
 
-    it('joins input and output through the node of the chain once the module has loaded', async () => {
+    it('plays in the node of the engine, into its output, once the module has loaded', async () => {
       const { audioCtx, chain, statuses, stages } = setup();
       await flush();
       expect(statuses).toEqual(['loading', 'ready']);
       expect(stages()).toEqual(STAGES.map(() => 'ready'));
       expect(chainNodes(audioCtx)).toHaveLength(1);
       const node = chainNode(audioCtx);
-      expect(node.name).toBe(CHAIN_PROCESSOR);
-      // one stereo output whatever comes in: a mono input is upmixed to both channels
-      expect(node.options).toMatchObject({
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-        channelCount: 2,
-        channelCountMode: 'explicit',
-        channelInterpretation: 'speakers',
-      });
-      expect(chain.input.connect).toHaveBeenCalledTimes(1);
-      expect(chain.input.connect).toHaveBeenCalledWith(node);
-      expect(node.connect).toHaveBeenCalledTimes(1);
-      expect(node.connect).toHaveBeenCalledWith(chain.output);
-      expect(chain.input.connect).not.toHaveBeenCalledWith(chain.output);
+      expect(node.name).toBe(ENGINE_PROCESSOR);
+      // no input: the voices play inside it, nothing goes into it or around its limiter (the specs are a perf
+      // build: its second output is the probe's)
+      expect(node.options).toMatchObject(PROBED_NODE_OPTIONS);
+      expect(node.options.numberOfInputs).toBe(0);
+      // its first output alone, the one after the limiter
+      expect((node.connect as jest.Mock).mock.calls).toEqual([[chain.output, 0]]);
     });
 
     it('a chain no one told anything starts neutral: no effect, the master open, nothing followed', async () => {
@@ -121,7 +116,7 @@ describe('createChain', () => {
 
     it('without AudioWorklet: unsupported at once, nothing to load, nothing throws', async () => {
       withoutAudioWorklet();
-      const { audioCtx, chain, statuses, stages } = setup();
+      const { engine, audioCtx, chain, statuses, stages } = setup();
       expect(statuses).toEqual(['unsupported']);
       expect(stages()).toEqual(STAGES.map(() => 'unsupported'));
       chain.retry();
@@ -129,35 +124,32 @@ describe('createChain', () => {
       chain.setMix(DELAY, 0.5);
       chain.setMasterGain(0.5);
       chain.setRoutes([LFO_ROUTE]);
-      chain.setLfos(lfos(0));
+      engine.lfos.take(lfos(0));
       chain.clear();
       await flush();
       expect(statuses).toEqual(['unsupported']);
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      expect(chain.input.connect).not.toHaveBeenCalled();
       expect(() => chain.destroy()).not.toThrow();
     });
 
     it('without wasm SIMD (Safari before 16.4): unsupported, its core could not be compiled', async () => {
       const validate = jest.spyOn(WebAssembly, 'validate').mockReturnValue(false);
-      const { audioCtx, addModule, chain, statuses } = setup();
+      const { audioCtx, addModule, statuses } = setup();
       validate.mockRestore();
       await flush();
       expect(statuses).toEqual(['unsupported']);
       expect(addModule).not.toHaveBeenCalled();
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      expect(chain.input.connect).not.toHaveBeenCalled();
     });
 
-    it('a module that fails to load: failed, every stage with it, the input goes nowhere', async () => {
+    it('a module that fails to load: failed, every stage with it, no node is made', async () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { audioCtx, chain, statuses, stages } = setup({ failFirstLoad: true });
+      const { audioCtx, statuses, stages } = setup({ failFirstLoad: true });
       await flush();
       expect(statuses).toEqual(['loading', 'failed']);
       expect(stages()).toEqual(STAGES.map(() => 'failed'));
-      expect(error).toHaveBeenCalledWith('The chain worklet failed', expect.any(Error));
+      expect(error).toHaveBeenCalledWith('The engine worklet failed', expect.any(Error));
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      expect(chain.input.connect).not.toHaveBeenCalled();
     });
 
     it('retry loads a failed module again and makes the node', async () => {
@@ -165,12 +157,12 @@ describe('createChain', () => {
       const { audioCtx, addModule, chain, statuses, stages } = setup({ failFirstLoad: true });
       await flush();
       chain.retry();
-      expect(workletLoads(addModule as jest.Mock, 'chain')).toBe(2);
+      expect(workletLoads(addModule as jest.Mock, 'engine')).toBe(2);
       expect(stages()).toEqual(STAGES.map(() => 'loading'));
       await flush();
       expect(statuses).toEqual(['loading', 'failed', 'loading', 'ready']);
       expect(stages()).toEqual(STAGES.map(() => 'ready'));
-      expect(chain.input.connect).toHaveBeenCalledWith(chainNode(audioCtx));
+      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(chain.output, 0);
     });
 
     it('retry does nothing while loading or ready', async () => {
@@ -195,7 +187,7 @@ describe('createChain', () => {
       const { audioCtx, addModule, chain, statuses } = setup();
       await flush();
       expect(statuses).toEqual(['loading', 'failed']);
-      expect(chain.input.connect).not.toHaveBeenCalled();
+      expect(chainNodes(audioCtx)).toHaveLength(0);
 
       Object.assign(globalThis, { AudioWorkletNode: Stub });
       chain.retry();
@@ -203,7 +195,7 @@ describe('createChain', () => {
       expect(statuses).toEqual(['loading', 'failed', 'loading', 'ready']);
       // (the module had loaded: it is not added again)
       expect(addModule).toHaveBeenCalledTimes(1);
-      expect(chain.input.connect).toHaveBeenCalledWith(chainNode(audioCtx));
+      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(chain.output, 0);
     });
 
     it('a processor error: failed, the node stopped (its core freed) and dropped, the master silent', async () => {
@@ -213,10 +205,9 @@ describe('createChain', () => {
       node.onprocessorerror?.call(node, event as ErrorEvent);
       expect(statuses).toEqual(['loading', 'ready', 'failed']);
       expect(stages()).toEqual(STAGES.map(() => 'failed'));
-      expect(error).toHaveBeenCalledWith('The chain worklet failed', event);
+      expect(error).toHaveBeenCalledWith('The engine worklet failed', event);
       expect(posts()).toEqual([{ stop: true }]);
       expect(node.disconnect).toHaveBeenCalled();
-      expect(chain.input.disconnect).toHaveBeenCalled();
       // dropped: it is told nothing more
       chain.setMix(DELAY, 0.5);
       chain.clear();
@@ -229,7 +220,10 @@ describe('createChain', () => {
       chainReports(node, { broken: true });
       expect(statuses).toEqual(['loading', 'ready', 'failed']);
       expect(stages()).toEqual(STAGES.map(() => 'failed'));
-      expect(error).toHaveBeenCalledWith('The chain worklet failed', expect.any(Error));
+      expect(error).toHaveBeenCalledWith(
+        'The engine worklet failed',
+        expect.objectContaining({ message: 'The engine core trapped' })
+      );
       expect(posts()).toEqual([{ stop: true }]);
       expect(node.disconnect).toHaveBeenCalled();
       chain.retry();
@@ -291,8 +285,7 @@ describe('createChain', () => {
         order: [REVERB],
         slots: { reverb: { params: { ...NEUTRAL_PARAMS.reverb, decay: 5 }, mix: 0.4, active: true } },
       });
-      expect(chain.input.connect).toHaveBeenLastCalledWith(next);
-      expect(next.connect).toHaveBeenCalledWith(chain.output);
+      expect(next.connect).toHaveBeenCalledWith(chain.output, 0);
       // it has it all already: nothing is posted again
       expect(chainPosts(next)).toEqual([]);
       chain.setMix(REVERB, 0.6);
@@ -531,34 +524,34 @@ describe('createChain', () => {
     const table = new Float32Array([0, 1, 0]);
 
     it('are not posted while no route reads one: a state is a table the audio thread takes in', async () => {
-      const { chain, posts } = await ready();
-      chain.setLfos(lfos(0, table));
+      const { engine, chain, posts } = await ready();
+      engine.lfos.take(lfos(0, table));
       chain.setRoutes([ENV_ROUTE]);
-      chain.setLfos(lfos(1));
+      engine.lfos.take(lfos(1));
       expect(posts()).toEqual([{ note: null, routes: [ENV_ROUTE] }]);
     });
 
     it('a route of an LFO: the LFOs as they are at once, before the routes, then every state', async () => {
-      const { chain, posts } = await ready();
-      chain.setLfos(lfos(0, table));
-      chain.setLfos(lfos(1));
+      const { engine, chain, posts } = await ready();
+      engine.lfos.take(lfos(0, table));
+      engine.lfos.take(lfos(1));
       chain.setRoutes([ENV_ROUTE, LFO_ROUTE]);
       // the knobs of the last state, the shape of the one before (a state has only the tables that changed)
       const merged = lfos(1, table).lfos;
       expect(posts()).toEqual([
-        { lfos: { at: 0, instantly: true, lfos: merged } },
+        { lfos: { at: 0, instantly: true, lfos: merged }, readers: ['chain'] },
         { note: null, routes: [ENV_ROUTE, LFO_ROUTE] },
       ]);
-      chain.setLfos(lfos(2));
-      expect(posts()[2]).toEqual({ lfos: lfos(2) });
+      engine.lfos.take(lfos(2));
+      expect(posts()[2]).toEqual({ lfos: lfos(2), readers: ['chain'] });
       // other routes that still read one: the LFOs are not sent again
       chain.setRoutes([LFO_ROUTE]);
       expect(posts().slice(3)).toEqual([{ routes: [LFO_ROUTE] }]);
     });
 
     it('the source of a route tells: an envelope and the velocity read none, LFO 1 to 4 do', async () => {
-      const { chain, posts } = await ready();
-      chain.setLfos(lfos(0));
+      const { engine, chain, posts } = await ready();
+      engine.lfos.take(lfos(0));
       [0, 1, 2, 3].forEach((source) => chain.setRoutes([{ ...ENV_ROUTE, source }]));
       expect(posts().some((message) => message.lfos)).toBe(false);
       chain.setRoutes([{ ...ENV_ROUTE, source: LFO_SOURCE }]);
@@ -568,47 +561,50 @@ describe('createChain', () => {
     });
 
     it('the last route of an LFO gone: no state any more; one again: the LFOs as they are by then', async () => {
-      const { chain, posts } = await ready();
+      const { engine, chain, posts } = await ready();
       chain.setRoutes([LFO_ROUTE]);
-      chain.setLfos(lfos(1, table));
+      engine.lfos.take(lfos(1, table));
       chain.setRoutes([ENV_ROUTE]);
-      chain.setLfos(lfos(2));
-      chain.setLfos(lfos(3));
+      engine.lfos.take(lfos(2));
+      engine.lfos.take(lfos(3));
       expect(posts().slice(2)).toEqual([{ routes: [ENV_ROUTE] }]);
       chain.setRoutes([LFO_ROUTE]);
       expect(posts().slice(3)).toEqual([
-        { lfos: { at: 0, instantly: true, lfos: lfos(3, table).lfos } },
+        { lfos: { at: 0, instantly: true, lfos: lfos(3, table).lfos }, readers: ['chain'] },
         { routes: [LFO_ROUTE] },
       ]);
     });
 
     it('a route of an LFO before any state: nothing to send, the first state comes as it is', async () => {
-      const { chain, posts } = await ready();
+      const { engine, chain, posts } = await ready();
       chain.setRoutes([LFO_ROUTE]);
       expect(posts()).toEqual([{ note: null, routes: [LFO_ROUTE] }]);
-      chain.setLfos(lfos(1, table));
-      expect(posts()[1]).toEqual({ lfos: lfos(1, table) });
+      engine.lfos.take(lfos(1, table));
+      expect(posts()[1]).toEqual({ lfos: lfos(1, table), readers: ['chain'] });
     });
 
     it('a node made later starts with the LFOs as they are, every shape with them; none told: none', async () => {
       const first = setup();
       await flush();
       expect(chainNode(first.audioCtx).options.processorOptions.state.lfos).toBeNull();
+      expect(chainNode(first.audioCtx).options.processorOptions).not.toHaveProperty('lfos');
 
-      const { audioCtx, chain } = setup();
-      chain.setLfos(lfos(0, table));
-      chain.setLfos(lfos(1));
+      const { engine, audioCtx, chain } = setup();
+      engine.lfos.take(lfos(0, table));
+      engine.lfos.take(lfos(1));
       chain.setRoutes([LFO_ROUTE]);
       await flush();
       const node = chainNode(audioCtx);
-      expect(node.options.processorOptions.state.lfos).toEqual({
+      // (those of the node: its voices and its chain have them at once)
+      expect(node.options.processorOptions.lfos).toEqual({
         at: 0,
         instantly: true,
         lfos: lfos(1, table).lfos,
       });
+      expect(node.options.processorOptions.state.lfos).toBeNull();
       // it reads one already: the states go on
-      chain.setLfos(lfos(2));
-      expect(chainPosts(node)).toEqual([{ lfos: lfos(2) }]);
+      engine.lfos.take(lfos(2));
+      expect(chainPosts(node)).toEqual([{ lfos: lfos(2), readers: ['chain'] }]);
     });
   });
 
@@ -680,7 +676,6 @@ describe('createChain', () => {
       expect(error).toHaveBeenCalledWith('A stage of the chain failed', [REVERB]);
       // the node stays
       expect(node.disconnect).not.toHaveBeenCalled();
-      expect(chain.input.disconnect).not.toHaveBeenCalled();
     });
 
     it('the limiter is a stage of its own, several may fail', async () => {
@@ -831,16 +826,16 @@ describe('createChain', () => {
 
   describe('destroy', () => {
     it('stops the processor, disconnects everything and completes the statuses', async () => {
-      const { chain, node, posts } = await ready();
+      const { chain, engine, node, posts } = await ready();
       const completed = jest.fn();
       chain.$status.subscribe({ complete: completed });
       STAGES.forEach((stage) => chain.status(stage).subscribe({ complete: completed }));
       const listener = jest.fn();
       chain.watch(CHORUS, listener);
       chain.destroy();
+      engine.destroy();
       expect(posts()).toEqual([{ meter: [CHORUS, true] }, { stop: true }]);
       expect(node.disconnect).toHaveBeenCalled();
-      expect(chain.input.disconnect).toHaveBeenCalled();
       expect(chain.output.disconnect).toHaveBeenCalled();
       expect(completed).toHaveBeenCalledTimes(1 + STAGES.length);
 
@@ -854,18 +849,19 @@ describe('createChain', () => {
     });
 
     it('destroyed while its module loads: no node is made', async () => {
-      const { audioCtx, chain, statuses } = setup();
+      const { audioCtx, chain, engine, statuses } = setup();
       chain.destroy();
+      engine.destroy();
       await flush();
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      expect(chain.input.connect).not.toHaveBeenCalled();
       expect(statuses).toEqual(['loading']);
     });
 
     it('destroyed while a failed module is reported: no error, nothing throws', async () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { chain, statuses } = setup({ failFirstLoad: true });
+      const { chain, engine, statuses } = setup({ failFirstLoad: true });
       chain.destroy();
+      engine.destroy();
       await flush();
       expect(error).not.toHaveBeenCalled();
       expect(statuses).toEqual(['loading']);

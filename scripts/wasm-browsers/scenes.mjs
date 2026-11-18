@@ -7,6 +7,11 @@ import { root } from '../bench-common.mjs';
 
 const RATE = 48000;
 const BLOCK = 128;
+// the worklet bundle of every scene and its processor: the one node of the app, its core engine.wasm (the chain and
+// the oscillator in one; `module` of a scene: the half it plays, a core of its own in a reference of the null test
+// from before the engine)
+const BUNDLE = 'engine';
+export const PROCESSOR = 'chisper-engine';
 const STEREO = {
   numberOfInputs: 1,
   numberOfOutputs: 1,
@@ -62,10 +67,10 @@ const REVERB = {
   body: 2,
 };
 
-// the voices of the wavetable oscillator: a store node with the tables and the samples of the noise (posted to its
-// port, the page waits for their acks), the voices node with the events of every voice (its options and initial
+// the voices of the wavetable oscillator: the tables and the samples of the noise posted to a node of the engine
+// (the page waits for their acks: the store is the module's), then a node with the events of every voice (its options and initial
 // params, the steps of the gate at frames exact in binary: a rate of 2^15). phaseRand 0 and the Rand of a noise 0:
-// Math.random draws nothing that sounds
+// Math.random draws nothing that sounds (a node with a `seed` in its options draws alike everywhere)
 const OSC_RATE = 32768;
 const saw = (size, harmonics, shift = 0) =>
   Array.from({ length: size }, (_, n) => {
@@ -78,6 +83,7 @@ const ENV = { attack: 0.01, hold: 0.005, decay: 0.05, sustain: 0.6, release: 0.0
 const oscScene = (name, { tables, samples = {}, voices, frames, lfos = null }) => ({
   name,
   module: 'wavetable-osc',
+  bundle: BUNDLE,
   kind: 'osc',
   rate: OSC_RATE,
   frames,
@@ -402,8 +408,8 @@ const chainState = (kinds, slots = {}, rest = {}) => ({
   ...rest,
 });
 
-// a scene of the chain: the node of the worklet made with a state (its params go only there), the core in Node
-// made with the same one; a block of the core at its frame. `alone`: its effects without the limiter after them,
+// a scene of the chain: the node of the worklet made with a state (its params go only there) and an input it plays
+// in place of its voices (`fed`), the core in Node made with the same state; a block of the core at its frame. `alone`: its effects without the limiter after them,
 // what the null test holds to a reference from before the chain (an effect was a core of its own then; a chain
 // with no effect is its limiter)
 const chainScene = (name, state, scene) => {
@@ -421,8 +427,9 @@ const chainScene = (name, state, scene) => {
   return {
     name,
     module: 'chain',
-    processor: 'chisper-chain',
-    options: { ...STEREO, processorOptions: { state } },
+    bundle: BUNDLE,
+    processor: PROCESSOR,
+    options: { ...STEREO, processorOptions: { state, fed: true } },
     create: make(true),
     ...(state.order.length > 0 && { alone: make(false) }),
     ...scene,
@@ -452,6 +459,24 @@ const LFOS = {
     { mode: 1, delay: 0, rise: 0, smooth: 0, phase: 0, anchor: { time: 0, phase: 0, period: 1 } },
   ],
 };
+
+// the whole node: the voices of an oscillator scene summed into a chain of `kinds` (the engine: one block of both),
+// what the app plays. `whole`: no tap, the output of the limiter
+const engineScene = (name, kinds, scene) => ({
+  ...scene,
+  name,
+  module: 'engine',
+  whole: true,
+  state: chainState(kinds),
+});
+const ENGINE_SCENES = [
+  engineScene(
+    'engine: a chord through every effect',
+    ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
+    OSC_SCENES[0]
+  ),
+  engineScene('engine: voices into the limiter alone', [], OSC_SCENES[1]),
+];
 
 export const SCENES = [
   chainScene('limiter, a chord 12 dB over', chainState([]), { frames: RATE / 2, amplitude: 2 }),
@@ -532,10 +557,12 @@ export const SCENES = [
   ),
 ]
   .map((scene) => ({ rate: RATE, ...scene }))
-  .concat(OSC_SCENES);
+  .concat(OSC_SCENES)
+  .concat(ENGINE_SCENES);
 
 const ENTRY = `
 export { createChainWasm } from './apps/chisper/src/app/synth/common/chain/chain-wasm';
+export { createNodeEngine } from './apps/chisper/src/app/synth/common/engine/engine-messages';
 export {
   createOscScope,
   createTableStoreWasm,
@@ -549,20 +576,26 @@ export { lfoTable } from './apps/chisper/src/app/synth/common/lfo/lfo-curve';
 `;
 const CORES = 'tmp/wasm';
 const loaded = new Map();
-// the cores of a folder of .wasm: the ones it has (a reference of the null test from before a core has none of it)
-const coreFile = (cores, name) => path.resolve(root, cores, `${name}.wasm`);
-export const hasCore = (name, cores = CORES) => fs.existsSync(coreFile(cores, name));
+// the cores of a folder of .wasm: the ones it has (a reference of the null test from before a core has none of it).
+// The file of a half: the engine in a folder that has it, else its own
+const coreFile = (cores, name) =>
+  [BUNDLE, name].map((file) => path.resolve(root, cores, `${file}.wasm`)).find((file) => fs.existsSync(file));
+export const hasCore = (name, cores = CORES) => Boolean(coreFile(cores, name));
 // the facades of the app and the cores of `cores` (a folder of .wasm, by default the build of this tree)
 const load = async (cores = CORES) => {
   if (loaded.has(cores)) return loaded.get(cores);
   const dsp = loaded.get(CORES)?.dsp ?? (await loadApp({ contents: ENTRY, name: 'wasm-browsers' }));
+  // (one instance a file: the halves of an engine in one memory, as in the worklet)
+  const instances = new Map();
+  const instance = (file) => {
+    if (!instances.has(file))
+      instances.set(file, new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(file))).exports);
+    return instances.get(file);
+  };
   const wasm = Object.fromEntries(
     [...new Set(SCENES.map(({ module }) => module))]
       .filter((name) => hasCore(name, cores))
-      .map((name) => [
-        name,
-        new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(coreFile(cores, name)))).exports,
-      ])
+      .map((name) => [name, instance(coreFile(cores, name))])
   );
   loaded.set(cores, { dsp, wasm });
   return loaded.get(cores);
@@ -638,9 +671,45 @@ const nodeOscRender = async (scene, cores) => {
   return { output };
 };
 
+// the events of the voices of an oscillator scene as the node takes them: each voice, its params at the note on,
+// the steps of its gate
+export const sceneEvents = (scene) =>
+  scene.voices.flatMap(({ options, params, gate }, voice) => [
+    { kind: 'on', voice, options, params },
+    ...gate.map(([frame, value]) => ({
+      kind: 'set',
+      voice,
+      param: 'gate',
+      value,
+      time: frame / scene.rate,
+    })),
+  ]);
+
+// the whole node of a scene in Node: the engine of its events and its state, block by block
+const nodeEngineRender = async (scene, cores) => {
+  const { dsp, wasm } = await load(cores);
+  const scope = dsp.createOscScope(wasm.engine);
+  const store = dsp.createTableStoreWasm(scope);
+  Object.entries(await sceneLevels(scene)).forEach(([table, levels]) => store.set(table, 1, levels));
+  const shared = dsp.createVoiceSharedWasm(scope);
+  const lfos = await sceneLfos(scene);
+  const state = lfos
+    ? { ...lfos, lfos: lfos.lfos.map((wire) => ({ ...wire, table: Float32Array.from(wire.table) })) }
+    : null;
+  // (the engine of the options of the node, as its processor makes it)
+  const options = { state: scene.state, ...(state && { lfos: state }), events: sceneEvents(scene) };
+  const { engine } = dsp.createNodeEngine(scope, scene.rate, options, store, shared);
+  const output = [new Float32Array(scene.frames), new Float32Array(scene.frames)];
+  for (let at = 0; at < scene.frames; at += BLOCK)
+    engine.process(at, output[0].subarray(at, at + BLOCK), output[1].subarray(at, at + BLOCK));
+  engine.free();
+  return { output };
+};
+
 // the input of a scene and the output of its wasm core in Node, block by block (`cores`: the cores of another
 // folder, the null test)
 export const nodeRender = async (scene, cores) => {
+  if (scene.whole) return nodeEngineRender(scene, cores);
   if (scene.kind === 'osc') return nodeOscRender(scene, cores);
   const { dsp, wasm } = await load(cores);
   const input = scene.input?.() ?? signal(scene.frames, scene.amplitude);

@@ -1,48 +1,27 @@
-import bytes from '@chisper/wasm/wavetable-osc.wasm';
 import { lfoTable, LfosState, RETRIG } from '../lfo/lfo-curve';
-import { instantiateCore } from '../wasm/wasm-core';
-import type {
-  StoreStatsMessage,
-  VoiceEvent,
-  VoiceFilterOptions,
-  VoiceOptions,
-  VoiceOscOptions,
-} from './voice-options';
+import type { VoiceEvent, VoiceFilterOptions, VoiceOptions, VoiceOscOptions } from './voice-options';
 import { noiseLevels } from './noise-layout';
 import { createLevels, levelBase } from './wavetable-levels';
-import { STORE_PROCESSOR, VOICE_PARAMETERS, VOICES_PROCESSOR, VoiceParam } from './wavetable-osc-params';
+import { VOICE_PARAMETERS, VoiceParam } from './wavetable-osc-params';
 import {
-  createOscScope,
-  createStoreReceiver,
   createTableStoreWasm,
   createVoiceScopeWasm,
   createVoiceSharedWasm,
   createVoiceWasm,
-  OscExports,
-  StoreFreedBytesMessage,
+  OscScope,
   TableStoreWasm,
-  VoiceScopeWasm,
+  VoiceSharedWasm,
 } from './wavetable-osc-wasm';
-import { registerVoicesProcessor } from './voices-processor';
 
-// the audio worklet module of the wavetable oscillator with its Rust core (dsp/wavetable-osc), bundled by esbuild
-// (`npm run worklets`) into assets/worklets/wavetable-osc.js with the bytes of wavetable-osc.wasm; it runs in
-// the AudioWorkletGlobalScope (one per AudioContext): no window, document or React. One instance of the core for
-// the scope: the store processor receives the tables into its memory (from the worker in chunks, or posted to its
-// node), the voices processor plays them from there (every note in one node)
-
-declare const sampleRate: number;
-declare const currentFrame: number;
-interface AudioWorkletProcessor {
-  readonly port: MessagePort;
+// what renders the voices of the warm-up in a node: the scope of the voices alone, or the engine they play in (its
+// block is another function of the core: the one the node calls is the one to compile)
+export interface WarmVoices {
+  apply: (events: VoiceEvent[]) => void;
+  process: (frame: number, outL: Float32Array, outR: Float32Array) => unknown;
+  reports: () => unknown;
+  free: () => void;
 }
-declare const AudioWorkletProcessor: { prototype: AudioWorkletProcessor; new (): AudioWorkletProcessor };
-declare function registerProcessor(
-  name: string,
-  processor: new (options: AudioWorkletNodeOptions) => AudioWorkletProcessor
-): void;
-
-const scope = createOscScope(instantiateCore<OscExports>(new WebAssembly.Module(bytes)));
+export type WarmVoicesFactory = (store: TableStoreWasm, shared: VoiceSharedWasm) => WarmVoices;
 
 // the functions of a block compile lazily, on their first call: while the module loads, a voice of both
 // oscillators (a table of 2 frames and the placeholder sine) on a store and a shared of its own renders a moving
@@ -143,7 +122,13 @@ const WARM_NOISE = WARM_VOICE.noise as NonNullable<VoiceOptions['noise']>;
 const WARM_SUB = WARM_VOICE.sub as NonNullable<VoiceOptions['sub']>;
 // (the kernels of the noise the warm store built go to `store`: built as the module loads, not with its first
 // sample on the audio thread)
-const prewarm = (store: TableStoreWasm) => {
+export const prewarmVoices = (
+  scope: OscScope,
+  store: TableStoreWasm,
+  sampleRate: number,
+  createVoices: WarmVoicesFactory = (warmStore, warmShared) =>
+    createVoiceScopeWasm(scope, sampleRate, warmStore, warmShared)
+) => {
   const warmStore = createTableStoreWasm(scope);
   const warmShared = createVoiceSharedWasm(scope);
   try {
@@ -174,11 +159,11 @@ const prewarm = (store: TableStoreWasm) => {
       voice.process(block * 128, params, outL, outR);
     }
     voice.end();
-    const voices = createVoiceScopeWasm(scope, sampleRate, warmStore, warmShared);
+    const voices = createVoices(warmStore, warmShared);
     const at = (block: number) => (block * 128) / sampleRate;
+    warmShared.setLfos(warmLfos(0, 0, 'square', true));
+    warmShared.setLfos(warmLfos(at(2), 0.5, 'triangle'));
     const events: VoiceEvent[] = [
-      { kind: 'lfos', ...warmLfos(0, 0, 'square', true) },
-      { kind: 'lfos', ...warmLfos(at(2), 0.5, 'triangle') },
       {
         kind: 'on',
         voice: 0,
@@ -237,62 +222,3 @@ const prewarm = (store: TableStoreWasm) => {
   warmStore.free();
   warmShared.free();
 };
-
-const store = createTableStoreWasm(scope);
-// (a prewarm that fails, a trap of the core on some engine, leaves its functions to the first note and its store,
-// shared and voices where they are: a voice may still hold their versions; the oscillators play all the same)
-try {
-  prewarm(store);
-} catch (error) {
-  console.error('The prewarm of the wavetable oscillator failed', error);
-}
-const shared = createVoiceSharedWasm(scope);
-// the voices of the node of the context (the counters of the perf build read them)
-let voices: VoiceScopeWasm | null = null;
-
-class StoreProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    // (the processor of a retry takes it over)
-    store.listen((bytes) => {
-      const freed: StoreFreedBytesMessage = { freedBytes: bytes };
-      this.port.postMessage(freed);
-    });
-    this.port.onmessage = createStoreReceiver(
-      store,
-      (message) => this.port.postMessage(message),
-      () => {
-        // the counters of the store and of the voices of the scope (the perf build)
-        if (!__PERF__) return;
-        const { voices: scopeVoices, events } = voices?.stats() ?? { voices: 0, events: 0 };
-        const answer: StoreStatsMessage = {
-          stats: { ...store.stats(), ...shared.stats(), scopeVoices, events, frame: currentFrame },
-        };
-        this.port.postMessage(answer);
-      }
-    );
-  }
-
-  process() {
-    return true;
-  }
-}
-
-registerProcessor(STORE_PROCESSOR, StoreProcessor);
-const voicesFailed = (error: unknown) => console.error('A voice of the wavetable oscillator failed', error);
-registerVoicesProcessor(
-  VOICES_PROCESSOR,
-  () => {
-    // (the node of a retry takes the counters over)
-    const created = createVoiceScopeWasm(scope, sampleRate, store, shared, Math.random, voicesFailed);
-    voices = created;
-    return {
-      ...created,
-      free: () => {
-        if (voices === created) voices = null;
-        created.free();
-      },
-    };
-  },
-  voicesFailed
-);

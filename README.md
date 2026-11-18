@@ -44,7 +44,7 @@ Built with TypeScript, Rust (WebAssembly), RxJS and the Web Audio API. Nothing t
 - Built-in delay presets: Slapback, Stereo widener, Digital echo, Ping-pong 250ms, Echo 375ms, Echo 500ms, Wide ping-pong, Tape echo, Dub, Ambient wash, Lo-fi, Metallic comb
 - **Reverb**: an algorithmic 16-line feedback delay network with input low cut, predelay, room size, decay with hi damping and a bass multiplier, tail modulation depth (every line has its own LFO), stereo separation and early reflections level (damped like the tail; the wet level is the common mix), plus a decay-over-frequency display. An **Era** switch colors the input like vintage units: Now (full band), 80s (clean, converter-like bandwidth limit and a little low-mid body) and 70s (darker, with a touch of asymmetric tube saturation)
 - Built-in reverb presets: Small room, Medium room, Bright room, Dark chamber, Plate, Vintage plate, Vocal plate, Large hall, Cathedral, Lush modulated, Ambient wash
-- The effects, the master gain and the limiter run in one AudioWorklet on one Rust core; the envelopes and the LFOs of the last note move the FX knobs too
+- The voices, the effects, the master gain and the limiter run in one AudioWorklet node on one Rust core; the envelopes and the LFOs of the last note move the FX knobs too
 
 ### 🌊 Wavetables
 
@@ -147,7 +147,7 @@ presets won't load in that mode (the tables of the patch do: they come from the 
 | `npm run client:start`   | Frontend only                                                               |
 | `npm run certs`          | Local HTTPS certificate for `netlify dev` (needs mkcert)                    |
 | `npm run build`          | Production build to `dist/apps/chisper`                                     |
-| `npm run wasm`           | Rust cores of the worklets to WebAssembly (`tmp/wasm`, `tmp/wasm-perf`)     |
+| `npm run wasm`           | Rust core of the worklet to WebAssembly (`tmp/wasm`, `tmp/wasm-perf`)       |
 | `npm run worklets`       | AudioWorklet and Web Worker bundles with esbuild (`tmp/worklets`)           |
 | `npm run test:all`       | All Jest tests (`npx nx test <project>` for one project)                    |
 | `npm run dsp:check`      | `cargo fmt`, `clippy`, `cargo test` and the size budgets of the Rust cores  |
@@ -174,9 +174,9 @@ libs/
   rxjs-react/           rxModel: RxJS state models bound to React context
   ui-kit/               knobs, charts, piano, analysers, ADSR widget, theme
   preset-schema/        zod schema of presets, normalization, hashing (shared by client and server)
-dsp/                    Rust cores of the worklets: wavetable-osc and chain (the effects in their slots, the
-                        master gain, the limiter), dsp-core (shared blocks), jsmath (JS Math bit for bit);
-                        golden hashes of their sound
+dsp/                    Rust core of the worklet: engine = wavetable-osc (the voices) into chain (the effects in
+                        their slots, the master gain, the limiter); dsp-core (shared blocks), jsmath (JS Math
+                        bit for bit); golden hashes of their sound
 netlify/
   functions/            presets API, usage stats, wavetables, scheduled jobs
   tests/                function specs
@@ -202,7 +202,7 @@ flowchart LR
   V --> PRE[Pre gain] --> FX[FX rack] --> M[Master gain] --> L[Limiter] --> OUT((Output))
 ```
 
-Every note is one AudioWorkletNode: both oscillators with their unison voices, the filter, the envelopes and the modulation run in its processor. A Web Worker builds the band-limited levels of each wavetable and streams them to a table store on the audio thread, which all voices share. The processors of the oscillator, the distortion, the reverb and the limiter run Rust cores compiled to WebAssembly (`dsp/`); the delay is built from native nodes. The cores were ported from TypeScript bit for bit, and golden hashes of their output (`dsp/goldens/`) keep the sound from changing by accident.
+The whole path is one AudioWorkletNode on one Rust core compiled to WebAssembly (`dsp/`): every voice (both oscillators with their unison voices, the noise, the sub, the filter, the envelopes and the modulation), then the effects, the master gain and the limiter; the voices are summed into the chain inside the core. A Web Worker builds the band-limited levels of each wavetable and streams them to a table store on the audio thread, which all voices share. Golden hashes of the core's output (`dsp/goldens/`) keep the sound from changing by accident.
 
 Note input from the on-screen piano, QWERTY and MIDI goes through one shared input controller. Synth state is serialized into presets through a snapshot plugin and validated by the shared zod schema.
 

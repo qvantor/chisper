@@ -1,3 +1,4 @@
+import { chainNode, chainPosts } from '../../../../test-utils/chain-node';
 import { createFx, createSynth, initModel, stopModels } from '../../../../test-utils/models';
 import { voiceEvents } from '../../../../test-utils/voice-events';
 import { soundSwitch } from './sound-switch';
@@ -58,11 +59,11 @@ const setup = async ({ running = true } = {}) => {
   const last = (mock: jest.SpyInstance) => mock.mock.invocationCallOrder.at(-1) ?? 0;
   // the output opened again: an unmute after the mute
   const opened = () => last(unmute) > last(mute);
-  // what the node of the chain was told since the switch model started
-  const node = (chain.input.connect as jest.Mock).mock.calls[0][0] as AudioWorkletNode;
-  const told = (node.port.postMessage as jest.Mock).mock.calls.length;
-  const messages = () =>
-    (node.port.postMessage as jest.Mock).mock.calls.slice(told).map(([message]) => message);
+  // what the chain was told in the node of the engine since the switch model started (not the events of its
+  // voices)
+  const node = chainNode(audioCtx);
+  const told = chainPosts(node).length;
+  const messages = () => chainPosts(node).slice(told);
   return {
     switchSound,
     $progress,

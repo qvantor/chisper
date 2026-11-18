@@ -50,7 +50,7 @@ import {
 // arrays of the block, every voice tapped): the same bits for every voice, and the sum of a block the f32 sum of
 // the voices in the order they were made (its own golden)
 
-const core = wasmCore<OscExports>('wavetable-osc');
+const core = wasmCore<OscExports>('engine');
 const goldens = createGoldens('wavetable-osc');
 afterAll(() => goldens.save());
 
@@ -288,7 +288,7 @@ const runScope = (name: string, scenario: Scenario, trap?: { block: number; voic
     const cents = scenario.bends?.[block];
     if (cents !== undefined) node.setBend(cents);
     const lfos = scenario.lfos?.[block];
-    if (lfos) node.apply([{ kind: 'lfos', ...lfos }]);
+    if (lfos) shared.setLfos(lfos);
     voices.forEach((voice, id) => {
       if (voice.at !== block) return;
       node.on(id, production(voice.options), {});

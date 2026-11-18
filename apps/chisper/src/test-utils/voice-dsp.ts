@@ -29,7 +29,7 @@ export { seeded };
 
 // an instance of the core for the spec file, as the AudioWorkletGlobalScope of a context: its stores and voices
 let instance: OscScope | null = null;
-export const oscScope = () => (instance ??= createOscScope(wasmCore<OscExports>('wavetable-osc')));
+export const oscScope = () => (instance ??= createOscScope(wasmCore<OscExports>('engine')));
 
 // a store with version 1 of each table (frames of samples) in the instance `scope`, the versions it frees
 export const storeWith = (tables: Record<string, number[][]>, scope = oscScope()) => {

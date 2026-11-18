@@ -12,7 +12,7 @@ import { wasmCore } from './wasm';
 
 let core: ChainExports | undefined;
 // one instance for a spec file
-export const chainCore = () => (core ??= wasmCore<ChainExports>('chain'));
+export const chainCore = () => (core ??= wasmCore<ChainExports>('engine'));
 
 export const slotOf = (kind: FxKind) => FX_KINDS.indexOf(kind);
 

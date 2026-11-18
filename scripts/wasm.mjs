@@ -6,7 +6,7 @@
 // --sizes prints their gzip sizes, --check-sizes fails over the budget of a module (CI), --watch builds them
 // again on every change of dsp/ (client:start)
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, watch } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, watch } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -17,19 +17,10 @@ const OUT_PERF = 'tmp/wasm-perf';
 // the cores: crate, its bundle (the worklet bundle of the same name embeds it), the gzip budget (bytes, about 10%
 // over the size of the port: dlmalloc, the tables of jsmath and the fmt the panic sites still reference are ~12 KB)
 const CORES = [
-  // (the effects, their slots and their modulation, the delay, the master and the limiter in one module: the
-  // runtime once, where five modules had it five times, 101 KB of them)
-  { crate: 'chain', name: 'chain', budget: 75000 },
-  // (the voices of one node: their timelines and their scope, +5.8 KB; the fades of a frame, +1.3 KB; the LFOs and
-  // the routes of their knobs, +6.3 KB; the blend a param, its blocks that move it, +1.2 KB; the noise, its
-  // samples and its windowed sincs, +5.7 KB; the sub, its loops of its own, +4.0 KB; the model types of the filter,
-  // their design and their sections in lanes, +9.6 KB; the grid of their cutoff and its cells, +1.9 KB; two pairs of
-  // voices in one loop, its 8 samples inlined, +7.2 KB; the steps of a fresh note, a change of type that waits for a
-  // fade, the narrow cells, Drive averaged by its parts, +0.2 KB; the ranges of the routes of the filter held for its
-  // type, +0.2 KB; groups of one layout, the scan of a filter kept for its pass, +0.4 KB; the late pole of a one-pole
-  // by W₀ near its double one, +0.3 KB; the room of the routes held made with them, not in their block, +0.5 KB; the
-  // knobs a type is not designed by, its FAT set after a design, its cutoff in its cells while they move, +0.4 KB)
-  { crate: 'wavetable-osc', name: 'wavetable-osc', budget: 110300 },
+  // the one core of the one node: the voices and the store of their tables (the crate wavetable-osc) into the chain
+  // (the effects, their slots and their modulation, the delay, the master and the limiter). The runtime once,
+  // where the two modules had it twice: 167.2 KB, they were 74.0 and 110.1
+  { crate: 'engine', name: 'engine', budget: 168500 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -80,7 +71,7 @@ const cargo = (perf) => {
 // the functions of a core -O3 doesn't inline (patterns of their names in the build of cargo): the render of each
 // source of a voice (the noise, the sub) stays a function of its own (inlined into Voice::process, its one caller, its loops would share
 // the registers of everything else the voice does in a block)
-const NO_INLINE = { 'wavetable-osc': ['*Noise11render_into*', '*Sub11render_into*'] };
+const NO_INLINE = { engine: ['*Noise11render_into*', '*Sub11render_into*'] };
 
 const optimize = (from, to, crate) => {
   // the features of the module from its target_features section; -O3, no --fast-math
@@ -103,6 +94,11 @@ const build = () => {
       const from = artifact(targetDir, crate);
       if (crate === 'jsmath-check') copyFileSync(from, join(out, `${name}.wasm`));
       else optimize(from, join(out, `${name}.wasm`), crate);
+    }
+    // a core that is no more (one a crate of CORES took in) is not left for a spec or a bench to load in its place
+    for (const file of readdirSync(out)) {
+      if (file.endsWith('.wasm') && !CORES.some(({ name }) => file === `${name}.wasm`))
+        rmSync(join(out, file));
     }
   }
   const into = VARIANTS.map(([, out]) => out).join(' and ');

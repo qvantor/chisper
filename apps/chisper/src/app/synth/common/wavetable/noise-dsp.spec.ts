@@ -42,7 +42,7 @@ const MEASURED: {
   mono: { legato: boolean; rand: number; shares: [number, number][] }[];
 } = JSON.parse(readFileSync(join(__dirname, '../../../../../../../dsp/measurements/noise.json'), 'utf8'));
 
-const scope = createOscScope(wasmCore<OscExports>('wavetable-osc'));
+const scope = createOscScope(wasmCore<OscExports>('engine'));
 const BLOCK = 128;
 const SOURCE_RATE = 44100;
 const FLAT: EnvelopeParams = { attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 };

@@ -17,7 +17,7 @@ import {
   ROUTE_SCALES,
 } from './chain-params';
 
-// The chain core (dsp/chain, chain.wasm) as a worklet and a render on the main thread drive it: the events of
+// The chain core (dsp/chain, in engine.wasm) as a worklet and a render on the main thread drive it: the events of
 // the knobs with their frame, the routes, the note and the LFOs, a block at a frame, what failed. A trap inside
 // an effect is caught here: the stack pointer back, the effect dropped by the core, the block finished without it
 
@@ -93,6 +93,8 @@ export const createChainWasm = (
   let freed = false;
 
   const chain = {
+    // (the engine renders it: engine-wasm.ts)
+    handle,
     // the params of a slot that changed (by the keys of its kind: others are ignored)
     setParams: (slot: number, params: Record<string, number>, at = 0) => {
       const keys = CHAIN_KEYS[FX_KINDS[slot]];

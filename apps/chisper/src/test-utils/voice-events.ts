@@ -5,19 +5,16 @@ import type {
   VoiceEventsMessage,
   VoiceFilterOptions,
   VoiceModuleKnobs,
-  VoicesLfos,
   VoiceOptions,
   VoiceRoute,
   VoicesReportMessage,
   VoiceVelocity,
 } from '../app/synth/common/wavetable/voice-options';
-import {
-  VOICE_PARAMETERS,
-  VOICES_PROCESSOR,
-  VoiceParam,
-} from '../app/synth/common/wavetable/wavetable-osc-params';
+import type { LfosState } from '../app/synth/common/lfo/lfo-curve';
+import { VOICE_PARAMETERS, VoiceParam } from '../app/synth/common/wavetable/wavetable-osc-params';
+import { engineNodes } from './chain-node';
 
-// the voices of the voices node of a context as the main thread made them: each rebuilt from the events
+// the voices of the engine node of a context as the main thread made them: each rebuilt from the events
 // the engine posted to the node (a voice from its `on`), its params AudioParam mocks the events of each are
 // played into (the calls and their order, the value at the current time), the routes and the filters sent to
 // it (and its velocities); bends() the pitch bends of the nodes, lfos() the states of their LFOs; end() and
@@ -68,27 +65,34 @@ const createParam = (context: BaseAudioContext, value: number, minValue?: number
     maxValue: maxValue ?? 3.4028234663852886e38,
   });
 
-export const voicesNodes = (context: BaseAudioContext) =>
-  (
-    registrar.getAudioNodes(context as never, 'AudioWorkletNode' as never) as unknown as VoicesNodeStub[]
-  ).filter(({ name }) => name === VOICES_PROCESSOR);
+export const voicesNodes = (context: BaseAudioContext) => engineNodes<VoicesNodeStub>(context);
 
-// the events a voices node got, in order (the messages of their tasks)
+// a state of the LFOs among the events of the voices: a message of its own to the node, shown in their order
+export interface SeenLfos extends LfosState {
+  kind: 'lfos';
+}
+type SeenEvent = VoiceEvent | SeenLfos;
+
+// the events the node of the engine got for its voices, in order (the messages of their tasks); a state of the
+// LFOs, a message of its own to the voices and the chain, as an event among them
 export const eventsOf = (node: VoicesNodeStub) =>
   node.port.postMessage.mock.calls
-    .map(([message]) => message as Partial<VoiceEventsMessage>)
-    .filter((message): message is VoiceEventsMessage => Array.isArray(message.events));
+    .map(([message]) => message as Partial<VoiceEventsMessage> & { lfos?: LfosState })
+    .map((message): { events?: SeenEvent[] } =>
+      message.lfos ? { events: [{ kind: 'lfos' as const, ...message.lfos }] } : message
+    )
+    .filter((message): message is { events: SeenEvent[] } => Array.isArray(message.events));
 
 // `engine.flush` sends the events of this task (a microtask would)
 export const voiceEvents = (context: BaseAudioContext, engine: { flush: () => void }) => {
   const views: VoiceView[] = [];
   // the pitch bend of the voices (cents), every one sent in order, and the states of the LFOs
   const bends: number[] = [];
-  const lfos: VoicesLfos[] = [];
+  const lfos: SeenLfos[] = [];
   const byId = new Map<number, VoiceView>();
   const read = new Map<VoicesNodeStub, number>();
 
-  const play = (node: VoicesNodeStub, event: VoiceEvent) => {
+  const play = (node: VoicesNodeStub, event: SeenEvent) => {
     if (event.kind === 'on') {
       const params = Object.fromEntries(
         VOICE_PARAMETERS.map(({ name, defaultValue, minValue, maxValue }) => [
@@ -175,7 +179,7 @@ export const voiceEvents = (context: BaseAudioContext, engine: { flush: () => vo
   };
 };
 
-// what the main thread sends the voices nodes of a context: its messages (one a task), the voices made, the
+// what the main thread sends the engine nodes of a context: its messages (one a task), the voices made, the
 // automation events of their params (set, target, ramp, cancel), the routes, filters and velocities of playing
 // voices, the pitch bends and the states of the LFOs
 export interface VoiceWork {
@@ -186,7 +190,7 @@ export interface VoiceWork {
 }
 
 // the events that change playing voices (not a note on nor the automation of a param; typed: a kind renamed fails)
-const CHANGES: VoiceEvent['kind'][] = ['routes', 'filter', 'velocity', 'knobs', 'bend', 'lfos'];
+const CHANGES: SeenEvent['kind'][] = ['routes', 'filter', 'velocity', 'knobs', 'bend', 'lfos'];
 const countEvents = (context: BaseAudioContext): VoiceWork => {
   const events = voicesNodes(context).flatMap((node) => eventsOf(node));
   const all = events.flatMap((message) => message.events);

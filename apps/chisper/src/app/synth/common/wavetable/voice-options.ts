@@ -1,10 +1,9 @@
 import type { EnvelopeParams } from '../envelope/envelope-curve';
-import type { LfosState } from '../lfo/lfo-curve';
 import type { WavetableLevels } from './wavetable-levels';
 import type { VoiceParam } from './wavetable-osc-params';
 
-// the options of a voice of the wavetable oscillator (its note on, an event to the voices node), the messages
-// between the main thread, the store, the worker and the voices node, the routes and the filter of a voice: the
+// the options of a voice of the wavetable oscillator (its note on, an event to the engine node), the messages
+// between the main thread, the store, the worker and the engine node, the routes and the filter of a voice: the
 // API of its Rust core (dsp/wavetable-osc, wavetable-osc-wasm.ts), no signal processing here
 
 // an oscillator of a voice, null in VoiceOptions.osc: off for the note
@@ -146,12 +145,7 @@ export interface VoiceModuleKnobs {
 }
 export type KnobsModule = keyof VoiceModuleKnobs;
 
-// main thread → a worklet: its node is destroyed, the processor ends, so it can be collected
-export interface StopMessage {
-  stop?: boolean;
-}
-
-// main thread → voices processor, the events of a task in the order they were made: a voice of a note (`on`), the
+// main thread → processor of the engine, the events of a task in the order they were made: a voice of a note (`on`), the
 // automation of its params (the AudioParam call of the same name: setValueAtTime, setTargetAtTime,
 // exponentialRampToValueAtTime, cancelScheduledValues, linearRampToValueAtTime (the synth makes none); values in
 // f32, times in seconds of the context), the routes, the filter, the velocity and the knobs of a module of playing
@@ -202,32 +196,20 @@ export interface VoicesBend {
   cents: number;
   instantly?: boolean;
 }
-// the LFOs of every voice of the node from `at` on (their knobs, clocks and shapes: lfo-curve.ts), in the order of
-// the other events (a voice made after it plays them)
-export interface VoicesLfos extends LfosState {
-  kind: 'lfos';
-}
 export type VoiceEvent =
-  | VoiceOn
-  | VoiceAutomation
-  | VoicesRoutes
-  | VoicesFilter
-  | VoicesVelocity
-  | VoicesKnobs
-  | VoicesBend
-  | VoicesLfos;
+  VoiceOn | VoiceAutomation | VoicesRoutes | VoicesFilter | VoicesVelocity | VoicesKnobs | VoicesBend;
 export interface VoiceEventsMessage {
   events: VoiceEvent[];
 }
 
-// voices processor → main thread, after a block that has any: the voices that started (each once: its id, the frame
+// processor of the engine → main thread, after a block that has any: the voices that started (each once: its id, the frame
 // it started at and the one it was scheduled at) and those that ended (released to 0, stolen, or failed)
 export interface VoicesReportMessage {
   started?: [number, number, number][];
   ended?: number[];
 }
 
-// the start of a voice the voices node tells, once, on time too: the frame it was scheduled at and the one it started
+// the start of a voice the engine node tells, once, on time too: the frame it was scheduled at and the one it started
 // at (its first block: later when its note on came after its start; the fx and Poly follow it from its first
 // sample). A note may take the voice over before it is told (its envelopes start again): the main thread keeps
 // those starts again until then (the perf test hook times the notes by it)

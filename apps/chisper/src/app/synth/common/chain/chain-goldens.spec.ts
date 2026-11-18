@@ -9,13 +9,12 @@ import {
   CHAIN_KEYS,
   ChainRoute,
   ChainState,
+  chainTarget,
   FX_KINDS,
   FxKind,
   LFO_SOURCE,
   LFO_TARGET,
-  MIX_KEY,
   NEUTRAL_PARAMS,
-  TARGET_KEYS,
 } from './chain-params';
 import type { ChainWasm } from './chain-wasm';
 
@@ -72,8 +71,7 @@ const blockOf = (seconds: number) => Math.floor((seconds * RATE) / 128);
 // notes of a few partials with silences between them, the channels apart
 const notes: Signal = (n, channel) =>
   n % 12000 < 7000 ? 0.4 * Math.sin(n / 9 + channel) + 0.3 * Math.sin(n / 3.7) + 0.2 * Math.sin(n / 1.3) : 0;
-const target = (kind: FxKind, key: string) =>
-  FX_KINDS.indexOf(kind) * TARGET_KEYS + (key === 'mix' ? MIX_KEY : CHAIN_KEYS[kind].indexOf(key));
+const target = chainTarget;
 const held = { attack: 0.02, hold: 0, decay: 0.1, sustain: 0.6, release: 0.2 };
 const lfos = () => ({
   at: 0,

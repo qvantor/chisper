@@ -12,7 +12,7 @@ import { wasmCore } from './wasm';
 
 let core: UnitExports | undefined;
 // one instance for a spec file
-export const delayCore = () => (core ??= wasmCore<UnitExports>('chain'));
+export const delayCore = () => (core ??= wasmCore<UnitExports>('engine'));
 
 export const DELAY_DEFAULTS = NEUTRAL_PARAMS.delay as unknown as DelayDspParams;
 

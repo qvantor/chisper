@@ -65,6 +65,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine"
+version = "0.1.0"
+dependencies = [
+ "chain",
+ "dsp-core",
+ "wasm-rt",
+ "wavetable-osc",
+]
+
+[[package]]
 name = "jsmath"
 version = "0.1.0"
 

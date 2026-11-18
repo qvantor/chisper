@@ -1,13 +1,9 @@
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import type { LfosState } from '../lfo/lfo-curve';
 
-// The chain (dsp/chain, chain.wasm): everything after the voices in one worklet node with one core, the effects in
+// The chain (dsp/chain, in engine.wasm): everything after the voices in the node of the engine, the effects in
 // their slots, the master gain and the limiter. What the main thread, the worklet and the specs share of it: no
 // imports but types, no window or document (a worklet module imports it)
-
-// the module and its processor (assets/worklets/chain.js)
-export const CHAIN_MODULE = 'chain';
-export const CHAIN_PROCESSOR = 'chisper-chain';
 
 // the kinds of the effects: the slot of each by its index (FX_TYPES of the preset schema, not imported: it would
 // bundle zod; a spec holds them equal), then the stage of the limiter
@@ -117,6 +113,9 @@ export const CHAIN_EVENT = {
 export const TARGET_KEYS = 32;
 export const MIX_KEY = 31;
 export const LFO_TARGET = FX_KINDS.length * TARGET_KEYS;
+// the target of a param of the effect of a kind, or of the mix of its slot
+export const chainTarget = (kind: FxKind, key: string) =>
+  FX_KINDS.indexOf(kind) * TARGET_KEYS + (key === 'mix' ? MIX_KEY : CHAIN_KEYS[kind].indexOf(key));
 export const LFO_KEYS = 8;
 export const LFO_KNOBS = ['rate', 'delay', 'rise', 'smooth', 'phase'] as const;
 // the sources: ENV 1–3, VELO, LFO 1–4 (MOD_SOURCES)
@@ -215,8 +214,4 @@ export interface ChainReport {
   // the stage a retry made again (one it could not make is in `failed` once more)
   remade?: number;
   broken?: true;
-}
-
-export interface ChainOptions {
-  state: ChainState;
 }

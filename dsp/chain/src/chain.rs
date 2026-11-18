@@ -126,6 +126,8 @@ pub struct Chain {
     // the step of the block (`EVENTS`…), the kind to rest next, whether the slots are skipped, the knobs the
     // routes move in this block (slot, key, value) and the one to set next
     step: u32,
+    // the input of the block is all 0, told by whoever made it (process_fed)
+    silent_input: bool,
     rested: usize,
     resting: bool,
     sets: Vec<(usize, usize, f64)>,
@@ -282,6 +284,7 @@ impl Chain {
             side: 0,
             silent: false,
             step: EVENTS,
+            silent_input: false,
             rested: 0,
             resting: false,
             // (a knob is set back or moved, never both in a block)
@@ -577,8 +580,25 @@ impl Chain {
         }
     }
 
+    /// the input of the block reserved (left, then right): whoever feeds the chain writes it there
+    pub fn input(&mut self) -> *mut f32 {
+        self.data.as_mut_ptr()
+    }
+
+    /// the block of `process`, its input known to be all 0 when `silent` (it is not read to find out: the same
+    /// values)
+    pub fn process_fed(&mut self, frame: f64, silent: bool) {
+        self.silent_input = silent;
+        self.block(frame);
+    }
+
     /// the block reserved, at `frame`: the events due, then the stages
     pub fn process(&mut self, frame: f64) {
+        self.silent_input = false;
+        self.block(frame);
+    }
+
+    fn block(&mut self, frame: f64) {
         self.end();
         self.frame = frame;
         self.cursor = 0;
@@ -608,7 +628,11 @@ impl Chain {
         // it is all 0
         // SAFETY: the buffers of the input, held once
         let (in_l, in_r) = unsafe { (self.buffer(0), self.buffer(1)) };
-        let peak = louder(loudest(in_l), loudest(in_r));
+        let peak = if self.silent_input {
+            0.0
+        } else {
+            louder(loudest(in_l), loudest(in_r))
+        };
         if !peak.is_finite() {
             for value in in_l.iter_mut().chain(in_r.iter_mut()) {
                 if !value.is_finite() {
@@ -926,6 +950,16 @@ impl Chain {
         }
         self.reports |= 1 << stage;
         true
+    }
+
+    /// the frames of the block reserved
+    pub fn frames(&self) -> usize {
+        self.frames
+    }
+
+    /// a stage failed since the last `take_reports`
+    pub fn reported(&self) -> bool {
+        self.reports != 0
     }
 
     /// the stages that failed since the last call (the bit of each)

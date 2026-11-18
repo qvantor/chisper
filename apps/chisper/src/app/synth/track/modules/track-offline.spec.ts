@@ -3,8 +3,9 @@ import { createSynth, createTrack, stopModels } from '../../../../test-utils/mod
 import { createOfflineEngine } from '../../../../test-utils/offline-engine';
 import { TRACK_LEAD } from './track';
 
-// the track played into the voices node of the core, offline: a note of the clip sounds from the first frame of its
-// time on the transport, ceil(timeAt · rate), not from the block its event was sent in
+// the track played into the node of the core, offline (the voices through the chain; without the limiter the
+// samples of the voices are at their frames): a note of the clip sounds from the first frame of its time on the
+// transport, ceil(timeAt · rate), not from the block its event was sent in; with the limiter, its latency later
 
 const flush = () => new Promise((resolve) => setTimeout(resolve));
 
@@ -17,7 +18,7 @@ const firstSound = (left: Float32Array) => left.findIndex((sample) => sample !==
 
 describe('the track on the voices of the core', () => {
   it('starts each note at the frame of its beat', async () => {
-    const engine = createOfflineEngine();
+    const engine = createOfflineEngine(undefined, { limited: false });
     const modules = createSynth();
     await flush();
     const [{ audioCtx, wavetables }] = modules.synthCore;
@@ -44,10 +45,30 @@ describe('the track on the voices of the core', () => {
     expect(engine.made()).toBe(2);
   });
 
+  it('the limiter of the node delays what it plays by its latency', async () => {
+    const engine = createOfflineEngine();
+    const modules = createSynth();
+    await flush();
+    const [{ audioCtx, wavetables }] = modules.synthCore;
+    engine.attach(audioCtx, wavetables);
+    engine.flushWorker();
+    modules.envelopes[1].setEnvelopeValue('env1', 'attack', 0);
+    const { track, clock } = createTrack(modules);
+    track[1].setNotes([[0, CLIP_PPQ / 4, 60, 100]]);
+    track[1].play();
+    const rate = audioCtx.sampleRate;
+    const [left, right] = engine.renderStereo(Math.ceil((0.3 * rate) / 128), () => clock.tick());
+    expect(engine.latency()).toBeGreaterThan(0);
+    expect(firstSound(left)).toBe(Math.ceil(TRACK_LEAD * rate - 1e-6) + engine.latency());
+    expect(firstSound(right)).toBe(firstSound(left));
+    // (under its ceiling of -0.5 dBTP)
+    expect(left.every((sample) => Math.abs(sample) < 1)).toBe(true);
+  });
+
   // back-to-back notes in mono faded the voice before out over 20 ms under a second voice (two pitches at
   // once, a click at the start of the next): the one voice takes each next note over, its pitch moves there
   it('mono: back-to-back notes (each released at the start of the next, the default release) play on one voice, no dip', async () => {
-    const engine = createOfflineEngine();
+    const engine = createOfflineEngine(undefined, { limited: false });
     const modules = createSynth();
     await flush();
     const [{ audioCtx, wavetables }] = modules.synthCore;
@@ -89,7 +110,7 @@ describe('the track on the voices of the core', () => {
     // a note that makes the voice, then two that take it over in legato a 64th apart (31 ms at 120 BPM: both
     // sent before the block of the first); the velocity sets the volume (Amp 1)
     const play = async (notes: ClipNote[]) => {
-      const engine = createOfflineEngine();
+      const engine = createOfflineEngine(undefined, { limited: false });
       const modules = createSynth();
       await flush();
       const [{ audioCtx, wavetables }] = modules.synthCore;

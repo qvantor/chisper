@@ -4,7 +4,6 @@ import {
   combineLatest,
   distinctUntilChanged,
   map,
-  Subject,
   throttleTime,
 } from 'rxjs';
 import { isEqual } from 'lodash';
@@ -46,7 +45,6 @@ import {
   LFO_LEAD,
   LFO_STATE_INTERVAL,
   LfoGlobal,
-  LfosState,
   lfoTable,
   LfoWire,
   nextAnchor,
@@ -213,8 +211,8 @@ const tableOf = ({ shape, points }: LfoParams) => lfoTable(shape, points);
 const sameShape = (a: LfoParams, b: LfoParams) =>
   a.shape === b.shape && JSON.stringify(a.points) === JSON.stringify(b.points);
 
-// the LFOs LFO 1–4, sources of the routes: the voices node runs one per note of each (the oscillators and the
-// filter), the chain node and the main thread one for the last note (the fx, the marks of the knobs). Every
+// the LFOs LFO 1–4, sources of the routes: the engine node runs one per note of each (the oscillators and the
+// filter), the engine node and the main thread one for the last note (the fx, the marks of the knobs). Every
 // change goes to them as a state from now + LFO_LEAD on (LfosState): the knobs, the newest anchor of each clock (a
 // new period: an anchor there, the phase goes on) and the tables of the shapes that changed, at most every
 // LFO_STATE_INTERVAL (the first change at once, the last one after it: a drag of a point or a knob posts 50 states
@@ -222,19 +220,15 @@ const sameShape = (a: LfoParams, b: LfoParams) =>
 // divisions at the tempo of the transport: a new tempo is a state of those in BPM from its segment on (a period of
 // its own, the phase goes on); a free one with HOST is on the grid of the beats (its phase the share of its
 // division since beat 0: a new Rate may step it), in HZ it takes the position of the transport where it moves (a
-// MIDI Start). `globals` are the LFOs as they run on the main thread, `$state` the last state with every table (a
-// chain node made later starts with it), `$ranges` the bounds of the routes to their knobs in BPM. The tab of the
-// section (`$selected`) is the state of the UI, not in the preset
+// MIDI Start). `globals` are the LFOs as they run on the main thread, `$ranges` the bounds of the routes to their
+// knobs in BPM. The tab of the section (`$selected`) is the state of the UI, not in the preset
 export const lfos = ({ synthCore: [{ audioCtx, wavetables }], transport: [transport] }: Deps) =>
   rxModel(() => {
     const $lfos = new ObjectBS<Lfos>(lfosFrom({}));
     const $selected = new BehaviorSubject<LfoId>(LFOS[0]);
     const globals = Object.fromEntries(LFOS.map((id) => [id, createLfoGlobal()])) as Record<LfoId, LfoGlobal>;
-    const $state = new BehaviorSubject<LfosState | null>(null);
-    // every state as it is sent (the tables only of the shapes that changed)
-    const $changes = new Subject<LfosState>();
     const $ranges = new BehaviorSubject<LfoRanges>(lfoRanges($lfos.value, transport.$tempo.value));
-    return { $lfos, $selected, globals, $state, $changes, $ranges };
+    return { $lfos, $selected, globals, $ranges };
   })
     .actions(({ $lfos, $selected }) => {
       const update = (id: LfoId, change: Partial<LfoParams>) =>
@@ -294,7 +288,7 @@ export const lfos = ({ synthCore: [{ audioCtx, wavetables }], transport: [transp
         select: (id: LfoId) => $selected.next(id),
       };
     })
-    .subscriptions(({ $lfos, globals, $state, $changes, $ranges }) => {
+    .subscriptions(({ $lfos, globals, $ranges }) => {
       // the knobs last sent
       let previous: Lfos | null = null;
       const tables = {} as Record<LfoId, Float32Array>;
@@ -340,8 +334,6 @@ export const lfos = ({ synthCore: [{ audioCtx, wavetables }], transport: [transp
           return wire;
         });
         wavetables.setLfos({ at, lfos: wires });
-        $state.next({ at, lfos: wires.map((wire, i) => ({ ...wire, table: tables[LFOS[i]] })) });
-        $changes.next({ at, lfos: wires });
       };
       return [
         $lfos

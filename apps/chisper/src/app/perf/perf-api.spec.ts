@@ -5,8 +5,8 @@ import { withoutAudioWorklet } from '../../test-utils/no-audio-worklet';
 import { WorkerStub } from '../../test-utils/worker-stub';
 import { getSnapshot } from '../app';
 import { presets } from '../presets/modules/presets';
-import { CHAIN_PROCESSOR, LIMITER_STAGE } from '../synth/common/chain/chain-params';
-import { STORE_PROCESSOR } from '../synth/common/wavetable/wavetable-osc-params';
+import { LIMITER_STAGE } from '../synth/common/chain/chain-params';
+import { ENGINE_PROCESSOR } from '../synth/common/engine/engine-params';
 import { voiceEvents } from '../../test-utils/voice-events';
 import { fx } from '../synth/fx/modules/fx';
 import { noteToString, Wavetable } from '../synth/services';
@@ -93,14 +93,15 @@ const setup = async ({ ready = true } = {}) => {
   const api = createPerfApi(models);
   if (ready) await sleep(0);
 
-  const [{ audioCtx, input, output }] = modules.synthCore;
+  const [{ audioCtx, output }] = modules.synthCore;
   const nodes = (name: string) =>
     (registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never) as unknown as NodeStub[]).filter(
       (node) => node.name === name
     );
-  // the store acknowledges every build and both answer a stats request, as the worklet and the worker do
+  // the store (in the node of the engine) acknowledges every build and both answer a stats request, as the worklet
+  // and the worker do
   const answerLikeTheWorklet = () => {
-    const store = nodes(STORE_PROCESSOR).at(-1) as NodeStub;
+    const store = nodes(ENGINE_PROCESSOR).at(-1) as NodeStub;
     const worker = WorkerStub.created.at(-1) as WorkerStub;
     const toStore = (data: unknown) => queueMicrotask(() => store.port.onmessage?.({ data }));
     const onWorker = (message: { frames?: unknown; table: string; version: number; stats?: true }) => {
@@ -122,7 +123,6 @@ const setup = async ({ ready = true } = {}) => {
     nodes,
     answerLikeTheWorklet,
     audioCtx,
-    input,
     output,
     filterModule: modules.filter,
     track,
@@ -167,19 +167,20 @@ describe('perf test hook api', () => {
     it('rejects at once when the limiter failed', async () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
       const { api, nodes } = await setup();
-      const [chain] = nodes(CHAIN_PROCESSOR);
-      chain.port.onmessage?.({ data: { failed: [LIMITER_STAGE] } });
+      const [engine] = nodes(ENGINE_PROCESSOR);
+      engine.port.onmessage?.({ data: { failed: [LIMITER_STAGE] } });
       await expect(api.ready()).rejects.toThrow('The limiter is failed');
       error.mockRestore();
     });
 
-    // the limiter is a stage of the chain: it fails with its processor
-    it('rejects at once when the chain failed', async () => {
+    // the oscillator and the limiter are in one processor: they fail with it (the oscillator is asked first)
+    it('rejects at once when the engine failed', async () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { api, nodes } = await setup();
-      const [chain] = nodes(CHAIN_PROCESSOR);
-      chain.onprocessorerror?.call(chain, new ErrorEvent('processorerror'));
-      await expect(api.ready()).rejects.toThrow('The limiter is failed');
+      const { api, modules, nodes } = await setup();
+      const [engine] = nodes(ENGINE_PROCESSOR);
+      engine.onprocessorerror?.call(engine, new ErrorEvent('processorerror'));
+      expect(modules.synthCore[0].masterLimiter.$status.value).toBe('failed');
+      await expect(api.ready()).rejects.toThrow('The wavetable oscillator is failed');
       error.mockRestore();
     });
 
@@ -376,19 +377,24 @@ describe('perf test hook api', () => {
   });
 
   it('taps the voices (the filter is in each) and the output', async () => {
-    const { api, nodes, audioCtx, input, output } = await setup();
+    const { api, nodes, audioCtx, output } = await setup();
+    const [engine] = nodes(ENGINE_PROCESSOR);
+    expect(engine.port.postMessage).not.toHaveBeenCalledWith({ probe: true });
     await api.probe.install('/perf/probe.js');
     const [probe] = nodes(PROBE_PROCESSOR);
     expect(audioCtx.audioWorklet.addModule).toHaveBeenCalledWith('/perf/probe.js');
     expect(probe.options).toMatchObject({ numberOfInputs: 2, numberOfOutputs: 1 });
     expect(output.connect).toHaveBeenCalledWith(probe, 0, 1);
     expect(probe.connect).toHaveBeenCalledWith(audioCtx.destination);
-    // the input of the chain: the voices before the effects
-    expect(input.connect).toHaveBeenCalledWith(probe, 0, 0);
+    // the second output of the engine node: the voices as the chain takes them, before the effects; it fills it
+    // only while it is told a probe listens
+    expect(engine.connect).toHaveBeenCalledWith(probe, 1, 0);
+    expect(engine.port.postMessage).toHaveBeenLastCalledWith({ probe: true });
 
     api.destroy();
     expect(probe.port.postMessage).toHaveBeenCalledWith({ stop: true });
-    expect(input.disconnect).toHaveBeenCalledWith(probe);
+    expect(engine.disconnect).toHaveBeenCalledWith(probe, 1, 0);
+    expect(engine.port.postMessage).toHaveBeenLastCalledWith({ probe: false });
     expect(output.disconnect).toHaveBeenCalledWith(probe);
   });
 

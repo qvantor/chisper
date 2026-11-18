@@ -1,17 +1,13 @@
 import { registrar } from 'standardized-audio-context-mock';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
+import { eventsOf, voicesNodes } from '../../../../test-utils/voice-events';
 import { MessageChannelStub, WorkerStub } from '../../../../test-utils/worker-stub';
+import { createEngineNode } from '../engine/engine-node';
+import { ENGINE_PROCESSOR } from '../engine/engine-params';
 import { LfoWire, lfoTable, RETRIG } from '../lfo/lfo-curve';
 import { createWavetableEngine, WavetableStatus } from './wavetable-engine';
-import { STORE_PROCESSOR, VOICES_PROCESSOR } from './wavetable-osc-params';
 import type { VoiceOptions } from './voice-options';
-
-interface NodeStub extends AudioWorkletNode {
-  name: string;
-  options: AudioWorkletNodeOptions;
-  port: AudioWorkletNode['port'] & { postMessage: jest.Mock };
-}
 
 // the module loads asynchronously
 const flush = () => new Promise((resolve) => setTimeout(resolve));
@@ -22,9 +18,9 @@ const setup = ({ failFirstLoad = false } = {}) => {
   // (no audioWorklet without AudioWorklet)
   const addModule = audioCtx.audioWorklet?.addModule as jest.Mock;
   if (failFirstLoad) addModule.mockRejectedValueOnce(new Error('404'));
-  // the input the voices play into
-  const output = audioCtx.createGain();
-  const engine = createWavetableEngine(audioCtx, output, { createChannel });
+  // the node of the engine: the voices and their store are in it
+  const core = createEngineNode(audioCtx);
+  const engine = createWavetableEngine(audioCtx, core, { createChannel });
   const statuses: WavetableStatus[] = [];
   engine.$status.subscribe((status) => statuses.push(status));
   const worker = () => WorkerStub.created.at(-1);
@@ -33,35 +29,31 @@ const setup = ({ failFirstLoad = false } = {}) => {
     (worker()?.postMessage.mock.calls ?? [])
       .map(([message]) => message)
       .filter((message) => 'frames' in message);
-  // the store node and what it posts to the main thread: an ack of a version, its counters
-  const nodes = (name: string) =>
-    (registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never) as unknown as NodeStub[]).filter(
-      (node) => node.name === name
-    );
-  const store = () => nodes(STORE_PROCESSOR).at(-1);
-  // the voices node, the events posted to it
-  const voices = () => nodes(VOICES_PROCESSOR).at(-1);
-  const events = (node = voices()) =>
-    (node?.port.postMessage.mock.calls ?? []).flatMap(([message]) => message.events ?? []);
-  const fromStore = (data: unknown, node = store()) => node?.port.onmessage?.({ data } as MessageEvent);
-  const ack = (table: string, version: number) => fromStore({ stored: table, version });
+  // the node of the engine (the last one made), everything it was posted and the events of the voices in it (a
+  // state of the LFOs, a message of its own, as an event among them)
+  const node = () => voicesNodes(audioCtx).at(-1);
+  const posts = (stub = node()) => (stub?.port.postMessage.mock.calls ?? []).map(([message]) => message);
+  const events = (stub = node()) => (stub ? eventsOf(stub) : []).flatMap((message) => message.events);
+  // what its store and its voices post to the main thread: an ack of a version, its counters, the voices ended
+  const report = (data: unknown, stub = node()) => stub?.port.onmessage?.({ data });
+  const ack = (table: string, version: number) => report({ stored: table, version });
   // both answers to a stats request
   const answer = (worklet: unknown, builder: unknown) => {
-    fromStore({ stats: worklet });
+    report({ stats: worklet });
     worker()?.onmessage?.({ data: { stats: builder } } as MessageEvent);
   };
   return {
     audioCtx,
     addModule,
-    output,
+    core,
     engine,
     statuses,
     worker,
     builds,
-    store,
-    voices,
+    node,
+    posts,
     events,
-    fromStore,
+    report,
     ack,
     answer,
   };
@@ -83,10 +75,10 @@ const sine = [0, 1, 0, -1];
 describe('wavetable engine', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('loads the module, connects the store and the worker by a channel: ready', async () => {
+  it('ready with the node of the engine: its module loaded, a worker made for its store', async () => {
     const { addModule, statuses, worker, engine } = setup();
     expect(statuses).toEqual(['loading']);
-    expect(workletLoads(addModule, 'wavetable-osc')).toBe(1);
+    expect(workletLoads(addModule, 'engine')).toBe(1);
     expect(
       engine.createVoice(
         { osc: [], start: 0, envelopes: [], envStart: 0, phrase: 0, routes: [], filter: null },
@@ -101,32 +93,18 @@ describe('wavetable engine', () => {
     expect(transfer).toEqual([toWorker.port]);
   });
 
-  it('creates the store node and passes it the other port', async () => {
-    const audioCtx = new AudioContext();
-    const created: NodeStub[] = [];
-    const Original = globalThis.AudioWorkletNode;
-    Object.assign(globalThis, {
-      AudioWorkletNode: class extends (Original as unknown as new (...args: unknown[]) => NodeStub) {
-        constructor(...args: unknown[]) {
-          super(...args);
-          created.push(this as unknown as NodeStub);
-        }
-      },
-    });
-    const output = audioCtx.createGain();
-    createWavetableEngine(audioCtx, output, { createChannel });
+  it('makes no node of its own: the node of the engine gets the other port of the channel, transferred', async () => {
+    const { audioCtx, node, posts, worker } = setup();
     await flush();
-    const [store, voices] = created;
-    expect(store.name).toBe(STORE_PROCESSOR);
-    expect(store.options).toEqual({ numberOfInputs: 0, numberOfOutputs: 1 });
-    // every voice in one node, into the output
-    expect(voices.name).toBe(VOICES_PROCESSOR);
-    expect(voices.options).toEqual({ numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
-    expect(voices.connect).toHaveBeenCalledWith(output);
-    expect(created).toHaveLength(2);
-    const [toStore, transfer] = store.port.postMessage.mock.calls[0];
+    // the store and every voice in the one node
+    expect(registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never)).toHaveLength(1);
+    expect(node()?.name).toBe(ENGINE_PROCESSOR);
+    const [toStore, transfer] = node()?.port.postMessage.mock.calls[0] ?? [];
+    expect(toStore).toEqual({ port: expect.any(Object) });
     expect(transfer).toEqual([toStore.port]);
-    expect(toStore.port).not.toBe(WorkerStub.created.at(-1)?.postMessage.mock.calls[0][0].port);
+    expect(toStore.port).not.toBe(worker()?.postMessage.mock.calls[0][0].port);
+    // nothing else at rest
+    expect(posts()).toHaveLength(1);
   });
 
   it('sends the latest frames of a table set before it was ready, copied and transferred', async () => {
@@ -163,7 +141,7 @@ describe('wavetable engine', () => {
   });
 
   it('makes a voice once ready: its note on and the automation of its params as events, in f32', async () => {
-    const { engine, voices, events } = setup();
+    const { engine, posts, events } = setup();
     await flush();
     const voice = engine.createVoice(NOTE, { frequency: 220.1, gain1: 0.5 });
     expect(voice?.id).toBe(1);
@@ -180,7 +158,7 @@ describe('wavetable engine', () => {
     // a microtask sends the events of the task, in one message
     expect(events()).toEqual([]);
     await Promise.resolve();
-    expect(voices()?.port.postMessage).toHaveBeenCalledTimes(1);
+    expect(posts().filter((message) => 'events' in message)).toHaveLength(1);
     expect(events()).toEqual([
       { kind: 'on', voice: 1, options: NOTE, params: { frequency: Math.fround(220.1), gain1: 0.5 } },
       { kind: 'cancel', voice: 1, param: 'gate', time: 1.5 },
@@ -200,42 +178,61 @@ describe('wavetable engine', () => {
   });
 
   it('tells a voice its late start and its end from the reports of the node; an ended voice is sent nothing', async () => {
-    const { engine, voices, events } = setup();
+    const { engine, report, events } = setup();
     await flush();
     const voice = engine.createVoice(NOTE, {});
     const [onStarted, onEnded] = [jest.fn(), jest.fn()];
     Object.assign(voice ?? {}, { onStarted, onEnded });
-    voices()?.port.onmessage?.({ data: { started: [[1, 140, 128]], ended: [1] } } as MessageEvent);
+    report({ started: [[1, 140, 128]], ended: [1] });
     expect(onStarted).toHaveBeenCalledWith(140, 128);
     expect(onStarted.mock.invocationCallOrder[0]).toBeLessThan(onEnded.mock.invocationCallOrder[0]);
     // once
-    voices()?.port.onmessage?.({ data: { ended: [1] } } as MessageEvent);
+    report({ ended: [1] });
     expect(onEnded).toHaveBeenCalledTimes(1);
     voice?.params.gate.setValueAtTime(2, 1);
     await Promise.resolve();
     expect(events().map(({ kind }) => kind)).toEqual(['on']);
   });
 
-  it('without AudioWorklet or Worker: unsupported, no voices', async () => {
+  it('without AudioWorklet: unsupported as the node of the engine, no voices', async () => {
     withoutAudioWorklet();
-    const { statuses, engine } = setup();
+    const { statuses, engine, core } = setup();
     await flush();
+    expect(core.$status.value).toBe('unsupported');
     expect(statuses).toEqual(['unsupported']);
+    expect(WorkerStub.created).toHaveLength(0);
     expect(
       engine.createVoice(
         { osc: [], start: 0, envelopes: [], envStart: 0, phrase: 0, routes: [], filter: null },
         {}
       )
     ).toBeNull();
+  });
 
+  it('without Worker: unsupported whatever the node is (it plays its chain all the same), no voices', async () => {
     Object.assign(globalThis, { Worker: undefined });
-    const second = setup();
-    expect(second.statuses).toEqual(['unsupported']);
+    const { statuses, engine, core, node, posts } = setup();
+    expect(statuses).toEqual(['unsupported']);
+    await flush();
+    expect(core.$status.value).toBe('ready');
+    expect(engine.$status.value).toBe('unsupported');
+    expect(statuses).not.toContain('ready');
+    // no store to send a table to, no port for the node
+    engine.setTable('osc1', [saw]);
+    expect(engine.$tables.value).toEqual({});
+    expect(node()).toBeDefined();
+    expect(posts()).toEqual([]);
+    expect(
+      engine.createVoice(
+        { osc: [], start: 0, envelopes: [], envStart: 0, phrase: 0, routes: [], filter: null },
+        {}
+      )
+    ).toBeNull();
   });
 
   it('without MessageChannel (and none passed): unsupported', () => {
     const audioCtx = new AudioContext();
-    const engine = createWavetableEngine(audioCtx, audioCtx.createGain());
+    const engine = createWavetableEngine(audioCtx, createEngineNode(audioCtx));
     expect(engine.$status.value).toBe('unsupported');
   });
 
@@ -245,7 +242,7 @@ describe('wavetable engine', () => {
     engine.setTable('osc1', [saw]);
     await flush();
     expect(statuses).toEqual(['loading', 'failed']);
-    expect(error).toHaveBeenCalledWith('The wavetable oscillator failed', expect.any(Error));
+    expect(error).toHaveBeenCalledWith('The engine worklet failed', expect.any(Error));
     expect(
       engine.createVoice(
         { osc: [], start: 0, envelopes: [], envStart: 0, phrase: 0, routes: [], filter: null },
@@ -254,30 +251,36 @@ describe('wavetable engine', () => {
     ).toBeNull();
 
     engine.retry();
-    expect(workletLoads(addModule, 'wavetable-osc')).toBe(2);
+    expect(workletLoads(addModule, 'engine')).toBe(2);
     await flush();
     expect(statuses).toEqual(['loading', 'failed', 'loading', 'ready']);
     expect(builds()).toEqual([expect.objectContaining({ table: 'osc1', version: 1 })]);
   });
 
-  it('fails when the worker or the store fails, the worker is terminated', async () => {
-    jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { audioCtx, engine, statuses, worker } = setup();
+  it('an error of the worker fails the node of the engine; a node that fails: failed too, the worker terminated', async () => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { core, engine, statuses, worker, node } = setup();
     await flush();
     const first = worker();
-    first?.onerror?.(new Event('error'));
+    const stub = node();
+    const event = new Event('error');
+    first?.onerror?.(event);
     expect(statuses.at(-1)).toBe('failed');
     expect(first?.terminate).toHaveBeenCalled();
+    // the whole node: its processor stopped, the chain with it
+    expect(core.$status.value).toBe('failed');
+    expect(error).toHaveBeenCalledWith('The engine worklet failed', event);
+    expect(stub?.port.postMessage).toHaveBeenLastCalledWith({ stop: true });
+    expect(stub?.disconnect).toHaveBeenCalled();
 
     engine.retry();
     await flush();
     expect(statuses.at(-1)).toBe('ready');
-    const store = (
-      registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never) as unknown as NodeStub[]
-    )
-      .filter(({ name }) => name === STORE_PROCESSOR)
-      .at(-1);
-    store?.onprocessorerror?.(new ErrorEvent('processorerror'));
+    expect(worker()).not.toBe(first);
+    // (the worker of before is not heard any more)
+    first?.onerror?.(new Event('error'));
+    expect(statuses.at(-1)).toBe('ready');
+    node()?.onprocessorerror?.(new ErrorEvent('processorerror'));
     expect(statuses.at(-1)).toBe('failed');
     expect(worker()?.terminate).toHaveBeenCalled();
   });
@@ -301,7 +304,7 @@ describe('wavetable engine', () => {
   });
 
   it('stays ready when a voice fails: the node tells it ended, the synth takes only that voice off', async () => {
-    const { engine, statuses, worker, voices } = setup();
+    const { engine, statuses, worker, report } = setup();
     await flush();
     const voice = engine.createVoice(
       { osc: [], start: 0, envelopes: [], envStart: 0, phrase: 0, routes: [], filter: null },
@@ -309,7 +312,7 @@ describe('wavetable engine', () => {
     );
     const onEnded = jest.fn();
     Object.assign(voice ?? {}, { onEnded });
-    voices()?.port.onmessage?.({ data: { ended: [voice?.id] } } as MessageEvent);
+    report({ ended: [voice?.id] });
     expect(onEnded).toHaveBeenCalled();
     expect(statuses).toEqual(['loading', 'ready']);
     expect(worker()?.terminate).not.toHaveBeenCalled();
@@ -321,56 +324,57 @@ describe('wavetable engine', () => {
     ).not.toBeNull();
   });
 
-  it('fails when the voices node fails: it stops, every voice ends; retry makes it again', async () => {
+  it('fails when the node of the engine fails: it stops, every voice ends; retry makes it again', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { engine, statuses, voices, events } = setup();
+    const { engine, statuses, node, events } = setup();
     await flush();
-    const node = voices();
+    const first = node();
     const voice = engine.createVoice(NOTE, {});
     const onEnded = jest.fn();
     Object.assign(voice ?? {}, { onEnded });
-    node?.onprocessorerror?.(new ErrorEvent('processorerror'));
+    first?.onprocessorerror?.(new ErrorEvent('processorerror'));
     expect(statuses.at(-1)).toBe('failed');
     expect(onEnded).toHaveBeenCalled();
-    expect(node?.port.postMessage).toHaveBeenCalledWith({ stop: true });
-    expect(node?.disconnect).toHaveBeenCalled();
+    expect(first?.port.postMessage).toHaveBeenCalledWith({ stop: true });
+    expect(first?.disconnect).toHaveBeenCalled();
     // (the events of the task are dropped with it)
     await Promise.resolve();
-    expect(events(node)).toEqual([]);
+    expect(events(first)).toEqual([]);
 
     engine.retry();
     await flush();
     expect(statuses.at(-1)).toBe('ready');
-    expect(voices()).not.toBe(node);
+    expect(node()).not.toBe(first);
     expect(engine.createVoice(NOTE, {})?.id).toBe(2);
   });
 
-  it('sends the pitch bend to the voices node, one event for every voice; a node made again takes it', async () => {
+  it('sends the pitch bend to the node, one event for every voice; a node made again takes it', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { engine, voices, events } = setup();
+    const { engine, node, events } = setup();
     await flush();
-    const node = voices();
+    const first = node();
     engine.setBend(-350);
     await Promise.resolve();
-    expect(events(node)).toEqual([{ kind: 'bend', cents: -350 }]);
+    expect(events(first)).toEqual([{ kind: 'bend', cents: -350 }]);
 
-    node?.onprocessorerror?.(new ErrorEvent('processorerror'));
+    first?.onprocessorerror?.(new ErrorEvent('processorerror'));
     engine.retry();
     await flush();
-    expect(voices()).not.toBe(node);
+    expect(node()).not.toBe(first);
     expect(events()).toEqual([{ kind: 'bend', cents: -350, instantly: true }]);
   });
 
   it('a node made at rest takes no bend', async () => {
-    const { voices, events } = setup();
+    const { node, events } = setup();
     await flush();
     await Promise.resolve();
-    expect(events(voices())).toEqual([]);
+    expect(node()).toBeDefined();
+    expect(events()).toEqual([]);
   });
 
-  it('sends the LFOs once it is ready, the last state first at once with every table, then while a voice reads one; a node made again takes them', async () => {
+  it('the LFOs go to the node of the engine: made with the last ones, every table with them, then told them only while a voice reads one', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { engine, voices, events } = setup();
+    const { engine, node, events, report } = setup();
     const wire = (change: Partial<LfoWire> = {}): LfoWire => ({
       mode: RETRIG,
       delay: 0,
@@ -381,68 +385,69 @@ describe('wavetable engine', () => {
       ...change,
     });
     const [sine, square] = [lfoTable('sine'), lfoTable('square')];
-    // before it is ready: kept, the tables of the states before taken on
+    // before it is ready: kept, the tables of the states before taken on; the node is made with them
     engine.setLfos({ at: 0.01, lfos: [wire({ table: sine }), wire({ table: sine }), wire(), wire()] });
     engine.setLfos({ at: 0.02, lfos: [wire({ delay: 1 }), wire({ table: square }), wire(), wire()] });
     await flush();
-    const node = voices();
-    expect(events(node)).toEqual([
-      {
-        kind: 'lfos',
-        at: 0,
-        instantly: true,
-        lfos: [wire({ delay: 1, table: sine }), wire({ table: square }), wire(), wire()],
-      },
-    ]);
+    const first = node();
+    expect(first?.options.processorOptions.lfos).toEqual({
+      at: 0,
+      instantly: true,
+      lfos: [wire({ delay: 1, table: sine }), wire({ table: square }), wire(), wire()],
+    });
+    expect(events(first)).toEqual([]);
     // ready, no voice reads an LFO: kept
     engine.setLfos({ at: 1.5, lfos: [wire({ phase: 0.5 }), wire(), wire(), wire()] });
     await Promise.resolve();
-    expect(events(node)).toHaveLength(1);
-    // a voice with a route of an LFO: the LFOs as they are before it, then every state as it comes
+    expect(events(first)).toEqual([]);
+    // a voice with a route of an LFO: the LFOs as they are before it, then every state as it comes (a message
+    // of its own, at once: before the events of the task)
     const lfoRoute = { source: 4, param: 'gain1', amount: 0.5, min: 0, max: 1 };
     const voice = engine.createVoice({ ...NOTE, routes: [lfoRoute] }, {});
     engine.setLfos({ at: 2, lfos: [wire({ phase: 0.25 }), wire(), wire(), wire()] });
     await Promise.resolve();
-    expect(events(node).slice(1)).toEqual([
+    expect(events(first)).toEqual([
       {
         kind: 'lfos',
         at: 0,
         instantly: true,
         lfos: [wire({ phase: 0.5, table: sine }), wire({ table: square }), wire(), wire()],
       },
-      expect.objectContaining({ kind: 'on', voice: voice?.id }),
       { kind: 'lfos', at: 2, lfos: [wire({ phase: 0.25 }), wire(), wire(), wire()] },
+      expect.objectContaining({ kind: 'on', voice: voice?.id }),
     ]);
     // its routes read none: kept; a route of an LFO again: the LFOs as they are first; ended: kept
     engine.setRoutes([voice?.id ?? 0], []);
     engine.setLfos({ at: 3, lfos: [wire({ phase: 0.75 }), wire(), wire(), wire()] });
     engine.setRoutes([voice?.id ?? 0], [lfoRoute]);
-    node?.port.onmessage?.({ data: { ended: [voice?.id] } } as MessageEvent);
+    report({ ended: [voice?.id] });
     engine.setLfos({ at: 4, lfos: [wire({ phase: 0.1 }), wire(), wire(), wire()] });
     await Promise.resolve();
-    expect(events(node).slice(4)).toEqual([
-      { kind: 'routes', voices: [voice?.id], routes: [] },
+    expect(events(first).slice(3)).toEqual([
       {
         kind: 'lfos',
         at: 0,
         instantly: true,
         lfos: [wire({ phase: 0.75, table: sine }), wire({ table: square }), wire(), wire()],
       },
+      { kind: 'routes', voices: [voice?.id], routes: [] },
       { kind: 'routes', voices: [voice?.id], routes: [lfoRoute] },
     ]);
 
-    node?.onprocessorerror?.(new ErrorEvent('processorerror'));
+    // a node made again starts with the last ones; no voice reads one any more: it is told none
+    const reader = engine.createVoice({ ...NOTE, routes: [lfoRoute] }, {});
+    expect(reader).not.toBeNull();
+    first?.onprocessorerror?.(new ErrorEvent('processorerror'));
     engine.retry();
     await flush();
-    expect(voices()).not.toBe(node);
-    expect(events()).toEqual([
-      {
-        kind: 'lfos',
-        at: 0,
-        instantly: true,
-        lfos: [wire({ phase: 0.1, table: sine }), wire({ table: square }), wire(), wire()],
-      },
-    ]);
+    expect(node()).not.toBe(first);
+    expect(node()?.options.processorOptions.lfos).toEqual({
+      at: 0,
+      instantly: true,
+      lfos: [wire({ phase: 0.1, table: sine }), wire({ table: square }), wire(), wire()],
+    });
+    engine.setLfos({ at: 5, lfos: [wire({ phase: 0.2 }), wire(), wire(), wire()] });
+    expect(events()).toEqual([]);
   });
 
   it('retry does nothing unless it failed', async () => {
@@ -450,30 +455,37 @@ describe('wavetable engine', () => {
     engine.retry();
     await flush();
     engine.retry();
-    expect(workletLoads(addModule, 'wavetable-osc')).toBe(1);
+    expect(workletLoads(addModule, 'engine')).toBe(1);
   });
 
-  it('destroy terminates the worker, stops the voices node and completes the status', async () => {
-    const { engine, worker, voices } = setup();
+  it("destroy terminates the worker and completes the status; the node is the engine's to stop", async () => {
+    const { core, engine, worker, node, events } = setup();
     await flush();
     const complete = jest.fn();
     engine.$status.subscribe({ complete });
+    engine.$tables.subscribe({ complete });
     const voice = engine.createVoice(NOTE, {});
     const onEnded = jest.fn();
     Object.assign(voice ?? {}, { onEnded });
-    const node = voices();
+    const stub = node();
     engine.destroy();
     expect(worker()?.terminate).toHaveBeenCalled();
-    expect(node?.port.postMessage).toHaveBeenCalledWith({ stop: true });
-    expect(node?.disconnect).toHaveBeenCalled();
     // (the synth is gone too: no voice is told ended)
     expect(onEnded).not.toHaveBeenCalled();
-    expect(complete).toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledTimes(2);
+    // the events of the task are dropped
+    await Promise.resolve();
+    expect(events(stub)).toEqual([]);
+    expect(stub?.port.postMessage).not.toHaveBeenCalledWith({ stop: true });
+    core.destroy();
+    expect(stub?.port.postMessage).toHaveBeenLastCalledWith({ stop: true });
+    expect(stub?.disconnect).toHaveBeenCalled();
+    expect(onEnded).not.toHaveBeenCalled();
   });
 
   describe('the state of each table', () => {
     it('sending, then stored or refused by the store; an answer for a version before the latest is late', async () => {
-      const { engine, ack, fromStore } = setup();
+      const { engine, ack, report } = setup();
       engine.setTable('osc1', [saw]);
       engine.setTable('osc2', [sine]);
       // (sent once ready)
@@ -481,7 +493,7 @@ describe('wavetable engine', () => {
       await flush();
       expect(engine.$tables.value).toEqual({ osc1: 'sending', osc2: 'sending' });
       ack('osc1', 1);
-      fromStore({ refused: 'osc2', version: 1 });
+      report({ refused: 'osc2', version: 1 });
       expect(engine.$tables.value).toEqual({ osc1: 'stored', osc2: 'refused' });
       engine.setTable('osc1', [sine]);
       ack('osc1', 1);
@@ -524,13 +536,13 @@ describe('wavetable engine', () => {
 
     it('retryTable sends a refused or failed version again, nothing else', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { engine, builds, fromStore, worker } = setup();
+      const { engine, builds, report, worker } = setup();
       engine.setTable('osc1', [saw]);
       engine.setTable('osc2', [sine]);
       await flush();
       engine.retryTable('osc1');
       expect(builds()).toHaveLength(2);
-      fromStore({ refused: 'osc1', version: 1 });
+      report({ refused: 'osc1', version: 1 });
       worker()?.onmessage?.({ data: { failed: 'osc2', version: 1, reason: 'RangeError' } } as MessageEvent);
       engine.retryTable('osc1');
       engine.retryTable('osc2');
@@ -542,23 +554,23 @@ describe('wavetable engine', () => {
     });
 
     it('memory freed by the store sends a refused version again once; refused again, it waits for Retry', async () => {
-      const { engine, builds, fromStore, ack } = setup();
+      const { engine, builds, report, ack } = setup();
       engine.setTable('osc1', [saw]);
       engine.setTable('osc2', [sine]);
       await flush();
       ack('osc2', 1);
-      fromStore({ refused: 'osc1', version: 1 });
-      fromStore({ freedBytes: 1024 });
+      report({ refused: 'osc1', version: 1 });
+      report({ freedBytes: 1024 });
       expect(builds()).toHaveLength(3);
       expect(builds()[2]).toMatchObject({ table: 'osc1', version: 1 });
-      fromStore({ refused: 'osc1', version: 1 });
-      fromStore({ freedBytes: 1024 });
+      report({ refused: 'osc1', version: 1 });
+      report({ freedBytes: 1024 });
       expect(builds()).toHaveLength(3);
       expect(engine.$tables.value['osc1']).toBe('refused');
       // Retry, or a new version, may go once more
       engine.retryTable('osc1');
-      fromStore({ refused: 'osc1', version: 1 });
-      fromStore({ freedBytes: 1024 });
+      report({ refused: 'osc1', version: 1 });
+      report({ freedBytes: 1024 });
       expect(builds()).toHaveLength(5);
       ack('osc1', 1);
       expect(engine.$tables.value).toEqual({ osc1: 'stored', osc2: 'stored' });
@@ -612,17 +624,17 @@ describe('wavetable engine', () => {
 
     it('sends the tables again after a failure: pending until acknowledged again', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { engine, ack, worker, store, fromStore } = setup();
+      const { engine, ack, worker, node, report } = setup();
       engine.setTable('osc1', [saw]);
       await flush();
       ack('osc1', 1);
-      const failed = store();
+      const failed = node();
       worker()?.onerror?.(new Event('error'));
       engine.retry();
       await flush();
       expect(engine.pending()).toEqual(['osc1']);
-      // the failed store is not heard anymore
-      fromStore({ stored: 'osc1', version: 1 }, failed);
+      // the store of the failed node is not heard anymore
+      report({ stored: 'osc1', version: 1 }, failed);
       expect(engine.pending()).toEqual(['osc1']);
       ack('osc1', 1);
       expect(engine.pending()).toEqual([]);
@@ -634,19 +646,20 @@ describe('wavetable engine', () => {
     const builder = { pending: 0, pooled: 1, pool: 1024, builds: 1, lastMs: 3, totalMs: 3, maxMs: 3 };
 
     it('null unless ready', async () => {
-      const { engine } = setup();
+      const { engine, core } = setup();
       expect(await engine.stats()).toBeNull();
       // (its module would load without AudioWorkletNode)
       engine.destroy();
+      core.destroy();
       withoutAudioWorklet();
       expect(await setup().engine.stats()).toBeNull();
     });
 
     it('asks the store and the worker for their counters', async () => {
-      const { engine, store, worker, answer } = setup();
+      const { engine, node, worker, answer } = setup();
       await flush();
       const asked = engine.stats();
-      expect(store()?.port.postMessage).toHaveBeenLastCalledWith({ stats: true });
+      expect(node()?.port.postMessage).toHaveBeenLastCalledWith({ stats: true });
       expect(worker()?.postMessage).toHaveBeenLastCalledWith({ stats: true });
       answer(worklet, builder);
       expect(await asked).toEqual({ worklet, worker: builder });
@@ -672,11 +685,13 @@ describe('wavetable engine', () => {
     });
   });
 
-  it('a module that loads after destroy creates nothing', async () => {
-    const { engine } = setup();
+  it('a module that loads after the engine and its node are destroyed creates nothing', async () => {
+    const { core, engine, node } = setup();
     const workers = WorkerStub.created.length;
     engine.destroy();
+    core.destroy();
     await flush();
     expect(WorkerStub.created).toHaveLength(workers);
+    expect(node()).toBeUndefined();
   });
 });

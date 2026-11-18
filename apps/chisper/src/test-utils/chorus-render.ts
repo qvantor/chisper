@@ -17,7 +17,7 @@ export const CHORUS_TAPS: ChorusDspParams = { ...CHORUS_DEFAULTS, mix: 1, cut: 2
 const BLOCK = 128;
 let core: ChorusExports | undefined;
 // one instance of the core for a spec file (a scope)
-export const chorusCore = () => (core ??= wasmCore<ChorusExports>('chain'));
+export const chorusCore = () => (core ??= wasmCore<ChorusExports>('engine'));
 
 export type ChorusChange = FxChange<ChorusDspParams>;
 

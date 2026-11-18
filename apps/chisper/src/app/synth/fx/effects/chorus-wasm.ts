@@ -3,7 +3,7 @@ import { paramsCore, UNIT, UnitExports } from '../../common/wasm/stereo-core';
 import { chorusMeterReader } from './chorus-params';
 import type { ChorusDspParams, ChorusMeterValues, ChorusOptions } from './chorus-params';
 
-// the Rust core of the chorus (dsp/chorus, a unit of chain.wasm): four taps (two a channel, a line each, fed back into
+// the Rust core of the chorus (dsp/chorus, a unit of the chain in engine.wasm): four taps (two a channel, a line each, fed back into
 // itself) moved by a triangle LFO, a filter of the wet signal, the mix inside, the level
 
 // the params in the order of the core (CHAIN_KEYS)

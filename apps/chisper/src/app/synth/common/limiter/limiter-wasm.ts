@@ -1,6 +1,6 @@
 import { stereoCore, UNIT, UnitExports } from '../wasm/stereo-core';
 
-// the Rust core of the master limiter (dsp/limiter, a unit of chain.wasm), with the API of createLimiterDsp
+// the Rust core of the master limiter (dsp/limiter, a unit of the chain in engine.wasm), with the API of createLimiterDsp
 export type LimiterExports = UnitExports;
 
 export const createLimiterWasm = (exports: LimiterExports, sampleRate: number) => {

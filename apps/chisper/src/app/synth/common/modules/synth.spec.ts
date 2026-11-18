@@ -25,7 +25,7 @@ const setup = async ({
   loadNoiseSample,
 }: { ready?: boolean; loadNoiseSample?: LoadNoiseSample } = {}) => {
   const modules = createSynth(['default'], undefined, loadNoiseSample);
-  const [{ audioCtx, input, wavetables }] = modules.synthCore;
+  const [{ audioCtx, output, wavetables }] = modules.synthCore;
   const createGain = jest.spyOn(audioCtx, 'createGain');
   const [, { onPress, onRelease }] = modules.inputController;
   const [synthModel, synthActions] = modules.synth;
@@ -50,7 +50,7 @@ const setup = async ({
     ...modules,
     envelopeModel: modules.envelopes,
     audioCtx,
-    input,
+    output,
     wavetables,
     onPress,
     onRelease,
@@ -153,13 +153,15 @@ describe('synth', () => {
     expect(gains()).toEqual([]);
   });
 
-  it('plays every voice in the voices node, connected straight to the input of the chain', async () => {
-    const { onPress, voices, input, audioCtx } = await setup();
+  it('plays every voice in the node of the engine, the one of the chain: no node between them', async () => {
+    const { onPress, voices, output, audioCtx } = await setup();
     onPress([4, 'A']);
     onPress([4, 'C']);
     const [node] = voicesNodes(audioCtx);
     expect(voicesNodes(audioCtx)).toHaveLength(1);
-    expect(node.connect).toHaveBeenCalledWith(input);
+    // the only worklet node: the voices are summed into the chain inside it, its output is after the limiter
+    expect(registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never)).toHaveLength(1);
+    expect((node.connect as jest.Mock).mock.calls).toEqual([[output, 0]]);
     expect(voices().map(({ node: of }) => of)).toEqual([node, node]);
   });
 
@@ -353,7 +355,7 @@ describe('synth', () => {
     expect(synthModel.$voicesCount.value).toBe(2);
   });
 
-  it('ends every voice when the voices node fails: their keys are free, Retry makes the node again', async () => {
+  it('ends every voice when the node of the engine fails: their keys are free, Retry makes the node again', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const { onPress, onRelease, voices, wavetables, synthModel, audioCtx } = await setup();
     onPress([4, 'C']);
@@ -363,7 +365,7 @@ describe('synth', () => {
 
     node.onprocessorerror?.(new ErrorEvent('processorerror'));
 
-    expect(error).toHaveBeenCalledWith('The wavetable oscillator failed', expect.any(Event));
+    expect(error).toHaveBeenCalledWith('The engine worklet failed', expect.any(Event));
     expect(wavetables.$status.value).toBe('failed');
     expect(synthModel.$voicesCount.value).toBe(0);
     expect(node.port.postMessage).toHaveBeenCalledWith({ stop: true });

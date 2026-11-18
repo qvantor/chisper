@@ -89,7 +89,7 @@ interface Core {
     shared: CoreShared
   ): CoreVoice;
 }
-const scope = createOscScope(wasmCore<OscExports>('wavetable-osc'));
+const scope = createOscScope(wasmCore<OscExports>('engine'));
 const core: Core = {
   storeWith: (tables) => {
     const freed: unknown[] = [];

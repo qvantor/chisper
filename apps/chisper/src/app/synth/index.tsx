@@ -413,7 +413,7 @@ const HeaderInternal = ({ screen, onScreenChange }: ScreenProps) => (
   </Header>
 );
 
-// the LFOs run in the voices node of the synth core, in BPM at the tempo of the transport
+// the LFOs run in the engine node of the synth core, in BPM at the tempo of the transport
 const LfoInternal = ({ children }: React.PropsWithChildren) => {
   const synthCore = useSynthCore();
   const transport = useTransport();

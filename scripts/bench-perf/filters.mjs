@@ -46,8 +46,9 @@ const outR = new Float32Array(BLOCK);
 const make =
   (filter, routes, period, own = false, turned = false) =>
   () => {
-    const voices = dsp.createVoiceScopeWasm(oscScope, RATE, store, dsp.createVoiceSharedWasm(oscScope));
-    voices.apply([{ kind: 'lfos', ...lfoStateOf(dsp, period) }]);
+    const shared = dsp.createVoiceSharedWasm(oscScope);
+    const voices = dsp.createVoiceScopeWasm(oscScope, RATE, store, shared);
+    shared.setLfos(lfoStateOf(dsp, period));
     const options = {
       osc: [{ table: 'a', unison: 1, phase: 0, phaseRand: 1 }, null],
       start: 0,

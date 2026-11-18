@@ -103,7 +103,7 @@ export interface VoiceStart {
 const SMOOTHING = 0.0033;
 const SETTLE = 6;
 
-// milliseconds: the voices node takes the pitch bend at most this often (MIDI sends hundreds of messages a
+// milliseconds: the engine node takes the pitch bend at most this often (MIDI sends hundreds of messages a
 // second), the first value at once, the last one after the pause
 const BEND_INTERVAL = 5;
 
@@ -381,25 +381,25 @@ interface VoiceConfig {
   filter: VoiceFilterOptions | null;
   // the bounds of the routes to the knobs of the LFOs in BPM now
   lfoRanges: () => LfoRanges;
-  // the voice has ended (released to 0, stolen, failed, or the voices node failed)
+  // the voice has ended (released to 0, stolen, failed, or the engine node failed)
   onEnded: (voice: Voice) => void;
-  // the voices node started it later than scheduled, at `startedAt` (seconds of the context): its note on came
+  // the engine node started it later than scheduled, at `startedAt` (seconds of the context): its note on came
   // after that block began
   onLate: (startedAt: number) => void;
-  // traces the voice: the frames of its start, as the voices node tells them (the perf test hook)
+  // traces the voice: the frames of its start, as the engine node tells them (the perf test hook)
   onStarted?: (message: VoiceStartedMessage) => void;
   // a voice of mono (Poly 1): it lives on RELEASE_LEAD after its release, a note sent before then takes it over
   mono: boolean;
 }
 
-// the voice of a note in the voices node and what it read at its note on: its sources, its routes
+// the voice of a note in the engine node and what it read at its note on: its sources, its routes
 interface CreatedVoice {
   handle: VoiceHandle;
   sources: NoteSources;
   routes: VoiceRoute[];
 }
 
-// the voice of a note in the voices node: both oscillators (off: not active when it was pressed) with their
+// the voice of a note in the engine node: both oscillators (off: not active when it was pressed) with their
 // unison voices and its envelopes (ENV 1 is its volume); the knobs are the base of its params (oscillator
 // $params), the unison and its shape, the phases, on/off and the envelopes are read now
 const createVoiceHandle = ({
@@ -458,7 +458,7 @@ const createVoiceHandle = ({
   return { handle, sources, routes };
 };
 
-// a note: its voice plays in the voices node, ENV 1 shapes it there and the node tells its end once ENV 1 is
+// a note: its voice plays in the engine node, ENV 1 shapes it there and the node tells its end once ENV 1 is
 // back at 0 after the release (or a stolen voice has faded out)
 class Voice {
   private config: VoiceConfig;
@@ -518,7 +518,7 @@ class Voice {
     handle.onEnded = () => config.onEnded(this);
   }
 
-  // its number in the voices node
+  // its number in the engine node
   get id() {
     return this.handle.id;
   }
@@ -538,7 +538,7 @@ class Voice {
     return this.handle.params.gate;
   }
 
-  // the voices node started it at `started` (seconds of the context), later than scheduled (its note on came
+  // the engine node started it at `started` (seconds of the context), later than scheduled (its note on came
   // late): its envelopes start there, the fx follow them (onLate). Its starts again before it are that start (it
   // sees the gate at its first sample), those after it start from the levels they have then from there
   private startLate(started: number) {
@@ -1308,7 +1308,7 @@ export const synth = ({
         lfo[0].$ranges.pipe(skip(1)).subscribe(() => {
           if (movesLfoKnob($routes.value)) voicing.setRoutes($routes.value, voiceFilter());
         }),
-        // the pitch bend of every note, in the voices node (on top of the detune of each oscillator, it glides
+        // the pitch bend of every note, in the engine node (on top of the detune of each oscillator, it glides
         // there; new notes start with it), at most every BEND_INTERVAL
         combineLatest([$bend, $bendDown, $bendUp])
           .pipe(

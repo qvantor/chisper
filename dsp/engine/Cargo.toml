@@ -1,0 +1,28 @@
+[package]
+name = "engine"
+description = "The core of the one worklet node: the voices and their store (wavetable-osc) into the chain (the effects, the master, the limiter)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+wasm-rt = { path = "../wasm-rt" }
+chain = { path = "../chain" }
+wavetable-osc = { path = "../wavetable-osc" }
+
+[features]
+# what only the specs call and the counters of the perf build, of both halves
+perf = ["chain/perf", "wavetable-osc/perf"]
+
+# (the tests make a voice and an effect trap: the hooks of the perf build)
+[dev-dependencies]
+dsp-core = { path = "../dsp-core" }
+chain = { path = "../chain", features = ["perf"] }
+wavetable-osc = { path = "../wavetable-osc", features = ["perf"] }

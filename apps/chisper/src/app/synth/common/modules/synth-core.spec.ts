@@ -4,9 +4,9 @@ import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { setChromium, setPlaybackStats } from '../../../../test-utils/user-agent';
 import { setVisibility } from '../../../../test-utils/visibility';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
-import { CHAIN_PROCESSOR, ChainMessage, ChainOptions, LIMITER_STAGE } from '../chain/chain-params';
+import { ChainMessage, LIMITER_STAGE } from '../chain/chain-params';
+import { ENGINE_PROCESSOR, EngineOptions, PROBED_NODE_OPTIONS } from '../engine/engine-params';
 import { keepNormalLatency, readAutoLatency, setLatencyMode } from '../latency/latency';
-import { VOICES_PROCESSOR } from '../wavetable/wavetable-osc-params';
 
 interface NodeStub extends AudioWorkletNode {
   name: string;
@@ -22,14 +22,17 @@ const nodesOf = (audioCtx: AudioContext, name: string) =>
     (node) => node.name === name
   );
 
-// the synth core and the node of its chain (once its module has loaded): what it was made with, what it is told
+// the synth core and the node of its engine (once its module has loaded): what it was made with, what its chain is
+// told (not the port of the worker of its store)
 const setup = () => {
   const module = createSynthCore();
   const [{ audioCtx }] = module;
-  const node = () => nodesOf(audioCtx, CHAIN_PROCESSOR).at(-1);
-  const state = () => (node()?.options.processorOptions as ChainOptions | undefined)?.state;
+  const node = () => nodesOf(audioCtx, ENGINE_PROCESSOR).at(-1);
+  const state = () => (node()?.options.processorOptions as EngineOptions | undefined)?.state;
   const messages = () =>
-    (node()?.port.postMessage.mock.calls ?? []).map(([message]) => message as ChainMessage);
+    (node()?.port.postMessage.mock.calls ?? [])
+      .map(([message]) => message as ChainMessage)
+      .filter((message) => !('port' in message));
   // a message of the processor
   const report = (data: unknown) => node()?.port.onmessage?.({ data } as MessageEvent);
   return { module, model: module[0], actions: module[1], audioCtx, node, state, messages, report };
@@ -50,34 +53,33 @@ const failLoads = (count: number) => {
 };
 
 describe('synthCore', () => {
-  it('connects the voices node → the chain → destination, the chain one node between its input and output', async () => {
+  it('plays everything in one node: the engine → its output → destination', async () => {
     const { model, audioCtx, node } = setup();
-    const { chain, input, output } = model;
-    expect(input).toBe(chain.input);
+    const { chain, engine, output } = model;
     expect(output).toBe(chain.output);
+    expect(output).toBe(engine.output);
     await flush();
-    const [voices] = nodesOf(audioCtx, VOICES_PROCESSOR);
-    // the filter is in each voice: the voices go straight into the chain
-    expect(voices.connect).toHaveBeenCalledWith(input);
-    expect(nodesOf(audioCtx, CHAIN_PROCESSOR)).toHaveLength(1);
-    expect((input.connect as jest.Mock).mock.calls).toEqual([[node()]]);
-    expect((node()?.connect as jest.Mock).mock.calls).toEqual([[output]]);
-    // the analysers tap what is played: the output of the chain, after its limiter
+    // the voices (the filter is in each), the effects, the master gain and the limiter: no other worklet node
+    const nodes = registrar.getAudioNodes(audioCtx as never, 'AudioWorkletNode' as never);
+    expect(nodes).toHaveLength(1);
+    expect(nodesOf(audioCtx, ENGINE_PROCESSOR)).toHaveLength(1);
+    // no input: nothing goes into it or around its limiter (the specs are a perf build: its second output is
+    // the probe's)
+    expect(node()?.options).toMatchObject(PROBED_NODE_OPTIONS);
+    expect((node()?.connect as jest.Mock).mock.calls).toEqual([[output, 0]]);
+    // the analysers tap what is played: the output of the engine, after its limiter
     expect((output.connect as jest.Mock).mock.calls[0]).toEqual([audioCtx.destination]);
-    // nothing goes around the limiter
-    expect(input.connect).not.toHaveBeenCalledWith(output);
-    expect(input.connect).not.toHaveBeenCalledWith(audioCtx.destination);
-    expect(voices.connect).toHaveBeenCalledTimes(1);
   });
 
-  it('is silent until the chain is ready: its input goes nowhere before the node exists', async () => {
+  it('is silent until the engine is ready: no node before its module has loaded', async () => {
     const { model, node } = setup();
     expect(node()).toBeUndefined();
-    expect(model.input.connect).not.toHaveBeenCalled();
     expect(model.chain.$status.value).toBe('loading');
+    expect(model.wavetables.$status.value).toBe('loading');
     await flush();
-    expect(model.input.connect).toHaveBeenCalledWith(node());
+    expect(node()?.connect).toHaveBeenCalledWith(model.output, 0);
     expect(model.chain.$status.value).toBe('ready');
+    expect(model.wavetables.$status.value).toBe('ready');
   });
 
   it('the master volume starts at 0 dB, the output open', async () => {
@@ -89,7 +91,7 @@ describe('synthCore', () => {
     expect(messages()).toEqual([]);
   });
 
-  it('destroys the chain and the wavetable oscillator when it stops', async () => {
+  it('destroys the chain, the wavetable oscillator and their node when it stops', async () => {
     const { model, node, messages } = setup();
     const destroy = jest.spyOn(model.chain, 'destroy');
     const destroyWavetables = jest.spyOn(model.wavetables, 'destroy');
@@ -98,26 +100,25 @@ describe('synthCore', () => {
     stopModels();
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(destroyWavetables).toHaveBeenCalledTimes(1);
-    // the processor ends, its core is freed
+    // the processor ends, its core is freed (once: the node is the one of both)
     expect(messages()).toEqual([{ stop: true }]);
-    [stub, model.input, model.output].forEach((item) => expect(item?.disconnect).toHaveBeenCalled());
+    [stub, model.output].forEach((item) => expect(item?.disconnect).toHaveBeenCalled());
   });
 
-  it('stopped before the chain has loaded: no node is made', async () => {
+  it('stopped before the engine has loaded: no node is made', async () => {
     const { node } = setup();
     stopModels();
     await flush();
     expect(node()).toBeUndefined();
   });
 
-  it('loads the chain and the wavetable oscillator at its start, each once', async () => {
+  it('loads the one module of the engine at its start, once', async () => {
     const { model, audioCtx } = setup();
     const addModule = audioCtx.audioWorklet.addModule as jest.Mock;
-    expect(workletLoads(addModule, 'chain')).toBe(1);
-    expect(workletLoads(addModule, 'wavetable-osc')).toBe(1);
+    expect(workletLoads(addModule, 'engine')).toBe(1);
     expect(model.wavetables.$status.value).toBe('loading');
     await flush();
-    expect(addModule).toHaveBeenCalledTimes(2);
+    expect(addModule).toHaveBeenCalledTimes(1);
   });
 
   describe('the master limiter', () => {
@@ -146,9 +147,8 @@ describe('synthCore', () => {
       error.mockRestore();
     });
 
-    it('fails with the module of the chain, retryAudio loads it again: a new node with the knobs of now', async () => {
+    it('fails with the module of the engine, retryAudio loads it again: a new node with the knobs of now', async () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      // (the chain is the first module a core adds)
       const restore = failLoads(1);
       const { model, actions, audioCtx, node, state } = setup();
       restore();
@@ -157,14 +157,13 @@ describe('synthCore', () => {
       expect(model.chain.$status.value).toBe('failed');
       // no fallback: nothing plays unlimited
       expect(node()).toBeUndefined();
-      expect(model.input.connect).not.toHaveBeenCalled();
       actions.setMasterGain(0.5);
       actions.retryAudio();
       expect(model.masterLimiter.$status.value).toBe('loading');
       await flush();
       expect(model.masterLimiter.$status.value).toBe('ready');
-      expect(workletLoads(audioCtx.audioWorklet.addModule as jest.Mock, 'chain')).toBe(2);
-      expect(model.input.connect).toHaveBeenCalledWith(node());
+      expect(workletLoads(audioCtx.audioWorklet.addModule as jest.Mock, 'engine')).toBe(2);
+      expect(node()?.connect).toHaveBeenCalledWith(model.output, 0);
       expect(state()?.masterGain).toBe(0.5);
       error.mockRestore();
     });
@@ -175,7 +174,6 @@ describe('synthCore', () => {
       await flush();
       expect(model.masterLimiter.$status.value).toBe('unsupported');
       expect(node()).toBeUndefined();
-      expect(model.input.connect).not.toHaveBeenCalled();
       expect(() => {
         actions.setMasterGain(0.5);
         actions.mute(0.02);
@@ -185,15 +183,13 @@ describe('synthCore', () => {
     });
   });
 
-  // each loads again only when it failed (a network down at the start fails both)
-  it('retryAudio loads again the wavetable oscillator and the chain, makes its limiter again', () => {
+  // each only when it failed
+  it('retryAudio loads the engine again, makes its limiter again', () => {
     const { model, actions } = setup();
-    const retryChain = jest.spyOn(model.chain, 'retry');
+    const retry = jest.spyOn(model.engine, 'retry');
     const retryStage = jest.spyOn(model.chain, 'retryStage');
-    const retryWavetables = jest.spyOn(model.wavetables, 'retry');
     actions.retryAudio();
-    expect(retryWavetables).toHaveBeenCalledTimes(1);
-    expect(retryChain).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(1);
     expect(retryStage.mock.calls).toEqual([[LIMITER_STAGE]]);
   });
 
@@ -202,14 +198,14 @@ describe('synthCore', () => {
     await flush();
     actions.retryAudio();
     await flush();
-    expect(audioCtx.audioWorklet.addModule).toHaveBeenCalledTimes(2);
-    expect(nodesOf(audioCtx, CHAIN_PROCESSOR)).toHaveLength(1);
+    expect(audioCtx.audioWorklet.addModule).toHaveBeenCalledTimes(1);
+    expect(nodesOf(audioCtx, ENGINE_PROCESSOR)).toHaveLength(1);
     expect(messages()).toEqual([]);
   });
 
-  it('one retryAudio brings both back when the network was down at the start', async () => {
+  it('one retryAudio brings the chain and the oscillators back when the network was down at the start', async () => {
     const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const restore = failLoads(2);
+    const restore = failLoads(1);
     const { model, actions, audioCtx } = setup();
     restore();
     await flush();
@@ -220,8 +216,7 @@ describe('synthCore', () => {
     expect(model.chain.$status.value).toBe('ready');
     expect(model.wavetables.$status.value).toBe('ready');
     const addModule = audioCtx.audioWorklet.addModule as jest.Mock;
-    expect(workletLoads(addModule, 'chain')).toBe(2);
-    expect(workletLoads(addModule, 'wavetable-osc')).toBe(2);
+    expect(workletLoads(addModule, 'engine')).toBe(2);
     error.mockRestore();
   });
 
