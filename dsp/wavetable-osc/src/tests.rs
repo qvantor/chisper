@@ -558,6 +558,41 @@ fn a_voice_of_mono_lives_on_release_lead_after_its_release_a_note_meanwhile_take
 }
 
 #[test]
+fn a_stolen_voice_fades_out_over_the_share_of_kill_fade_its_gate_asks_for() {
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    let mut scope = Scope::new(RATE, [(-BIG, BIG); PARAMS]);
+    let mut held = [0.0; PARAMS];
+    held[1] = 1.0;
+    for id in [1.0, 2.0, 3.0, 4.0, 5.0] {
+        scope.on(id, note(), held, false, false, &mut store, &mut shared);
+    }
+    // stolen at 0.01 s (frame 480): -1 and under over all of KILL_FADE (960 frames), -0.25 over a quarter (240),
+    // -0.05 over a twentieth (48), next to 0 over a frame at least
+    for (id, gate) in [(1.0, -1.0), (2.0, -3.0), (3.0, -0.25), (4.0, -0.05), (5.0, -1e-6)] {
+        scope.event(SET, id, 1, gate, 0.01, 0.0, &mut store, &mut shared);
+    }
+    let mut ends = Vec::new();
+    let mut frame = 0.0;
+    while frame < 0.05 * RATE {
+        scope.process(frame, 128, &mut store, &mut shared);
+        ends.extend(scope.ended.drain(..).map(|id| (id, frame)));
+        frame += 128.0;
+    }
+    // each in the block of the end of its fade: 481 (the block from 384), 528 (512), 720 (640), 1440 (1408)
+    assert_eq!(
+        ends,
+        [
+            (5.0, 384.0),
+            (4.0, 512.0),
+            (3.0, 640.0),
+            (1.0, 1408.0),
+            (2.0, 1408.0)
+        ]
+    );
+    scope.end(&mut store, &mut shared);
+}
+
+#[test]
 fn the_bend_of_the_node_is_on_top_of_a_detune_one_value_while_both_are() {
     let mut bend = Glided::new(0.0);
     bend.glide(100.0, 4.0);

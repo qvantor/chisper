@@ -30,6 +30,14 @@ export interface EnvelopeParams {
 export const curveShape = (k: number, x: number) =>
   k === 0 ? x : (1 - Math.exp(-k * x)) / (1 - Math.exp(-k));
 
+// the attack of an envelope as the time a line of its steepest slope would take: its seconds over the largest
+// slope of its curve (curveShape: |k| / (1 - e^(-|k|)), at its start for k > 0, at its end for k < 0; 1 for a
+// line)
+export const attackRise = ({ attack, curves }: EnvelopeParams) => {
+  const k = Math.abs(curves?.attack ?? 0);
+  return k === 0 ? attack : (attack * (1 - Math.exp(-k))) / k;
+};
+
 // from → to over `length` seconds, `done` of them done (the linear one as it was: its bits)
 const stage = (from: number, to: number, k: number, done: number, length: number) =>
   k === 0 ? from + ((to - from) * done) / length : from + (to - from) * curveShape(k, done / length);

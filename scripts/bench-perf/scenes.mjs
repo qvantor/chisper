@@ -115,6 +115,13 @@ export const clipSteps = ({ bpm, length, notes }, seconds) => {
   ).flat();
 };
 
+// the heavy patch at Poly 4 as a pluck with no attack and a long release (the envelope of WAVEFORM-41): over the
+// chord of the clip every note of its arpeggio steals a voice, which fades out under a new one (an attack under
+// MIN_TAKE_ATTACK of synth.ts: a voice more for its fade, the shorter the quieter it is, a voice made at every
+// note). A tree of before plays the note on the stolen voice: against it the shift is the cost of that
+const PLUCK = { attack: 0, hold: 0, decay: 0.36, sustain: 0, release: 1.24 };
+const STEALING = { ...HEAVY, v: { ...VOICING, max: 4 }, env: { ...HEAVY.env, e1: PLUCK } };
+
 // --- CPU and memory: the notes are held (or the clip plays), xctrace records 10 s after a warm-up ---
 
 export const CPU_CASES = [
@@ -183,6 +190,14 @@ export const CPU_CASES = [
     snapshot: HEAVY,
     clip: CLIP,
     roll: true,
+  },
+  {
+    id: 'T3',
+    group: 'cpu',
+    title: 'T1 at Poly 4 with no attack: a voice stolen at every note',
+    snapshot: STEALING,
+    clip: CLIP,
+    roll: false,
   },
 ];
 

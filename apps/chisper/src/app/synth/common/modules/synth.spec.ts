@@ -12,6 +12,7 @@ import { curveShape, envelopeValue } from '../envelope/envelope-curve';
 import { UNISON_SHAPE } from '../wavetable/voice-options';
 import type { TableState } from '../wavetable/wavetable-engine';
 import { glideValue } from './glide';
+import { MIN_TAKE_ATTACK, stealFade } from './synth';
 
 // the wavetable oscillator loads its module asynchronously
 const flush = () => new Promise((resolve) => setTimeout(resolve));
@@ -19,6 +20,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve));
 const f32 = Math.fround;
 // the velocity of the computer keyboard and the piano (100) as a share of 127: VELO on a line, the amp at Amp 1
 const KEY = 100 / 127;
+// the gate of a voice of `volume` a note of a sharp attack steals: it fades out over that share of KILL_FADE; of
+// one at its full level (ENV 1 at 1, the amp of KEY)
+const stolen = (volume: number) => -f32(stealFade(volume));
+const STOLEN = stolen(KEY);
 
 const setup = async ({
   ready = true,
@@ -438,6 +443,200 @@ describe('synth', () => {
     expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([]);
   });
 
+  // an attack of ENV 1 too short to rise without a step from the level the voice has reached (its filter sounds:
+  // a click, WAVEFORM-41): the stolen voice fades out, a new one (its filter at rest) plays the note
+  it.each([0, 0.001, MIN_TAKE_ATTACK - 1e-6])(
+    'a stolen voice fades out under a new one when ENV 1 attacks in %d s (under MIN_TAKE_ATTACK)',
+    async (attack) => {
+      const { onPress, voices, param, synthModel, synthActions, envelopeModel, travel } = await setup();
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', attack);
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'E']);
+      await travel(2);
+      onPress([4, 'G']);
+      expect(voices()).toHaveLength(3);
+      const [c, e, g] = voices();
+      expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[STOLEN, 2]]);
+      expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([]);
+      expect(g.values.frequency).toBe(f32(getFq([4, 'G'])));
+      expect(g.options.envelopes[0].attack).toBe(attack);
+      expect(synthModel.$voicesCount.value).toBe(2);
+      expect(synthModel.$fxNote.value).toMatchObject({ start: 2, release: null });
+    }
+  );
+
+  // the fade of a voice a note of a sharp attack steals: the quieter the voice, the shorter (the same splatter as a
+  // voice at 1 over all of KILL_FADE; a voice more for 20 ms at every note was the cost of it)
+  it('stealFade: all of KILL_FADE at a volume of 1, the root of the volume under it, a twentieth at least', () => {
+    expect(stealFade(1)).toBe(1);
+    expect(stealFade(2)).toBe(1);
+    expect(stealFade(0.25)).toBe(0.5);
+    expect(stealFade(0.01)).toBeCloseTo(0.1, 12);
+    expect(stealFade(0.0001)).toBe(0.05);
+    expect(stealFade(0)).toBe(0.05);
+  });
+
+  it('a note of a sharp attack fades the voice it steals out the shorter the quieter it is; another note over all of KILL_FADE', async () => {
+    const { onPress, voices, param, synthActions, envelopeModel, travel } = await setup();
+    // a pluck: ENV 1 down to a quarter in its decay (a line: its curve at 0)
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'hold', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'decay', 1);
+    envelopeModel[1].setEnvelopeValue('env1', 'sustain', 0.25);
+    envelopeModel[1].setEnvelopeCurve('env1', 'decay', 0);
+    synthActions.setMaxVoices(1 + 1);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    await travel(2);
+    onPress([4, 'G']);
+    const [c] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([[stolen(0.25 * KEY), 2]]);
+    // in legato the first note of a phrase starts its envelopes as sharply: E fades out by its level too; the next
+    // one joins the phrase (no onset over the voice it steals): G fades out over all of it
+    synthActions.setLegato(true);
+    onPress([4, 'A']);
+    expect(calls(param(voices()[1], 'gate'), 'setValueAtTime')).toEqual([[stolen(0.25 * KEY), 2]]);
+    onPress([4, 'B']);
+    expect(calls(param(voices()[2], 'gate'), 'setValueAtTime')).toEqual([[-1, 2]]);
+  });
+
+  // a voice still on its way up is not a quiet one: its fade is as long as the level it reaches within it asks for
+  it('a voice stolen in its attack fades out by the level it rises to, not the one it has', async () => {
+    const { onPress, voices, param, synthActions, envelopeModel } = await setup();
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0.001);
+    synthActions.setMaxVoices(2);
+    // a chord of three at one time: G steals C at the start of its attack (at 0, at its top a millisecond later)
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    onPress([4, 'G']);
+    expect(voices()).toHaveLength(3);
+    expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([[STOLEN, 0]]);
+  });
+
+  // the attack as its curve makes it (attackRise): one that does its rise in a few samples (at its start, k > 0,
+  // or at its end, k < 0) is as sharp as a shorter line
+  it.each([10, -10])(
+    'a stolen voice fades out under a new one when ENV 1 attacks in MIN_TAKE_ATTACK through a curve of %d',
+    async (k) => {
+      const { onPress, voices, param, synthActions, envelopeModel, travel } = await setup();
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', MIN_TAKE_ATTACK);
+      envelopeModel[1].setEnvelopeCurve('env1', 'attack', k);
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'E']);
+      await travel(2);
+      onPress([4, 'G']);
+      expect(voices()).toHaveLength(3);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([[STOLEN, 2]]);
+    }
+  );
+
+  it.each([
+    { attack: MIN_TAKE_ATTACK, curve: 0 },
+    { attack: 0.03, curve: 10 },
+  ])(
+    'a stolen voice plays the new note when ENV 1 attacks in $attack s through a curve of $curve (MIN_TAKE_ATTACK at its steepest)',
+    async ({ attack, curve }) => {
+      const { onPress, voices, param, synthActions, envelopeModel, travel } = await setup();
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', attack);
+      envelopeModel[1].setEnvelopeCurve('env1', 'attack', curve);
+      synthActions.setMaxVoices(2);
+      onPress([4, 'C']);
+      onPress([4, 'E']);
+      await travel(2);
+      onPress([4, 'G']);
+      expect(voices()).toHaveLength(2);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([[HELD_AGAIN_GATE, 2]]);
+    }
+  );
+
+  it('in legato the first note of a phrase with a sharp attack fades the released voice it steals out by its level', async () => {
+    const { onPress, onRelease, voices, param, synthActions, envelopeModel, travel, wall } = await setup();
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'release', 5);
+    synthActions.setMaxVoices(2);
+    synthActions.setLegato(true);
+    onPress([4, 'C']);
+    onPress([4, 'E']);
+    await travel(1);
+    wall.mockReturnValue(1000);
+    onRelease([4, 'C']);
+    onRelease([4, 'E']);
+    // G starts a phrase: C, at the start of its release, fades out by its level
+    onPress([4, 'G']);
+    expect(voices()).toHaveLength(3);
+    expect(calls(param(voices()[0], 'gate'), 'setValueAtTime').at(-1)).toEqual([STOLEN, 1]);
+  });
+
+  it('with no voice released a held one that is silent for good is stolen before an older one that sounds', async () => {
+    const { onPress, voices, param, synthActions, envelopeModel, travel } = await setup();
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'hold', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'sustain', 1);
+    synthActions.setMaxVoices(3);
+    // C: a pad, held at its sustain; E and G: plucks, down at a sustain of 0
+    onPress([4, 'C']);
+    envelopeModel[1].setEnvelopeValue('env1', 'decay', 0.3);
+    envelopeModel[1].setEnvelopeValue('env1', 'sustain', 0);
+    onPress([4, 'E']);
+    onPress([4, 'G']);
+    await travel(1);
+    onPress([4, 'A']);
+    expect(voices()).toHaveLength(4);
+    const [c, e, g] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime')).toEqual([]);
+    expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([[stolen(0), 1]]);
+    expect(calls(param(g, 'gate'), 'setValueAtTime')).toEqual([]);
+  });
+
+  // nothing heard is cut while a voice is silent for good: a key held on a pluck (ENV 1 down at a sustain of 0)
+  it('steals a held voice that is silent for good (ENV 1 at a sustain of 0) before a released one that still sounds', async () => {
+    const { onPress, onRelease, voices, param, synthActions, envelopeModel, travel, wall } = await setup();
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'hold', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'decay', 0.3);
+    envelopeModel[1].setEnvelopeValue('env1', 'sustain', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'release', 5);
+    synthActions.setMaxVoices(2);
+    // C held through its decay: silent; E released in its decay: its release sounds
+    onPress([4, 'C']);
+    await travel(1);
+    wall.mockReturnValue(1000);
+    onPress([4, 'E']);
+    await travel(0.1);
+    wall.mockReturnValue(1100);
+    onRelease([4, 'E']);
+    onPress([4, 'G']);
+    const gate = (index: number) => calls(param(voices()[index], 'gate'), 'setValueAtTime').at(-1)?.[0];
+    expect(voices()).toHaveLength(3);
+    // C fades out (silent: over the least of KILL_FADE), E releases on
+    expect(gate(0)).toBe(stolen(0));
+    expect(gate(1)).toBeGreaterThanOrEqual(RELEASE_GATE);
+  });
+
+  it('a held voice still in its attack or its decay is not silent: a released one is stolen before it', async () => {
+    const { onPress, onRelease, voices, param, synthActions, envelopeModel, travel, wall } = await setup();
+    envelopeModel[1].setEnvelopeValue('env1', 'attack', 1);
+    envelopeModel[1].setEnvelopeValue('env1', 'hold', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'decay', 1);
+    envelopeModel[1].setEnvelopeValue('env1', 'sustain', 0);
+    envelopeModel[1].setEnvelopeValue('env1', 'release', 5);
+    synthActions.setMaxVoices(2);
+    onPress([4, 'C']);
+    await travel(0.5);
+    wall.mockReturnValue(500);
+    onRelease([4, 'C']);
+    // E at the start of its attack (at 0, on its way up): C, released, is the one stolen (it plays G: an attack
+    // of a second)
+    onPress([4, 'E']);
+    onPress([4, 'G']);
+    expect(voices()).toHaveLength(2);
+    const [c, e] = voices();
+    expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(HELD_AGAIN_GATE);
+    expect(calls(param(e, 'gate'), 'setValueAtTime')).toEqual([]);
+  });
+
   it('a stolen voice with other envelopes than the knobs fades out: a new voice plays the note', async () => {
     const { onPress, voices, param, synthActions, envelopeModel } = await setup();
     synthActions.setMaxVoices(2);
@@ -504,9 +703,10 @@ describe('synth', () => {
       expect(synthModel.$voicesCount.value).toBe(1);
     });
 
-    it('a release of 32 s gives no more sounding voices than Poly: the oldest released one plays the new note', async () => {
+    it('a release of 32 s gives no more sounding voices than Poly: the oldest released one fades out under the new note', async () => {
       const { onPress, onRelease, voices, param, synthModel, synthActions, envelopeModel } = await setup();
-      // released at their start at full level (with an attack at 0: they would end there)
+      // released at their start at full level (an attack of 0: with one they would end there; under
+      // MIN_TAKE_ATTACK a stolen voice plays no new note)
       envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
       envelopeModel[1].setEnvelopeValue('env1', 'release', 32);
       synthActions.setMaxVoices(3);
@@ -516,12 +716,13 @@ describe('synth', () => {
         onRelease([4, note]);
         expect(synthModel.$voicesCount.value).toBeLessThanOrEqual(3);
       });
-      // C, D and E play F, G and A and release on: none fades out, no voice more
-      expect(voices()).toHaveLength(3);
-      const played = voices().map((voice) => calls(param(voice, 'frequency'), 'setValueAtTime').at(-1)?.[0]);
-      expect(played).toEqual((['F', 'G', 'A'] as const).map((name) => f32(getFq([4, name]))));
+      // C, D and E fade out as F, G and A start, each on a voice of its own, and release on
+      expect(voices()).toHaveLength(6);
+      expect(voices().map((voice) => voice.values.frequency)).toEqual(
+        notes.map((name) => f32(getFq([4, name])))
+      );
       const gates = voices().map((voice) => calls(param(voice, 'gate'), 'setValueAtTime').at(-1)?.[0]);
-      expect(gates).toEqual([RELEASE_GATE, RELEASE_GATE, RELEASE_GATE]);
+      expect(gates).toEqual([STOLEN, STOLEN, STOLEN, RELEASE_GATE, RELEASE_GATE, RELEASE_GATE]);
       expect(synthModel.$voicesCount.value).toBe(3);
     });
 
@@ -536,13 +737,13 @@ describe('synth', () => {
       onRelease([4, 'E']);
       onPress([4, 'F']);
       const gate = (index: number) => calls(param(voices()[index], 'gate'), 'setValueAtTime').at(-1)?.[0];
-      // E, released, plays F; C and D are held on
-      expect(voices()).toHaveLength(3);
-      expect([gate(0), gate(1), gate(2)]).toEqual([undefined, undefined, HELD_AGAIN_GATE]);
-      // none released: C, the oldest held one, plays G
+      // E, released, fades out under F (an attack of 0: a new voice); C and D are held on
+      expect(voices()).toHaveLength(4);
+      expect([gate(0), gate(1), gate(2), gate(3)]).toEqual([undefined, undefined, STOLEN, undefined]);
+      // none released: C, the oldest held one, fades out under G
       onPress([4, 'G']);
-      expect(voices()).toHaveLength(3);
-      expect(gate(0)).toBe(HELD_AGAIN_GATE);
+      expect(voices()).toHaveLength(5);
+      expect(gate(0)).toBe(STOLEN);
       expect(gate(1)).toBeUndefined();
     });
 
@@ -628,10 +829,13 @@ describe('synth', () => {
       // (from its note on it would be over at 1, within RELEASE_LEAD of now: not counted)
       await travel(0.98);
       onPress([4, 'E']);
-      expect(voices()).toHaveLength(2);
+      expect(voices()).toHaveLength(3);
       const [c, d] = voices();
-      // C still sounds: stolen for E, it plays it
-      expect(calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0]).toBe(HELD_AGAIN_GATE);
+      // C still sounds, at the end of its release: stolen for E (it fades out: an attack of 0; quiet, over a
+      // small share of KILL_FADE)
+      const gate = calls(param(c, 'gate'), 'setValueAtTime').at(-1)?.[0] as number;
+      expect(gate).toBeLessThan(0);
+      expect(gate).toBeGreaterThan(-0.1);
       expect(calls(param(d, 'gate'), 'setValueAtTime')).toEqual([]);
     });
 
@@ -1015,6 +1219,83 @@ describe('synth', () => {
         [fq('B'), expect.closeTo(1.07, 9)],
       ]);
       expect(synthModel.$voicesCount.value).toBe(1);
+    });
+
+    // (as a stolen voice of Poly: an attack too short to start again from a level without a step)
+    it('with ENV 1 attack under MIN_TAKE_ATTACK a note out of legato starts a new voice, the one before fades out', async () => {
+      const { onPress, voices, param, synthModel, envelopeModel, travel } = await mono(0, false);
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+      onPress([4, 'A']);
+      await travel(1);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(2);
+      const [a, b] = voices();
+      expect(calls(param(a, 'gate'), 'setValueAtTime')).toEqual([[STOLEN, 1]]);
+      expect(b.values.frequency).toBe(fq('B'));
+      expect(synthModel.$voicesCount.value).toBe(1);
+      // the next note: the same again, on the voice of B
+      await travel(1);
+      onPress([4, 'C']);
+      expect(voices()).toHaveLength(3);
+      expect(calls(param(b, 'gate'), 'setValueAtTime')).toEqual([[STOLEN, 2]]);
+    });
+
+    // the glide a note interrupts goes on from where it is, on the new voice (the voice taken over did the same)
+    it('with ENV 1 attack under MIN_TAKE_ATTACK the new voice glides on from where the one before is', async () => {
+      const { onPress, onRelease, voices, param, envelopeModel, travel } = await mono(500, false);
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+      onPress([4, 'A']);
+      await travel(1);
+      onPress([4, 'B']);
+      await travel(0.25);
+      // B in the middle of its glide from A
+      const toB = { from: getFq([4, 'A']), to: getFq([4, 'B']), start: 1, seconds: 0.5 };
+      const reached = glideValue(toB, 1.25);
+      expect(reached).toBeGreaterThan(getFq([4, 'A']) + 1);
+      expect(reached).toBeLessThan(getFq([4, 'B']) - 1);
+      onPress([4, 'C']);
+      expect(voices()).toHaveLength(3);
+      const [, b, c] = voices();
+      expect(b.values.frequency).toBe(fq('A'));
+      expect(c.values.frequency).toBe(f32(reached));
+      expect(calls(param(c, 'frequency'), 'exponentialRampToValueAtTime').at(-1)).toEqual([
+        fq('C'),
+        expect.closeTo(1.75, 9),
+      ]);
+      // C released at once: back to B (the key below) on a new voice, from where the voice of C is (it hasn't moved)
+      onRelease([4, 'C']);
+      expect(voices()).toHaveLength(4);
+      const back = voices()[3];
+      expect(back.values.frequency).toBe(f32(reached));
+      expect(calls(param(back, 'frequency'), 'exponentialRampToValueAtTime').at(-1)).toEqual([
+        fq('B'),
+        expect.closeTo(1.75, 9),
+      ]);
+    });
+
+    it('in legato a staccato note with ENV 1 attack under MIN_TAKE_ATTACK fades the released voice out by its level', async () => {
+      const { onPress, onRelease, voices, param, envelopeModel, travel, wall } = await mono(0, true);
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+      envelopeModel[1].setEnvelopeValue('env1', 'release', 5);
+      onPress([4, 'A']);
+      await travel(1);
+      wall.mockReturnValue(1000);
+      onRelease([4, 'A']);
+      // no key held: B starts its envelopes, as sharply as out of legato
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(2);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime').at(-1)).toEqual([STOLEN, 1]);
+    });
+
+    it('with ENV 1 attack under MIN_TAKE_ATTACK a note in legato over a held key still takes the voice over', async () => {
+      const { onPress, voices, param, envelopeModel, travel } = await mono(0, true);
+      envelopeModel[1].setEnvelopeValue('env1', 'attack', 0);
+      onPress([4, 'A']);
+      await travel(1);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(1);
+      expect(calls(param(voices()[0], 'gate'), 'setValueAtTime')).toEqual([]);
+      expect(calls(param(voices()[0], 'frequency'), 'setValueAtTime').at(-1)).toEqual([fq('B'), 1]);
     });
 
     it('a key released and the next one pressed at one time (MIDI, the default release): the voice takes it over', async () => {

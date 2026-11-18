@@ -325,8 +325,14 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - `noise.ts` (+ `synth/noise/`) — a sample player in every voice; samples from the noise bucket.
 - `sub.ts` (+ `synth/sub/`, left of OSC 1) — the sub oscillator in every voice; sends the table of a shape the first
   time it is on.
-- `synth.ts` + `synth/voicing/` — voices per note: poly with stealing (quietest released first; out of legato the
-  stolen voice takes the new note, its phases go on, else it fades out), legato, portamento (`glide.ts`), mono
+- `synth.ts` + `synth/voicing/` — voices per note: poly with stealing (a released voice at 0, a held one down at a
+  sustain of 0, the quietest released, the oldest held; out of legato the stolen voice takes the new note, its
+  phases go on, else it fades out; so does one whose ENV 1 rises in under `MIN_TAKE_ATTACK` at its steepest
+  (`attackRise`: the curve counts), in mono too: its amplitude would jump under its filter, a click,
+  `steal-clicks.spec.ts`; that note is a new voice, in mono gliding on from where the one before is, its phases,
+  filter, LFOs and ENV 2/3 from their starts; under a note that starts its envelopes so the stolen voice fades over
+  a share of `KILL_FADE` by the level it has or rises to, `stealFade`: the gate says it, a voice more for 20 ms at
+  every note was the cost), legato, portamento (`glide.ts`), mono
   (Poly 1: one voice, a stack of held keys; a note takes it over while it sounds, its core keeps it `RELEASE_LEAD`
   after its release so the takeover never comes late), velocity, pitch bend (one `bend` event for the whole node).
   Playing notes follow most knobs; unison, phases and envelopes apply to new notes.

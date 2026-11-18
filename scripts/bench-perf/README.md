@@ -16,7 +16,7 @@ node scripts/bench-perf/run.mjs --only=dsp --against=main                     # 
 node scripts/bench-perf/run.mjs --only=dsp --dsp=reverb,chord --against=main  # its cases with these in their names
 ```
 
-Options: `--against=<ref>` (a commit, branch or tag: an A/B run); `--only=` cases (`S5`, `F1`, `S5s`, `SUB`, `C1`, `T1`, `T2`, `L1`, `L3`), groups
+Options: `--against=<ref>` (a commit, branch or tag: an A/B run); `--only=` cases (`S5`, `F1`, `S5s`, `SUB`, `C1`, `T1`, `T2`, `T3`, `L1`, `L3`), groups
 (`cpu`, `latency`) or `dsp`; `--runs=N` (the runs of S5 a side, 5 by default); `--browsers=chromium,webkit`;
 `--update-baseline`; `--headless` (latency and quanta not representative: a separate baseline);
 `--keep-traces`; `--dump-trace` (every event of the Chromium trace of S5 in `tmp/bench-perf/trace-events.md`);
@@ -95,6 +95,7 @@ reference may have no setting. A baseline of before it was taken at normal (256 
 | **CH1** | S5 and the chorus in its rack: a fast LFO (2 Hz, depth 4), a feedback of a half; a tree without the chorus (the reference of an A/B run) plays S5                                                                                                                                                                                          | as S5: the cost of the chorus over the heavy patch                                                                                              |
 | **T1**  | the heavy patch (S5), a clip played by the track: 2 bars at 120 BPM, a chord of 4 held through each bar and an arpeggio of 16ths over it (~10 notes on a second, up to 12 voices: stealing where the chords change); a tree without the track (the reference of an A/B run) plays the same notes by a script of the hook, through the keys | as S5, and the notes of the track that started after their frames                                                                               |
 | **T2**  | T1 with the piano roll open (it draws while the track plays)                                                                                                                                                                                                                                                                               | as T1: the cost of the roll                                                                                                                     |
+| **T3**  | T1 at Poly 4, the envelope a pluck with no attack and a long release (0 / 360 ms / 0 / 1.24 s): every note of the arpeggio steals a voice, which fades out under a new one (an attack too short to take it over: a voice more for its fade, the shorter the quieter it is, a voice made at every note); a tree of before plays the note on the stolen voice                  | as T1: the cost of the fade and the new voice                                                                                                   |
 | **L1**  | 50 single notes, a key every 300 ms (one oscillator, u1, no attack)                                                                                                                                                                                                                                                                        | latency to the voice and to the output, jitter                                                                                                  |
 | **L3**  | L1 on top of 8 held notes (2 × u8)                                                                                                                                                                                                                                                                                                         | latency under audio load                                                                                                                        |
 
@@ -104,7 +105,7 @@ reference may have no setting. A baseline of before it was taken at normal (256 
   `--notify-tracing-started`). The hook's counters are read at both ends of the window; Chromium traces its
   glitches meanwhile (category `audio`: free), and in the first run its render quanta in a window of 4 s after
   the save (`audio,webaudio`: +3% of the worklet's cycles). The trace is read while the next run sets up. A
-  case of a clip (T1, T2) plays it from the snapshot on and traces the starts of its voices over the window (both
+  case of a clip (T1, T2, T3) plays it from the snapshot on and traces the starts of its voices over the window (both
   sides of an A/B run: the same work); a note of the track is sent 50 ms ahead, its voice starting after its
   frame is a late note (the main thread stood longer).
 - **The trace**: the CPU Profiler samples every 1M cycles of a core, so the cycles of a thread don't depend on
@@ -137,7 +138,7 @@ reference may have no setting. A baseline of before it was taken at normal (256 
 - **Memory**: the footprint of the page process (steady: the median of the window, the peak).
 - **Engine** (the hook): voices alive, the share of samples played on the direct path (not from mix tables),
   mix builds and refusals per second, the store (bytes of the table versions held), the mix tables, the worker's
-  pool, the longest table build; the late notes of the track of the runs (T1, T2).
+  pool, the longest table build; the late notes of the track of the runs (T1, T2, T3).
 - **Quanta** (Chromium): the render of each block of 128 frames (`webaudio`
   `RealtimeAudioDestinationHandler::Render`) p99 / max against its deadline (2.67 ms at 48 kHz).
 - **Dropouts**: device callbacks Chromium missed (`audio` `Glitch!` on `AudioOutputDevice`), or the context
@@ -181,7 +182,7 @@ no memory of the page, dropouts in most runs (in some: a warning), a case that e
 
 WARN: the preflight, and the budgets — S5 memory ≤ 300 MB, render quanta p99 ≤ 50% and max ≤ 80% of the
 deadline; L1 to the voice p95 ≤ 8 ms and jitter ≤ 3 ms; L3 p95 ≤ L1 + 3 ms and max ≤ 20 ms; a note on ≤ 1 ms
-(p95); a note of the track that started after its frame (T1, T2).
+(p95); a note of the track that started after its frame (T1, T2, T3).
 
 The verdicts are tested without a browser: `npm run test:scripts` (`verdict.test.mjs`, `report.test.mjs`).
 
