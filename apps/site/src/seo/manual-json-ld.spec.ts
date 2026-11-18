@@ -3,7 +3,7 @@ import { manualJsonLd } from './manual-json-ld';
 
 type Node = Record<string, unknown> & { '@type': string };
 
-const graph = () =>
+const graph = (extra: { kind?: 'Article' } = {}) =>
   manualJsonLd({
     lang: 'es',
     path: '/es/manual/teclado-midi/',
@@ -17,6 +17,7 @@ const graph = () =>
       { name: 'Manual', path: '/es/manual/primeros-pasos/' },
       { name: 'MIDI y dispositivos', path: '/es/manual/teclado-midi/' },
     ],
+    ...extra,
   })['@graph'] as unknown as Node[];
 
 const nodeOf = (type: string) => graph().find((node) => node['@type'] === type);
@@ -45,6 +46,16 @@ describe('manualJsonLd', () => {
       publisher: { '@type': 'Person', name: 'Qvantor', url: 'https://github.com/qvantor' },
       about: { '@id': 'https://chisper.qvantor.org/#app' },
     });
+  });
+
+  it('makes a page of Learn an article that mentions the synth, not one about it', () => {
+    const article = graph({ kind: 'Article' }).find((node) => node['@type'] === 'Article');
+    expect(article).toMatchObject({
+      '@id': 'https://chisper.qvantor.org/es/manual/teclado-midi/#article',
+      mentions: { '@id': 'https://chisper.qvantor.org/#app' },
+    });
+    expect(article).not.toHaveProperty('about');
+    expect(graph({ kind: 'Article' }).some((node) => node['@type'] === 'TechArticle')).toBe(false);
   });
 
   it('places it in the site with absolute URLs', () => {

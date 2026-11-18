@@ -49,6 +49,18 @@ describe('merge', () => {
     assert.equal(readFileSync(join(synth, 'wavetable-synth/index.html'), 'utf8'), 'page');
   });
 
+  it('merges again over a merge whose sitemap lastmod.mjs dated, the sitemap of the site over it', () => {
+    const urls = (lastmod = '') =>
+      `<urlset><url><loc>https://chisper.example/a/</loc>${lastmod}<xhtml:link href="x"/></url></urlset>`;
+    write(site, 'sitemap-0.xml', urls());
+    merge(site, synth);
+    write(synth, 'sitemap-0.xml', urls('<lastmod>2026-11-17T18:30:12Z</lastmod>'));
+    assert.equal(merge(site, synth), 5);
+    assert.equal(readFileSync(join(synth, 'sitemap-0.xml'), 'utf8'), urls());
+    write(site, 'sitemap-0.xml', urls().replace('/a/', '/b/'));
+    assert.throws(() => merge(site, synth), /the synth has too: sitemap-0\.xml/);
+  });
+
   it('fails on a file the synth has with other contents, copying nothing', () => {
     write(site, 'index.html', 'not the synth');
     write(site, 'assets/worklets/limiter.js', 'another limiter');

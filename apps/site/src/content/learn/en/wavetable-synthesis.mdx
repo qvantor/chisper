@@ -1,0 +1,196 @@
+---
+title: 'What Is Wavetable Synthesis? How It Works, with Sounds to Try'
+h1: 'What is wavetable synthesis? How it works and how to hear it'
+description: 'Wavetable synthesis explained: a table of single-cycle waves, a position that moves through it, unison and a filter. Try every idea on a free online synth.'
+nav: 'What is wavetable synthesis'
+updated: 2026-11-17
+preset: warehouse-lead
+image: oscillator
+---
+Wavetable synthesis makes a sound by playing one wave out of a table of many, and moving through the table while a
+note plays. Every wave in the table is a single cycle of a different shape, so each has a timbre of its own: moving
+from one to the next turns a soft sine into a bright saw, one vowel into another, a clean tone into a growl. This
+ability to change timbre over time is what makes wavetable synthesis so useful for evolving basses, leads and pads.
+This page explains the idea piece by piece, with something to hear at every step; the examples run on Chisper, a free
+wavetable synth that plays in the browser.
+
+## Wavetable synthesis in one minute
+
+1. A wavetable is a collection of single-cycle waves, called frames. In Chisper, a table can contain up to 256 frames,
+   usually of 2048 samples each.
+2. The oscillator plays one frame in a loop. The key you press sets how fast the loop runs, which is the pitch, and
+   the shape of the frame sets the timbre.
+3. The **Wave** control selects which frame plays.
+4. Something moves the position: your hand or, better, an envelope, an LFO or the velocity. The movement is what makes
+   a wavetable sound alive.
+5. The rest is an ordinary synth. Unison thickens the voices, a filter shapes them, an envelope gives them their
+   loudness and effects finish the sound.
+
+<WavetableStack label='A wavetable: its frames stacked from a sine (frame 1) to a saw (frame 256), the Wave knob on the frame that plays'>
+
+A wavetable drawn as a stack: a sine at the back, a saw at the front, the frame the **Wave** knob plays lit.
+
+</WavetableStack>
+
+## What is a wavetable, and what is in a frame?
+
+Think of one cycle of a wave as a recipe. Repeated over and over it is a tone, and its shape is its timbre. Shape and
+harmonics are the same thing seen two ways: every repeating wave is a sum of sine waves at whole multiples of its
+pitch, the harmonics, and the shape says how loud each of them is.
+
+- A sine is the plain case, the first harmonic and nothing else: a pure, soft tone, like a tuning fork.
+- A saw wave contains all integer harmonics, with each harmonic decreasing in amplitude inversely with its frequency:
+  the second is half as loud, the third a third as loud. It sounds bright and buzzy, the base of strings and brass.
+- Keep only the odd harmonics, the 1st, 3rd, 5th and so on, and you hear the hollow square of a clarinet.
+- Narrow the pulse of a square and more energy moves into the upper harmonics. The tone gets thin and nasal.
+
+A wavetable lines up many such cycles, one recipe after another. A frame may be a basic shape, one cycle cut from a
+recorded voice or instrument, or a wave drawn by hand, and the table keeps them in order, so that walking along it
+changes the harmonics a little at a time.
+
+<Figure name='oscillator' alt='Osc 1 of Chisper on the table Spectral Gyro at frame 33 of 256: the table name with its arrows, Oct, Semi and Fine, the wave of that frame, Wave 33/256, Phase, Phase rand, Unison 3, and the Gain, Wave, Detune and Blend knobs' narrow>
+
+The oscillator on screen: the table on top, the frame that plays in the middle (frame 33 of 256), **Wave** under it.
+
+</Figure>
+
+## How does a wavetable oscillator make a note?
+
+It reads the frame round and round. For an A at 440 Hz the oscillator goes through the cycle 440 times a second,
+whether the frame is 2048 samples long or 600. Pitch and timbre stay apart: the key decides how often the cycle
+repeats, the frame decides what each repetition looks like.
+
+## What does the Wave knob do?
+
+**Wave** is the position in the table. Its travel is divided into equal parts, one for every frame, and you hear the
+frame whose part the knob is in. The strip under the wave shows where you are (*Wave 33/256*).
+
+What happens between two frames depends on the table. With few frames the sound moves in steps: *Basic Shapes*, the
+table of *Init*, has nine, a saw, a sine, a triangle, two squares and four narrow pulses (25, 12.5, 6.25 and 3.125%),
+and turning **Wave** makes the tone jump from one to the next. Give the same turn a table of 256 frames and it becomes
+a glide, because every step is only 1/256 of the knob.
+
+A jump from one frame to the next is clean, with no click. Some tables with few frames are morph tables: Chisper fills
+the gaps between their frames, so they glide like a table of 256. Every table made from an audio file is a morph
+table.
+
+<Tip>
+
+A table that sounds steppy as you turn **Wave** has few frames. Pick one with more, or make a morph table from audio
+(see [Wavetables: import, make from audio, draw](/manual/wavetables/)).
+
+</Tip>
+
+## How do you make a wavetable move?
+
+Wavetable synthesis lives in the movement: a table left on one frame is only an ordinary oscillator. **Wave** is a
+knob like any other, so any source of modulation can drive it. Drag the tab of an envelope, an LFO or VELO onto the
+knob and it moves (the whole mechanism is on [Modulation: envelopes, LFOs and velocity](/manual/modulation-envelopes-lfo/)).
+
+An envelope turns the knob once for every note. A short decay across the table is the snap of a pluck, a slow attack
+a swell. An LFO never stops, so the tone drifts back and forth through the table: a pad that breathes, a lead that
+shimmers, and once the LFO follows the tempo the drift turns into rhythm. Velocity brings in the player: the harder
+you press a key, the further into the table the note starts.
+
+Two oscillators mean two positions. One can rise while the other falls, or each gets its own table and its own speed,
+creating more complex and evolving textures. The presets *UFO Drone* and *Biting Brass Keys* work like this: the first
+sweeps the wavetable position through two tables with envelopes, the second moves the position of both oscillators with
+LFO 1.
+
+## What else shapes a wavetable sound?
+
+A wavetable is only the source. The chain after it is familiar from any synth.
+
+**Unison** stacks up to 8 copies of the note in each oscillator. **Detune** spreads them in pitch, **Blend** balances
+the centre voices against the side ones (75% by default), and **Phase** and **Phase rand** decide where the voices
+start. A bright saw table in an 8-voice unison is the supersaw. **Oct**, **Semi** and **Fine** tune each oscillator,
+which lets two tables an octave or a fifth apart act as one sound, and the **Sub** oscillator and the **Noise** player
+add a low tone or a sample (white noise, a hat, wind) underneath.
+
+Then comes the filter, one for every voice. A wavetable hands it a source that already changes, so it often has less
+to do than on a plain saw. Distortion, chorus, delay, a compressor and a reverb finish the sound, in any order.
+
+## Wavetable, subtractive, FM, additive and sampling: what is the difference?
+
+| Method | What makes the tone | How the tone changes | Known for |
+|---|---|---|---|
+| Subtractive | A few fixed waves (saw, square) | A filter takes harmonics away | Classic analog basses and leads |
+| Wavetable | A table of many different waves | A position moves through the table | Evolving pads, growls, digital and vocal tones |
+| FM | Sine waves that modulate each other's pitch | The amount of the modulation | Bells, electric pianos, metallic tones |
+| Additive | Many sines added one by one | The level of every harmonic | Organs, spectral textures |
+| Sampling | A recording | The pitch, the loop and the filter | Real instruments |
+
+The methods mix. Most wavetable synths put a filter after the oscillators, so they are subtractive as well: the table
+is a source that moves, the filter carves it. A frame is also a list of harmonics, which makes wavetable a cousin of
+additive synthesis, and a table cut from an audio file is a cousin of sampling.
+
+## Three things to hear
+
+<Try title='Steps, then a sweep'>
+
+1. Load *Init* (the circular arrow by the preset name) and hold <kbd>Q</kbd>.
+2. Turn **Wave** on Osc 1 slowly across its whole travel. This is *Basic Shapes*.
+3. Click the name of the table to open the browser and pick *Spectral Gyro*, a table of 256 frames.
+4. Turn **Wave** across its travel again, at the same speed.
+
+You should hear the first turn jump between nine distinct shapes and the second glide through hundreds of small
+changes, with the pitch the same all the way.
+
+</Try>
+
+<Try title='An envelope sweeps the table' preset='ufo-drone'>
+
+1. Load *Init* and pick *Spectral Gyro* on Osc 1, then turn **Wave** all the way down.
+2. Drag the **ENV 2** tab onto **Wave** of Osc 1. The route lands at +50%: drag its dot up to +100%.
+3. Play a few notes, holding each for about three seconds.
+4. Raise **Decay** of ENV 2 to about 2 s and play them again the same way.
+
+You should hear every note start at the far end of the table and slide back towards its first frame in half a second,
+and with Decay at 2 s the slide takes four times as long. The preset below does the same with two tables and two
+envelopes for an ambient drone.
+
+</Try>
+
+<Try title='An LFO drifts through the table' preset='biting-brass-keys'>
+
+1. Load *Init* and pick *Spectral Gyro* on Osc 1, then turn **Wave** to the middle.
+2. On LFO 1 pick **Triangle** in the shape menu, set the mode to **Free** and turn **Rate** to about 4 s.
+3. Drag the **LFO 1** tab onto **Wave** of Osc 1, then <kbd>Shift</kbd>-click its dot to make the route bipolar and
+   drag the dot up to about +60%.
+4. Hold a chord for ten seconds.
+
+You should hear the timbre of the chord breathe through the table and back, the pitch unchanged. The preset below
+moves the position of two oscillators with one LFO, over a filter and a drive that open with an envelope.
+
+</Try>
+
+## Questions people ask
+
+### Is wavetable synthesis the same as sampling?
+
+No. A sampler plays back one recording of a sound; a wavetable synth plays many one-cycle waves and moves between
+them. The two do meet in one trick: cut a wavetable from an audio file and its frames become short slices of that
+sound.
+
+### Do I need wavetables of my own?
+
+No. Chisper comes with a library of wavetables sorted into folders, and each one downloads when you pick it. Make your
+own for a sound the library lacks: draw a wave, import a WAV wavetable or turn an audio file into one.
+
+### Why does my wavetable sound steppy?
+
+Because the table has few frames and **Wave** hops from one to the next. A table of 256 frames, or a morph table,
+glides instead.
+
+### Can a wavetable hold a real instrument?
+
+Yes. A frame can be one cycle of a recorded note, and a table can be a row of such cycles from the start of the note
+to its end. *Harp Pluck* plays tables of real instruments, a harp and a nylon guitar an octave above.
+
+## Where next
+
+- [Wavetables: import, make from audio, draw](/manual/wavetables/): the library, tables of your own from WAV and
+  audio files, drawing a wave.
+- [Modulation: envelopes, LFOs and velocity](/manual/modulation-envelopes-lfo/): make **Wave**, or any knob, move by
+  itself.
+- [Getting started](/manual/getting-started/): the screen of Chisper, the first knobs and saving a sound.

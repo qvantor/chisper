@@ -37,6 +37,20 @@ export const MANUAL = {
 };
 export const MANUAL_PAGES = Object.keys(MANUAL);
 
+// the pages of Learn, the articles on what a synth does, the same way
+export const LEARN = {
+  'wavetable-synthesis': {
+    en: '/learn/what-is-wavetable-synthesis/',
+    es: '/es/aprende/que-es-la-sintesis-wavetable/',
+    de: '/de/lernen/was-ist-wavetable-synthese/',
+  },
+};
+export const LEARN_PAGES = Object.keys(LEARN);
+
+// the sections: their pages, and the hub each opens at its folder
+export const SECTIONS = { manual: MANUAL, learn: LEARN };
+export const HUBS = { manual: 'getting-started', learn: 'wavetable-synthesis' };
+
 // the document of a built page (read once: the tests only look at it)
 const documents = new Map();
 export const pageAt = (path) => {

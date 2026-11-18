@@ -24,7 +24,7 @@ import unison from '../assets/unison.png';
 import { demosOf, type Section } from '../data/demos';
 import { MESSAGES, type Messages } from '../i18n';
 import type { Lang } from '../i18n/locales';
-import { LANDING_PATHS, manualPath, type ManualPage } from '../manual/pages';
+import { LANDING_PATHS, pagePath, type ManualPage } from '../manual/pages';
 import { jsonLd } from '../seo/json-ld';
 
 interface Props {
@@ -69,7 +69,7 @@ const MORE: Partial<Record<keyof Messages['features'], ManualPage>> = {
 const moreOf = (section: keyof Messages['features']) => {
   const page = MORE[section];
   const feature = m.features[section];
-  return page && 'more' in feature ? { href: manualPath(page, lang), label: feature.more } : undefined;
+  return page && 'more' in feature ? { href: pagePath(page, lang), label: feature.more } : undefined;
 };
 
 // the screenshot of the synth for the structured data: one webp of the width of the column

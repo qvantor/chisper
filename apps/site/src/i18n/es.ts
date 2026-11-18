@@ -170,13 +170,13 @@ export const es: Messages = {
   },
   demos: {
     'biting-brass-keys':
-      'Dos unísonos de 8 voces de una tabla de sierra Moog a una octava; el LFO 1 mueve las dos posiciones de onda, la ENV 2 abre el filtro y la distorsión.',
+      'Dos unísonos de 8 voces de una tabla de sierra Moog a una octava; el LFO 1 mueve las dos posiciones de wavetable, la ENV 2 abre el filtro y la distorsión.',
     'rhodes-keys':
       'Una tabla de Rhodes en unísono de 2 voces sobre una tabla de vibráfono; ENV 2 en el cutoff y un LFO lento en las ganancias: trémolo.',
     'lo-fi-tape-keys':
       'Una tabla de Wurlitzer con distorsión suave; dos LFO hacen oscilar un delay corto: el flutter de cinta del lo-fi hip hop.',
     'ufo-drone':
-      'Las envolventes barren la posición de onda por dos tablas y el pitch bend baja un tono y vuelve: un drone ambient de ciencia ficción.',
+      'Las envolventes barren la posición de wavetable por dos tablas y el pitch bend baja un tono y vuelve: un drone ambient de ciencia ficción.',
     'harp-pluck':
       'Tablas de instrumentos reales: un arpa y una guitarra de nailon una octava más arriba, cada una con su propio decay.',
     'noise-riser':
@@ -188,7 +188,7 @@ export const es: Messages = {
     helicopter:
       'Una forma de LFO propia corta el volumen; la ENV 2 acelera el LFO como un rotor que arranca.',
     'warehouse-lead':
-      'Un lead de techno: el LFO 1 mueve la posición de onda, un LFO rápido en Fine añade aspereza y la ENV 3 cierra el filtro; distorsión, delay y reverb.',
+      'Un lead de techno: el LFO 1 mueve la posición de wavetable, un LFO rápido en Fine añade aspereza y la ENV 3 cierra el filtro; distorsión, delay y reverb.',
     'sonar-ping':
       'Tres pings a los que responden un delay largo y la reverb; la ENV 2 mueve la banda de los ecos.',
     'zesty-drive-bass':
@@ -252,6 +252,10 @@ export const es: Messages = {
         a: 'Sí. El código fuente de Chisper está en GitHub, con la licencia PolyForm Noncommercial.',
       },
     ],
+  },
+  learn: {
+    name: 'Aprende',
+    nav: 'Artículos de Aprende',
   },
   manual: {
     name: 'Manual',

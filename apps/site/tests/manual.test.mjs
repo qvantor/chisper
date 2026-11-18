@@ -8,11 +8,12 @@ import { describe, it } from 'node:test';
 import { JSDOM } from 'jsdom';
 import {
   DIST,
+  HUBS,
   LANGS,
   MANUAL,
-  MANUAL_PAGES,
   PAGES,
   ROOT,
+  SECTIONS,
   SITE,
   attr,
   hrefs,
@@ -28,6 +29,7 @@ const graphOf = (document) => {
 // the names of the synth a page keeps in English in every language (knobs, sections, keys)
 const GLOSSARY = {
   'getting-started': ['Wave', 'Detune', 'Cutoff', 'Osc 1', 'Save', 'Share', 'Keys'],
+  'wavetable-synthesis': ['Wave', 'Detune', 'Blend', 'Unison', 'ENV 2', 'LFO 1', 'Osc 1', 'Basic Shapes'],
   modulation: ['ENV 2', 'LFO 1', 'VELO', 'Cutoff', 'Uni', 'Bi', 'Pump', 'Retrig', 'Free', 'BPM', 'Amp'],
   wavetables: ['Wave', 'W Count', 'Size', 'Grid X', 'Audio file', 'Choose a file'],
   midi: ['Midi', 'Channel', 'Sync to MIDI Clock', 'Auto', 'Low', 'Normal', 'EXT'],
@@ -40,6 +42,9 @@ const synthApp = JSON.parse(
   ).textContent
 );
 
+// every page of the manual and of Learn: a link between them stays in its language
+const ARTICLES = Object.values(SECTIONS).flatMap((pages) => Object.values(pages));
+
 // a link of a page leads to a page or a file of the build, or into the synth
 const leadsSomewhere = (href) => {
   if (href === '/' || href.startsWith('/?')) return true;
@@ -48,144 +53,152 @@ const leadsSomewhere = (href) => {
   return existsSync(file) && (!statSync(file).isDirectory() || existsSync(join(file, 'index.html')));
 };
 
-describe('every page of the manual', () => {
-  for (const [index, page] of MANUAL_PAGES.entries()) {
-    for (const lang of LANGS) {
-      describe(`${page} (${lang})`, () => {
-        const path = MANUAL[page][lang];
-        const document = pageOf(path);
-        const url = `${SITE}${path}`;
+for (const [section, pages] of Object.entries(SECTIONS))
+  describe(`every page of ${section}`, () => {
+    const names = Object.keys(pages);
+    const hub = HUBS[section];
+    for (const [index, page] of names.entries()) {
+      for (const lang of LANGS) {
+        describe(`${page} (${lang})`, () => {
+          const path = pages[page][lang];
+          const document = pageOf(path);
+          const url = `${SITE}${path}`;
 
-        it('has its language, a title and a description of its search, its canonical', () => {
-          assert.equal(document.documentElement.lang, lang);
-          assert.ok(document.title.length >= 20 && document.title.length <= 70, document.title);
-          const description = attr(document, 'meta[name="description"]', 'content');
-          assert.ok(description.length >= 80 && description.length <= 160, description);
-          assert.equal(attr(document, 'link[rel="canonical"]', 'href'), url);
-          assert.equal(attr(document, 'meta[property="og:url"]', 'content'), url);
-          assert.equal(attr(document, 'meta[property="og:type"]', 'content'), 'article');
-          assert.equal(attr(document, 'meta[property="og:title"]', 'content'), document.title);
-          assert.ok(existsSync(join(DIST, `og/${lang}.png`)));
-        });
+          it('has its language, a title and a description of its search, its canonical', () => {
+            assert.equal(document.documentElement.lang, lang);
+            assert.ok(document.title.length >= 20 && document.title.length <= 70, document.title);
+            const description = attr(document, 'meta[name="description"]', 'content');
+            assert.ok(description.length >= 80 && description.length <= 160, description);
+            assert.equal(attr(document, 'link[rel="canonical"]', 'href'), url);
+            assert.equal(attr(document, 'meta[property="og:url"]', 'content'), url);
+            assert.equal(attr(document, 'meta[property="og:type"]', 'content'), 'article');
+            assert.equal(attr(document, 'meta[property="og:title"]', 'content'), document.title);
+            assert.ok(existsSync(join(DIST, `og/${lang}.png`)));
+          });
 
-        it('links its translations and x-default (English), as do its language links', () => {
-          const links = [...document.querySelectorAll('link[rel="alternate"][hreflang]')].map((link) => [
-            link.getAttribute('hreflang'),
-            link.getAttribute('href'),
-          ]);
-          assert.deepEqual(links, [
-            ...LANGS.map((other) => [other, `${SITE}${MANUAL[page][other]}`]),
-            ['x-default', `${SITE}${MANUAL[page].en}`],
-          ]);
-          assert.deepEqual(
-            hrefs(document.querySelectorAll('footer a[hreflang]')),
-            LANGS.map((other) => MANUAL[page][other])
-          );
-        });
-
-        it('has one H1, its sections under H2s, and answers first: a paragraph before them', () => {
-          assert.equal(document.querySelectorAll('h1').length, 1);
-          const prose = document.querySelector('.prose');
-          assert.ok(prose.querySelectorAll('h2').length >= 4);
-          const first = prose.firstElementChild;
-          assert.equal(first.tagName, 'P');
-          assert.ok(first.textContent.length > 150, first.textContent);
-          assert.ok(!document.body.textContent.includes('**'));
-        });
-
-        it('shows where it is: breadcrumbs, the pages of the manual (this one marked), the ones before and after', () => {
-          const crumbs = document.querySelector('nav.crumbs');
-          const hub = MANUAL['getting-started'][lang];
-          assert.deepEqual(hrefs(crumbs.querySelectorAll('a')), [
-            PAGES[lang].path,
-            ...(page === 'getting-started' ? [] : [hub]),
-          ]);
-          assert.equal(crumbs.querySelector('[aria-current="page"]').textContent.trim().length > 3, true);
-          const nav = document.querySelector('nav.side');
-          assert.deepEqual(
-            hrefs(nav.querySelectorAll('.pages > li > a')),
-            MANUAL_PAGES.map((other) => MANUAL[other][lang])
-          );
-          assert.equal(attr(nav, '[aria-current="page"]', 'href'), path);
-          // the headings of this page under its name, each leading to its H2
-          const sections = hrefs(nav.querySelectorAll('.sections a'));
-          assert.equal(sections.length, document.querySelectorAll('.prose h2').length);
-          for (const href of sections) assert.ok(document.getElementById(href.slice(1)), href);
-          const prev = MANUAL_PAGES[index - 1];
-          const next = MANUAL_PAGES[index + 1];
-          assert.equal(attr(document, '.pager a[rel="prev"]', 'href'), prev && MANUAL[prev][lang]);
-          assert.equal(attr(document, '.pager a[rel="next"]', 'href'), next && MANUAL[next][lang]);
-        });
-
-        it('has structured data: the synth, the article in its language, its breadcrumbs', () => {
-          const graph = graphOf(document);
-          const app = graph.find((node) => node['@type'] === 'WebApplication');
-          assert.equal(app['@id'], `${SITE}/#app`);
-          assert.equal(app.description, synthApp.description);
-          const article = graph.find((node) => node['@type'] === 'TechArticle');
-          assert.equal(article.url, url);
-          assert.equal(article.headline, document.querySelector('h1').textContent.trim());
-          assert.equal(article.description, attr(document, 'meta[name="description"]', 'content'));
-          assert.equal(article.inLanguage, lang);
-          assert.match(article.dateModified, /^\d{4}-\d{2}-\d{2}$/);
-          assert.deepEqual(article.about, { '@id': `${SITE}/#app` });
-          assert.equal(article.author.name, 'Qvantor');
-          assert.ok(existsSync(join(DIST, new URL(article.image).pathname)), article.image);
-          const crumbs = graph.find((node) => node['@type'] === 'BreadcrumbList').itemListElement;
-          assert.deepEqual(
-            crumbs.map((crumb) => crumb.position),
-            crumbs.map((_, i) => i + 1)
-          );
-          assert.equal(crumbs[0].item, `${SITE}${PAGES[lang].path}`);
-          assert.equal(crumbs.at(-1).item, page === 'getting-started' ? `${SITE}${MANUAL[page][lang]}` : url);
-        });
-
-        it('leads back to the landing of its language from the logos, to the manual from the header', () => {
-          assert.deepEqual(hrefs(document.querySelectorAll('header a.logo, footer a.logo')), [
-            PAGES[lang].path,
-            PAGES[lang].path,
-          ]);
-          assert.equal(attr(document, 'header a.manual', 'href'), MANUAL['getting-started'][lang]);
-        });
-
-        it('opens presets of the site in the synth', () => {
-          const presets = hrefs(document.querySelectorAll('a.open-preset'));
-          assert.ok(presets.length >= 2);
-          for (const href of presets) assert.match(href, /^\/\?preset=[0-9a-f-]{36}$/);
-        });
-
-        it('links only pages and files the build has, or the synth', () => {
-          const links = hrefs(document.querySelectorAll('a[href^="/"], link[href^="/"]'));
-          const sources = [...document.querySelectorAll('[src^="/"]')].map((element) =>
-            element.getAttribute('src')
-          );
-          for (const href of [...links, ...sources].filter((href) => href !== '/favicon.ico'))
-            assert.ok(leadsSomewhere(href), href);
-          // a page of the manual links others of its language only (but for its translations)
-          const own = hrefs(document.querySelectorAll('a[href^="/"]:not([hreflang])'));
-          for (const href of own.filter((href) => href.includes('/manual/') || href.includes('/anleitung/')))
-            assert.ok(
-              MANUAL_PAGES.some((other) => MANUAL[other][lang] === href.split('#')[0]),
-              `${href} in ${lang}`
+          it('links its translations and x-default (English), as do its language links', () => {
+            const links = [...document.querySelectorAll('link[rel="alternate"][hreflang]')].map((link) => [
+              link.getAttribute('hreflang'),
+              link.getAttribute('href'),
+            ]);
+            assert.deepEqual(links, [
+              ...LANGS.map((other) => [other, `${SITE}${pages[page][other]}`]),
+              ['x-default', `${SITE}${pages[page].en}`],
+            ]);
+            assert.deepEqual(
+              hrefs(document.querySelectorAll('footer a[hreflang]')),
+              LANGS.map((other) => pages[page][other])
             );
-        });
+          });
 
-        it('has pictures of a known size, each with a text alternative', () => {
-          for (const image of document.querySelectorAll('img')) {
-            assert.ok(Number(image.getAttribute('width')) > 0);
-            assert.ok(Number(image.getAttribute('height')) > 0);
-            assert.ok(image.getAttribute('alt').length > 20, image.getAttribute('alt'));
-          }
-        });
+          it('has one H1, its sections under H2s, and answers first: a paragraph before them', () => {
+            assert.equal(document.querySelectorAll('h1').length, 1);
+            const prose = document.querySelector('.prose');
+            assert.ok(prose.querySelectorAll('h2').length >= 4);
+            const first = prose.firstElementChild;
+            assert.equal(first.tagName, 'P');
+            assert.ok(first.textContent.length > 150, first.textContent);
+            assert.ok(!document.body.textContent.includes('**'));
+          });
 
-        it('keeps the names of the synth in English', () => {
-          const text = document.querySelector('.prose').textContent;
-          for (const name of GLOSSARY[page]) assert.ok(text.includes(name), name);
+          it('shows where it is: breadcrumbs, the pages of the manual (this one marked), the ones before and after', () => {
+            const crumbs = document.querySelector('nav.crumbs');
+            assert.deepEqual(hrefs(crumbs.querySelectorAll('a')), [
+              PAGES[lang].path,
+              ...(page === hub ? [] : [pages[hub][lang]]),
+            ]);
+            assert.equal(crumbs.querySelector('[aria-current="page"]').textContent.trim().length > 3, true);
+            const nav = document.querySelector('nav.side');
+            assert.deepEqual(
+              hrefs(nav.querySelectorAll('.pages > li > a')),
+              names.map((other) => pages[other][lang])
+            );
+            assert.equal(attr(nav, '[aria-current="page"]', 'href'), path);
+            // the headings of this page under its name, each leading to its H2
+            const sections = hrefs(nav.querySelectorAll('.sections a'));
+            assert.equal(sections.length, document.querySelectorAll('.prose h2').length);
+            for (const href of sections) assert.ok(document.getElementById(href.slice(1)), href);
+            const prev = names[index - 1];
+            const next = names[index + 1];
+            assert.equal(attr(document, '.pager a[rel="prev"]', 'href'), prev && pages[prev][lang]);
+            assert.equal(attr(document, '.pager a[rel="next"]', 'href'), next && pages[next][lang]);
+          });
+
+          it('has structured data: the synth, the article in its language, its breadcrumbs', () => {
+            const graph = graphOf(document);
+            const app = graph.find((node) => node['@type'] === 'WebApplication');
+            assert.equal(app['@id'], `${SITE}/#app`);
+            assert.equal(app.description, synthApp.description);
+            // a page of the manual is about the synth, an article of Learn mentions it
+            const kind = section === 'learn' ? 'Article' : 'TechArticle';
+            assert.equal(graph.filter((node) => /Article$/.test(node['@type'])).length, 1);
+            const article = graph.find((node) => node['@type'] === kind);
+            assert.equal(article.url, url);
+            assert.equal(article.headline, document.querySelector('h1').textContent.trim());
+            assert.equal(article.description, attr(document, 'meta[name="description"]', 'content'));
+            assert.equal(article.inLanguage, lang);
+            assert.match(article.dateModified, /^\d{4}-\d{2}-\d{2}$/);
+            assert.deepEqual(article[section === 'learn' ? 'mentions' : 'about'], { '@id': `${SITE}/#app` });
+            assert.equal(article.author.name, 'Qvantor');
+            assert.ok(existsSync(join(DIST, new URL(article.image).pathname)), article.image);
+            const crumbs = graph.find((node) => node['@type'] === 'BreadcrumbList').itemListElement;
+            assert.deepEqual(
+              crumbs.map((crumb) => crumb.position),
+              crumbs.map((_, i) => i + 1)
+            );
+            assert.equal(crumbs[0].item, `${SITE}${PAGES[lang].path}`);
+            assert.equal(crumbs.at(-1).item, page === hub ? `${SITE}${pages[page][lang]}` : url);
+          });
+
+          it('leads back to the landing of its language from the logos, to the manual from the header', () => {
+            assert.deepEqual(hrefs(document.querySelectorAll('header a.logo, footer a.logo')), [
+              PAGES[lang].path,
+              PAGES[lang].path,
+            ]);
+            assert.equal(attr(document, 'header a.manual', 'href'), MANUAL['getting-started'][lang]);
+            // Learn is in the footer (and the manual leads to it), not in the header
+            assert.equal(document.querySelector('header a.learn'), null);
+          });
+
+          it('opens presets of the site in the synth', () => {
+            const presets = hrefs(document.querySelectorAll('a.open-preset'));
+            assert.ok(presets.length >= 2);
+            for (const href of presets) assert.match(href, /^\/\?preset=[0-9a-f-]{36}$/);
+          });
+
+          it('links only pages and files the build has, or the synth', () => {
+            const links = hrefs(document.querySelectorAll('a[href^="/"], link[href^="/"]'));
+            const sources = [...document.querySelectorAll('[src^="/"]')].map((element) =>
+              element.getAttribute('src')
+            );
+            for (const href of [...links, ...sources].filter((href) => href !== '/favicon.ico'))
+              assert.ok(leadsSomewhere(href), href);
+            // a page links the pages of its language only (but for its translations)
+            const own = hrefs(document.querySelectorAll('a[href^="/"]:not([hreflang])'));
+            const folders = ['/manual/', '/anleitung/', '/learn/', '/aprende/', '/lernen/'];
+            for (const href of own.filter((href) => folders.some((folder) => href.includes(folder))))
+              assert.ok(
+                ARTICLES.some((other) => other[lang] === href.split('#')[0]),
+                `${href} in ${lang}`
+              );
+          });
+
+          it('has pictures of a known size, each with a text alternative', () => {
+            for (const image of document.querySelectorAll('img')) {
+              assert.ok(Number(image.getAttribute('width')) > 0);
+              assert.ok(Number(image.getAttribute('height')) > 0);
+              assert.ok(image.getAttribute('alt').length > 20, image.getAttribute('alt'));
+            }
+          });
+
+          it('keeps the names of the synth in English', () => {
+            const text = document.querySelector('.prose').textContent;
+            for (const name of GLOSSARY[page]) assert.ok(text.includes(name), name);
+          });
         });
-      });
+      }
     }
-  }
-});
+  });
 
 describe('the parts of a page of the manual', () => {
   it('numbers the parts of the synth on its screenshot as its legend does', () => {
@@ -293,17 +306,15 @@ describe('the parts of a page of the manual', () => {
   });
 });
 
-describe('the section of the manual', () => {
-  it('has no page at its folder: the hub of each language is its Getting started (netlify.toml)', () => {
+describe('the sections of the manual and of Learn', () => {
+  it('have no page at their folder: the hub of each language is its first page (netlify.toml)', () => {
     const redirects = readFileSync(join(ROOT, 'netlify.toml'), 'utf8');
-    for (const lang of LANGS) {
-      const folder = MANUAL['getting-started'][lang].replace(/[^/]+\/$/, '');
-      assert.ok(!existsSync(join(DIST, folder, 'index.html')), folder);
-      assert.match(
-        redirects,
-        new RegExp(`from = "${folder}"\\s+to = "${MANUAL['getting-started'][lang]}"\\s+status = 301`),
-        folder
-      );
-    }
+    for (const [section, pages] of Object.entries(SECTIONS))
+      for (const lang of LANGS) {
+        const hub = pages[HUBS[section]][lang];
+        const folder = hub.replace(/[^/]+\/$/, '');
+        assert.ok(!existsSync(join(DIST, folder, 'index.html')), folder);
+        assert.match(redirects, new RegExp(`from = "${folder}"\\s+to = "${hub}"\\s+status = 301`), folder);
+      }
   });
 });

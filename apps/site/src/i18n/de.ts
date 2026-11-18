@@ -167,13 +167,13 @@ export const de: Messages = {
   },
   demos: {
     'biting-brass-keys':
-      'Zwei 8-stimmige Unisonos einer Moog-Sägezahntabelle im Oktavabstand; LFO 1 bewegt beide Wave-Positionen, ENV 2 öffnet Filter und Drive.',
+      'Zwei 8-stimmige Unisonos einer Moog-Sägezahntabelle im Oktavabstand; LFO 1 bewegt beide Wavetable-Positionen, ENV 2 öffnet Filter und Drive.',
     'rhodes-keys':
       'Eine Rhodes-Tabelle im 2-stimmigen Unisono über einer Vibraphon-Tabelle; ENV 2 auf dem Cutoff, ein langsamer LFO auf den Pegeln: Tremolo.',
     'lo-fi-tape-keys':
       'Eine Wurlitzer-Tabelle durch weiche Distortion; zwei LFOs lassen ein kurzes Delay schwanken: das Bandflattern des Lo-Fi-Hip-Hop.',
     'ufo-drone':
-      'Hüllkurven fahren die Wave-Position durch zwei Tabellen, der Pitch Bend sinkt um einen Ganzton und kehrt zurück: ein Sci-Fi-Drone für Ambient.',
+      'Hüllkurven fahren die Wavetable-Position durch zwei Tabellen, der Pitch Bend sinkt um einen Ganzton und kehrt zurück: ein Sci-Fi-Drone für Ambient.',
     'harp-pluck':
       'Tabellen echter Instrumente: eine Harfe und eine Nylongitarre eine Oktave höher, jede mit eigenem Decay.',
     'noise-riser':
@@ -185,7 +185,7 @@ export const de: Messages = {
     helicopter:
       'Eine eigene LFO-Form zerhackt die Lautstärke; ENV 2 beschleunigt den LFO wie einen anlaufenden Rotor.',
     'warehouse-lead':
-      'Ein Techno-Lead: LFO 1 bewegt die Wave-Position, ein schneller LFO auf Fine macht ihn rau, ENV 3 schließt das Filter; Distortion, Delay und Reverb.',
+      'Ein Techno-Lead: LFO 1 bewegt die Wavetable-Position, ein schneller LFO auf Fine macht ihn rau, ENV 3 schließt das Filter; Distortion, Delay und Reverb.',
     'sonar-ping':
       'Drei Pings, beantwortet von einem langen Delay und Reverb; ENV 2 verschiebt das Band der Echos.',
     'zesty-drive-bass':
@@ -249,6 +249,10 @@ export const de: Messages = {
         a: 'Ja. Der Quellcode von Chisper liegt auf GitHub, unter der Lizenz PolyForm Noncommercial.',
       },
     ],
+  },
+  learn: {
+    name: 'Lernen',
+    nav: 'Artikel zum Lernen',
   },
   manual: {
     name: 'Anleitung',
