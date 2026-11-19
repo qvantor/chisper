@@ -68,8 +68,10 @@ export const eqGain = (variation: number) =>
     ? ((t) => 1 - t * t * t)(1 - 2 * variation)
     : ((t) => 1 + 8 * (t * t * t))(2 * variation - 1);
 
-// Comp (FAT of the reference, the variation of the types of Normal but the one-poles): a gain of 1 + 4 r fat into the
-// sections (at Comp 1 it gives back what the resonance takes off the pass band; louder into the saturation of the core's resonance)
+// Comp (FAT of the reference, the variation of the types of Normal but the one-poles and the notches): a gain of
+// 1 + 4 r fat into the sections (at Comp 1 it gives back what the resonance takes off the pass band; louder into the
+// saturation of the core's resonance). A notch has none: the resonance takes nothing off its pass band, and Comp of the
+// reference's Notch changes no bit of it
 const fatFactor = (resonance: number, variation: number) => 1 + 4 * resonance * variation;
 // (the floor of the types of Normal: their resonance saturates, at Res 1 a quiet sine at the cutoff already a little
 // as the reference's)
@@ -142,11 +144,12 @@ export const isEqFilterType = (type: string) =>
   isModelFilterType(type) && MODEL_STRUCTURES[type].kind === 'eq';
 
 // the knobs a type uses besides the cutoff and Drive: the resonance (a one-pole has none: Low and High 6, the EQ ones
-// of 6 dB) and the variation (Comp of a one-pole is a gain of 1)
+// of 6 dB) and the variation (Comp of a one-pole and of a notch is a gain of 1)
 export const modelKnobsOf = (type: ModelFilterType) => {
   const s = MODEL_STRUCTURES[type];
   const onePole = s.kind === 'pole' || (s.kind === 'eq' && s.order === 1);
-  return { resonance: !onePole, variation: s.kind !== 'pole' };
+  const notch = s.kind === 'svf' && s.tap === 'notch';
+  return { resonance: !onePole, variation: s.kind !== 'pole' && !notch };
 };
 
 // --- Drive (the curve before the sections: filter_model.rs of dsp-core) ---
@@ -185,9 +188,10 @@ export const driveLevel = (drive: number, amplitude = 1) => {
 const NEWTON_STEPS = 4;
 // settled: a step under 1e-5 of the root (the next one under 1e-10 of it, the coefficients of the core are f32)
 const SETTLED = 1e-10;
-const svfRoot = (start: Complex, k: number, tau: number): Complex => {
+// a root by `steps` of Newton at most, and whether it settled
+const svfRoot = (start: Complex, k: number, tau: number, steps: number): [Complex, boolean] => {
   let s = start;
-  for (let i = 0; i < NEWTON_STEPS; i++) {
+  for (let i = 0; i < steps; i++) {
     const e = cexp([-s[0] * tau, -s[1] * tau]);
     const se = mul(s, e);
     const f: Complex = [s[0] * s[0] - s[1] * s[1] + k * se[0] + 1, 2 * s[0] * s[1] + k * se[1]];
@@ -196,9 +200,9 @@ const svfRoot = (start: Complex, k: number, tau: number): Complex => {
     const step = div(f, [2 * s[0] + k * de[0], 2 * s[1] + k * de[1]]);
     s = [s[0] - step[0], s[1] - step[1]];
     // (settled: a short feedback delay leaves the start of the Taylor a step from it)
-    if (step[0] * step[0] + step[1] * step[1] <= SETTLED * (s[0] * s[0] + s[1] * s[1])) break;
+    if (step[0] * step[0] + step[1] * step[1] <= SETTLED * (s[0] * s[0] + s[1] * s[1])) return [s, true];
   }
-  return s;
+  return [s, false];
 };
 // under it (the cutoffs under about 6 kHz) a root starts from e^{-sτ} to the 2nd order: a step of Newton on
 // (kτ²/2) s³ + (1 - kτ) s² + k s + 1, its error then about kτ³/6
@@ -213,11 +217,10 @@ const taylorStep = (s: Complex, k: number, tau: number): Complex => {
   const step = div(f, [3 * c * s2[0] + 2 * a * s[0] + k, 3 * c * s2[1] + 2 * a * s[1]]);
   return [s[0] - step[0], s[1] - step[1]];
 };
-// the root of a complex pair where τ is under TAYLOR_TAU: from the start of the Taylor moved by `taylorStep`, steps
-// of Halley (f'' = 2 + kτ e^{-sτ}(sτ - 2) of the same exponential)
-const svfRootNear = (start: Complex, k: number, tau: number): Complex => {
-  let s = taylorStep(start, k, tau);
-  for (let i = 0; i < NEWTON_STEPS; i++) {
+// a root by `steps` of Halley at most (f'' = 2 + kτ e^{-sτ}(sτ - 2) of the same exponential), and whether it settled
+const svfRootHalley = (start: Complex, k: number, tau: number, steps: number): [Complex, boolean] => {
+  let s = start;
+  for (let i = 0; i < steps; i++) {
     const e = cexp([-s[0] * tau, -s[1] * tau]);
     const se = mul(s, e);
     const f: Complex = [s[0] * s[0] - s[1] * s[1] + k * se[0] + 1, 2 * s[0] * s[1] + k * se[1]];
@@ -229,47 +232,240 @@ const svfRootNear = (start: Complex, k: number, tau: number): Complex => {
     const [ff1, d11, ff2] = [mul(f, d1), mul(d1, d1), mul(f, d2)];
     const step = div([2 * ff1[0], 2 * ff1[1]], [2 * d11[0] - ff2[0], 2 * d11[1] - ff2[1]]);
     s = [s[0] - step[0], s[1] - step[1]];
-    if (abs2(step) <= SETTLED_HALLEY * abs2(s)) break;
+    if (abs2(step) <= SETTLED_HALLEY * abs2(s)) return [s, true];
   }
-  return s;
+  return [s, false];
 };
+// the root of a complex pair where τ is under TAYLOR_TAU: from the start of the Taylor moved by `taylorStep`, steps
+// of Halley; and whether it settled
+const svfRootNear = (start: Complex, k: number, tau: number): [Complex, boolean] =>
+  svfRootHalley(taylorStep(start, k, tau), k, tau, NEWTON_STEPS);
 // (on the real axis: steps of a real exponential)
 const REAL_STEPS = 8;
-// a real root by Newton from a real start, null if it doesn't settle within `half` of it (the pair is complex there,
-// or it went to the root of the delay far to the left)
-const svfRealRoot = (start: number, half: number, k: number, tau: number): number | null => {
+// a real root by Newton from a real start and the slope of its last step, null if it doesn't settle within `half`
+// of it (the pair is complex there, or it went to the root of the delay far to the left)
+const svfRealRoot = (start: number, half: number, k: number, tau: number): [number, number] | null => {
   let s = tau < TAYLOR_TAU ? taylorStep([start, 0], k, tau)[0] : start;
   for (let i = 0; i < REAL_STEPS; i++) {
     const e = Math.exp(-s * tau);
-    const step = (s * s + k * s * e + 1) / (2 * s + k * e * (1 - s * tau));
+    const slope = 2 * s + k * e * (1 - s * tau);
+    const step = (s * s + k * s * e + 1) / slope;
     s -= step;
-    if (step * step <= SETTLED * (s * s)) return Math.abs(s - start) < half ? s : null;
+    if (step * step <= SETTLED * (s * s)) return Math.abs(s - start) < half ? [s, slope] : null;
   }
   return null;
 };
+
+// --- the poles of a prototype nearly without resonance ---
+
+// In x = -s the poles are the roots of F(x) = x² + 1 - k x e^{xτ}. A damping over K_CUSP (Res under 1 %) has
+// three real ones in a window of τ: the pair lands on the real axis (x1 < x2), then x2 meets the root of the delay
+// x3 and leaves the axis with it, a pair over nyquist. Where a pair lands and where two meet is a double root:
+// (x + 1/x) e^{-(x² - 1)/(x² + 1)} = k at τ = (x² - 1)/(x (x² + 1)), under X_CUSP and over it (at X_CUSP, K_CUSP,
+// the three are one). The poles there: the pair until it lands, x1 and x2 while both are real, then x1 and the
+// place where x2 met x3 (the second pole stays there: its z is under 0.01, the poles are continuous along τ)
+const X_CUSP = 2.0581710272714924;
+const K_CUSP = 1.371245024747284;
+// (the damping of a second section is 2.02 at most: where the roots meet is under X_TOP)
+const K_TOP = 3;
+const X_TOP = 8;
+// no root meets another under it (K_TOP aside: the window of the roots says so itself)
+const TAU_MEET = 0.18;
+// a pair this near the real axis (its imaginary part under 1 % of |s|: squared) is landing, Newton is slow there
+const LANDED = 1e-4;
+const SAFE_STEPS = 60;
+
+// A root of `at` (its value and its slope) in lo..hi, where it rises or falls through 0: Newton from `start`, a
+// step out of what is left of lo..hi is its middle (a double root, a start on the wrong side of a turn)
+const safeRoot = (
+  at: (x: number) => [number, number],
+  lo: number,
+  hi: number,
+  start: number,
+  rising: boolean
+) => {
+  let [a, b] = [lo, hi];
+  // (a NaN: lo)
+  let x = start > lo ? (start < hi ? start : hi) : lo;
+  for (let i = 0; i < SAFE_STEPS; i++) {
+    const [f, d] = at(x);
+    if (f === 0) break;
+    if (f > 0 === rising) b = x;
+    else a = x;
+    const next = x - f / d;
+    const newton = next > a && next < b;
+    const to = newton ? next : 0.5 * (a + b);
+    const step = to - x;
+    x = to;
+    if (newton && step * step <= SETTLED * (x * x)) break;
+  }
+  return x;
+};
+// F and its slope
+const realAt =
+  (k: number, tau: number) =>
+  (x: number): [number, number] => {
+    const e = Math.exp(x * tau);
+    return [x * x + 1 - k * x * e, 2 * x - k * e * (1 + x * tau)];
+  };
+// where x2 meets x3 at the damping k (over X_CUSP): the double root there
+const meetRoot = (k: number) =>
+  safeRoot(
+    (x) => {
+      const x2 = x * x;
+      const m = (x + 1 / x) * Math.exp(-(x2 - 1) / (x2 + 1));
+      return [m - k, (m * (x2 * x2 - 4 * x2 - 1)) / (x * (x2 + 1) * (x2 + 1))];
+    },
+    X_CUSP,
+    X_TOP,
+    X_CUSP + 3 * Math.sqrt(k - K_CUSP),
+    true
+  );
+// whether x2 has met x3 at τ (the τ of the double root xm is under it)
+const met = (xm: number, tau: number) => tau * (xm * (xm * xm + 1)) >= xm * xm - 1;
+// x1 and the place x2 met x3
+const metPoles = (k: number, tau: number, xm: number, start: number): [Complex, Complex] => [
+  [-safeRoot(realAt(k, tau), 0, xm, start, false), 0],
+  [-xm, 0],
+];
+// The poles before x2 meets x3 (xm), where Newton from the starts of the Taylor doesn't find them (near a double
+// root, a start on the wrong side): from the minimum of F between x1 and x2 (Newton on F' from 0: F' is concave,
+// its steps never pass it), under 0 two real roots each in its part of 0..xm, over 0 the pair before it lands (those
+// of τ = 0 if it doesn't settle on one, as `svfPoles` takes them)
+const windowPoles = (k: number, tau: number, xm: number): [Complex, Complex] => {
+  let x = 0;
+  for (let i = 0; i < SAFE_STEPS; i++) {
+    const e = Math.exp(x * tau);
+    const d2 = 2 - k * tau * e * (2 + x * tau);
+    if (!(d2 > 0)) break;
+    const step = (2 * x - k * e * (1 + x * tau)) / d2;
+    x -= step;
+    if (step * step <= SETTLED * (x * x)) break;
+  }
+  const e = Math.exp(x * tau);
+  const f = x * x + 1 - k * x * e;
+  // (F to the 2nd order about its minimum: its roots this far to each side, or up and down)
+  const off = Math.sqrt(Math.abs((2 * f) / (2 - k * tau * e * (2 + x * tau))));
+  const at = realAt(k, tau);
+  if (f <= 0)
+    return [
+      [-safeRoot(at, 0, x, x - off, false), 0],
+      [-safeRoot(at, x, xm, x + off, true), 0],
+    ];
+  const [s, settled] = svfRoot([-x, off], k, tau, SAFE_STEPS);
+  if (settled && Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[0] < 0)
+    return [
+      [s[0], Math.abs(s[1])],
+      [s[0], -Math.abs(s[1])],
+    ];
+  const [p, q] = svfPolesOf(k);
+  return [p, q];
+};
+// the poles where Newton from the starts of the Taylor doesn't find them: x2 has met x3 (xm) or not yet
+const widePoles = (k: number, tau: number, xm: number, start: number): [Complex, Complex] =>
+  met(xm, tau) ? metPoles(k, tau, xm, start) : windowPoles(k, tau, xm);
+
+// --- the pair of a prototype with some resonance ---
+
+// A damping under K_CUSP (Res over 1 %) has one real root at every τ, the root of the delay, and the pair never
+// lands. At the top of the cutoff that root has come nearer than the pair (the pair past nyquist) and Newton from
+// the start of the Taylor goes to it: the poles are the pair all the same, as they are at any resonance over it
+// (continuous along the cutoff; along the resonance a step is left at the cusp, where the rule over it takes x1)
+const PAIR_STEPS = 10;
+// where the steps of Halley start there: they settle on the pair from it wherever the real root is (7 at most, 3.6
+// a design), Newton's from the same start go to the real root at some τ
+const PAIR_START: Complex = [-1.5, 2];
+// where Newton from the start of the Taylor leaves the pair, nearly (it settles on it up to kτ 0.386 at the cusp,
+// 0.44 at k 0.8, at every τ under k 0.7): no step of it is spent there
+const PAIR_K = 0.75;
+const PAIR_K_TAU = 0.38;
+// The pair under K_CUSP where Newton from the start of the Taylor leaves it: Halley from PAIR_START; a root that is
+// no pair of the cutoff (on the real axis, a turn of the delay further: |Im s| τ over π) or none: `deflatedPair`
+const pairPoles = (k: number, tau: number): [Complex, Complex] => {
+  const [s, settled] = svfRootHalley(PAIR_START, k, tau, PAIR_STEPS);
+  const im = Math.abs(s[1]);
+  if (settled && s[0] < 0 && im * im > LANDED * abs2(s) && im * tau < Math.PI)
+    return [
+      [s[0], im],
+      [s[0], -im],
+    ];
+  return deflatedPair(k, tau);
+};
+// (the steps of Newton on the function without its real root: 7 at most from its start)
+const DEFLATED_STEPS = 16;
+const DEFLATED_START: Complex = [-1.5, 1.5];
+// The pair with the real root x taken out of the way (the only one, F falls through it): Newton on f(s)/(s + x),
+// which has no root there; those of τ = 0 if it doesn't settle
+const deflatedPair = (k: number, tau: number): [Complex, Complex] => {
+  let hi = 4;
+  while (hi * hi + 1 > k * hi * Math.exp(hi * tau) && hi < 1e6) hi *= 2;
+  const x = safeRoot(realAt(k, tau), 0, hi, 1.5, false);
+  let s = DEFLATED_START;
+  for (let i = 0; i < DEFLATED_STEPS; i++) {
+    const e = cexp([-s[0] * tau, -s[1] * tau]);
+    const se = mul(s, e);
+    const f: Complex = [s[0] * s[0] - s[1] * s[1] + k * se[0] + 1, 2 * s[0] * s[1] + k * se[1]];
+    const de = mul(e, [1 - s[0] * tau, -s[1] * tau]);
+    // (f / (s + x))' / (f / (s + x)) = f'/f - 1/(s + x)
+    const q = div(f, [s[0] + x, s[1]]);
+    const step = div(f, [2 * s[0] + k * de[0] - q[0], 2 * s[1] + k * de[1] - q[1]]);
+    s = [s[0] - step[0], s[1] - step[1]];
+    if (abs2(step) <= SETTLED * abs2(s)) {
+      if (Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[0] < 0 && s[1] !== 0)
+        return [
+          [s[0], Math.abs(s[1])],
+          [s[0], -Math.abs(s[1])],
+        ];
+      break;
+    }
+  }
+  const [p, q] = svfPolesOf(k);
+  return [p, q];
+};
+
 const svfPoles = (k: number, tau: number): [Complex, Complex] => {
   // from those of (1 - kτ) s² + k s + 1 (e^{-sτ} ≈ 1 - sτ); two real starts on the real axis while each settles in
-  // its half of the gap between them, else in the complex plane, a real start a little off the axis (the pair may be
-  // complex where the start is not); those of τ = 0 if it doesn't settle
+  // its half of the gap between them on its own root (the slope there: x1 where F falls, x2 where it rises), else
+  // in the complex plane, a real start a little off the axis (the pair may be complex where the start is not);
+  // those of τ = 0 if it doesn't settle. Nearly without resonance (`wide`): where Newton doesn't find them,
+  // `windowPoles`, past the meeting of x2 and x3 `metPoles`. Under the cusp (`pair`): the pair, `pairPoles` where
+  // Newton doesn't settle on it
   const a = Math.max(1 - k * tau, 0.05);
   const disc = k * k - 4 * a;
+  const wide = k > K_CUSP && k < K_TOP;
+  const pair = k <= K_CUSP;
+  if (pair && k > PAIR_K && k * tau > PAIR_K_TAU) return pairPoles(k, tau);
   let roots: Complex[];
   if (disc < 0) {
     // (a complex pair: one root, the other its conjugate)
     const start: Complex = [-k / (2 * a), Math.sqrt(-disc) / (2 * a)];
-    const s = tau < TAYLOR_TAU ? svfRootNear(start, k, tau) : svfRoot(start, k, tau);
+    const [s, settled] = tau < TAYLOR_TAU ? svfRootNear(start, k, tau) : svfRoot(start, k, tau, NEWTON_STEPS);
+    const lost = !settled || s[1] * s[1] <= LANDED * abs2(s);
+    // (it is landing, or has landed: Newton is slow about a double root, or went to one of two real ones)
+    if (wide && lost) return widePoles(k, tau, meetRoot(k), k / (2 * a));
+    // (it went to the real root, or is on its way)
+    if (pair && tau >= TAYLOR_TAU && lost) return pairPoles(k, tau);
     roots = [s, s];
   } else {
+    // (the starts are real, the pair is not)
+    if (pair) return pairPoles(k, tau);
     const r = Math.sqrt(disc);
     const [p, q] = [(-k + r) / (2 * a), (-k - r) / (2 * a)];
     const half = r / (2 * a);
+    // (where x2 meets x3, if worked out already)
+    let xm: number | undefined;
+    if (wide && tau >= TAU_MEET) {
+      xm = meetRoot(k);
+      if (met(xm, tau)) return metPoles(k, tau, xm, -p);
+    }
     const [rp, rq] = [svfRealRoot(p, half, k, tau), svfRealRoot(q, half, k, tau)];
-    if (rp !== null && rq !== null)
+    if (rp !== null && rq !== null && (!wide || (rp[1] > 0 && rq[1] < 0)))
       return [
-        [rp, 0],
-        [rq, 0],
+        [rp[0], 0],
+        [rq[0], 0],
       ];
-    roots = [svfRoot([p, 1e-3], k, tau), svfRoot([q, 1e-3], k, tau)];
+    if (wide) return widePoles(k, tau, xm ?? meetRoot(k), -p);
+    roots = [svfRoot([p, 1e-3], k, tau, NEWTON_STEPS)[0], svfRoot([q, 1e-3], k, tau, NEWTON_STEPS)[0]];
   }
   if (!roots.every((s) => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[0] < 0)) roots = svfPolesOf(k);
   for (const s of roots)
@@ -560,7 +756,8 @@ export const modelDesign = (type: ModelFilterType, knobs: ModelKnobs, sampleRate
   const svf = [section(k, s.tap, gain)];
   if (s.second) svf.push(section(s.second.c2 + (s.second.c3 * k * k) / 4, s.tap, 1));
   const pole = s.pole ? poleSection(2 * s.pole.d * w, w, s.tap, xOf) : null;
-  return { svf, pole, droop: droopOf(s.D2 * (svf.length + (pole ? 1 : 0))), fat: fatFactor(r, v) };
+  const fat = s.tap === 'notch' ? 1 : fatFactor(r, v);
+  return { svf, pole, droop: droopOf(s.D2 * (svf.length + (pole ? 1 : 0))), fat };
 };
 
 // an EQ type: the input + (G - 1) a tap (its own droop: the input has none), the whole response matched in magnitude

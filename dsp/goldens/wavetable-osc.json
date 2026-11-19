@@ -112,7 +112,7 @@
     ]
   },
   "a bipolar LFO 4 on the cutoff, smoothed, a shape of its own": {
-    "sha256": "0c39e5ec3c7c9e2e46d05e873f16c4230401052b49c25580ba298bcc83c0cdde",
+    "sha256": "180acaae37393e868e7f77acc8858a1f4d9efec7df34f61c4a314299d8f19fd5",
     "at": 0,
     "head": [
       -5.374455069601506e-19,
@@ -126,7 +126,7 @@
     ]
   },
   "a bipolar LFO 4 on the cutoff, smoothed, a shape of its own: the sum of one node": {
-    "sha256": "0c39e5ec3c7c9e2e46d05e873f16c4230401052b49c25580ba298bcc83c0cdde",
+    "sha256": "180acaae37393e868e7f77acc8858a1f4d9efec7df34f61c4a314299d8f19fd5",
     "at": 0,
     "head": [
       -5.374455069601506e-19,
@@ -168,7 +168,7 @@
     ]
   },
   "a change of the filter from ladder12 to high18 on a playing note: a crossfade": {
-    "sha256": "ebdfd1fae50e08360863a177bd7f6cc8a420bf369f737d48d1afcc8cb9c4671a",
+    "sha256": "53ef290b64ab8d200b0b390f49baf047c4cbd7b610ed12a2d0af1ab3cfb77735",
     "at": 0,
     "head": [
       -8.480493867910055e-18,
@@ -182,7 +182,7 @@
     ]
   },
   "a change of the filter from ladder12 to high18 on a playing note: a crossfade: the sum of one node": {
-    "sha256": "ebdfd1fae50e08360863a177bd7f6cc8a420bf369f737d48d1afcc8cb9c4671a",
+    "sha256": "53ef290b64ab8d200b0b390f49baf047c4cbd7b610ed12a2d0af1ab3cfb77735",
     "at": 0,
     "head": [
       -8.480493867910055e-18,
@@ -196,35 +196,35 @@
     ]
   },
   "a change of the filter from low24 to bandpass on a playing note: a crossfade": {
-    "sha256": "d13b6256513d6194329b95c0a8734cac62b68e369f4687b79c926e42024850f5",
+    "sha256": "f64b8cceede7a19622faf7fd8c71b3df4307cccf5dba9f71d5a63f99cae77de9",
     "at": 0,
     "head": [
-      -5.4058388836531365e-20,
+      -5.40583952988799e-20,
       0.00006242388917598873,
-      0.0003955246356781572,
-      0.0013540164800360799,
-      0.003394557163119316,
-      0.007026874925941229,
-      0.01276681199669838,
-      0.021096739917993546
+      0.00039552466478198767,
+      0.0013540167128667235,
+      0.003394557861611247,
+      0.007026876322925091,
+      0.012766813859343529,
+      0.021096741780638695
     ]
   },
   "a change of the filter from low24 to bandpass on a playing note: a crossfade: the sum of one node": {
-    "sha256": "d13b6256513d6194329b95c0a8734cac62b68e369f4687b79c926e42024850f5",
+    "sha256": "f64b8cceede7a19622faf7fd8c71b3df4307cccf5dba9f71d5a63f99cae77de9",
     "at": 0,
     "head": [
-      -5.4058388836531365e-20,
+      -5.40583952988799e-20,
       0.00006242388917598873,
-      0.0003955246356781572,
-      0.0013540164800360799,
-      0.003394557163119316,
-      0.007026874925941229,
-      0.01276681199669838,
-      0.021096739917993546
+      0.00039552466478198767,
+      0.0013540167128667235,
+      0.003394557861611247,
+      0.007026876322925091,
+      0.012766813859343529,
+      0.021096741780638695
     ]
   },
   "a change of the filter from loweq6 to peak12 on a playing note: a crossfade": {
-    "sha256": "e9b2e4bcaa6bae596a47d90539b2efffcd85f9eaaa91aebdef0e70e9f3879116",
+    "sha256": "b151db099a6f12305942033f3111337fbbeb21af87c614b7a563708b2b35f248",
     "at": 0,
     "head": [
       -5.159494204523085e-16,
@@ -238,7 +238,7 @@
     ]
   },
   "a change of the filter from loweq6 to peak12 on a playing note: a crossfade: the sum of one node": {
-    "sha256": "e9b2e4bcaa6bae596a47d90539b2efffcd85f9eaaa91aebdef0e70e9f3879116",
+    "sha256": "b151db099a6f12305942033f3111337fbbeb21af87c614b7a563708b2b35f248",
     "at": 0,
     "head": [
       -5.159494204523085e-16,
@@ -252,7 +252,7 @@
     ]
   },
   "a change of the filter from lowpass to ladder24 on a playing note: a crossfade": {
-    "sha256": "093f2ca4df8c8341140bad6fa124bae9fc33c83b05613921ff8132c3361e69a5",
+    "sha256": "4d35880ebf504ac92099b01b05a998182242e3fe58dc1394654f59df2a14eb3b",
     "at": 0,
     "head": [
       -4.515699732296411e-18,
@@ -266,7 +266,7 @@
     ]
   },
   "a change of the filter from lowpass to ladder24 on a playing note: a crossfade: the sum of one node": {
-    "sha256": "093f2ca4df8c8341140bad6fa124bae9fc33c83b05613921ff8132c3361e69a5",
+    "sha256": "4d35880ebf504ac92099b01b05a998182242e3fe58dc1394654f59df2a14eb3b",
     "at": 0,
     "head": [
       -4.515699732296411e-18,
@@ -952,7 +952,7 @@
     ]
   },
   "the allpass filter with its cutoff moved by ENV 2": {
-    "sha256": "d4d02417632eb0164447d3164d1f0bfbfcebae8bb3e07d62968ef44194094498",
+    "sha256": "3bd33885dffc6d4137797948ad74b447b3efed0b71ff15236617ffd698fc0f70",
     "at": 0,
     "head": [
       -6.927272082475307e-16,
@@ -966,7 +966,7 @@
     ]
   },
   "the allpass filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "d4d02417632eb0164447d3164d1f0bfbfcebae8bb3e07d62968ef44194094498",
+    "sha256": "3bd33885dffc6d4137797948ad74b447b3efed0b71ff15236617ffd698fc0f70",
     "at": 0,
     "head": [
       -6.927272082475307e-16,
@@ -1007,8 +1007,36 @@
       -0.0025176708586513996
     ]
   },
+  "the band12 filter at Res 0.3 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "a9e02b42a621800ed1dc5a51626fcd1eea9d1c292d389065f1ba98c63cb02451",
+    "at": 0,
+    "head": [
+      -2.1374043949393796e-16,
+      0.2779366672039032,
+      -0.039449483156204224,
+      0.027656925842165947,
+      -0.01848730258643627,
+      0.009229416027665138,
+      -0.006726627703756094,
+      0.0006708779837936163
+    ]
+  },
+  "the band12 filter at Res 0.3 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "a9e02b42a621800ed1dc5a51626fcd1eea9d1c292d389065f1ba98c63cb02451",
+    "at": 0,
+    "head": [
+      -2.1374043949393796e-16,
+      0.2779366672039032,
+      -0.039449483156204224,
+      0.027656925842165947,
+      -0.01848730258643627,
+      0.009229416027665138,
+      -0.006726627703756094,
+      0.0006708779837936163
+    ]
+  },
   "the band12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "65ca06ad70cd24aeadbbec27e33ed68f12200030658e33c7c537f2f4a9a76e11",
+    "sha256": "aebca5101e6fa4064eb278d3c1c7ec751f4fa0267ee45728d8c1b6aba778c52a",
     "at": 0,
     "head": [
       -1.3117485574966954e-17,
@@ -1022,7 +1050,7 @@
     ]
   },
   "the band12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "65ca06ad70cd24aeadbbec27e33ed68f12200030658e33c7c537f2f4a9a76e11",
+    "sha256": "aebca5101e6fa4064eb278d3c1c7ec751f4fa0267ee45728d8c1b6aba778c52a",
     "at": 0,
     "head": [
       -1.3117485574966954e-17,
@@ -1036,7 +1064,7 @@
     ]
   },
   "the band12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "8d1ff680f6ee88a33d2d324fc9672c3601b06089b5a5baa4405c33f834f134c4",
+    "sha256": "d892e2eddeffb2cbad6c349ace8e4e502b2e1dd2ee96fd30b3c43cd6cd7f839e",
     "at": 0,
     "head": [
       -4.99465682842707e-17,
@@ -1050,7 +1078,7 @@
     ]
   },
   "the band12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "8d1ff680f6ee88a33d2d324fc9672c3601b06089b5a5baa4405c33f834f134c4",
+    "sha256": "d892e2eddeffb2cbad6c349ace8e4e502b2e1dd2ee96fd30b3c43cd6cd7f839e",
     "at": 0,
     "head": [
       -4.99465682842707e-17,
@@ -1064,35 +1092,35 @@
     ]
   },
   "the band24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "09f68bd27dbb52870cfadbe29b09105cef4d829fa6a1e589e3a6874bb66a5255",
+    "sha256": "4ed2f2706a9d96ced94746e86fdf3b096834880f1a724d681d4af438c0b181c4",
     "at": 0,
     "head": [
-      -4.2100096568558813e-19,
-      0.0005474471836350858,
+      -4.21000939836194e-19,
+      0.0005474471254274249,
       0.0017143337754532695,
       0.0035103249829262495,
       0.005878218449652195,
       0.008790383115410805,
       0.012202417477965355,
-      0.01607590727508068
+      0.01607590541243553
     ]
   },
   "the band24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "09f68bd27dbb52870cfadbe29b09105cef4d829fa6a1e589e3a6874bb66a5255",
+    "sha256": "4ed2f2706a9d96ced94746e86fdf3b096834880f1a724d681d4af438c0b181c4",
     "at": 0,
     "head": [
-      -4.2100096568558813e-19,
-      0.0005474471836350858,
+      -4.21000939836194e-19,
+      0.0005474471254274249,
       0.0017143337754532695,
       0.0035103249829262495,
       0.005878218449652195,
       0.008790383115410805,
       0.012202417477965355,
-      0.01607590727508068
+      0.01607590541243553
     ]
   },
   "the band24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "1f8f45d2f88de958108ea35ee8ee8e13baa400a2565dc746e6d42962db1653c4",
+    "sha256": "49c54030a4d1109dbfcfdd1b57d57e4ffcbf618e45179f62c95f8bdc0354a1ae",
     "at": 0,
     "head": [
       -4.175265279394087e-18,
@@ -1106,7 +1134,7 @@
     ]
   },
   "the band24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "1f8f45d2f88de958108ea35ee8ee8e13baa400a2565dc746e6d42962db1653c4",
+    "sha256": "49c54030a4d1109dbfcfdd1b57d57e4ffcbf618e45179f62c95f8bdc0354a1ae",
     "at": 0,
     "head": [
       -4.175265279394087e-18,
@@ -1120,7 +1148,7 @@
     ]
   },
   "the bandeq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "3f85b2c02ad49f7e96ccc2c44a788c1de1a4424aa2321986d5edc479cfc1ebc3",
+    "sha256": "1594d9f9977a21868e99a070d5ee0fdd61a4d55ae8b328ecb26a4829537be0a0",
     "at": 0,
     "head": [
       -7.04789486812024e-16,
@@ -1134,7 +1162,7 @@
     ]
   },
   "the bandeq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "3f85b2c02ad49f7e96ccc2c44a788c1de1a4424aa2321986d5edc479cfc1ebc3",
+    "sha256": "1594d9f9977a21868e99a070d5ee0fdd61a4d55ae8b328ecb26a4829537be0a0",
     "at": 0,
     "head": [
       -7.04789486812024e-16,
@@ -1148,7 +1176,7 @@
     ]
   },
   "the bandeq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "b3bfb9a9a8e0c351eb314509c8d39cc77d435abaf545197389bf501489ed5bdc",
+    "sha256": "48e2959627a765a9b37fc57a6206f6492c82a792b19349619be80cd805768fda",
     "at": 0,
     "head": [
       -1.0062092845264598e-15,
@@ -1162,7 +1190,7 @@
     ]
   },
   "the bandeq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "b3bfb9a9a8e0c351eb314509c8d39cc77d435abaf545197389bf501489ed5bdc",
+    "sha256": "48e2959627a765a9b37fc57a6206f6492c82a792b19349619be80cd805768fda",
     "at": 0,
     "head": [
       -1.0062092845264598e-15,
@@ -1176,7 +1204,7 @@
     ]
   },
   "the bandpass filter with its cutoff moved by ENV 2": {
-    "sha256": "287e773011e3e9c23a1b8e45f2899321ad265439380f35077feb22e78af310ac",
+    "sha256": "875a5d7a8b11c3e31f224795f462f77c39dea9b2769adcae08cbfea8ca966077",
     "at": 0,
     "head": [
       -6.0871667066766896e-18,
@@ -1190,7 +1218,7 @@
     ]
   },
   "the bandpass filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "287e773011e3e9c23a1b8e45f2899321ad265439380f35077feb22e78af310ac",
+    "sha256": "875a5d7a8b11c3e31f224795f462f77c39dea9b2769adcae08cbfea8ca966077",
     "at": 0,
     "head": [
       -6.0871667066766896e-18,
@@ -1204,7 +1232,7 @@
     ]
   },
   "the high12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "50c025b093d52b569e38a4403603498c952759fc5f4a85fc221affe438039786",
+    "sha256": "8b9a3561c3cddcb50d546e891ced6d69e76e3e90e34e92a279676bc7e735a2d3",
     "at": 0,
     "head": [
       -3.848185028824166e-16,
@@ -1218,7 +1246,7 @@
     ]
   },
   "the high12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "50c025b093d52b569e38a4403603498c952759fc5f4a85fc221affe438039786",
+    "sha256": "8b9a3561c3cddcb50d546e891ced6d69e76e3e90e34e92a279676bc7e735a2d3",
     "at": 0,
     "head": [
       -3.848185028824166e-16,
@@ -1232,7 +1260,7 @@
     ]
   },
   "the high12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "09e2f5c358542e3bfae2a0da87c0ae1daacec3f1ae5352957d29263e01ae70f8",
+    "sha256": "17748aa1862b850941556aefb9aca207279cd9a7114e93a62ecc93d122367a21",
     "at": 0,
     "head": [
       -5.4378191724746e-16,
@@ -1241,12 +1269,12 @@
       1.0911988019943237,
       1.0513451099395752,
       0.9627132415771484,
-      0.8908082246780396,
-      0.7929219603538513
+      0.8908084034919739,
+      0.7929220199584961
     ]
   },
   "the high12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "09e2f5c358542e3bfae2a0da87c0ae1daacec3f1ae5352957d29263e01ae70f8",
+    "sha256": "17748aa1862b850941556aefb9aca207279cd9a7114e93a62ecc93d122367a21",
     "at": 0,
     "head": [
       -5.4378191724746e-16,
@@ -1255,12 +1283,12 @@
       1.0911988019943237,
       1.0513451099395752,
       0.9627132415771484,
-      0.8908082246780396,
-      0.7929219603538513
+      0.8908084034919739,
+      0.7929220199584961
     ]
   },
   "the high18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "c51ac91468aa28afed2069ef97244657c8087bdb34c8f932cbfe7267fe330356",
+    "sha256": "43100fb0cce18c9d32c702dfc67abc15be1e3293cfb0da31b71afbf2934136f2",
     "at": 0,
     "head": [
       -3.4797339024002216e-16,
@@ -1274,7 +1302,7 @@
     ]
   },
   "the high18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "c51ac91468aa28afed2069ef97244657c8087bdb34c8f932cbfe7267fe330356",
+    "sha256": "43100fb0cce18c9d32c702dfc67abc15be1e3293cfb0da31b71afbf2934136f2",
     "at": 0,
     "head": [
       -3.4797339024002216e-16,
@@ -1288,7 +1316,7 @@
     ]
   },
   "the high18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "997781d7304a034b2e4d4ec983a00931061a8f26dcdbc9d2003b10cc70c72bc1",
+    "sha256": "ed5ef62df1753bb83a54f3bf3955c3b764fd544b2f83e16780e3f336c5d337e9",
     "at": 0,
     "head": [
       -4.829082533666944e-16,
@@ -1298,11 +1326,11 @@
       0.7619228959083557,
       0.6033222079277039,
       0.4712715744972229,
-      0.3311351537704468
+      0.331135094165802
     ]
   },
   "the high18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "997781d7304a034b2e4d4ec983a00931061a8f26dcdbc9d2003b10cc70c72bc1",
+    "sha256": "ed5ef62df1753bb83a54f3bf3955c3b764fd544b2f83e16780e3f336c5d337e9",
     "at": 0,
     "head": [
       -4.829082533666944e-16,
@@ -1312,11 +1340,39 @@
       0.7619228959083557,
       0.6033222079277039,
       0.4712715744972229,
-      0.3311351537704468
+      0.331135094165802
+    ]
+  },
+  "the high24 filter at Res 0.1 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "a74ede4fdd9db4da1f6dbb4151770c5d1aab35fa0a4ab377eaf8f27b4e9e68a0",
+    "at": 0,
+    "head": [
+      -1.1372183286136206e-17,
+      0.014787781983613968,
+      -0.04230305179953575,
+      0.03978104144334793,
+      -0.013958429917693138,
+      0.004689536988735199,
+      -0.004382006824016571,
+      0.002136532450094819
+    ]
+  },
+  "the high24 filter at Res 0.1 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "a74ede4fdd9db4da1f6dbb4151770c5d1aab35fa0a4ab377eaf8f27b4e9e68a0",
+    "at": 0,
+    "head": [
+      -1.1372183286136206e-17,
+      0.014787781983613968,
+      -0.04230305179953575,
+      0.03978104144334793,
+      -0.013958429917693138,
+      0.004689536988735199,
+      -0.004382006824016571,
+      0.002136532450094819
     ]
   },
   "the high24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "50a5a8441bd055294b01369880fc24baa1583c0874bdf2951816b305a3efe56b",
+    "sha256": "56343ac194ab95abbea3033597f91cb17114b59310100192ecd1c2ac4aa43359",
     "at": 0,
     "head": [
       -3.558092655652921e-16,
@@ -1330,7 +1386,7 @@
     ]
   },
   "the high24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "50a5a8441bd055294b01369880fc24baa1583c0874bdf2951816b305a3efe56b",
+    "sha256": "56343ac194ab95abbea3033597f91cb17114b59310100192ecd1c2ac4aa43359",
     "at": 0,
     "head": [
       -3.558092655652921e-16,
@@ -1344,35 +1400,35 @@
     ]
   },
   "the high24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "266233cc618006bf6c8473b78bc9a8932ee7dd541a1201d0edb2b03490db90f9",
+    "sha256": "5894bfcbd31a3881e9a31f1b505be58d84d5d4bbc277f99dd2df5d36531ff2d4",
     "at": 0,
     "head": [
       -4.929867807687181e-16,
       0.6109620928764343,
-      1.0326474905014038,
+      1.0326476097106934,
       0.8604341745376587,
       0.7043072581291199,
       0.5166018605232239,
-      0.35486936569213867,
-      0.18342989683151245
+      0.35486942529678345,
+      0.18342992663383484
     ]
   },
   "the high24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "266233cc618006bf6c8473b78bc9a8932ee7dd541a1201d0edb2b03490db90f9",
+    "sha256": "5894bfcbd31a3881e9a31f1b505be58d84d5d4bbc277f99dd2df5d36531ff2d4",
     "at": 0,
     "head": [
       -4.929867807687181e-16,
       0.6109620928764343,
-      1.0326474905014038,
+      1.0326476097106934,
       0.8604341745376587,
       0.7043072581291199,
       0.5166018605232239,
-      0.35486936569213867,
-      0.18342989683151245
+      0.35486942529678345,
+      0.18342992663383484
     ]
   },
   "the high6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "67a646622946140cf007c9b402de9346298133de4e1a0cdeb320e736084dda73",
+    "sha256": "64eeb8c6ab6cb753471ccc4595b8fe0aeb82f2a8dc0a5b6f21cab19996bd732a",
     "at": 0,
     "head": [
       -6.489597453134802e-16,
@@ -1386,7 +1442,7 @@
     ]
   },
   "the high6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "67a646622946140cf007c9b402de9346298133de4e1a0cdeb320e736084dda73",
+    "sha256": "64eeb8c6ab6cb753471ccc4595b8fe0aeb82f2a8dc0a5b6f21cab19996bd732a",
     "at": 0,
     "head": [
       -6.489597453134802e-16,
@@ -1400,7 +1456,7 @@
     ]
   },
   "the high6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "cd944241b3d1eb1458af845ee64676be66cae3fcdfba7d00de392a8876b8515b",
+    "sha256": "8160b984028d03ad8872b6b9e34304899025c407de140928e99559816d43b384",
     "at": 0,
     "head": [
       -9.056287807212215e-16,
@@ -1414,7 +1470,7 @@
     ]
   },
   "the high6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "cd944241b3d1eb1458af845ee64676be66cae3fcdfba7d00de392a8876b8515b",
+    "sha256": "8160b984028d03ad8872b6b9e34304899025c407de140928e99559816d43b384",
     "at": 0,
     "head": [
       -9.056287807212215e-16,
@@ -1428,7 +1484,7 @@
     ]
   },
   "the higheq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "47f54cb0fc6ecb041bd4a305aa8d099e257ca3613d4f0435af6a653668e8b99e",
+    "sha256": "773ac35de90ff78c9ab29d789e1212b0b9f9ab9d1db677f7eddc4d3844764da6",
     "at": 0,
     "head": [
       -6.992766258143786e-16,
@@ -1442,7 +1498,7 @@
     ]
   },
   "the higheq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "47f54cb0fc6ecb041bd4a305aa8d099e257ca3613d4f0435af6a653668e8b99e",
+    "sha256": "773ac35de90ff78c9ab29d789e1212b0b9f9ab9d1db677f7eddc4d3844764da6",
     "at": 0,
     "head": [
       -6.992766258143786e-16,
@@ -1456,7 +1512,7 @@
     ]
   },
   "the higheq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "8e68138d3602148db72fd4461aa4a4897a355a090c8c2867ac43a6045f99be2f",
+    "sha256": "d7b9ba3c284065715eafb63c68254592525573710937e866dd7c939228dd09c7",
     "at": 0,
     "head": [
       -9.98667938438818e-16,
@@ -1470,7 +1526,7 @@
     ]
   },
   "the higheq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "8e68138d3602148db72fd4461aa4a4897a355a090c8c2867ac43a6045f99be2f",
+    "sha256": "d7b9ba3c284065715eafb63c68254592525573710937e866dd7c939228dd09c7",
     "at": 0,
     "head": [
       -9.98667938438818e-16,
@@ -1484,7 +1540,7 @@
     ]
   },
   "the higheq6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "322e5677bbe3ba508b0444be5f775e30499ff1c0811b55662f4c5c5b77b7cf90",
+    "sha256": "1d8feafd2324c2e82bbd75ff7056c77ba12e11f246a7da1e69c266d1506d5dca",
     "at": 0,
     "head": [
       -6.998851660474216e-16,
@@ -1498,7 +1554,7 @@
     ]
   },
   "the higheq6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "322e5677bbe3ba508b0444be5f775e30499ff1c0811b55662f4c5c5b77b7cf90",
+    "sha256": "1d8feafd2324c2e82bbd75ff7056c77ba12e11f246a7da1e69c266d1506d5dca",
     "at": 0,
     "head": [
       -6.998851660474216e-16,
@@ -1512,7 +1568,7 @@
     ]
   },
   "the higheq6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "6e1395377cc35ac48e2beadcf295015c778450b30eea7ebbcefeb98f14cba013",
+    "sha256": "95d3edcf23a3f22633b17200251e18647bedc441d7a43a501fbadb1ffe373c58",
     "at": 0,
     "head": [
       -9.99638532317253e-16,
@@ -1526,7 +1582,7 @@
     ]
   },
   "the higheq6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "6e1395377cc35ac48e2beadcf295015c778450b30eea7ebbcefeb98f14cba013",
+    "sha256": "95d3edcf23a3f22633b17200251e18647bedc441d7a43a501fbadb1ffe373c58",
     "at": 0,
     "head": [
       -9.99638532317253e-16,
@@ -1540,7 +1596,7 @@
     ]
   },
   "the highpass filter with its cutoff moved by ENV 2": {
-    "sha256": "95c34649ae9a48da965d87579edbe6bec789b885d6f6257416431a786a26c324",
+    "sha256": "89115dd3f8e4a284aac4f8c1fec7281cabb5d9222ee3533fa4af70a946669123",
     "at": 0,
     "head": [
       -6.850270964218379e-16,
@@ -1554,7 +1610,7 @@
     ]
   },
   "the highpass filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "95c34649ae9a48da965d87579edbe6bec789b885d6f6257416431a786a26c324",
+    "sha256": "89115dd3f8e4a284aac4f8c1fec7281cabb5d9222ee3533fa4af70a946669123",
     "at": 0,
     "head": [
       -6.850270964218379e-16,
@@ -1568,7 +1624,7 @@
     ]
   },
   "the highshelf filter with its cutoff moved by ENV 2": {
-    "sha256": "a49e37e71f176989f011f954ff80788c8f0d54551a9e195ce4574467147b3b40",
+    "sha256": "c46712a3164d96d02d2acb6b6c81d67facbc534ceda616a4ec26992432eb7bb1",
     "at": 0,
     "head": [
       -1.370835368979281e-15,
@@ -1582,7 +1638,7 @@
     ]
   },
   "the highshelf filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "a49e37e71f176989f011f954ff80788c8f0d54551a9e195ce4574467147b3b40",
+    "sha256": "c46712a3164d96d02d2acb6b6c81d67facbc534ceda616a4ec26992432eb7bb1",
     "at": 0,
     "head": [
       -1.370835368979281e-15,
@@ -1596,7 +1652,7 @@
     ]
   },
   "the ladder12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "6ee0bf3ba6db726ebf187f3525c78e563488a9bb03e17beedd42e02fcbda8e16",
+    "sha256": "77e5246603fd1f9c5c8f7311dcba8f5c137b04836e5d99f7be297218e7a9e54c",
     "at": 0,
     "head": [
       -1.3663575119328284e-18,
@@ -1610,7 +1666,7 @@
     ]
   },
   "the ladder12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "6ee0bf3ba6db726ebf187f3525c78e563488a9bb03e17beedd42e02fcbda8e16",
+    "sha256": "77e5246603fd1f9c5c8f7311dcba8f5c137b04836e5d99f7be297218e7a9e54c",
     "at": 0,
     "head": [
       -1.3663575119328284e-18,
@@ -1624,7 +1680,7 @@
     ]
   },
   "the ladder12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "bd455135345ddbf3fee07c0011d71b04049e539e72ad309d34cfa4347dde21c4",
+    "sha256": "daf837b09168ce6d0482dc59925f665503331a639a76205f6b118d1dc90def3f",
     "at": 0,
     "head": [
       -1.402930082625457e-17,
@@ -1638,7 +1694,7 @@
     ]
   },
   "the ladder12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "bd455135345ddbf3fee07c0011d71b04049e539e72ad309d34cfa4347dde21c4",
+    "sha256": "daf837b09168ce6d0482dc59925f665503331a639a76205f6b118d1dc90def3f",
     "at": 0,
     "head": [
       -1.402930082625457e-17,
@@ -1652,35 +1708,35 @@
     ]
   },
   "the ladder18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "44f7154dc3edd2446c5b22c8e74f50fdd2b4ae549f90089bbcb15c36b956c141",
+    "sha256": "f5a395705d22023a785ad391a06f3c39553d15be12756c994fd0969145919d53",
     "at": 0,
     "head": [
-      -4.6119270875960794e-20,
+      -4.6119267644786526e-20,
       0.00005997103653498925,
       0.00025138570345006883,
-      0.0006412490038201213,
-      0.0012864371528849006,
-      0.002236702712252736,
-      0.0035341251641511917,
-      0.005214028060436249
+      0.0006412488874047995,
+      0.001286436803638935,
+      0.002236702246591449,
+      0.0035341246984899044,
+      0.005214026663452387
     ]
   },
   "the ladder18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "44f7154dc3edd2446c5b22c8e74f50fdd2b4ae549f90089bbcb15c36b956c141",
+    "sha256": "f5a395705d22023a785ad391a06f3c39553d15be12756c994fd0969145919d53",
     "at": 0,
     "head": [
-      -4.6119270875960794e-20,
+      -4.6119267644786526e-20,
       0.00005997103653498925,
       0.00025138570345006883,
-      0.0006412490038201213,
-      0.0012864371528849006,
-      0.002236702712252736,
-      0.0035341251641511917,
-      0.005214028060436249
+      0.0006412488874047995,
+      0.001286436803638935,
+      0.002236702246591449,
+      0.0035341246984899044,
+      0.005214026663452387
     ]
   },
   "the ladder18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "b8889a7e8c41950a14d8022d226f86e3306d868deece24a5b5e930d646f42fd7",
+    "sha256": "9af332f02fabbe31344e9a063db0904c84d087933e6857bf9db0e3106521640a",
     "at": 0,
     "head": [
       -1.2122702040288738e-18,
@@ -1694,7 +1750,7 @@
     ]
   },
   "the ladder18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "b8889a7e8c41950a14d8022d226f86e3306d868deece24a5b5e930d646f42fd7",
+    "sha256": "9af332f02fabbe31344e9a063db0904c84d087933e6857bf9db0e3106521640a",
     "at": 0,
     "head": [
       -1.2122702040288738e-18,
@@ -1708,35 +1764,35 @@
     ]
   },
   "the ladder24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "0c2e7da3cac35644ce59d6b2542e2a11aaa67164f49a541c3b1f73a885a77dbe",
+    "sha256": "563b3a51e523ec6efdfe7f44cc39435277ba37eef28fd0f7a15a7c491c2ad755",
     "at": 0,
     "head": [
       -1.558825499427232e-21,
       0.000002027013806582545,
       0.000010787709470605478,
       0.000033417760278098285,
-      0.00007901806384325027,
+      0.00007901804929133505,
       0.00015828620234970003,
       0.00028316539828665555,
       0.00046653090976178646
     ]
   },
   "the ladder24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "0c2e7da3cac35644ce59d6b2542e2a11aaa67164f49a541c3b1f73a885a77dbe",
+    "sha256": "563b3a51e523ec6efdfe7f44cc39435277ba37eef28fd0f7a15a7c491c2ad755",
     "at": 0,
     "head": [
       -1.558825499427232e-21,
       0.000002027013806582545,
       0.000010787709470605478,
       0.000033417760278098285,
-      0.00007901806384325027,
+      0.00007901804929133505,
       0.00015828620234970003,
       0.00028316539828665555,
       0.00046653090976178646
     ]
   },
   "the ladder24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "f1362ff2bf8793bc5ca336c1c2220624f5bc71cb0e62cc9b1c1605fbb7ba60b9",
+    "sha256": "b68a13ae8801b7c290e988fdf5f0add545538a987f97cef6a0e8608cab349e82",
     "at": 0,
     "head": [
       -1.0489822437196743e-19,
@@ -1750,7 +1806,7 @@
     ]
   },
   "the ladder24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "f1362ff2bf8793bc5ca336c1c2220624f5bc71cb0e62cc9b1c1605fbb7ba60b9",
+    "sha256": "b68a13ae8801b7c290e988fdf5f0add545538a987f97cef6a0e8608cab349e82",
     "at": 0,
     "head": [
       -1.0489822437196743e-19,
@@ -1764,7 +1820,7 @@
     ]
   },
   "the ladder6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "7b08c0119d4607021dbed80b65e05b79e721b1f7cb985c2420a0fc513343eb57",
+    "sha256": "1015ba92dadfbe9d28767c8badd8579f573e946625bbef1394ce5d5e64bcda64",
     "at": 0,
     "head": [
       -3.9846884910900345e-17,
@@ -1778,7 +1834,7 @@
     ]
   },
   "the ladder6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "7b08c0119d4607021dbed80b65e05b79e721b1f7cb985c2420a0fc513343eb57",
+    "sha256": "1015ba92dadfbe9d28767c8badd8579f573e946625bbef1394ce5d5e64bcda64",
     "at": 0,
     "head": [
       -3.9846884910900345e-17,
@@ -1792,7 +1848,7 @@
     ]
   },
   "the ladder6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "f55ce7e3859e7620a62d7d28b029e1e6e2e0558d8e28ad5e06612b2b15f810a2",
+    "sha256": "aa9b584f5488cd8ecdae90e726660ee02cbc2f6edaa660ebc6d2fa406c9c9ed2",
     "at": 0,
     "head": [
       -1.59933703841013e-16,
@@ -1806,7 +1862,7 @@
     ]
   },
   "the ladder6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "f55ce7e3859e7620a62d7d28b029e1e6e2e0558d8e28ad5e06612b2b15f810a2",
+    "sha256": "aa9b584f5488cd8ecdae90e726660ee02cbc2f6edaa660ebc6d2fa406c9c9ed2",
     "at": 0,
     "head": [
       -1.59933703841013e-16,
@@ -1819,8 +1875,64 @@
       1.9690608978271484
     ]
   },
+  "the low12 filter at Res 0 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "df0a824dacb36fc02898cebaf3641b943a928f95669dc5bac3d95d7527bb95e6",
+    "at": 0,
+    "head": [
+      -4.72934440412775e-16,
+      0.6149787902832031,
+      0.7152895331382751,
+      0.7814555764198303,
+      0.7617390751838684,
+      0.7733888626098633,
+      0.7634544968605042,
+      0.7611643075942993
+    ]
+  },
+  "the low12 filter at Res 0 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "df0a824dacb36fc02898cebaf3641b943a928f95669dc5bac3d95d7527bb95e6",
+    "at": 0,
+    "head": [
+      -4.72934440412775e-16,
+      0.6149787902832031,
+      0.7152895331382751,
+      0.7814555764198303,
+      0.7617390751838684,
+      0.7733888626098633,
+      0.7634544968605042,
+      0.7611643075942993
+    ]
+  },
+  "the low12 filter at Res 2 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "1d61f09183557a12ec9bdda5960c8f632894f68a9a34cd425125ab6508a8bb7a",
+    "at": 0,
+    "head": [
+      -5.872111493377601e-16,
+      0.7635781168937683,
+      0.712999165058136,
+      0.7713904976844788,
+      0.7276456952095032,
+      0.748228907585144,
+      0.7322887182235718,
+      0.7324236035346985
+    ]
+  },
+  "the low12 filter at Res 2 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "1d61f09183557a12ec9bdda5960c8f632894f68a9a34cd425125ab6508a8bb7a",
+    "at": 0,
+    "head": [
+      -5.872111493377601e-16,
+      0.7635781168937683,
+      0.712999165058136,
+      0.7713904976844788,
+      0.7276456952095032,
+      0.748228907585144,
+      0.7322887182235718,
+      0.7324236035346985
+    ]
+  },
   "the low12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "e1bc47f0c526c5c930bd413412e7d1557fb4604f1ecdbe6d2de58c66199a709b",
+    "sha256": "85a7c2c0637d2edbc6ffba8cb5decc92034c78e32ee5cc718d68c6bfa333098f",
     "at": 0,
     "head": [
       -4.584213758265683e-19,
@@ -1834,7 +1946,7 @@
     ]
   },
   "the low12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "e1bc47f0c526c5c930bd413412e7d1557fb4604f1ecdbe6d2de58c66199a709b",
+    "sha256": "85a7c2c0637d2edbc6ffba8cb5decc92034c78e32ee5cc718d68c6bfa333098f",
     "at": 0,
     "head": [
       -4.584213758265683e-19,
@@ -1848,7 +1960,7 @@
     ]
   },
   "the low12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "fb1a49abac2be6cdcd3ca9673b9afb202f6ecf977e16fe8b733ffeb66cbd7ace",
+    "sha256": "f8d59b1264625fd301c4ebc761af14033d193624604420599921dd700708ca4c",
     "at": 0,
     "head": [
       -4.539676389531873e-18,
@@ -1862,7 +1974,7 @@
     ]
   },
   "the low12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "fb1a49abac2be6cdcd3ca9673b9afb202f6ecf977e16fe8b733ffeb66cbd7ace",
+    "sha256": "f8d59b1264625fd301c4ebc761af14033d193624604420599921dd700708ca4c",
     "at": 0,
     "head": [
       -4.539676389531873e-18,
@@ -1875,8 +1987,36 @@
       0.2775787115097046
     ]
   },
+  "the low18 filter at Res 0.05 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "b45c27510a142eadca5ead5b56e0d8421cfc8f89625a890a9c29fe44275a8ddd",
+    "at": 0,
+    "head": [
+      -4.638174012850033e-16,
+      0.6031234264373779,
+      0.7251488566398621,
+      0.7835044860839844,
+      0.7632991075515747,
+      0.7723195552825928,
+      0.7630911469459534,
+      0.7602822184562683
+    ]
+  },
+  "the low18 filter at Res 0.05 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "b45c27510a142eadca5ead5b56e0d8421cfc8f89625a890a9c29fe44275a8ddd",
+    "at": 0,
+    "head": [
+      -4.638174012850033e-16,
+      0.6031234264373779,
+      0.7251488566398621,
+      0.7835044860839844,
+      0.7632991075515747,
+      0.7723195552825928,
+      0.7630911469459534,
+      0.7602822184562683
+    ]
+  },
   "the low18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "866c540e48e1b1ed8f03a84b2e24dd016c81251d8cbbeadfacffc8dac183e19d",
+    "sha256": "2510d0e8e435cef10b2ead0f1f950dc6c7a336b4be4f896d9932b6db194e2f38",
     "at": 0,
     "head": [
       -1.475757259660658e-20,
@@ -1890,7 +2030,7 @@
     ]
   },
   "the low18 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "866c540e48e1b1ed8f03a84b2e24dd016c81251d8cbbeadfacffc8dac183e19d",
+    "sha256": "2510d0e8e435cef10b2ead0f1f950dc6c7a336b4be4f896d9932b6db194e2f38",
     "at": 0,
     "head": [
       -1.475757259660658e-20,
@@ -1904,35 +2044,91 @@
     ]
   },
   "the low18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "a04a1f2be53e0232b24a2a8ac538ab9c4b92ae06f261b26f2c901590c7c88b48",
+    "sha256": "5014b328b67d70551f957bafd799f4a29ef4faacc9dbb526a98f2fd241806a27",
     "at": 0,
     "head": [
-      -3.8141096419545796e-19,
-      0.0004726854676846415,
-      0.0024361032992601395,
-      0.00695633701980114,
-      0.01495475322008133,
-      0.027178416028618813,
-      0.04421457648277283,
-      0.06649257987737656
+      -3.814109900448521e-19,
+      0.0004726855258923024,
+      0.0024361037649214268,
+      0.006956337485462427,
+      0.014954756014049053,
+      0.02717842347919941,
+      0.04421458765864372,
+      0.06649260222911835
     ]
   },
   "the low18 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "a04a1f2be53e0232b24a2a8ac538ab9c4b92ae06f261b26f2c901590c7c88b48",
+    "sha256": "5014b328b67d70551f957bafd799f4a29ef4faacc9dbb526a98f2fd241806a27",
     "at": 0,
     "head": [
-      -3.8141096419545796e-19,
-      0.0004726854676846415,
-      0.0024361032992601395,
-      0.00695633701980114,
-      0.01495475322008133,
-      0.027178416028618813,
-      0.04421457648277283,
-      0.06649257987737656
+      -3.814109900448521e-19,
+      0.0004726855258923024,
+      0.0024361037649214268,
+      0.006956337485462427,
+      0.014954756014049053,
+      0.02717842347919941,
+      0.04421458765864372,
+      0.06649260222911835
+    ]
+  },
+  "the low24 filter at Res 0 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "1ac7cf75016c05da5eb7047ece79a34406708ae4f79389497805d196424015de",
+    "at": 0,
+    "head": [
+      -3.1472538829660035e-16,
+      0.4092521071434021,
+      0.6394716501235962,
+      0.7432303428649902,
+      0.7601714134216309,
+      0.7690325975418091,
+      0.7658572196960449,
+      0.7624126672744751
+    ]
+  },
+  "the low24 filter at Res 0 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "1ac7cf75016c05da5eb7047ece79a34406708ae4f79389497805d196424015de",
+    "at": 0,
+    "head": [
+      -3.1472538829660035e-16,
+      0.4092521071434021,
+      0.6394716501235962,
+      0.7432303428649902,
+      0.7601714134216309,
+      0.7690325975418091,
+      0.7658572196960449,
+      0.7624126672744751
+    ]
+  },
+  "the low24 filter at Res 5 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "6a19c179ea03ee95e5d21223e8495c32707b13e076b9ea14d1a2202d3c1aac2d",
+    "at": 0,
+    "head": [
+      -5.14132005384856e-16,
+      0.6685498356819153,
+      0.6898453235626221,
+      0.729001522064209,
+      0.6965783834457397,
+      0.7102442979812622,
+      0.6985153555870056,
+      0.6970398426055908
+    ]
+  },
+  "the low24 filter at Res 5 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "6a19c179ea03ee95e5d21223e8495c32707b13e076b9ea14d1a2202d3c1aac2d",
+    "at": 0,
+    "head": [
+      -5.14132005384856e-16,
+      0.6685498356819153,
+      0.6898453235626221,
+      0.729001522064209,
+      0.6965783834457397,
+      0.7102442979812622,
+      0.6985153555870056,
+      0.6970398426055908
     ]
   },
   "the low24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "e497365f14eb8250061cda87fed098ed6fc639fc03f1f0dc7b597bce11c4ea9b",
+    "sha256": "adfaffd48694094d110b23aeb1ffdeba8ad7002c5150e7408110b8c8bb6786aa",
     "at": 0,
     "head": [
       -4.973883370437259e-22,
@@ -1946,7 +2142,7 @@
     ]
   },
   "the low24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "e497365f14eb8250061cda87fed098ed6fc639fc03f1f0dc7b597bce11c4ea9b",
+    "sha256": "adfaffd48694094d110b23aeb1ffdeba8ad7002c5150e7408110b8c8bb6786aa",
     "at": 0,
     "head": [
       -4.973883370437259e-22,
@@ -1960,13 +2156,13 @@
     ]
   },
   "the low24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "350eee96bcd84eb47d05e7cd8e6365bc2940e49fafdb9176ba05e604d988d79e",
+    "sha256": "e4395fbff96f3883a9d4eef6c33395b361b7515651c08fc5e4cffac9075dbd12",
     "at": 0,
     "head": [
-      -3.440371475874193e-20,
+      -3.4403717989916196e-20,
       0.000042636787839001045,
       0.0002698501048143953,
-      0.0009335274808108807,
+      0.0009335275972262025,
       0.0023792623542249203,
       0.005024835001677275,
       0.009339490905404091,
@@ -1974,13 +2170,13 @@
     ]
   },
   "the low24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "350eee96bcd84eb47d05e7cd8e6365bc2940e49fafdb9176ba05e604d988d79e",
+    "sha256": "e4395fbff96f3883a9d4eef6c33395b361b7515651c08fc5e4cffac9075dbd12",
     "at": 0,
     "head": [
-      -3.440371475874193e-20,
+      -3.4403717989916196e-20,
       0.000042636787839001045,
       0.0002698501048143953,
-      0.0009335274808108807,
+      0.0009335275972262025,
       0.0023792623542249203,
       0.005024835001677275,
       0.009339490905404091,
@@ -1988,7 +2184,7 @@
     ]
   },
   "the low6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "bf90ea225014e4156d40090ee8078c135db3474385ad619315d6661a803794da",
+    "sha256": "b4160aa6e17b24e62747a139cc6a524448349df6a3b568e863c1401333169a09",
     "at": 0,
     "head": [
       -2.271420094969383e-17,
@@ -2002,7 +2198,7 @@
     ]
   },
   "the low6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "bf90ea225014e4156d40090ee8078c135db3474385ad619315d6661a803794da",
+    "sha256": "b4160aa6e17b24e62747a139cc6a524448349df6a3b568e863c1401333169a09",
     "at": 0,
     "head": [
       -2.271420094969383e-17,
@@ -2016,7 +2212,7 @@
     ]
   },
   "the low6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "7fecff5683ff49b739e37145819cb0488fef6663cf87c74f7038e2366dab71c4",
+    "sha256": "c974ed730cc379548dc90029ed94552254d864035adb71bfb7fc9396bc1ddbf8",
     "at": 0,
     "head": [
       -8.433431261522728e-17,
@@ -2030,7 +2226,7 @@
     ]
   },
   "the low6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "7fecff5683ff49b739e37145819cb0488fef6663cf87c74f7038e2366dab71c4",
+    "sha256": "c974ed730cc379548dc90029ed94552254d864035adb71bfb7fc9396bc1ddbf8",
     "at": 0,
     "head": [
       -8.433431261522728e-17,
@@ -2043,8 +2239,36 @@
       1.0158056020736694
     ]
   },
+  "the loweq12 filter at Res 0 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "3979a200b7cc9c621fb33c0bf897335946d03dde479634d6944f49da49718a5c",
+    "at": 0,
+    "head": [
+      -7.049015598588576e-16,
+      0.9166163802146912,
+      0.7099207639694214,
+      0.8154512643814087,
+      0.7460709810256958,
+      0.7820021510124207,
+      0.7570124864578247,
+      0.7612146139144897
+    ]
+  },
+  "the loweq12 filter at Res 0 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "3979a200b7cc9c621fb33c0bf897335946d03dde479634d6944f49da49718a5c",
+    "at": 0,
+    "head": [
+      -7.049015598588576e-16,
+      0.9166163802146912,
+      0.7099207639694214,
+      0.8154512643814087,
+      0.7460709810256958,
+      0.7820021510124207,
+      0.7570124864578247,
+      0.7612146139144897
+    ]
+  },
   "the loweq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "33d72e94f7c7df768c91f9e70c54c6a4da90d03d050bfbab18b30529758ab039",
+    "sha256": "5af03167c7e7ce31a5be52487f7404b57f62fb6acb3fabdc2caaa153028500f8",
     "at": 0,
     "head": [
       -7.0489938933693025e-16,
@@ -2058,7 +2282,7 @@
     ]
   },
   "the loweq12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "33d72e94f7c7df768c91f9e70c54c6a4da90d03d050bfbab18b30529758ab039",
+    "sha256": "5af03167c7e7ce31a5be52487f7404b57f62fb6acb3fabdc2caaa153028500f8",
     "at": 0,
     "head": [
       -7.0489938933693025e-16,
@@ -2072,7 +2296,7 @@
     ]
   },
   "the loweq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "04ce66b6849e30505b962b0c0e0a04b169d139dd70941e4aabcb73b943753e7f",
+    "sha256": "41caf08d8e7dd14281820a675edd9e1196949f6b22add4ba3f46fba08688e95a",
     "at": 0,
     "head": [
       -1.0066128957258265e-15,
@@ -2086,7 +2310,7 @@
     ]
   },
   "the loweq12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "04ce66b6849e30505b962b0c0e0a04b169d139dd70941e4aabcb73b943753e7f",
+    "sha256": "41caf08d8e7dd14281820a675edd9e1196949f6b22add4ba3f46fba08688e95a",
     "at": 0,
     "head": [
       -1.0066128957258265e-15,
@@ -2100,7 +2324,7 @@
     ]
   },
   "the loweq6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "c755bd5cb58d15d96b3293272c58030f1d423835faeae8c07db7ab0acdd77a11",
+    "sha256": "99fffda940befd425526b02de2b073fce2fa68d5b054f792474f269baf6a5420",
     "at": 0,
     "head": [
       -7.047914455757145e-16,
@@ -2114,7 +2338,7 @@
     ]
   },
   "the loweq6 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "c755bd5cb58d15d96b3293272c58030f1d423835faeae8c07db7ab0acdd77a11",
+    "sha256": "99fffda940befd425526b02de2b073fce2fa68d5b054f792474f269baf6a5420",
     "at": 0,
     "head": [
       -7.047914455757145e-16,
@@ -2128,7 +2352,7 @@
     ]
   },
   "the loweq6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "380b86610f7369548d13400b970a141db86f27552256f26ddb1de856004bb349",
+    "sha256": "3c666b49e48b05d95556a0f8c880314eda4e81e3243e77841bf8981fe4ba28dd",
     "at": 0,
     "head": [
       -1.0062194489218268e-15,
@@ -2142,7 +2366,7 @@
     ]
   },
   "the loweq6 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "380b86610f7369548d13400b970a141db86f27552256f26ddb1de856004bb349",
+    "sha256": "3c666b49e48b05d95556a0f8c880314eda4e81e3243e77841bf8981fe4ba28dd",
     "at": 0,
     "head": [
       -1.0062194489218268e-15,
@@ -2156,7 +2380,7 @@
     ]
   },
   "the lowpass filter with its cutoff moved by ENV 2": {
-    "sha256": "4f57f3506d0846b9c0549c740a7e5bd8692cc075810d4126679ab06b66829a17",
+    "sha256": "5bc12c32aab4cc96cb7c983b7570f154b81dc9823dd814b75a0c187eaea6e53e",
     "at": 0,
     "head": [
       -1.881478551533515e-18,
@@ -2170,7 +2394,7 @@
     ]
   },
   "the lowpass filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "4f57f3506d0846b9c0549c740a7e5bd8692cc075810d4126679ab06b66829a17",
+    "sha256": "5bc12c32aab4cc96cb7c983b7570f154b81dc9823dd814b75a0c187eaea6e53e",
     "at": 0,
     "head": [
       -1.881478551533515e-18,
@@ -2184,7 +2408,7 @@
     ]
   },
   "the lowshelf filter with its cutoff moved by ENV 2": {
-    "sha256": "0967f7e51e24ede82160010818d46e2e78d06d092fbb2506b1a9e97608fe2865",
+    "sha256": "71edd172167bbec42dfab6d5da0dfc817059a90ee584f0472881de49bc28d309",
     "at": 0,
     "head": [
       -7.232219825354616e-16,
@@ -2198,7 +2422,7 @@
     ]
   },
   "the lowshelf filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "0967f7e51e24ede82160010818d46e2e78d06d092fbb2506b1a9e97608fe2865",
+    "sha256": "71edd172167bbec42dfab6d5da0dfc817059a90ee584f0472881de49bc28d309",
     "at": 0,
     "head": [
       -7.232219825354616e-16,
@@ -2212,7 +2436,7 @@
     ]
   },
   "the notch filter with its cutoff moved by ENV 2": {
-    "sha256": "576784369099cd83fd63d916f132c5bbd3b0db82cd09287d90a16abe4a75083f",
+    "sha256": "d13517f7804cff1ade34cfab0fbd1cc820d0b9d6f8a605f71c448f7c75b013a5",
     "at": 0,
     "head": [
       -6.988144105229738e-16,
@@ -2226,7 +2450,7 @@
     ]
   },
   "the notch filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "576784369099cd83fd63d916f132c5bbd3b0db82cd09287d90a16abe4a75083f",
+    "sha256": "d13517f7804cff1ade34cfab0fbd1cc820d0b9d6f8a605f71c448f7c75b013a5",
     "at": 0,
     "head": [
       -6.988144105229738e-16,
@@ -2239,148 +2463,204 @@
       0.6837616562843323
     ]
   },
-  "the notch12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "9d25e0d26e9f7491076bf39554bc2d958d5a4b3504e8f5982592ac9386cd4e54",
+  "the notch12 filter at Res 0.6 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "888bd1294dc7f1f69fbf511b70b3586f4b74d5b9c54075c09a7c04096d540a85",
     "at": 0,
     "head": [
-      -1.409823872024923e-15,
-      1.8332598209381104,
-      1.4516193866729736,
-      1.641149640083313,
-      1.4950766563415527,
-      1.5520641803741455,
-      1.4921270608901978,
-      1.4880876541137695
+      -1.6112504244643637e-16,
+      0.2095184028148651,
+      0.589322030544281,
+      0.7701223492622375,
+      0.7713514566421509,
+      0.7726758122444153,
+      0.7671432495117188,
+      0.764689028263092
+    ]
+  },
+  "the notch12 filter at Res 0.6 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "888bd1294dc7f1f69fbf511b70b3586f4b74d5b9c54075c09a7c04096d540a85",
+    "at": 0,
+    "head": [
+      -1.6112504244643637e-16,
+      0.2095184028148651,
+      0.589322030544281,
+      0.7701223492622375,
+      0.7713514566421509,
+      0.7726758122444153,
+      0.7671432495117188,
+      0.764689028263092
+    ]
+  },
+  "the notch12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
+    "sha256": "b552390ed306e3a30af3dfcac409ebd1e4e7a49e708197814fc4c91461266157",
+    "at": 0,
+    "head": [
+      -6.85711922559693e-16,
+      0.8916632533073425,
+      0.7060405611991882,
+      0.7982245087623596,
+      0.7271767258644104,
+      0.7548927664756775,
+      0.7257386445999146,
+      0.7237717509269714
     ]
   },
   "the notch12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "9d25e0d26e9f7491076bf39554bc2d958d5a4b3504e8f5982592ac9386cd4e54",
+    "sha256": "b552390ed306e3a30af3dfcac409ebd1e4e7a49e708197814fc4c91461266157",
     "at": 0,
     "head": [
-      -1.409823872024923e-15,
-      1.8332598209381104,
-      1.4516193866729736,
-      1.641149640083313,
-      1.4950766563415527,
-      1.5520641803741455,
-      1.4921270608901978,
-      1.4880876541137695
+      -6.85711922559693e-16,
+      0.8916632533073425,
+      0.7060405611991882,
+      0.7982245087623596,
+      0.7271767258644104,
+      0.7548927664756775,
+      0.7257386445999146,
+      0.7237717509269714
     ]
   },
   "the notch12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "dffbc1a65591004067e5cf2d2324e0bc72101c1efa1ebbea31c4b90392795c67",
+    "sha256": "fbab0a6e6ec1e33268ea25fefde79de2a38331f505b9288c43a702febca39a93",
     "at": 0,
     "head": [
-      -1.9070099774483318e-15,
-      2.3633720874786377,
-      4.070545673370361,
-      3.800588607788086,
-      3.784090995788574,
-      3.6287128925323486,
-      3.5738139152526855,
-      3.45902943611145
+      -9.729643001379126e-16,
+      1.2058019638061523,
+      2.0768089294433594,
+      1.9390757083892822,
+      1.930297613143921,
+      1.8502055406570435,
+      1.8212074041366577,
+      1.7615255117416382
     ]
   },
   "the notch12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "dffbc1a65591004067e5cf2d2324e0bc72101c1efa1ebbea31c4b90392795c67",
+    "sha256": "fbab0a6e6ec1e33268ea25fefde79de2a38331f505b9288c43a702febca39a93",
     "at": 0,
     "head": [
-      -1.9070099774483318e-15,
-      2.3633720874786377,
-      4.070545673370361,
-      3.800588607788086,
-      3.784090995788574,
-      3.6287128925323486,
-      3.5738139152526855,
-      3.45902943611145
+      -9.729643001379126e-16,
+      1.2058019638061523,
+      2.0768089294433594,
+      1.9390757083892822,
+      1.930297613143921,
+      1.8502055406570435,
+      1.8212074041366577,
+      1.7615255117416382
+    ]
+  },
+  "the notch24 filter at Res 3 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "333b5f08272b3ae3960fd329a6f828e7754e78484ec83263793d593147ec59e4",
+    "at": 0,
+    "head": [
+      -4.385187506120039e-17,
+      0.057022642344236374,
+      0.267036497592926,
+      0.5593414306640625,
+      0.7380805015563965,
+      0.7749580144882202,
+      0.7709605097770691,
+      0.7677093148231506
+    ]
+  },
+  "the notch24 filter at Res 3 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "333b5f08272b3ae3960fd329a6f828e7754e78484ec83263793d593147ec59e4",
+    "at": 0,
+    "head": [
+      -4.385187506120039e-17,
+      0.057022642344236374,
+      0.267036497592926,
+      0.5593414306640625,
+      0.7380805015563965,
+      0.7749580144882202,
+      0.7709605097770691,
+      0.7677093148231506
     ]
   },
   "the notch24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "dab5722ddff39332b84c82312bf86dc3605bef55de9df8e2935d3af4a2c13f26",
+    "sha256": "da9abba764fecd9c053cc29aaa5475aaf44e832822af3b2f48d31ec6f3aaffd4",
     "at": 0,
     "head": [
-      -1.3804384991396583e-15,
-      1.7950483560562134,
-      1.3786673545837402,
-      1.5046827793121338,
-      1.3066492080688477,
-      1.310293436050415,
-      1.2028131484985352,
-      1.1529111862182617
+      -6.662347705144948e-16,
+      0.8663361072540283,
+      0.6653800010681152,
+      0.726198136806488,
+      0.6306208372116089,
+      0.6323760747909546,
+      0.580499529838562,
+      0.5564112663269043
     ]
   },
   "the notch24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "dab5722ddff39332b84c82312bf86dc3605bef55de9df8e2935d3af4a2c13f26",
+    "sha256": "da9abba764fecd9c053cc29aaa5475aaf44e832822af3b2f48d31ec6f3aaffd4",
     "at": 0,
     "head": [
-      -1.3804384991396583e-15,
-      1.7950483560562134,
-      1.3786673545837402,
-      1.5046827793121338,
-      1.3066492080688477,
-      1.310293436050415,
-      1.2028131484985352,
-      1.1529111862182617
+      -6.662347705144948e-16,
+      0.8663361072540283,
+      0.6653800010681152,
+      0.726198136806488,
+      0.6306208372116089,
+      0.6323760747909546,
+      0.580499529838562,
+      0.5564112663269043
     ]
   },
   "the notch24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "329cb1b4286693a64522c3172548128e92e28288648464681291d631306fd71c",
+    "sha256": "69ccf48f90f7ef6992c06acf8bc7404e10d141cb0fdf9b84df3b2b0777f22ad5",
     "at": 0,
     "head": [
-      -1.8082978165664997e-15,
-      2.241036891937256,
-      3.6653695106506348,
-      3.063230276107788,
-      2.743664026260376,
-      2.341249465942383,
-      2.087068796157837,
-      1.819474220275879
+      -9.226008857644743e-16,
+      1.1433862447738647,
+      1.870086669921875,
+      1.5628724098205566,
+      1.3992120027542114,
+      1.1925616264343262,
+      1.0613954067230225,
+      0.9233333468437195
     ]
   },
   "the notch24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "329cb1b4286693a64522c3172548128e92e28288648464681291d631306fd71c",
+    "sha256": "69ccf48f90f7ef6992c06acf8bc7404e10d141cb0fdf9b84df3b2b0777f22ad5",
     "at": 0,
     "head": [
-      -1.8082978165664997e-15,
-      2.241036891937256,
-      3.6653695106506348,
-      3.063230276107788,
-      2.743664026260376,
-      2.341249465942383,
-      2.087068796157837,
-      1.819474220275879
+      -9.226008857644743e-16,
+      1.1433862447738647,
+      1.870086669921875,
+      1.5628724098205566,
+      1.3992120027542114,
+      1.1925616264343262,
+      1.0613954067230225,
+      0.9233333468437195
     ]
   },
   "the peak12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "dfabea4c22982f1e232a50f7954e8789b2890f4e4a0cb856e12042e7fdf3d4be",
+    "sha256": "2998c4bc1945b958e23b5fffa4fd65da95be0fda11602000d499b0b14f7e1e36",
     "at": 0,
     "head": [
       -3.8671943010451244e-16,
       0.5028693079948425,
       0.43190768361091614,
       0.496087908744812,
-      0.4749961793422699,
+      0.4749961495399475,
       0.5052356719970703,
       0.5055176615715027,
       0.5194004774093628
     ]
   },
   "the peak12 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "dfabea4c22982f1e232a50f7954e8789b2890f4e4a0cb856e12042e7fdf3d4be",
+    "sha256": "2998c4bc1945b958e23b5fffa4fd65da95be0fda11602000d499b0b14f7e1e36",
     "at": 0,
     "head": [
       -3.8671943010451244e-16,
       0.5028693079948425,
       0.43190768361091614,
       0.496087908744812,
-      0.4749961793422699,
+      0.4749961495399475,
       0.5052356719970703,
       0.5055176615715027,
       0.5194004774093628
     ]
   },
   "the peak12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "668e12c830fc16f4d63fbc83adaf69ed989da3d8d0cf9283d1c93121010fc489",
+    "sha256": "760f65406efe2bda8f5359b529cc102aa1acd38c1266b36e2aac7f4c8a449544",
     "at": 0,
     "head": [
       -5.754424735686088e-16,
@@ -2394,7 +2674,7 @@
     ]
   },
   "the peak12 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "668e12c830fc16f4d63fbc83adaf69ed989da3d8d0cf9283d1c93121010fc489",
+    "sha256": "760f65406efe2bda8f5359b529cc102aa1acd38c1266b36e2aac7f4c8a449544",
     "at": 0,
     "head": [
       -5.754424735686088e-16,
@@ -2407,8 +2687,64 @@
       1.6724025011062622
     ]
   },
+  "the peak24 filter at Res 0 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "91bb51c0747ea4d50c0470f845eead148c55dff74f73ea752d43fb9748813235",
+    "at": 0,
+    "head": [
+      -2.729019718556168e-16,
+      0.354867160320282,
+      0.5744222402572632,
+      0.7089596390724182,
+      0.746748685836792,
+      0.7650907635688782,
+      0.7649034857749939,
+      0.7629648447036743
+    ]
+  },
+  "the peak24 filter at Res 0 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "91bb51c0747ea4d50c0470f845eead148c55dff74f73ea752d43fb9748813235",
+    "at": 0,
+    "head": [
+      -2.729019718556168e-16,
+      0.354867160320282,
+      0.5744222402572632,
+      0.7089596390724182,
+      0.746748685836792,
+      0.7650907635688782,
+      0.7649034857749939,
+      0.7629648447036743
+    ]
+  },
+  "the peak24 filter at Res 50 % with its cutoff swept down from the top by ENV 2": {
+    "sha256": "5181f7659a8d5777d7e193d62359045721b942624215e035119a71f4ba08d1e5",
+    "at": 0,
+    "head": [
+      -5.26835805527776e-16,
+      0.6850690841674805,
+      0.3042266070842743,
+      0.689555287361145,
+      0.3737112283706665,
+      0.6223870515823364,
+      0.42580658197402954,
+      0.567199170589447
+    ]
+  },
+  "the peak24 filter at Res 50 % with its cutoff swept down from the top by ENV 2: the sum of one node": {
+    "sha256": "5181f7659a8d5777d7e193d62359045721b942624215e035119a71f4ba08d1e5",
+    "at": 0,
+    "head": [
+      -5.26835805527776e-16,
+      0.6850690841674805,
+      0.3042266070842743,
+      0.689555287361145,
+      0.3737112283706665,
+      0.6223870515823364,
+      0.42580658197402954,
+      0.567199170589447
+    ]
+  },
   "the peak24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding": {
-    "sha256": "2b460683d563f7eff2624780a18d28aaf41e0412a2cc98740aae3060de6b3ddb",
+    "sha256": "e930ebe2f379d2992e41aa5326de43281353f46ee9bd9eaff224b229c30fd9d8",
     "at": 0,
     "head": [
       -3.6778541146696144e-16,
@@ -2422,7 +2758,7 @@
     ]
   },
   "the peak24 filter with its cutoff alone moved by ENV 2 and LFO 1, its knob gliding: the sum of one node": {
-    "sha256": "2b460683d563f7eff2624780a18d28aaf41e0412a2cc98740aae3060de6b3ddb",
+    "sha256": "e930ebe2f379d2992e41aa5326de43281353f46ee9bd9eaff224b229c30fd9d8",
     "at": 0,
     "head": [
       -3.6778541146696144e-16,
@@ -2436,7 +2772,7 @@
     ]
   },
   "the peak24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1": {
-    "sha256": "309dabefaad51eebbdfd4c62ba50a524620882f3a0c18c70ed394f2cdb7fc70c",
+    "sha256": "e92842597b8623343839ccef40e54894744222bb65c41a39b4467574a8ac587f",
     "at": 0,
     "head": [
       -5.556813007882844e-16,
@@ -2450,7 +2786,7 @@
     ]
   },
   "the peak24 filter with its cutoff moved by ENV 2, its Drive and Var by LFO 1: the sum of one node": {
-    "sha256": "309dabefaad51eebbdfd4c62ba50a524620882f3a0c18c70ed394f2cdb7fc70c",
+    "sha256": "e92842597b8623343839ccef40e54894744222bb65c41a39b4467574a8ac587f",
     "at": 0,
     "head": [
       -5.556813007882844e-16,
@@ -2464,7 +2800,7 @@
     ]
   },
   "the peaking filter with its cutoff moved by ENV 2": {
-    "sha256": "56a3feab26570e17d62499edfdcc37e62d1bb9bf8d82d14325766deb70a71473",
+    "sha256": "1b95d1a4f45a5ff7025c731e36864e16d2eac5913ee650a634346bfb98dd2ae2",
     "at": 0,
     "head": [
       -7.092013637969164e-16,
@@ -2478,7 +2814,7 @@
     ]
   },
   "the peaking filter with its cutoff moved by ENV 2: the sum of one node": {
-    "sha256": "56a3feab26570e17d62499edfdcc37e62d1bb9bf8d82d14325766deb70a71473",
+    "sha256": "1b95d1a4f45a5ff7025c731e36864e16d2eac5913ee650a634346bfb98dd2ae2",
     "at": 0,
     "head": [
       -7.092013637969164e-16,

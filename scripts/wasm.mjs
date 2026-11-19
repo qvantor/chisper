@@ -19,8 +19,10 @@ const OUT_PERF = 'tmp/wasm-perf';
 const CORES = [
   // the one core of the one node: the voices and the store of their tables (the crate wavetable-osc) into the chain
   // (the effects, their slots and their modulation, the delay, the master and the limiter). The runtime once,
-  // where the two modules had it twice: 167.2 KB, they were 74.0 and 110.1
-  { crate: 'engine', name: 'engine', budget: 168500 },
+  // where the two modules had it twice: 167.2 KB, they were 74.0 and 110.1; 178.2 KB with the spans of the filter of
+  // a voice as lines (their coefficients a step on at every refresh in each of its loops, the lines taken); 182.5 KB
+  // with the loops of a filter at rest apart from those of its lines (in one, a chord at rest was 3 % slower)
+  { crate: 'engine', name: 'engine', budget: 183500 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -70,8 +72,17 @@ const cargo = (perf) => {
 
 // the functions of a core -O3 doesn't inline (patterns of their names in the build of cargo): the render of each
 // source of a voice (the noise, the sub) stays a function of its own (inlined into Voice::process, its one caller, its loops would share
-// the registers of everything else the voice does in a block)
-const NO_INLINE = { engine: ['*Noise11render_into*', '*Sub11render_into*'] };
+// the registers of everything else the voice does in a block); so do the spans of the filter of a voice alone
+// (inlined into run_alone, next to the design of a span: a third slower)
+const NO_INLINE = {
+  engine: [
+    '*Noise11render_into*',
+    '*Sub11render_into*',
+    '*filter10model_span*',
+    '*filter10model_line*',
+    '*filter16model_line_plain*',
+  ],
+};
 
 const optimize = (from, to, crate) => {
   // the features of the module from its target_features section; -O3, no --fast-math

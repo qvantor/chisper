@@ -124,6 +124,22 @@ describe('the model types of the filter against the Audio Unit', () => {
     expect(Math.abs(worst)).toBeLessThan(1.5);
   });
 
+  // a cutoff of 15 kHz without resonance: the poles of the prototype are real there and the second has met the
+  // root of the delay (the design keeps it where they met). Low and Band as below 8 kHz, Notch within 1.5 dB, High
+  // within 3 dB (near nyquist: the deliberate difference above; two poles on one root were 6 to 12 dB off for High,
+  // 4 to 9 dB for Notch)
+  it.each(
+    MEASURED.responses
+      .filter(
+        ([name, cut, res]) => cut === 15000 && res === 0 && /^(Low|High|Band|Notch) (12|18|24)$/.test(name)
+      )
+      .map(([name, cut, , gains]) => [name, cut, gains] as const)
+  )('%s at %s Hz without resonance', (name, cut, gains) => {
+    const worst = worstOf(TYPES[name], cut, { cutoff: cut as number, resonance: 0, variation: 0 }, gains);
+    const within = name.startsWith('High') ? 3 : name.startsWith('Notch') ? 1.5 : 0.5;
+    expect(Math.abs(worst)).toBeLessThan(within);
+  });
+
   it.each(
     MEASURED.eq
       .filter(([, cut, res, v]) => v >= 0.25 && v <= 0.75 && res <= 0.5 && cut <= 3000)

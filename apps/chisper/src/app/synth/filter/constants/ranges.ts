@@ -59,7 +59,7 @@ const webRanges: Record<WebFilterType, Partial<Record<FilterNumerics, Partial<Fi
 const MODEL_RESONANCE: FilterRange = { min: 0, max: 100, precision: 10 };
 
 // the knobs of a model type: Res, Drive and Var in % (Var: Comp, or the Gain of the band of an EQ one), no Gain; Res
-// and Var where it uses them (a one-pole has no resonance, Comp of Low and High 6 is a gain of 1)
+// and Var where it uses them (a one-pole has no resonance; Comp of Low 6, High 6 and the notches is a gain of 1)
 const modelRangesOf = (type: filterModel.ModelFilterType) => {
   const uses = filterModel.modelKnobsOf(type);
   return {

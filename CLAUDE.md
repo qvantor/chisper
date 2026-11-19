@@ -299,18 +299,41 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   the resonance by the cutoff: `filter-resonance.json`, `filter-resonance-measured.spec.ts`):
   analog prototypes whose feedback comes late, realized in matched sections (TPT SVF, one-pole, a droop FIR), Drive
   (the curve before them, ADAA1, only while Drive is over 0) and Var (FAT, the knob Comp: a gain of 1 + 4·Res·FAT
-  into the sections; DB +/- of the reference, the knob Gain of an EQ type; labels and units: `filterKnobLooks`). The
+  into the sections, none of a one-pole or a notch: the reference's Var changes no bit of its Notch; DB +/- of the
+  reference, the knob Gain of an EQ type; labels and units: `filterKnobLooks`). The
   resonance of the types of Normal saturates in the core only (the damping of the first section, and of the second of
   a 24 dB one, by the level of the sample before, worked out again every 4 samples of
   a block, left out under Res 40 % without Drive and FAT: under 0.3 dB there; a ladder clips at its output: measured
   by the `fat` rows, held by the cargo test `saturation`); the chart draws the small signal of the sections, filled to
   0 dB, Drive at a sine of full scale (`driveLevel` of math, its `UT` that of the core). Their design
   is the same code in `libs/math/src/filter/model.ts` (the chart; jsmath: the same bits, so no `Math.hypot`): change
-  both (`filter-model.spec` holds them bit for bit, the core's through `osc_model_design` of the perf build). A design of a span costs some sines (the poles of the delayed prototype by Halley's steps): the voices of a
+  both (`filter-model.spec` holds them bit for bit, the core's through `osc_model_design` of the perf build). Nearly
+  without resonance (Res under 1 %: a damping over `K_CUSP`) the poles of the prototype are real: its two roots on
+  the real axis, then the first and the place the second met the root of the delay (`window_poles`, `met_poles` of
+  `svf_poles`); with resonance they are its pair at every cutoff, also where its one real root has come nearer at
+  the top (`pair_poles`: Halley from a start of its own, Newton from the start of the Taylor goes to the real root
+  there; the second sections too). Never a root Newton happened to settle on: the design is continuous along the
+  cutoff at every Res, the cargo test `the_design_is_continuous_along_the_cutoff` holds it, a jump there was a click
+  a span. Deliberate: a step along Res at 1 %, at the top of the cutoff (the two rules meet at the cusp). A design of a span costs some sines (the poles of the delayed prototype by Halley's steps): the voices of a
   node share the last 4 (`Designs` of `filter.rs`, a pure function of the type and knobs: one LFO on the cutoff of
   all designs once a span). A cutoff that moves alone, a cell a span at most, takes the coefficients between the
   designs at the edges of its cell (`cutoff_cell` of `filter_model.rs`: 16 an octave, kept by the node); a cell the
-  design isn't smooth across (`Coefs::near`, Res 100 % mostly) takes designs. The type lists
+  design isn't smooth across (`Coefs::near`, Res 100 % mostly) takes designs. The coefficients of a
+  span whose knobs moved go to those of its knobs as a line from where the span before left them, never at once (held
+  a span each they were a stair of `SEGMENT` samples: a noise over the note under a moving cutoff): a step every
+  `REFRESH` samples of a model type (`LaneCoefs::steer`/`advance`, `take_spans` of `filter.rs`), every sample of a
+  type of a BiquadFilterNode; the filter is a span behind its knobs. No line: the first span of a note, a cutoff that
+  went over `JUMP` times in a span. A saturating section goes along its g, k0, a, l, the products of its saturation
+  the same function of them at every refresh as in a design (`sat_products`: a line of the products went under 0 of
+  damping where the cutoff and Res jump together, a burst; the cargo test
+  `a_jump_of_the_cutoff_and_the_resonance_together_is_no_burst`). A short span at the end of a pass is the end of the
+  one before (`span_end`: in its few refreshes, or none, it went the way of a whole span at once). A voice on a line
+  next to another, or alone: the same bits (the cargo test
+  `the_lines_of_voices_in_the_lanes_are_those_of_each_alone`); `moves the cutoff of … without a noise` of
+  `wavetable-osc-dsp.spec.ts` holds the noise. The loops of a voice alone stay functions of their own (`NO_INLINE` of
+  `scripts/wasm.mjs`: inlined next to the design of a span they are a third slower); so do those of voices at rest
+  (`still_pair`, `still_group`: in the loops of the lines their coefficients went through memory, a chord 3 % slower;
+  `scope chord filter …` of the perf suite). The type lists
   (`FILTER_TYPES` of the schema, `VOICE_FILTER_TYPES` of `voice-options.ts`, `MODEL_FILTER_TYPES` of math) only grow,
   a spec holds them alike; Drive and Var are the knobs of `FILTER_EXTRA` (appended to `targets.rs`). Two voices of
   one layout of sections share the lanes, others each alone; a change of type on a note into or out of a model type
