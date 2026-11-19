@@ -103,6 +103,35 @@ describe('the design of the model types: the chart and the core', () => {
     expect(mismatches(cases)).toEqual([]);
   });
 
+  // nearly without resonance the poles of a prototype are real ones found another way (the pair as it lands, the
+  // two real roots, past the meeting of the second with the root of the delay): every 1/24 octave from 0.02 fs to
+  // the top, Res from 0 to 1.2 % (over 1 % the pair again)
+  it('gives the same bits where the poles of a prototype nearly without resonance are real', () => {
+    const resonances = [0, 0.00002, 0.0002, 0.0005, 0.001, 0.003, 0.008, 0.0092, 0.012];
+    const cases = RATES.flatMap((rate) => {
+      const cutoffs: number[] = [];
+      for (let f = 0.02 * rate; f < 0.47 * rate; f *= 2 ** (1 / 24)) cutoffs.push(f);
+      return cutoffs.flatMap((cutoff) =>
+        resonances.map((resonance) => ({ knobs: { cutoff, resonance, variation: 0 }, rate }))
+      );
+    });
+    expect(mismatches(cases)).toEqual([]);
+  });
+
+  // with some resonance the real root of a prototype comes nearer than its pair at the top of the cutoff and the
+  // pair is found another way there (steps of Halley from a start of its own; the second sections too)
+  it('gives the same bits where the real root of a prototype passes its pair', () => {
+    const resonances = [0.0096, 0.0099, 0.0105, 0.02, 0.03, 0.05, 0.1, 0.2, 0.5, 1];
+    const cases = RATES.flatMap((rate) => {
+      const cutoffs: number[] = [];
+      for (let f = 0.1 * rate; f < 0.47 * rate; f *= 2 ** (1 / 48)) cutoffs.push(f);
+      return cutoffs.flatMap((cutoff) =>
+        resonances.map((resonance) => ({ knobs: { cutoff, resonance, variation: 0 }, rate }))
+      );
+    });
+    expect(mismatches(cases)).toEqual([]);
+  });
+
   it('gives the same bits at random knobs', () => {
     const random = seeded(0x5eed);
     const cases = Array.from({ length: 1500 }, () => ({

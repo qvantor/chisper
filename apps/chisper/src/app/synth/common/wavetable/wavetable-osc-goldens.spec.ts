@@ -755,6 +755,44 @@ const GOLDEN: [string, Scenario][] = [
       seed: 3,
     },
   ]),
+  // nearly without resonance the poles of a prototype are real: ENV 2 sweeps the cutoff down from the top through
+  // where its second pole meets the root of the delay and, with a little resonance, where the pair lands (Res in %)
+  ...(
+    [
+      ['low12', 0],
+      ['low24', 0],
+      ['low18', 0.05],
+      ['high24', 0.1],
+      ['band12', 0.3],
+      ['peak24', 0],
+      ['notch12', 0.6],
+      ['loweq12', 0],
+      // (with some resonance: through where the real root of the prototype passes its pair)
+      ['low12', 2],
+      ['low24', 5],
+      ['notch24', 3],
+      ['peak24', 50],
+    ] as const
+  ).map(([type, resonance]): [string, Scenario] => [
+    `the ${type} filter at Res ${resonance} % with its cutoff swept down from the top by ENV 2`,
+    {
+      rate: RATE,
+      blocks: quanta(0.12),
+      tables: { a: [SAW] },
+      voices: [
+        {
+          at: 0,
+          options: note({
+            envelopes: [FLAT, { attack: 0, hold: 0, decay: 0.1, sustain: 0, release: 0.1 }, FLAT],
+            filter: { type, cutoff: 284, resonance, gain: 0, drive: 0, variation: 50 },
+            routes: [{ source: 1, param: 'cutoff', amount: 6.3, min: 20, max: 22050, scale: 'log' }],
+          }),
+          params: { frequency: constant(110) },
+        },
+      ],
+      seed: 5,
+    },
+  ]),
   ...(
     [
       ['lowpass', 'ladder24'],

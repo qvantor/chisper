@@ -831,9 +831,11 @@ const createCases = (dsp) => {
         'scope chord lfo cutoff, no filter': scopeChordLfoOf(false, true),
         'scope chord filter': scopeChordLfoOf(true, false),
         // the model types of the filter (a tree that has them): Low 12 next to the lowpass it replaces, Low 24, Ladder
-        // 24 with Drive and FAT; at rest and under the LFO (their design every 32 samples)
+        // 24 with Drive and FAT; at rest and under the LFO (their design every 32 samples). Low 12 at Res 60: its
+        // resonance saturates, four voices in one loop at rest (`interleaves` of filter.rs)
         ...(modelFilters && {
           'scope chord filter low12': scopeChordLfoOf(true, false, LOW12),
+          'scope chord filter low12 res 60': scopeChordLfoOf(true, false, { ...LOW12, resonance: 60 }),
           'scope chord lfo cutoff low12': scopeChordLfoOf(true, true, LOW12),
           'scope chord filter low24': scopeChordLfoOf(true, false, { ...LOW12, type: 'low24' }),
           'scope chord filter ladder24 drive fat': scopeChordLfoOf(true, false, LADDER24),

@@ -8,8 +8,9 @@
 //! app draws it): the Math of JS from jsmath, the same bits
 //!
 //! Drive: the gain (1 + d)⁴ into the curve of the reference (a cubic up to UT, flat past it) before the sections.
-//! FAT (the variation of the types of Normal but the one-poles) is a gain of 1 + 4 r fat into the sections after it;
-//! DB +/- (the one of the EQ types) is the gain of their band
+//! FAT (the variation of the types of Normal but the one-poles and the notches) is a gain of 1 + 4 r fat into the
+//! sections after it; DB +/- (the one of the EQ types) is the gain of their band. A notch has no FAT: the resonance
+//! takes nothing off its pass band (a gain of 1), and the variation of the reference's Notch changes no bit of it
 //!
 //! The resonance saturates (the measurements of a loud sine at the cutoff, `fat` of filter-types.json): the damping
 //! of the first section k = K0 - A·m, A = K0 - k what the resonance takes off the damping of Res 0, m of the level b
@@ -83,9 +84,14 @@ impl ModelType {
     }
 
     /// whether its variation is FAT (a gain into its sections): a ladder and the state variable filters, not the
-    /// one-poles (their FAT is a gain of 1) nor the EQ ones (their variation is the gain of their band)
+    /// one-poles (their FAT is a gain of 1), the notches (the variation of the reference's does nothing) nor the EQ
+    /// ones (their variation is the gain of their band)
     pub fn has_fat(self) -> bool {
-        matches!(structure(self), Structure::Ladder { .. } | Structure::Svf { .. })
+        match structure(self) {
+            Structure::Ladder { .. } => true,
+            Structure::Svf { tap, .. } => tap != Tap::Notch,
+            _ => false,
+        }
     }
 
     /// whether its design depends on the resonance and on the variation besides the cutoff: FAT is not of the
@@ -102,7 +108,7 @@ impl ModelType {
     }
 
     /// the gain of FAT of its design at the resonance and the variation (0..1): 1 of a type without it (those
-    /// designed by the variation and the one-poles)
+    /// designed by the variation, the one-poles and the notches)
     pub fn fat_of(self, resonance: f64, variation: f64) -> f64 {
         if !self.has_fat() {
             return 1.0;
@@ -142,7 +148,7 @@ impl ModelType {
 /// the sections a type runs, whether the curve of Drive runs before them (Drive over 0: at 0 the curve is the
 /// input within -52 dB at a level of 1, it is left out), whether its resonance saturates (the types of Normal but
 /// the one-poles; the second section of a 24 dB one too; a ladder clips), whether the gain of FAT runs (FAT over 0
-/// anywhere: at 0 it is 1)
+/// of a type that has it: at 0 it is 1)
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Layout {
     pub svfs: usize,
@@ -441,10 +447,11 @@ const NEWTON_STEPS: usize = 4;
 // settled: a step under 1e-5 of the root (the next one under 1e-10 of it, the coefficients are f32)
 const SETTLED: f64 = 1e-10;
 
+/// a root by `steps` of Newton at most, and whether it settled
 #[inline(never)]
-fn svf_root(start: Complex, k: f64, tau: f64) -> Complex {
+fn svf_root(start: Complex, k: f64, tau: f64, steps: usize) -> (Complex, bool) {
     let mut s = start;
-    for _ in 0..NEWTON_STEPS {
+    for _ in 0..steps {
         let e = cexp((-s.0 * tau, -s.1 * tau));
         let se = mul(s, e);
         let f = (s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1);
@@ -453,10 +460,10 @@ fn svf_root(start: Complex, k: f64, tau: f64) -> Complex {
         s = (s.0 - step.0, s.1 - step.1);
         // (settled: a short feedback delay leaves the start of the Taylor a step from it)
         if step.0 * step.0 + step.1 * step.1 <= SETTLED * (s.0 * s.0 + s.1 * s.1) {
-            break;
+            return (s, true);
         }
     }
-    s
+    (s, false)
 }
 
 // under it (the cutoffs under about 6 kHz) a root starts from e^{-sτ} to the 2nd order: a step of Newton on
@@ -476,12 +483,12 @@ fn taylor_step(s: Complex, k: f64, tau: f64) -> Complex {
     (s.0 - step.0, s.1 - step.1)
 }
 
-/// the root of a complex pair of s² + k s e^{-sτ} + 1 where τ is under TAYLOR_TAU: from the start of the Taylor
-/// moved by `taylor_step`, steps of Halley (f'' = 2 + kτ e^{-sτ}(sτ - 2) of the same exponential)
+/// a root of s² + k s e^{-sτ} + 1 by `steps` of Halley at most (f'' = 2 + kτ e^{-sτ}(sτ - 2) of the same
+/// exponential), and whether it settled
 #[inline(never)]
-fn svf_root_near(start: Complex, k: f64, tau: f64) -> Complex {
-    let mut s = taylor_step(start, k, tau);
-    for _ in 0..NEWTON_STEPS {
+fn svf_root_halley(start: Complex, k: f64, tau: f64, steps: usize) -> (Complex, bool) {
+    let mut s = start;
+    for _ in 0..steps {
         let e = cexp((-s.0 * tau, -s.1 * tau));
         let se = mul(s, e);
         let f = (s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1);
@@ -497,19 +504,26 @@ fn svf_root_near(start: Complex, k: f64, tau: f64) -> Complex {
         );
         s = (s.0 - step.0, s.1 - step.1);
         if abs2(step) <= SETTLED_HALLEY * abs2(s) {
-            break;
+            return (s, true);
         }
     }
-    s
+    (s, false)
+}
+
+/// the root of a complex pair of s² + k s e^{-sτ} + 1 where τ is under TAYLOR_TAU: from the start of the Taylor
+/// moved by `taylor_step`, steps of Halley; and whether it settled
+fn svf_root_near(start: Complex, k: f64, tau: f64) -> (Complex, bool) {
+    svf_root_halley(taylor_step(start, k, tau), k, tau, NEWTON_STEPS)
 }
 
 // (on the real axis: steps of a real exponential)
 const REAL_STEPS: usize = 8;
 
-/// a real root of s² + k s e^{-sτ} + 1 by Newton from a real start, None if it doesn't settle within `half` of it
-/// (the pair is complex there, or it went to the root of the delay far to the left)
+/// a real root of s² + k s e^{-sτ} + 1 by Newton from a real start and the slope of its last step, None if it
+/// doesn't settle within `half` of it (the pair is complex there, or it went to the root of the delay far to the
+/// left)
 #[inline(never)]
-fn svf_real_root(start: f64, half: f64, k: f64, tau: f64) -> Option<f64> {
+fn svf_real_root(start: f64, half: f64, k: f64, tau: f64) -> Option<(f64, f64)> {
     let mut s = if tau < TAYLOR_TAU {
         taylor_step((start, 0.0), k, tau).0
     } else {
@@ -517,40 +531,287 @@ fn svf_real_root(start: f64, half: f64, k: f64, tau: f64) -> Option<f64> {
     };
     for _ in 0..REAL_STEPS {
         let e = exp(-s * tau);
-        let step = (s * s + k * s * e + 1.0) / (2.0 * s + k * e * (1.0 - s * tau));
+        let slope = 2.0 * s + k * e * (1.0 - s * tau);
+        let step = (s * s + k * s * e + 1.0) / slope;
         s -= step;
         if step * step <= SETTLED * (s * s) {
-            return ((s - start).abs() < half).then_some(s);
+            return ((s - start).abs() < half).then_some((s, slope));
         }
     }
     None
 }
 
+// --- the poles of a prototype nearly without resonance ---
+
+// In x = -s the poles are the roots of F(x) = x² + 1 - k x e^{xτ}. A damping over K_CUSP (Res under 1 %) has
+// three real ones in a window of τ: the pair lands on the real axis (x1 < x2), then x2 meets the root of the delay
+// x3 and leaves the axis with it, a pair over nyquist. Where a pair lands and where two meet is a double root:
+// (x + 1/x) e^{-(x² - 1)/(x² + 1)} = k at τ = (x² - 1)/(x (x² + 1)), under X_CUSP and over it (at X_CUSP, K_CUSP,
+// the three are one). The poles there: the pair until it lands, x1 and x2 while both are real, then x1 and the
+// place where x2 met x3 (the second pole stays there: its z is under 0.01, the poles are continuous along τ)
+const X_CUSP: f64 = 2.0581710272714924;
+const K_CUSP: f64 = 1.371245024747284;
+// (the damping of a second section is 2.02 at most: where the roots meet is under X_TOP)
+const K_TOP: f64 = 3.0;
+const X_TOP: f64 = 8.0;
+// no root meets another under it (K_TOP aside: the window of the roots says so itself)
+const TAU_MEET: f64 = 0.18;
+// a pair this near the real axis (its imaginary part under 1 % of |s|: squared) is landing, Newton is slow there
+const LANDED: f64 = 1e-4;
+const SAFE_STEPS: usize = 60;
+
+/// A root of `at` (its value and its slope) in lo..hi, where it rises or falls through 0: Newton from `start`, a
+/// step out of what is left of lo..hi is its middle (a double root, a start on the wrong side of a turn)
+#[inline(always)]
+fn safe_root(at: impl Fn(f64) -> (f64, f64), lo: f64, hi: f64, start: f64, rising: bool) -> f64 {
+    let (mut a, mut b) = (lo, hi);
+    // (a NaN: lo)
+    let mut x = if start > lo {
+        if start < hi {
+            start
+        } else {
+            hi
+        }
+    } else {
+        lo
+    };
+    for _ in 0..SAFE_STEPS {
+        let (f, d) = at(x);
+        if f == 0.0 {
+            break;
+        }
+        if (f > 0.0) == rising {
+            b = x;
+        } else {
+            a = x;
+        }
+        let next = x - f / d;
+        let newton = next > a && next < b;
+        let to = if newton { next } else { 0.5 * (a + b) };
+        let step = to - x;
+        x = to;
+        if newton && step * step <= SETTLED * (x * x) {
+            break;
+        }
+    }
+    x
+}
+
+/// a root of F in lo..hi (`safe_root` of F and its slope)
+#[inline(never)]
+fn real_root(k: f64, tau: f64, lo: f64, hi: f64, start: f64, rising: bool) -> f64 {
+    safe_root(
+        |x| {
+            let e = exp(x * tau);
+            (x * x + 1.0 - k * x * e, 2.0 * x - k * e * (1.0 + x * tau))
+        },
+        lo,
+        hi,
+        start,
+        rising,
+    )
+}
+
+/// where x2 meets x3 at the damping k (over X_CUSP): the double root there
+#[inline(never)]
+fn meet_root(k: f64) -> f64 {
+    safe_root(
+        |x| {
+            let x2 = x * x;
+            let m = (x + 1.0 / x) * exp(-(x2 - 1.0) / (x2 + 1.0));
+            (
+                m - k,
+                (m * (x2 * x2 - 4.0 * x2 - 1.0)) / (x * (x2 + 1.0) * (x2 + 1.0)),
+            )
+        },
+        X_CUSP,
+        X_TOP,
+        X_CUSP + 3.0 * sqrt(k - K_CUSP),
+        true,
+    )
+}
+
+/// whether x2 has met x3 at τ (the τ of the double root xm is under it)
+fn met(xm: f64, tau: f64) -> bool {
+    tau * (xm * (xm * xm + 1.0)) >= xm * xm - 1.0
+}
+
+/// x1 and the place x2 met x3
+fn met_poles(k: f64, tau: f64, xm: f64, start: f64) -> [Complex; 2] {
+    [(-real_root(k, tau, 0.0, xm, start, false), 0.0), (-xm, 0.0)]
+}
+
+/// the poles where Newton from the starts of the Taylor doesn't find them: x2 has met x3 (xm) or not yet
+fn wide_poles(k: f64, tau: f64, xm: f64, start: f64) -> [Complex; 2] {
+    if met(xm, tau) {
+        met_poles(k, tau, xm, start)
+    } else {
+        window_poles(k, tau, xm)
+    }
+}
+
+/// The poles before x2 meets x3 (xm), where Newton from the starts of the Taylor doesn't find them (near a double
+/// root, a start on the wrong side): from the minimum of F between x1 and x2 (Newton on F' from 0: F' is concave,
+/// its steps never pass it), under 0 two real roots each in its part of 0..xm, over 0 the pair before it lands (those
+/// of τ = 0 if it doesn't settle on one, as `svf_poles` takes them)
+#[inline(never)]
+fn window_poles(k: f64, tau: f64, xm: f64) -> [Complex; 2] {
+    let mut x = 0.0;
+    for _ in 0..SAFE_STEPS {
+        let e = exp(x * tau);
+        let d2 = 2.0 - k * tau * e * (2.0 + x * tau);
+        // (a NaN too)
+        if d2.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            break;
+        }
+        let step = (2.0 * x - k * e * (1.0 + x * tau)) / d2;
+        x -= step;
+        if step * step <= SETTLED * (x * x) {
+            break;
+        }
+    }
+    let e = exp(x * tau);
+    let f = x * x + 1.0 - k * x * e;
+    // (F to the 2nd order about its minimum: its roots this far to each side, or up and down)
+    let off = sqrt(((2.0 * f) / (2.0 - k * tau * e * (2.0 + x * tau))).abs());
+    if f <= 0.0 {
+        return [
+            (-real_root(k, tau, 0.0, x, x - off, false), 0.0),
+            (-real_root(k, tau, x, xm, x + off, true), 0.0),
+        ];
+    }
+    let (s, settled) = svf_root((-x, off), k, tau, SAFE_STEPS);
+    if settled && s.0.is_finite() && s.1.is_finite() && s.0 < 0.0 {
+        return [(s.0, s.1.abs()), (s.0, -s.1.abs())];
+    }
+    svf_poles_of(k)
+}
+
+// --- the pair of a prototype with some resonance ---
+
+// A damping under K_CUSP (Res over 1 %) has one real root at every τ, the root of the delay, and the pair never
+// lands. At the top of the cutoff that root has come nearer than the pair (the pair past nyquist) and Newton from
+// the start of the Taylor goes to it: the poles are the pair all the same, as they are at any resonance over it
+// (continuous along the cutoff; along the resonance a step is left at the cusp, where the rule over it takes x1)
+const PAIR_STEPS: usize = 10;
+// where the steps of Halley start there: they settle on the pair from it wherever the real root is (7 at most, 3.6
+// a design), Newton's from the same start go to the real root at some τ
+const PAIR_START: Complex = (-1.5, 2.0);
+// where Newton from the start of the Taylor leaves the pair, nearly (it settles on it up to kτ 0.386 at the cusp,
+// 0.44 at k 0.8, at every τ under k 0.7): no step of it is spent there
+const PAIR_K: f64 = 0.75;
+const PAIR_K_TAU: f64 = 0.38;
+
+/// The pair of s² + k s e^{-sτ} + 1 under K_CUSP where Newton from the start of the Taylor leaves it: Halley from
+/// PAIR_START; a root that is no pair of the cutoff (on the real axis, a turn of the delay further: |Im s| τ over π)
+/// or none: `deflated_pair`
+#[inline(never)]
+fn pair_poles(k: f64, tau: f64) -> [Complex; 2] {
+    let (s, settled) = svf_root_halley(PAIR_START, k, tau, PAIR_STEPS);
+    let im = s.1.abs();
+    if settled && s.0 < 0.0 && im * im > LANDED * abs2(s) && im * tau < PI {
+        return [(s.0, im), (s.0, -im)];
+    }
+    deflated_pair(k, tau)
+}
+
+// (the steps of Newton on the function without its real root: 7 at most from its start)
+const DEFLATED_STEPS: usize = 16;
+const DEFLATED_START: Complex = (-1.5, 1.5);
+
+/// The pair with the real root x taken out of the way (the only one, F falls through it): Newton on f(s)/(s + x),
+/// which has no root there; those of τ = 0 if it doesn't settle
+#[inline(never)]
+fn deflated_pair(k: f64, tau: f64) -> [Complex; 2] {
+    let mut hi = 4.0;
+    while hi * hi + 1.0 > k * hi * exp(hi * tau) && hi < 1e6 {
+        hi *= 2.0;
+    }
+    let x = real_root(k, tau, 0.0, hi, 1.5, false);
+    let mut s = DEFLATED_START;
+    for _ in 0..DEFLATED_STEPS {
+        let e = cexp((-s.0 * tau, -s.1 * tau));
+        let se = mul(s, e);
+        let f = (s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1);
+        let de = mul(e, (1.0 - s.0 * tau, -s.1 * tau));
+        // (f / (s + x))' / (f / (s + x)) = f'/f - 1/(s + x)
+        let q = div(f, (s.0 + x, s.1));
+        let step = div(f, (2.0 * s.0 + k * de.0 - q.0, 2.0 * s.1 + k * de.1 - q.1));
+        s = (s.0 - step.0, s.1 - step.1);
+        if abs2(step) <= SETTLED * abs2(s) {
+            if s.0.is_finite() && s.1.is_finite() && s.0 < 0.0 && s.1 != 0.0 {
+                return [(s.0, s.1.abs()), (s.0, -s.1.abs())];
+            }
+            break;
+        }
+    }
+    svf_poles_of(k)
+}
+
 /// the poles of s² + k s e^{-sτ} + 1 (units of the cutoff): those of (1 - kτ) s² + k s + 1 moved by Newton; two real
-/// starts on the real axis while each settles in its half of the gap between them, else in the complex plane (a real
-/// start a little off the axis: the pair may be complex where the start is not); a pair or two real ones, those of
-/// τ = 0 if it doesn't settle
+/// starts on the real axis while each settles in its half of the gap between them on its own root (the slope there:
+/// x1 where F falls, x2 where it rises), else in the complex plane (a real start a little off the axis: the pair
+/// may be complex where the start is not); a pair or two real ones, those of τ = 0 if it doesn't settle. Nearly
+/// without resonance (`wide`): where Newton doesn't find them `window_poles`, past the meeting of x2 and x3
+/// `met_poles`. Under the cusp (`pair`): the pair, `pair_poles` where Newton doesn't settle on it
 #[inline(never)]
 fn svf_poles(k: f64, tau: f64) -> [Complex; 2] {
     let a = max(1.0 - k * tau, 0.05);
     let disc = k * k - 4.0 * a;
+    let wide = k > K_CUSP && k < K_TOP;
+    let pair = k <= K_CUSP;
+    if pair && k > PAIR_K && k * tau > PAIR_K_TAU {
+        return pair_poles(k, tau);
+    }
     let roots = if disc < 0.0 {
         // (a complex pair: one root, the other its conjugate)
         let start = (-k / (2.0 * a), sqrt(-disc) / (2.0 * a));
-        let s = if tau < TAYLOR_TAU {
+        let (s, settled) = if tau < TAYLOR_TAU {
             svf_root_near(start, k, tau)
         } else {
-            svf_root(start, k, tau)
+            svf_root(start, k, tau, NEWTON_STEPS)
         };
+        let lost = !settled || s.1 * s.1 <= LANDED * abs2(s);
+        // (it is landing, or has landed: Newton is slow about a double root, or went to one of two real ones)
+        if wide && lost {
+            return wide_poles(k, tau, meet_root(k), k / (2.0 * a));
+        }
+        // (it went to the real root, or is on its way)
+        if pair && tau >= TAYLOR_TAU && lost {
+            return pair_poles(k, tau);
+        }
         [s, s]
     } else {
+        // (the starts are real, the pair is not)
+        if pair {
+            return pair_poles(k, tau);
+        }
         let r = sqrt(disc);
         let (p, q) = ((-k + r) / (2.0 * a), (-k - r) / (2.0 * a));
         let half = r / (2.0 * a);
-        if let (Some(p), Some(q)) = (svf_real_root(p, half, k, tau), svf_real_root(q, half, k, tau)) {
-            return [(p, 0.0), (q, 0.0)];
+        // (where x2 meets x3, if worked out already)
+        let mut xm = None;
+        if wide && tau >= TAU_MEET {
+            let x = meet_root(k);
+            if met(x, tau) {
+                return met_poles(k, tau, x, -p);
+            }
+            xm = Some(x);
         }
-        [svf_root((p, 1e-3), k, tau), svf_root((q, 1e-3), k, tau)]
+        if let (Some((p, falls)), Some((q, rises))) =
+            (svf_real_root(p, half, k, tau), svf_real_root(q, half, k, tau))
+        {
+            if !wide || (falls > 0.0 && rises < 0.0) {
+                return [(p, 0.0), (q, 0.0)];
+            }
+        }
+        if wide {
+            return wide_poles(k, tau, xm.unwrap_or_else(|| meet_root(k)), -p);
+        }
+        [
+            svf_root((p, 1e-3), k, tau, NEWTON_STEPS).0,
+            svf_root((q, 1e-3), k, tau, NEWTON_STEPS).0,
+        ]
     };
     let settled = roots
         .iter()
@@ -910,7 +1171,7 @@ pub fn model_design(
             }
             let stages = design.svfs + design.pole.is_some() as usize;
             design.droop = droop_of(d2 * stages as f64);
-            design.fat = fat_factor(r, v);
+            design.fat = if tap == Tap::Notch { 1.0 } else { fat_factor(r, v) };
             design
         }
     };
@@ -1119,11 +1380,13 @@ pub fn cutoff_cell(cutoff: f64, sample_rate: f64) -> Option<Cell> {
 // --- the sections in lanes of f32 ---
 
 use crate::simd::{F32x4, U32x4};
+use core::ops::{Add, Mul};
 
 /// the coefficients of a design in f32: of each state variable filter the steps of its integrators and the shares of
 /// its taps (c1, a2, a3 of the integrators, the input, the band halved, the low halved: the tick of the voice filter),
 /// of the one-pole G = g / (1 + g) and its taps, of the droop 1 - b and b, the gain of Drive into the curve, the gain
 /// into the sections (FAT); of the saturation of each section g, 2g, a·l², g·a·l², g + k0, 1 + g (g + k0), l², l
+/// (`sat`), worked out of its g, k0, a, l (`saturation`: `sat_products`)
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Coefs {
     pub svf: [[f32; 6]; 2],
@@ -1132,6 +1395,19 @@ pub struct Coefs {
     pub drive: f32,
     pub fat: f32,
     pub sat: [[f32; 8]; 2],
+    pub saturation: [[f32; 4]; 2],
+}
+
+/// The saturation of a section as `sat_steps` reads it (g, 2g, a·l², g·a·l², g + k0, 1 + g (g + k0), l², l) of its
+/// g, k0, a, l in f32: that of a design and that of each refresh along a line are this one function of them. A line
+/// of the products themselves is no section: between two designs whose cutoff and resonance are far apart its g·a·l²
+/// is over g times its a·l², its damping under 0 (a burst at a jump of both); along g, k0, a, l the damping of the
+/// small signal, k0 - a, goes from that of one to that of the other
+#[inline(always)]
+pub fn sat_products<T: Copy + Add<Output = T> + Mul<Output = T>>([g, k0, a, l]: [T; 4], one: T) -> [T; 8] {
+    let (l2, gk) = (l * l, g + k0);
+    let al = a * l2;
+    [g, g + g, al, g * al, gk, one + g * gk, l2, l]
 }
 
 /// the coefficients in f32 of a state variable filter of g, k and the shares of its taps (the input, the band, the
@@ -1156,32 +1432,22 @@ impl Coefs {
         let svf = |s: &SvfSection| svf_coefs(s.g, s.k, s.mix);
         let pole = design.pole.unwrap_or_default();
         let sat = design.sat;
-        let saturation = |i: usize| {
-            let (g, k0, a, l) = (design.svf[i].g, sat.k0[i], sat.a[i], sat.l[i]);
-            [
-                g,
-                2.0 * g,
-                a * l * l,
-                g * a * l * l,
-                g + k0,
-                1.0 + g * (g + k0),
-                l * l,
-                l,
-            ]
-            .map(|value| value as f32)
-        };
+        let saturation: [[f32; 4]; 2] = core::array::from_fn(|i| {
+            [design.svf[i].g, sat.k0[i], sat.a[i], sat.l[i]].map(|value| value as f32)
+        });
         Coefs {
             svf: [svf(&design.svf[0]), svf(&design.svf[1])],
             pole: [pole.g / (1.0 + pole.g), pole.mix[0], pole.mix[1]].map(|value| value as f32),
             droop: [1.0 - design.droop, design.droop].map(|value| value as f32),
             drive: drive_gain(drive) as f32,
             fat: design.fat as f32,
-            sat: [saturation(0), saturation(1)],
+            sat: saturation.map(|section| sat_products(section, 1.0)),
+            saturation,
         }
     }
 
     /// the coefficients the share `t` of the way from these to `to`: a + (b - a) t of each, in f32 (the gain of
-    /// Drive: these')
+    /// Drive: these'; the saturation: its products of g, k0, a, l so: `sat_products`)
     pub fn between(&self, to: &Coefs, t: f32) -> Coefs {
         let mut out = *self;
         out.set_between(self, to, t);
@@ -1208,10 +1474,11 @@ impl Coefs {
             self.svf.as_flattened_mut(),
         );
         fours(
-            from.sat.as_flattened(),
-            to.sat.as_flattened(),
-            self.sat.as_flattened_mut(),
+            from.saturation.as_flattened(),
+            to.saturation.as_flattened(),
+            self.saturation.as_flattened_mut(),
         );
+        self.sat = self.saturation.map(|section| sat_products(section, 1.0));
         let one = |a: f32, b: f32| a + (b - a) * t;
         self.pole = core::array::from_fn(|k| one(from.pole[k], to.pole[k]));
         self.droop = core::array::from_fn(|k| one(from.droop[k], to.droop[k]));
@@ -1290,6 +1557,7 @@ pub struct LaneCoefs {
     pub drive: F32x4,
     pub fat: F32x4,
     pub sat: [[F32x4; 8]; 2],
+    pub saturation: [[F32x4; 4]; 2],
 }
 
 impl LaneCoefs {
@@ -1313,6 +1581,12 @@ impl LaneCoefs {
         fours(p.svf.as_flattened(), q.svf.as_flattened(), svf.as_flattened_mut());
         let mut sat = [[F32x4::splat(0.0); 8]; 2];
         fours(p.sat.as_flattened(), q.sat.as_flattened(), sat.as_flattened_mut());
+        let mut saturation = [[F32x4::splat(0.0); 4]; 2];
+        fours(
+            p.saturation.as_flattened(),
+            q.saturation.as_flattened(),
+            saturation.as_flattened_mut(),
+        );
         LaneCoefs {
             svf,
             pole: core::array::from_fn(|k| lanes(p.pole[k], q.pole[k])),
@@ -1320,8 +1594,167 @@ impl LaneCoefs {
             drive: lanes(p.drive, q.drive),
             fat: lanes(p.fat, q.fat),
             sat,
+            saturation,
         }
     }
+
+    /// its lanes where those of `mask` are set (all their bits or none), else those of `other` (the coefficients of
+    /// one voice of two from another)
+    #[inline(always)]
+    pub fn pick(&self, other: &LaneCoefs, mask: U32x4) -> LaneCoefs {
+        let pick = |a: F32x4, b: F32x4| a.or_else(mask, b);
+        LaneCoefs {
+            svf: core::array::from_fn(|i| core::array::from_fn(|k| pick(self.svf[i][k], other.svf[i][k]))),
+            pole: core::array::from_fn(|k| pick(self.pole[k], other.pole[k])),
+            droop: core::array::from_fn(|k| pick(self.droop[k], other.droop[k])),
+            drive: pick(self.drive, other.drive),
+            fat: pick(self.fat, other.fat),
+            sat: core::array::from_fn(|i| core::array::from_fn(|k| pick(self.sat[i][k], other.sat[i][k]))),
+            saturation: core::array::from_fn(|i| {
+                core::array::from_fn(|k| pick(self.saturation[i][k], other.saturation[i][k]))
+            }),
+        }
+    }
+
+    /// the step of coefficients that stay: -0 of each (x + -0 is x bit for bit, a -0 too)
+    #[inline(always)]
+    pub fn still() -> LaneCoefs {
+        let still = F32x4::splat(-0.0);
+        LaneCoefs {
+            svf: [[still; 6]; 2],
+            pole: [still; 3],
+            droop: [still; 2],
+            drive: still,
+            fat: still,
+            sat: [[still; 8]; 2],
+            saturation: [[still; 4]; 2],
+        }
+    }
+
+    /// The lanes onto the lines of their spans. Of the voices whose span starts here (`stepped`, a mask of their
+    /// lanes) and is a line (`ramping`): the step `d` a refresh of what the sections of the layout read along the
+    /// span, (`to` - these) × `inv` (1 / the refreshes of the span; of a saturating section its g, k0, a, l, the
+    /// products `advance` works out of them); what is read at its ends alone (the steps of a section for its
+    /// saturation, the gain of Drive for its curve: `keep_steps`, `drive_rest`) and the droop (a cutoff doesn't move
+    /// it) is that of `to` at once; what the layout reads nowhere stays as it is (a pass has one layout, its first
+    /// span starts from all the coefficients of the block before). Of the stepped voices whose span is no line the
+    /// step is -0 (x + -0 is x bit for bit, a -0 too: their coefficients are those of `to` already). The others keep
+    /// their steps
+    #[inline(always)]
+    pub fn steer(
+        &mut self,
+        d: &mut LaneCoefs,
+        to: &LaneCoefs,
+        layout: Layout,
+        inv: F32x4,
+        ramping: U32x4,
+        stepped: U32x4,
+    ) {
+        let still = F32x4::splat(-0.0);
+        // (every lane on a line from here: no lane picked, the same bits)
+        let all = ramping.all();
+        // `moves`: read along the span; else `ends`: read at its ends
+        let line = |c: &mut F32x4, d: &mut F32x4, to: F32x4, moves: bool, ends: bool| {
+            if moves {
+                let step = (to - *c) * inv;
+                *d = if all {
+                    step
+                } else {
+                    step.or_else(ramping, still).or_else(stepped, *d)
+                };
+            } else if ends {
+                *c = if all { to } else { to.or_else(stepped, *c) };
+            }
+        };
+        line(&mut self.drive, &mut d.drive, to.drive, layout.drive, true);
+        line(&mut self.fat, &mut d.fat, to.fat, layout.fat, false);
+        let saturating = [layout.sat, layout.sat2];
+        for i in 0..2 {
+            let on = i < layout.svfs;
+            for k in 0..3 {
+                let moves = on && !saturating[i];
+                line(&mut self.svf[i][k], &mut d.svf[i][k], to.svf[i][k], moves, true);
+            }
+            for k in 3..6 {
+                line(&mut self.svf[i][k], &mut d.svf[i][k], to.svf[i][k], on, false);
+            }
+            for k in 0..4 {
+                let moves = on && saturating[i];
+                line(
+                    &mut self.saturation[i][k],
+                    &mut d.saturation[i][k],
+                    to.saturation[i][k],
+                    moves,
+                    false,
+                );
+            }
+        }
+        for k in 0..3 {
+            line(&mut self.pole[k], &mut d.pole[k], to.pole[k], layout.pole, false);
+        }
+        for k in 0..2 {
+            line(&mut self.droop[k], &mut d.droop[k], to.droop[k], false, true);
+        }
+    }
+
+    /// A refresh on along the line of a span (`d` of `steer`), before the `tick` of that refresh: what the sections of
+    /// the layout read along the span (of a saturating section its g, k0, a, l in place of its steps, the products
+    /// of its saturation worked out of them: those of a lane that stays are its own, `sat_products` of its g, k0, a, l
+    /// as they are). Each coefficient by its place, no loop over them: they stay in registers through the samples of
+    /// a span; their steps are read from memory (`step_of`: in registers too they would be more than there are, the
+    /// state of the sections spilled at every sample)
+    #[inline(always)]
+    pub fn advance(&mut self, layout: Layout, step: &LaneCoefs) {
+        #[inline(always)]
+        fn section(c: &mut [F32x4; 6], d: &[F32x4; 6], saturating: bool) {
+            if !saturating {
+                c[0] = c[0] + step_of(&d[0]);
+                c[1] = c[1] + step_of(&d[1]);
+                c[2] = c[2] + step_of(&d[2]);
+            }
+            c[3] = c[3] + step_of(&d[3]);
+            c[4] = c[4] + step_of(&d[4]);
+            c[5] = c[5] + step_of(&d[5]);
+        }
+        #[inline(always)]
+        fn saturation(sat: &mut [F32x4; 8], c: &mut [F32x4; 4], d: &[F32x4; 4]) {
+            c[0] = c[0] + step_of(&d[0]);
+            c[1] = c[1] + step_of(&d[1]);
+            c[2] = c[2] + step_of(&d[2]);
+            c[3] = c[3] + step_of(&d[3]);
+            *sat = sat_products(*c, F32x4::splat(1.0));
+        }
+        if layout.drive {
+            self.drive = self.drive + step_of(&step.drive);
+        }
+        if layout.fat {
+            self.fat = self.fat + step_of(&step.fat);
+        }
+        if layout.svfs > 0 {
+            section(&mut self.svf[0], &step.svf[0], layout.sat);
+        }
+        if layout.svfs > 1 {
+            section(&mut self.svf[1], &step.svf[1], layout.sat2);
+        }
+        if layout.pole {
+            self.pole[0] = self.pole[0] + step_of(&step.pole[0]);
+            self.pole[1] = self.pole[1] + step_of(&step.pole[1]);
+            self.pole[2] = self.pole[2] + step_of(&step.pole[2]);
+        }
+        if layout.svfs > 0 && layout.sat {
+            saturation(&mut self.sat[0], &mut self.saturation[0], &step.saturation[0]);
+        }
+        if layout.svfs > 1 && layout.sat2 {
+            saturation(&mut self.sat[1], &mut self.saturation[1], &step.saturation[1]);
+        }
+    }
+}
+
+// a step of the line of a span, read where it is at every refresh (not kept in a register over the loop)
+#[inline(always)]
+fn step_of(step: &F32x4) -> F32x4 {
+    // (a reference: valid and aligned to read)
+    unsafe { core::ptr::read_volatile(step) }
 }
 
 /// the state of the sections in lanes: the input of the curve of Drive before, the integrators of each state variable filter (the band, the low), the one-pole, the input
@@ -1571,7 +2004,8 @@ mod tests {
     fn a_design_is_of_the_knobs_it_is_designed_by() {
         for ty in MODEL_TYPES {
             let [by_res, by_var] = ty.designed_by();
-            assert_eq!(ty.has_fat(), by_res && !by_var, "{ty:?}");
+            let notch = matches!(ty, ModelType::Notch12 | ModelType::Notch24);
+            assert_eq!(ty.has_fat(), by_res && !by_var && !notch, "{ty:?}");
             for cutoff in [20.0, 150.0, 1000.0, 4000.0, 11000.0, 21000.0] {
                 for r in [0.0, 0.05, 0.3, 0.7, 0.97, 1.0] {
                     for v in [0.0, 0.25, 0.6, 1.0] {
@@ -1600,9 +2034,9 @@ mod tests {
         }
     }
 
-    // the poles of the prototype: roots of s² + k s e^{-sτ} + 1 (but where the pair turns from complex into real: the
-    // start real, the pair complex, or a double one; those of τ = 0 where it doesn't settle at the top): within 1e-7
-    // under τ 0.1 (cutoffs under 6 kHz; over it 4 steps at most); real ones found on the real axis
+    // the poles of the prototype under the cusp (some resonance: k up to 1.37), every τ up to the top of Peak: a pair
+    // at every τ, a root of s² + k s e^{-sτ} + 1 within 1e-7 (the steps of Halley under τ 0.1), never those of τ = 0
+    // (the next but one test: which pair). Nearly without resonance (k over K_CUSP) the next test holds them
     #[test]
     fn the_poles_of_the_prototype_settle() {
         let f = |s: Complex, k: f64, tau: f64| {
@@ -1610,32 +2044,245 @@ mod tests {
             let se = mul(s, e);
             (s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1)
         };
-        let (mut real, mut complex) = (0, 0);
-        for ti in 0..=130 {
+        for ti in 1..=130 {
             let tau = ti as f64 * 0.005;
-            for ki in 0..=202 {
+            for ki in 0..=137 {
                 let k = max(ki as f64 * 0.01, 0.0001);
                 let poles = svf_poles(k, tau);
                 let scale = 1.0 + k * abs2(poles[0]);
-                let turning = k * k - 4.0 * max(1.0 - k * tau, 0.05) >= 0.0 && poles[0].1 != 0.0;
-                let near_double = abs2((poles[0].0 - poles[1].0, poles[0].1 - poles[1].1)) < 0.01;
-                // (or those of τ = 0: it didn't settle)
-                let unsettled = poles == svf_poles_of(k);
-                for s in poles {
-                    let residual = sqrt(abs2(f(s, k, tau)));
-                    assert!(
-                        turning || near_double || unsettled || tau > 0.1 || residual < 1e-7 * scale,
-                        "k {k} tau {tau}: {s:?} leaves {residual:e}"
-                    );
-                }
-                if poles[0].1 == 0.0 {
-                    real += 1;
+                assert!(
+                    poles[0].1 > 0.0 && poles[1] == (poles[0].0, -poles[0].1) && poles != svf_poles_of(k),
+                    "k {k} tau {tau}: {poles:?}"
+                );
+                let residual = sqrt(abs2(f(poles[0], k, tau)));
+                assert!(
+                    residual < 1e-7 * scale,
+                    "k {k} tau {tau}: {poles:?} leaves {residual:e}"
+                );
+            }
+        }
+    }
+
+    // Nearly without resonance (k over K_CUSP, up to the 2.02 of a second section), every τ up to the top of Peak:
+    // the poles against the roots of F(x) = x² + 1 - k x e^{xτ} found by bisection. The pair until it lands (τa), x1
+    // and x2 while both are real, then x1 and the place x2 met x3 (τb, `meet_root`): never a root of the delay, a
+    // pole that didn't settle or those of τ = 0. A real root is within 1e-9 of it away from a double one (Newton
+    // halves its step there: within 2e-5 of it, the step it settles at), a pair leaves 1e-7 at most (the steps of
+    // Halley under τ 0.1)
+    #[test]
+    fn the_poles_nearly_without_resonance_are_the_roots_on_the_real_axis() {
+        let value = |x: f64, k: f64, tau: f64| x * x + 1.0 - k * x * exp(x * tau);
+        let bisect = |g: &dyn Fn(f64) -> f64, mut a: f64, mut b: f64| {
+            for _ in 0..200 {
+                let c = 0.5 * (a + b);
+                if g(a) * g(c) <= 0.0 {
+                    b = c;
                 } else {
-                    complex += 1;
+                    a = c;
+                }
+            }
+            0.5 * (a + b)
+        };
+        let meets = |x: f64| (x + 1.0 / x) * exp(-(x * x - 1.0) / (x * x + 1.0));
+        let tau_of = |x: f64| (x * x - 1.0) / (x * (x * x + 1.0));
+        assert!((meets(X_CUSP) - K_CUSP).abs() < 1e-14);
+        let (mut pairs, mut windows, mut met_ones) = (0, 0, 0);
+        for k in [
+            1.3713, 1.372, 1.375, 1.381, 1.4, 1.45, 1.5, 1.532, 1.6, 1.644, 1.7, 1.8, 1.9, 1.95, 1.99, 1.999,
+            2.0, 2.01, 2.02,
+        ] {
+            let xm = bisect(&|x| meets(x) - k, X_CUSP, X_TOP);
+            let xa = if k >= 2.0 {
+                1.0
+            } else {
+                bisect(&|x| meets(x) - k, 1.0, X_CUSP)
+            };
+            let (ta, tb) = (if k >= 2.0 { 0.0 } else { tau_of(xa) }, tau_of(xm));
+            assert!(
+                (meet_root(k) - xm).abs() < 1e-9,
+                "k {k}: {} of {xm}",
+                meet_root(k)
+            );
+            for i in 1..=6200 {
+                let tau = i as f64 * 1e-4;
+                let poles = svf_poles(k, tau);
+                let at = || format!("k {k} tau {tau} (lands {ta}, meets {tb}): {poles:?}");
+                // (how near a double root: there a root is found within the step Newton settles at)
+                let near = (tau - ta).abs() < 2e-3 || (tau - tb).abs() < 2e-3;
+                let within = if near { 2e-5 } else { 1e-9 };
+                if tau >= tb + 1e-9 {
+                    met_ones += 1;
+                    let x1 = bisect(&|x| value(x, k, tau), 1e-9, xm);
+                    assert!(poles[0].1 == 0.0 && poles[1] == (-meet_root(k), 0.0), "{}", at());
+                    assert!((poles[0].0 + x1).abs() < 1e-9 * x1, "{}: x1 {x1}", at());
+                } else if tau > ta + 1e-9 && tau < tb - 1e-9 {
+                    windows += 1;
+                    let x1 = bisect(&|x| value(x, k, tau), 1e-9, xa);
+                    let x2 = bisect(&|x| value(x, k, tau), xa, xm);
+                    assert!(poles[0].1 == 0.0 && poles[1].1 == 0.0, "{}", at());
+                    assert!(
+                        (poles[0].0 + x1).abs() < within * x1 && (poles[1].0 + x2).abs() < within * x2,
+                        "{}: x1 {x1}, x2 {x2}",
+                        at()
+                    );
+                } else if tau < ta - 1e-9 {
+                    pairs += 1;
+                    let s = poles[0];
+                    let e = cexp((-s.0 * tau, -s.1 * tau));
+                    let se = mul(s, e);
+                    let residual = hypot(s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1);
+                    assert!(
+                        s.1 > 0.0 && poles[1] == (s.0, -s.1) && s.0 < 0.0 && residual < 1e-7,
+                        "{}: leaves {residual:e}",
+                        at()
+                    );
                 }
             }
         }
-        assert!(real > 100 && complex > 20000, "{real} {complex}");
+        assert!(
+            pairs > 15000 && windows > 15000 && met_ones > 60000,
+            "{pairs} {windows} {met_ones}"
+        );
+    }
+
+    // Under the cusp (a damping under K_CUSP: Res over 1 %, the second sections at any) at every τ up to the top of
+    // Peak the poles are the pair, never the real root that passes under it at the top of the cutoff, a pole that
+    // didn't settle or those of τ = 0. The pair here: followed along τ at k 0.5 (far from the cusp, Newton from the
+    // one before never leaves it), then along the damping up to the cusp in steps of 1e-3, of 1e-5 from 1.33 (the
+    // pair turns fast about the cusp)
+    #[test]
+    fn the_poles_under_the_cusp_are_the_pair() {
+        let newton = |mut s: Complex, k: f64, tau: f64| {
+            for _ in 0..60 {
+                let e = cexp((-s.0 * tau, -s.1 * tau));
+                let se = mul(s, e);
+                let f = (s.0 * s.0 - s.1 * s.1 + k * se.0 + 1.0, 2.0 * s.0 * s.1 + k * se.1);
+                let de = mul(e, (1.0 - s.0 * tau, -s.1 * tau));
+                let step = div(f, (2.0 * s.0 + k * de.0, 2.0 * s.1 + k * de.1));
+                s = (s.0 - step.0, s.1 - step.1);
+                if abs2(step) <= 1e-28 * abs2(s) {
+                    break;
+                }
+            }
+            s
+        };
+        let real = |k: f64, tau: f64| {
+            let (mut a, mut b) = (0.0, 1e4);
+            for _ in 0..200 {
+                let c = 0.5 * (a + b);
+                if c * c + 1.0 - k * c * exp(c * tau) > 0.0 {
+                    a = c;
+                } else {
+                    b = c;
+                }
+            }
+            0.5 * (a + b)
+        };
+        let mut from = svf_poles_of(0.5)[0];
+        let (mut checked, mut passed) = (0, 0);
+        for ti in 1..=310 {
+            let tau = ti as f64 * 0.002;
+            from = newton(from, 0.5, tau);
+            let (mut s, mut k) = (from, 0.5);
+            let mut i = 0;
+            while k < 1.371 {
+                k = if k < 1.33 - 1e-9 { k + 1e-3 } else { k + 1e-5 };
+                s = newton(s, k, tau);
+                assert!(
+                    s.1 > 0.05 && s.0 < 0.0,
+                    "k {k} tau {tau}: the pair is lost at {s:?}"
+                );
+                i += 1;
+                if i % 10 != 0 {
+                    continue;
+                }
+                // (and the pair without the real root, where Halley would not settle on it)
+                for poles in [svf_poles(k, tau), deflated_pair(k, tau)] {
+                    let off = hypot(poles[0].0 - s.0, poles[0].1 - s.1);
+                    assert!(
+                        off < 1e-6 * hypot(s.0, s.1) && poles[1] == (poles[0].0, -poles[0].1),
+                        "k {k} tau {tau}: {poles:?} of {s:?}"
+                    );
+                }
+                checked += 1;
+                // (the real root nearer than the pair: it has passed under it)
+                if real(k, tau) < -s.0 {
+                    passed += 1;
+                }
+            }
+        }
+        assert!(checked > 100000 && passed > 10000, "{checked} {passed}");
+    }
+
+    // The design along the cutoff, every type of a state variable filter from 0.02 fs up to the top: no step of a
+    // section (g and k against themselves, a tap against the largest) over 0.1 % a step of 0.005 % of the cutoff
+    // (1 % of a Peak: its second pole is nearer). Nearly without resonance (Res 0 to 0.8 %: where the poles of the
+    // prototype are real) x2 meets x3 and the second pole turns as a square root (a step of 0.03 % at most there, of
+    // a Peak 0.3 %); a pole that jumped to another root moved a section by 5 % to some hundred times (clicks of a
+    // sweep through 0.22 to 0.31 fs). With resonance (Res 1 to 100 %; about the cusp, Res 1 %, the pair and the
+    // real root trade places fast: 0.09 %, a Peak 0.9 %; at Res 100 % the damping of a High at its floor moves
+    // 0.101 % at the top): the pair wherever the real root is, a pole that went to it moved a section by 80 % to ten
+    // times (Res 2 to 10 %, the second section of a Peak 24 at any; clicks of a sweep through 0.26 to 0.45 fs). Aside:
+    // the numerator of a Peak, another one from a cutoff of fs/π (PEAK_ZEROS); the EQ types with resonance at a
+    // DB of 0.25 (fully cut, DB 0, the band of Band EQ 12 leaves its numerator as a square root: not a pole)
+    #[test]
+    fn the_design_is_continuous_along_the_cutoff() {
+        const RATE: f64 = 48000.0;
+        let step_of = |from: &ModelDesign, to: &ModelDesign| {
+            let mut most = 0.0;
+            for (p, q) in from.svf[..from.svfs].iter().zip(&to.svf) {
+                let taps = q.mix.iter().fold(1.0, |m, x| max(m, x.abs()));
+                most = max(most, (q.g / p.g - 1.0).abs());
+                most = max(most, (q.k / p.k - 1.0).abs());
+                for (a, b) in p.mix.iter().zip(&q.mix) {
+                    most = max(most, (b - a).abs() / taps);
+                }
+            }
+            most
+        };
+        let sweep = |ty: ModelType, r: f64, v: f64, ratio: f64, from: f64| {
+            let peak = matches!(ty, ModelType::Peak12 | ModelType::Peak24);
+            let zeros = PEAK_ZEROS * RATE / (2.0 * PI);
+            let (mut f, mut most, mut at) = (from, 0.0, 0.0);
+            let mut before = model_design(ty, f, r, v, RATE);
+            while f * ratio < TOP_CUTOFF * RATE {
+                let to = f * ratio;
+                let design = model_design(ty, to, r, v, RATE);
+                let step = step_of(&before, &design);
+                if step > most && !(peak && f < zeros && to >= zeros) {
+                    (most, at) = (step, to);
+                }
+                (f, before) = (to, design);
+            }
+            (most, at)
+        };
+        for ty in MODEL_TYPES {
+            let (peak, eq) = match structure(ty) {
+                Structure::Svf { tap, .. } => (tap == Tap::Peak, false),
+                Structure::Eq { order: 2, .. } => (false, true),
+                _ => continue,
+            };
+            for r in [0.0, 2e-5, 2e-4, 0.001, 0.003, 0.008] {
+                let (most, at) = sweep(ty, r, 0.0, 1.00005, 0.02 * RATE);
+                assert!(
+                    most < if peak { 0.01 } else { 0.001 },
+                    "{ty:?} Res {r}: a step of {most:e} at {at} Hz"
+                );
+            }
+            for r in [
+                0.0092, 0.0096, 0.0099, 0.0105, 0.012, 0.02, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0,
+            ] {
+                let (most, at) = sweep(ty, r, if eq { 0.25 } else { 0.0 }, 1.00005, 0.02 * RATE);
+                let top = if r == 1.0 { 1.2 } else { 1.0 };
+                assert!(
+                    most < top * if peak { 0.01 } else { 0.001 },
+                    "{ty:?} Res {r}: a step of {most:e} at {at} Hz"
+                );
+            }
+        }
+        // (the sweep of the preset that clicked, a step of 0.001 %: Low 24 from 0.2 fs)
+        let (most, at) = sweep(ModelType::Low24, 0.0, 0.0, 1.00001, 0.2 * RATE);
+        assert!(most < 1e-4, "a step of {most:e} at {at} Hz");
     }
 
     #[test]
@@ -2156,6 +2803,52 @@ mod grid {
         det.abs() < 1.0 && trace.abs() < 1.0 + det
     }
 
+    // Along a line between two designs whose cutoff (up to 4 times: a line's JUMP) and resonance are far apart, the
+    // saturating sections decay all the way, at the small signal and as they saturate: their g, k0, a, l go along it,
+    // the products of the saturation are those of them (`sat_products`). A line of the products themselves is no
+    // section: its damping goes under 0 between such designs (a burst where the cutoff and the resonance jump together)
+    #[test]
+    fn a_line_of_the_saturation_is_a_section_all_the_way() {
+        let mut products_grow = 0;
+        for ty in MODEL_TYPES.into_iter().filter(|ty| ty.layout().sat) {
+            let layout = ty.layout();
+            let design = |cutoff: f64, r: f64| Coefs::of(&model_design(ty, cutoff, r, 0.0, RATE), 0.0);
+            for (f0, r0, f1, r1) in [
+                (5306.0, 0.42, 13235.0, 0.959),
+                (3960.0, 0.406, 13860.0, 0.962),
+                (1000.0, 0.4, 3900.0, 1.0),
+                (12000.0, 1.0, 3000.0, 0.45),
+                (300.0, 0.6, 1200.0, 1.0),
+                (6000.0, 0.4, 18000.0, 1.0),
+            ] {
+                let ends = [design(f0, r0), design(f1, r1)];
+                for t in [0.1f32, 0.25, 0.5, 0.75, 0.9] {
+                    let between = ends[0].between(&ends[1], t);
+                    for i in 0..layout.svfs {
+                        if !(i == 0 && layout.sat || i == 1 && layout.sat2) {
+                            continue;
+                        }
+                        let products: [f32; 8] = core::array::from_fn(|k| {
+                            ends[0].sat[i][k] + (ends[1].sat[i][k] - ends[0].sat[i][k]) * t
+                        });
+                        for level in [0.0f32, 0.1, 1.0, 10.0] {
+                            let steps = |sat: [f32; 8]| {
+                                sat_steps(&sat.map(F32x4::splat), F32x4::splat(level), layout.clip)
+                                    .map(|x| x.lanes()[0] as f64)
+                            };
+                            assert!(
+                                decays(steps(between.sat[i])),
+                                "{ty:?} {f0} {r0} → {f1} {r1} at {t}, section {i}, level {level}"
+                            );
+                            products_grow += !decays(steps(products)) as usize;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(products_grow > 0);
+    }
+
     #[test]
     fn a_cell_is_the_cutoffs_of_an_exponent_and_four_bits() {
         let cell = cutoff_cell(1100.0, RATE).unwrap();
@@ -2193,10 +2886,19 @@ mod grid {
             let (a, b) = (low.svf.as_flattened()[k], high.svf.as_flattened()[k]);
             assert_eq!(value.to_bits(), (a + (b - a) * 0.5).to_bits());
         }
-        for (k, value) in half.sat.as_flattened().iter().enumerate() {
-            let (a, b) = (low.sat.as_flattened()[k], high.sat.as_flattened()[k]);
+        // (the saturation: g, k0, a, l so, its products of them)
+        for (k, value) in half.saturation.as_flattened().iter().enumerate() {
+            let (a, b) = (
+                low.saturation.as_flattened()[k],
+                high.saturation.as_flattened()[k],
+            );
             assert_eq!(value.to_bits(), (a + (b - a) * 0.5).to_bits());
         }
+        assert_eq!(
+            half.sat,
+            half.saturation.map(|section| sat_products(section, 1.0))
+        );
+        assert_eq!(low.sat, low.saturation.map(|section| sat_products(section, 1.0)));
         assert_eq!(
             (half.drive, half.droop, half.fat),
             (low.drive, low.droop, low.fat)
@@ -2227,6 +2929,12 @@ mod grid {
             for k in 0..8 {
                 assert_eq!(bits(c.sat[i][k]), lanes(p.sat[i][k], q.sat[i][k]));
             }
+            for k in 0..4 {
+                assert_eq!(
+                    bits(c.saturation[i][k]),
+                    lanes(p.saturation[i][k], q.saturation[i][k])
+                );
+            }
         }
         for k in 0..3 {
             assert_eq!(bits(c.pole[k]), lanes(p.pole[k], q.pole[k]));
@@ -2242,8 +2950,9 @@ mod grid {
     // the design's at its middle (a smooth cell), they play the design's sections inside it too: the cutoff of each
     // (g, of a one-pole too) within 0.12 % and its damping (k) within 0.15 % of it under 6 kHz, the integrators
     // decaying everywhere (the saturating ones at their small signal too). Under Res 100 %: under 3 kHz 99 % of the
-    // cells are smooth, under 12 kHz 98 % (over it the poles of a design turn real and back, its numerators change:
-    // such a cell takes designs); a resonance as narrow as the floor of the damping (Res 100 %) mostly takes designs
+    // cells are smooth, under 12 kHz 99.8 % (the cell a pair lands in, the one x2 meets x3 in; over it the numerators
+    // of a design change, a pair with some resonance turns real: such a cell takes designs); a resonance as narrow
+    // as the floor of the damping (Res 100 %) mostly takes designs
     #[test]
     fn between_the_designs_of_a_cell() {
         let (mut rough, mut cells) = ([0usize; 3], [0usize; 3]);
@@ -2313,7 +3022,7 @@ mod grid {
             }
         }
         assert!(rough[0] * 100 < cells[0], "{rough:?} of {cells:?}");
-        assert!(rough[1] * 50 < cells[1], "{rough:?} of {cells:?}");
+        assert!(rough[1] * 500 < cells[1], "{rough:?} of {cells:?}");
         // (Res 100 %: three cells in four)
         assert!(narrow * 3 > 2 * narrow_cells, "{narrow} of {narrow_cells}");
     }
@@ -2345,6 +3054,42 @@ mod timing {
             }
             let ns = start.elapsed().as_nanos() as f64 / n as f64;
             std::println!("{ty:?}: {ns:.0} ns a design ({sink})");
+        }
+        // without resonance, the cutoffs over 0.19 fs: the second pole of the prototype has met the root of the delay
+        // (two real roots under it)
+        for (ty, from) in [
+            (ModelType::Low24, 200.0),
+            (ModelType::Low24, 9200.0),
+            (ModelType::Low12, 9200.0),
+        ] {
+            let n = 200_000;
+            let start = std::time::Instant::now();
+            let mut sink = 0.0;
+            for i in 0..n {
+                let cutoff = from + (i % 1000) as f64 * 10.0;
+                let d = model_design(ty, cutoff, 0.0, 0.0, 48000.0);
+                sink += d.svf[0].g;
+            }
+            let ns = start.elapsed().as_nanos() as f64 / n as f64;
+            std::println!("{ty:?} without resonance from {from} Hz: {ns:.0} ns a design ({sink})");
+        }
+        // with some resonance at the top of the cutoff: the real root of the prototype nearer than its pair (the
+        // pair by `pair_poles`; the second section of a Peak 24 at any resonance)
+        for (ty, r, from) in [
+            (ModelType::Low12, 0.02, 17000.0),
+            (ModelType::Low24, 0.05, 17000.0),
+            (ModelType::Peak24, 0.2, 12000.0),
+        ] {
+            let n = 200_000;
+            let start = std::time::Instant::now();
+            let mut sink = 0.0;
+            for i in 0..n {
+                let cutoff = from + (i % 1000) as f64 * 5.0;
+                let d = model_design(ty, cutoff, r, 0.0, 48000.0);
+                sink += d.svf[0].g;
+            }
+            let ns = start.elapsed().as_nanos() as f64 / n as f64;
+            std::println!("{ty:?} Res {r} from {from} Hz: {ns:.0} ns a design ({sink})");
         }
         // the tick of a pair of voices through Low 12: plain, saturating
         let design = model_design(ModelType::Low12, 1200.0, 0.3, 0.0, 48000.0);

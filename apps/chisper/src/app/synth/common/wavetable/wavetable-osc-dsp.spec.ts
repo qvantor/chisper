@@ -17,6 +17,7 @@ import {
   nextAnchor,
   RETRIG,
 } from '../lfo/lfo-curve';
+import { createTestBiquad } from '../../../../test-utils/biquad';
 import { withCurves } from '../../../../test-utils/envelopes';
 import { seeded, VOICE_DEFAULTS } from '../../../../test-utils/voice-dsp';
 import { wasmCore } from '../../../../test-utils/wasm';
@@ -29,6 +30,7 @@ import {
   UnisonShape,
   UnisonStack,
   VoiceFilterOptions,
+  VoiceFilterType,
   VoiceOptions,
   VoiceOscOptions,
   VoiceRoute,
@@ -3061,6 +3063,35 @@ describe('the wavetable voice', () => {
       );
     });
 
+    // (Comp of the reference's Notch 12 and 24 changes no bit of it at any Res and Drive: the resonance takes nothing
+    // off the pass band of a notch, there is nothing to give back)
+    it("doesn't change the level of Notch 12 and 24 by Var", () => {
+      const { store } = core.storeWith({ a: [saw] });
+      const play = (filter: VoiceFilterOptions) =>
+        render({ store, frames: 4096, params: { frequency: 110 }, filter }).left;
+      for (const type of ['notch12', 'notch24'] as const)
+        for (const [resonance, drive] of [
+          [40, 0],
+          [100, 0],
+          [100, 50],
+        ]) {
+          const filter: VoiceFilterOptions = { type, cutoff: 1000, resonance, gain: 0, drive, variation: 0 };
+          const quiet = play(filter);
+          for (const variation of [20, 80, 100])
+            expect(Array.from(play({ ...filter, variation }))).toEqual(Array.from(quiet));
+        }
+      // (Var raises the other types of Normal: 1 + 4 Res Var)
+      const low: VoiceFilterOptions = {
+        type: 'low12',
+        cutoff: 1000,
+        resonance: 40,
+        gain: 0,
+        drive: 0,
+        variation: 0,
+      };
+      expect(db(rms(play({ ...low, variation: 80 })) / rms(play(low)))).toBeGreaterThan(4);
+    });
+
     it('reads an LFO only the routes held for a change of type read, from the block the type comes in', () => {
       // a second change of type during the fade of the first waits for its end, the routes of its knobs with it:
       // the LFO of one, which no other route reads, has its levels in the block they come in (not those of a block
@@ -3228,6 +3259,116 @@ describe('the wavetable voice', () => {
         // (the open Low 12 at 220 Hz apart; the core takes the amplitude of the voice into the curve)
         expect(db(driven / open)).toBeCloseTo(db(filterModel.driveLevel(drive / 100, dry)), 1);
       });
+    });
+
+    // ENV 2 sweeps the cutoff down from the top (the preset of WAVEFORM-43: Cut 284 Hz, ENV 2 to it by 5.9 octaves,
+    // a decay of 0.5 s) over a sine: nothing is over 8 kHz but what a jump of the coefficients leaves there. The
+    // poles of a design nearly without resonance went from one root of its prototype to another span by span at
+    // 0.22 to 0.31 fs (a burst of clicks 11 to 20 ms into the note: 2e-3 to 2e-2 there, of Low 24 0.2); now they
+    // move with the cutoff (3e-5 at most)
+    // (the sine at `frequency` under that sweep by `amount` octaves: the note and what a cascade of highpasses at
+    // `corner` leaves of it)
+    const swept = (
+      type: VoiceFilterType,
+      resonance: number,
+      {
+        amount,
+        frequency,
+        frames,
+        corner,
+        order,
+      }: Record<'amount' | 'frequency' | 'frames' | 'corner' | 'order', number>
+    ) => {
+      const { store } = core.storeWith({ a: [sine] });
+      const { left } = render({
+        store,
+        params: { frequency },
+        frames,
+        envelopes: [{ attack: 0, hold: 0, decay: 0.5, sustain: 0, release: 0 }, FLAT],
+        routes: [{ source: 1, param: 'cutoff', amount, min: 10, max: 22050, scale: 'log' }],
+        filter: { type, cutoff: 284, resonance, gain: 0 },
+      });
+      const highs = Array.from({ length: order }, () =>
+        createTestBiquad('highpass', { frequency: corner, Q: 0, gain: 0 }, RATE)
+      );
+      return { left, high: left.map((x) => highs.reduce((y, biquad) => biquad.process(y), x)) };
+    };
+    // the peak over 8 kHz of the first 4096 samples, past the start of the note and but `aside`
+    const click = (
+      type: VoiceFilterType,
+      resonance: number,
+      amount: number,
+      aside?: (i: number) => boolean
+    ) => {
+      const { high } = swept(type, resonance, {
+        amount,
+        frequency: 110,
+        frames: 4096,
+        corner: 8000,
+        order: 2,
+      });
+      return high.reduce((most, y, i) => (i >= 128 && !aside?.(i) ? Math.max(most, Math.abs(y)) : most), 0);
+    };
+
+    it.each<[VoiceFilterType, number]>([
+      ['low12', 0],
+      ['low18', 0],
+      ['low24', 0],
+      ['low24', 0.1],
+      ['high12', 0],
+      ['band12', 0],
+      ['notch24', 0],
+    ])('sweeps %s at Res %f %% through the top without a click', (type, resonance) => {
+      expect(click(type, resonance, 5.886)).toBeLessThan(1e-4);
+    });
+
+    // the same sweep from 22 kHz with some resonance (Res in %): the one real root of the prototype is nearer than
+    // its pair at the top (of a second section at any resonance) and the poles went to it span by span (clicks
+    // 2e-4 to 0.9 over 8 kHz); now the pair all the way (7e-5 at most)
+    it.each<[VoiceFilterType, number]>([
+      ['low12', 2],
+      ['low18', 2],
+      ['low24', 5],
+      ['notch12', 2],
+      ['notch24', 5],
+      ['peak12', 3],
+      ['peak24', 2],
+      ['peak24', 50],
+    ])('sweeps %s at Res %f %% down from the top without a click', (type, resonance) => {
+      // (aside: the numerator of a Peak is another one from a cutoff of fs/π, 44 ms into the note: 2e-4 there)
+      const aside = (i: number) => type.startsWith('peak') && i >= 2100 && i < 2140;
+      expect(click(type, resonance, 6.3, aside)).toBeLessThan(1e-4);
+    });
+
+    // the same sweep under a sine at D3 and at G4: over 1.5 kHz there is nothing but what the coefficients leave
+    // there as they move. Held a span of 32 samples each (a stair of 1500 Hz) they left -85 to -79 dB of the peak
+    // at D3 and -76 to -71 dB at G4 in the middle of the note, more of a steeper type; now they go from a span to
+    // the next as a line (a step every 4 samples, every sample of a type of a BiquadFilterNode)
+    it.each<[VoiceFilterType]>([
+      ['lowpass'],
+      ['low6'],
+      ['low12'],
+      ['low18'],
+      ['low24'],
+      ['ladder6'],
+      ['ladder12'],
+      ['ladder18'],
+      ['ladder24'],
+    ])('moves the cutoff of %s without a noise over the note', (type) => {
+      const noise = [146.83, 392].map((frequency) => {
+        const { left, high } = swept(type, 0, {
+          amount: 5.886,
+          frequency,
+          frames: 24000,
+          corner: 1500,
+          order: 4,
+        });
+        const peak = left.reduce((most, x) => Math.max(most, Math.abs(x)), 0);
+        // (the middle of the note: the cutoff comes down through the highs to the note)
+        return db(rms(high, 4800, 19200) / peak);
+      });
+      // (-113 dB and under at D3; at G4 what the highpass leaves of the note itself, -96 dB)
+      noise.forEach((level) => expect(level).toBeLessThan(-90));
     });
 
     it('filters both channels of a unison, the middle voice in both', () => {

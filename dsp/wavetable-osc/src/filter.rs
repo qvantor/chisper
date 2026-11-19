@@ -65,6 +65,30 @@ pub const FADE: f64 = 0.01;
 const REFRESH: usize = 4;
 // Res (%) from which the resonance of a model type saturates in a pass without Drive and FAT
 const RESONANT: f32 = 40.0;
+// The coefficients of a span whose knobs moved go to those of its knobs as a line from where the span before left
+// them, a step every REFRESH samples of a model type, every sample of a type of a BiquadFilterNode (held a span each they were a stair of SEGMENT samples: a noise over the note, more of a
+// steeper type; the filter is a span behind its knobs). A cutoff that went further than JUMP times in a span is no
+// line (a jump of a knob: the coefficients between two far designs are of no filter), nor is the first span of a note
+const JUMP: f64 = 4.0;
+fn glides(cutoff: f64, before: f64) -> bool {
+    cutoff <= before * JUMP && before <= cutoff * JUMP
+}
+// the refreshes of the saturating sections in the samples s..e
+fn refreshes(s: usize, e: usize) -> usize {
+    e.div_ceil(REFRESH) - s.div_ceil(REFRESH)
+}
+// The end of a span from s of a pass whose knobs move, of a pass that ends at b: SEGMENT samples on, or b where under
+// half a span would be left after it. A short span at the end goes the way of a whole span (from the knobs of the span
+// before to its own) in its few steps, under a refresh in none: the block after took it at once, the stair the lines
+// take away (a note that starts late in its block, or a voice that sweeps a cutoff of a BiquadFilterNode)
+fn span_end(s: usize, b: usize) -> usize {
+    let e = s + SEGMENT;
+    if e + SEGMENT / 2 > b {
+        b
+    } else {
+        e
+    }
+}
 
 // a model type: its coefficients, the knobs they were worked out with (cutoff, resonance, variation, drive), the
 // state of its channels (of each lane of a voice); the cell of its cutoff as it moved last (None: it was still, or
@@ -84,6 +108,9 @@ struct ModelSlot {
     fresh: bool,
     narrow: Option<(ModelType, [f64; 2], u32)>,
     designed: Option<DesignKey>,
+    // its span is a line (`Pass::step`), 1 / its refreshes (0: none)
+    ramps: bool,
+    inv: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -601,6 +628,8 @@ impl VoiceFilter {
                 last,
                 state,
                 current: FROZEN,
+                step: STILL,
+                ramps: false,
             },
             Kind::Model(ty) => Engine::Model { ty, slot: model },
         };
@@ -655,9 +684,9 @@ fn layout_of(kind: Kind, knobs: &[&[f32]; KNOBS]) -> Option<Layout> {
 }
 
 // the sections of a model type with the curve of Drive (Drive over 0), the gain of FAT (over 0, of a type that has
-// it: the variation of an EQ type is the gain of its band, the design's FAT a gain of 1) and the saturation of the
-// resonance: the resonance saturates under Res 40 %, without Drive and FAT, by under 0.3 dB at the cutoff (a sine at
-// full scale): the plain sections there
+// it: the variation of an EQ type is the gain of its band, the FAT of a one-pole or a notch a gain of 1) and the
+// saturation of the resonance: the resonance saturates under Res 40 %, without Drive and FAT, by under 0.3 dB at the
+// cutoff (a sine at full scale): the plain sections there
 fn gated(ty: ModelType, drive: bool, fat: bool, resonant: bool) -> Layout {
     let layout = ty.layout();
     let fat = fat && ty.has_fat();
@@ -687,8 +716,11 @@ enum Engine<'a> {
         power: &'a mut f64,
         last: &'a mut [f64; 3],
         state: &'a mut [f32; 4],
-        // the coefficients of the span
+        // the coefficients the span starts from and their step a sample (`ramps`, a span that is a line: else
+        // those of the span, still)
         current: [f32; 6],
+        step: [f32; 6],
+        ramps: bool,
     },
     // (the coefficients of the span: those of its slot, read in place)
     Model {
@@ -698,7 +730,8 @@ enum Engine<'a> {
 }
 
 /// the filter of a voice over the samples a..b of a block: its knobs are read at the start of each span (SEGMENT
-/// samples from a while one moves, else the whole a..b), its coefficients worked out when they changed
+/// samples from a while one moves, the last one up to b: `span_end`; else the whole a..b), its coefficients worked
+/// out when they changed
 pub struct Pass<'a> {
     sample_rate: f64,
     // the designs of the node (None: a voice alone)
@@ -729,10 +762,27 @@ impl<'a> Pass<'a> {
         }
     }
 
-    // the state and the coefficients of the span of a type of a BiquadFilterNode (a pass without a layout)
-    fn web(&self) -> ([f32; 4], [f32; 6]) {
+    // the state of a type of a BiquadFilterNode (a pass without a layout)
+    fn web(&self) -> [f32; 4] {
         match &self.engine {
-            Engine::Web { state, current, .. } => (**state, *current),
+            Engine::Web { state, .. } => **state,
+            Engine::Model { .. } => unreachable!(),
+        }
+    }
+
+    // whether its span is a line of coefficients (`step`)
+    fn ramps(&self) -> bool {
+        self.active
+            && match &self.engine {
+                Engine::Web { ramps, .. } => *ramps,
+                Engine::Model { slot, .. } => slot.ramps,
+            }
+    }
+
+    // the coefficients a span of a type of a BiquadFilterNode starts from and their step a sample
+    fn web_line(&self) -> ([f32; 6], [f32; 6]) {
+        match &self.engine {
+            Engine::Web { current, step, .. } => (*current, *step),
             Engine::Model { .. } => unreachable!(),
         }
     }
@@ -757,7 +807,7 @@ impl<'a> Pass<'a> {
     fn step(&mut self, s: usize) {
         if s < self.a || s >= self.b {
             match &mut self.engine {
-                Engine::Web { current, .. } => *current = FROZEN,
+                Engine::Web { current, step, .. } => (*current, *step) = (FROZEN, STILL),
                 Engine::Model { .. } => {}
             }
             self.active = false;
@@ -766,6 +816,10 @@ impl<'a> Pass<'a> {
         }
         let at = |values: &[f32]| (if values.len() > 1 { values[s] } else { values[0] }) as f64;
         let (sample_rate, designs, sweeps) = (self.sample_rate, self.designs, self.sweeps);
+        let (moving, next) = (
+            self.moving,
+            if self.moving { span_end(s, self.b) } else { self.b },
+        );
         match &mut self.engine {
             Engine::Web {
                 ty,
@@ -774,18 +828,28 @@ impl<'a> Pass<'a> {
                 power,
                 last,
                 current,
+                step,
+                ramps,
                 ..
             } => {
                 let (f, q, g) = (at(self.knobs[0]), at(self.knobs[1]), at(self.knobs[2]));
+                (*ramps, *step) = (false, STILL);
+                let before = **coefficients;
                 if f != last[0] || q != last[1] || g != last[2] {
+                    let line = moving && glides(f, last[0]);
                     // (a cutoff that moves alone: the power of the span before)
                     if q != last[1] || g != last[2] {
                         **power = power_of(*ty, q, g);
                     }
                     **k = svf_into(coefficients, *ty, f, q, **power, sample_rate);
                     **last = [f, q, g];
+                    if line {
+                        let count = (next - s) as f32;
+                        *step = core::array::from_fn(|k| (coefficients[k] - before[k]) / count);
+                        *ramps = true;
+                    }
                 }
-                *current = **coefficients;
+                *current = if *ramps { before } else { **coefficients };
             }
             Engine::Model { ty, slot } => {
                 let (f, q, d, v) = (
@@ -795,6 +859,13 @@ impl<'a> Pass<'a> {
                     at(self.knobs[4]),
                 );
                 let redesign = f != slot.last[0] || q != slot.last[1] || v != slot.last[2];
+                let line =
+                    moving && !slot.fresh && (redesign || d != slot.last[3]) && glides(f, slot.last[0]);
+                slot.ramps = line;
+                if line {
+                    let count = refreshes(s, next);
+                    slot.inv = if count > 0 { 1.0 / count as f32 } else { 0.0 };
+                }
                 if redesign {
                     // (its designs and cells by the knobs it is designed by: one it is not designed by may move)
                     let knobs = design_knobs(*ty, [q, v]);
@@ -875,16 +946,14 @@ impl<'a> Pass<'a> {
             }
         }
         self.active = true;
-        self.next = if self.moving {
-            self.b.min(s + SEGMENT)
-        } else {
-            self.b
-        };
+        self.next = next;
     }
 }
 
 // no filter: the integrators keep their state, nothing comes out (a voice outside its a..b)
 const FROZEN: [f32; 6] = [0.0; 6];
+// the step of coefficients that stay (LaneCoefs::still)
+const STILL: [f32; 6] = [-0.0; 6];
 
 fn constant(out: &mut [f32; 6], value: f64) -> f64 {
     *out = [0.0, 0.0, 0.0, value as f32, 0.0, 0.0];
@@ -1054,8 +1123,8 @@ fn run_frozen(fade: &mut Fade, a: usize, b: usize, left: &mut [f32], right: &mut
     match fade.kind {
         Kind::Web(_) => {
             let [mut ic1, mut ic2] = web_lanes(fade.web_state);
-            let c = fade.web.map(F32x4::splat);
-            web_span(&c, &mut ic1, &mut ic2, a, b, left, right);
+            let mut c = fade.web.map(F32x4::splat);
+            web_span(&mut c, None, &mut ic1, &mut ic2, a, b, left, right);
             fade.web_state = web_state_of(ic1, ic2);
         }
         Kind::Model(ty) => {
@@ -1089,14 +1158,37 @@ fn transpose([a, b, c, d]: [F32x4; 4]) -> [F32x4; 4] {
 // four samples of the lanes turned into the lanes of each sample and back (no sample goes in and out lane by lane),
 // the refresh at its first one (no branch a sample); each sample the operations of `tick` alone
 #[inline(always)]
-fn group(layout: Layout, c: &LaneCoefs, state: &mut LaneState, rows: [F32x4; 4]) -> [F32x4; 4] {
+fn group(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: Option<&LaneCoefs>,
+    state: &mut LaneState,
+    rows: [F32x4; 4],
+) -> [F32x4; 4] {
     let x = transpose(rows);
     transpose([
-        filter_model::tick(layout, c, state, x[0], true),
-        filter_model::tick(layout, c, state, x[1], false),
-        filter_model::tick(layout, c, state, x[2], false),
-        filter_model::tick(layout, c, state, x[3], false),
+        sample(layout, c, d, state, x[0], true),
+        sample(layout, c, d, state, x[1], false),
+        sample(layout, c, d, state, x[2], false),
+        sample(layout, c, d, state, x[3], false),
     ])
+}
+
+// a sample of the lanes through the sections of a layout (filter_model::tick), their coefficients a step on before
+// it at a refresh in a span that is a line (`d`: the step a refresh)
+#[inline(always)]
+fn sample(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: Option<&LaneCoefs>,
+    state: &mut LaneState,
+    x: F32x4,
+    refresh: bool,
+) -> F32x4 {
+    if let (Some(d), true) = (d, refresh) {
+        c.advance(layout, d);
+    }
+    filter_model::tick(layout, c, state, x, refresh)
 }
 const _: () = assert!(REFRESH == 4);
 
@@ -1105,24 +1197,85 @@ const _: () = assert!(REFRESH == 4);
 #[inline(always)]
 fn groups(
     layout: Layout,
-    c: &[LaneCoefs; 2],
+    [c0, c1]: &mut [LaneCoefs; 2],
+    d: Option<&[LaneCoefs; 2]>,
     first: &mut LaneState,
     second: &mut LaneState,
     rows: [[F32x4; 4]; 2],
 ) -> [[F32x4; 4]; 2] {
+    let (d0, d1) = (d.map(|d| &d[0]), d.map(|d| &d[1]));
     let (x, z) = (transpose(rows[0]), transpose(rows[1]));
-    let y0 = filter_model::tick(layout, &c[0], first, x[0], true);
-    let w0 = filter_model::tick(layout, &c[1], second, z[0], true);
-    let y1 = filter_model::tick(layout, &c[0], first, x[1], false);
-    let w1 = filter_model::tick(layout, &c[1], second, z[1], false);
-    let y2 = filter_model::tick(layout, &c[0], first, x[2], false);
-    let w2 = filter_model::tick(layout, &c[1], second, z[2], false);
-    let y3 = filter_model::tick(layout, &c[0], first, x[3], false);
-    let w3 = filter_model::tick(layout, &c[1], second, z[3], false);
+    let y0 = sample(layout, c0, d0, first, x[0], true);
+    let w0 = sample(layout, c1, d1, second, z[0], true);
+    let y1 = sample(layout, c0, d0, first, x[1], false);
+    let w1 = sample(layout, c1, d1, second, z[1], false);
+    let y2 = sample(layout, c0, d0, first, x[2], false);
+    let w2 = sample(layout, c1, d1, second, z[2], false);
+    let y3 = sample(layout, c0, d0, first, x[3], false);
+    let w3 = sample(layout, c1, d1, second, z[3], false);
     [transpose([y0, y1, y2, y3]), transpose([w0, w1, w2, w3])]
 }
 // (the spans of a pass that starts at 0 start at a refresh)
 const _: () = assert!(SEGMENT.is_multiple_of(REFRESH));
+
+// The coefficients `c` of the lanes of two voices for the samples from here on, where the span of each one that
+// `stepped` starts, and whether a span of theirs is a line. None is: those of their knobs, as they were held before
+// the lines. One is: a voice whose span is a line goes on from where its coefficients are (`c`; before the first
+// span of a pass those of the block before: `before`), a step `d` a refresh to those of its knobs (LaneCoefs::steer);
+// another that stepped has those of its knobs, still; one that did not goes on along its line (one function for a
+// voice alone, a pair and the pairs of a group: in each of them it would be a fifth of the core)
+#[inline(never)]
+fn take_spans(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &mut LaneCoefs,
+    [p, q]: [&Pass; 2],
+    stepped: [bool; 2],
+) -> bool {
+    let (ramps, slots) = ([p.ramps(), q.ramps()], [p.model(), q.model()]);
+    let to = LaneCoefs::of(&slots[0].coefs, &slots[1].coefs);
+    if !ramps[0] && !ramps[1] {
+        // (still: next to lanes that are on a line, a pair of a group, they step by nothing)
+        (*c, *d) = (to, LaneCoefs::still());
+        return false;
+    }
+    let jumps = [stepped[0] && !ramps[0], stepped[1] && !ramps[1]];
+    if jumps[0] || jumps[1] {
+        *c = to.pick(c, halves_of(jumps));
+    }
+    let ramping = [stepped[0] && ramps[0], stepped[1] && ramps[1]];
+    let inv = F32x4::new(slots[0].inv, slots[0].inv, slots[1].inv, slots[1].inv);
+    c.steer(d, &to, layout, inv, halves_of(ramping), halves_of(stepped));
+    true
+}
+
+// `take_spans` where a knob of one of the voices moves; no knob does: no span is a line, their coefficients as they
+// were held before the lines (nothing more a block)
+#[inline(always)]
+fn spans(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &mut LaneCoefs,
+    [p, q]: [&Pass; 2],
+    stepped: [bool; 2],
+) -> bool {
+    if p.moving || q.moving {
+        return take_spans(layout, c, d, [p, q], stepped);
+    }
+    *c = LaneCoefs::of(&p.model().coefs, &q.model().coefs);
+    false
+}
+
+// the coefficients of the lanes of two voices before the first spans of their passes (`take_spans`): those the block
+// before left them at, where a knob of one moves (else no span is a line: nothing reads them)
+#[inline(always)]
+fn before(p: &Pass, q: &Pass) -> LaneCoefs {
+    if p.moving || q.moving {
+        LaneCoefs::of(&p.model().coefs, &q.model().coefs)
+    } else {
+        LaneCoefs::default()
+    }
+}
 
 // the samples a..b of a voice alone (lanes 0 and 1) through the sections of a layout
 #[inline(never)]
@@ -1151,22 +1304,126 @@ fn model_span(
     end_span(layout, c, lanes, last);
 }
 
+// the same of a span that is a line: its coefficients from `c` on, a step `d` a refresh
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn model_line(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &LaneCoefs,
+    lanes: &mut LaneState,
+    a: usize,
+    b: usize,
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    line_samples(layout, c, d, lanes, a, b, left, right);
+}
+
+// whether the sections of a layout are the plain ones: no curve of Drive, no FAT, no saturation (the clip of a
+// ladder is of its saturation: none without it)
+fn plain(layout: Layout) -> bool {
+    !(layout.drive || layout.fat || layout.sat || layout.sat2)
+}
+
+// `model_line` of plain sections (`plain`: the types of Normal under Res 40 % without Drive and FAT, the EQ types), the
+// same operations: a loop without the coefficients and the state of the others (with them a span keeps more than
+// the registers hold)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn model_line_plain(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &LaneCoefs,
+    lanes: &mut LaneState,
+    a: usize,
+    b: usize,
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    // (what a plain layout has not, written out: its loop is compiled without the rest)
+    let layout = Layout {
+        drive: false,
+        fat: false,
+        sat: false,
+        sat2: false,
+        clip: false,
+        ..layout
+    };
+    line_samples(layout, c, d, lanes, a, b, left, right);
+}
+
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn line_samples(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &LaneCoefs,
+    lanes: &mut LaneState,
+    a: usize,
+    b: usize,
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    let last = (b > a).then(|| F32x4::new(left[b - 1], right[b - 1], left[b - 1], right[b - 1]));
+    let (left, right) = (&mut left[..b], &mut right[..b]);
+    // (the state and the coefficients of the span in locals)
+    let (mut state, mut now) = (*lanes, *c);
+    let mut i = a;
+    while i < b {
+        // from a refresh on a whole group (`group`: its samples one by one), as two voices in the lanes run; else
+        // (the samples up to the first refresh, the last ones) one by one
+        if i.is_multiple_of(REFRESH) && i + REFRESH <= b {
+            let (l, r) = (
+                F32x4::load(&left[i..i + REFRESH]),
+                F32x4::load(&right[i..i + REFRESH]),
+            );
+            let y = group(layout, &mut now, Some(d), &mut state, [l, r, l, r]);
+            y[0].store(&mut left[i..i + REFRESH]);
+            y[1].store(&mut right[i..i + REFRESH]);
+            i += REFRESH;
+            continue;
+        }
+        let x = F32x4::new(left[i], right[i], left[i], right[i]);
+        let y = sample(
+            layout,
+            &mut now,
+            Some(d),
+            &mut state,
+            x,
+            i.is_multiple_of(REFRESH),
+        )
+        .lanes();
+        left[i] = y[0];
+        right[i] = y[1];
+        i += 1;
+    }
+    (*lanes, *c) = (state, now);
+    end_span(layout, c, lanes, last);
+}
+
 #[inline(never)]
 fn run_alone(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
     if let Some(layout) = pass.layout {
         let state = pass.model().state;
         let mut lanes = lanes_of(&state, &state);
+        let (mut c, mut d) = (before(pass, pass), LaneCoefs::still());
         let mut s = pass.a;
         while s < pass.b {
             pass.step(s);
             let fresh = pass.take_fresh();
             let e = pass.next;
-            let coefs = &pass.model().coefs;
-            let c = LaneCoefs::of(coefs, coefs);
+            let line = spans(layout, &mut c, &mut d, [pass, pass], [true; 2]);
             if fresh {
                 filter_model::keep_steps(&c, &mut lanes);
             }
-            model_span(layout, &c, &mut lanes, s, e, left, right);
+            if line && plain(layout) {
+                model_line_plain(layout, &mut c, &d, &mut lanes, s, e, left, right);
+            } else if line {
+                model_line(layout, &mut c, &d, &mut lanes, s, e, left, right);
+            } else {
+                model_span(layout, &c, &mut lanes, s, e, left, right);
+            }
             // (the tail of a filter decays: no denormals in its state)
             lanes.flush();
             s = e;
@@ -1176,13 +1433,19 @@ fn run_alone(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
         }
         return;
     }
-    let [mut ic1, mut ic2] = web_lanes(pass.web().0);
+    let [mut ic1, mut ic2] = web_lanes(pass.web());
     let mut s = pass.a;
     while s < pass.b {
         pass.step(s);
         let e = pass.next;
-        let c = pass.web().1.map(F32x4::splat);
-        web_span(&c, &mut ic1, &mut ic2, s, e, left, right);
+        let (from, step) = pass.web_line();
+        let mut c = from.map(F32x4::splat);
+        if pass.ramps() {
+            let d = step.map(F32x4::splat);
+            web_span(&mut c, Some(&d), &mut ic1, &mut ic2, s, e, left, right);
+        } else {
+            web_span(&mut c, None, &mut ic1, &mut ic2, s, e, left, right);
+        }
         s = e;
     }
     if let Engine::Web { state, .. } = &mut pass.engine {
@@ -1202,11 +1465,23 @@ fn web_state_of(ic1: F32x4, ic2: F32x4) -> [f32; 4] {
     [ic1[0], ic1[1], ic2[0], ic2[1]]
 }
 
-// the samples s..e of a voice alone through a filter of a BiquadFilterNode, its integrators flushed after them (the
+// the coefficients of a filter of a BiquadFilterNode a step on in a span that is a line (`d`: the step a sample)
+#[inline(always)]
+fn web_advance(c: &mut [F32x4; 6], d: Option<&[F32x4; 6]>) {
+    if let Some(d) = d {
+        for k in 0..6 {
+            c[k] = c[k] + d[k];
+        }
+    }
+}
+
+// the samples s..e of a voice alone through a filter of a BiquadFilterNode (its coefficients from `c`, in a span that
+// is a line a step `d` a sample), its integrators flushed after them (the
 // tail of a filter decays: no denormals in its state)
 #[inline(always)]
 fn web_span(
-    c: &[F32x4; 6],
+    c: &mut [F32x4; 6],
+    d: Option<&[F32x4; 6]>,
     ic1: &mut F32x4,
     ic2: &mut F32x4,
     s: usize,
@@ -1218,6 +1493,7 @@ fn web_span(
     // (the integrators in locals, as `model_span` keeps its state)
     let (mut x1, mut x2) = (*ic1, *ic2);
     for i in s..e {
+        web_advance(c, d);
         let y = tick(c, &mut x1, &mut x2, F32x4::new(left[i], right[i], 0.0, 0.0)).lanes();
         left[i] = y[0];
         right[i] = y[1];
@@ -1246,10 +1522,12 @@ pub fn run_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
 }
 
 /// The channels of some voices of `n` samples through their filters, in place, each the bits of `run`. Three or
-/// four of one layout of sections that play their whole block: two pairs of lanes in one loop (`run_model_group`);
-/// the others in pairs (`run_pair`), the last of three alone
+/// four of one layout of sections that play their whole block (of whole groups of REFRESH): two pairs of lanes in one
+/// loop (`run_model_group`); the others in pairs (`run_pair`), the last of three alone
 pub fn run_group(passes: &mut [Pass], outs: &mut [[&mut [f32]; 2]], n: usize) {
-    if passes.len() > 2 && n > 0 {
+    // (a block of whole groups of REFRESH, as every block of a node is: every span of the group starts at a refresh,
+    // the loop of the group has no sample alone)
+    if passes.len() > 2 && n > 0 && n.is_multiple_of(REFRESH) {
         let layout = passes[0].layout;
         let whole = |pass: &Pass| pass.fade.is_none() && pass.a == 0 && pass.b == n && pass.layout == layout;
         if let (Some(layout), true) = (layout, passes.iter().all(whole)) {
@@ -1279,23 +1557,76 @@ pub fn interleaves(layout: Layout, moving: bool) -> bool {
 
 // Three or four voices of one layout over their whole block: the first two in the lanes of one filter, the others in
 // those of a second one (the third of three in both halves of its lanes), a sample of each in turn (`groups`). Each
-// voice the operations of `run_model_pair`: its spans, its state flushed where its own span ends
+// voice the operations of `run_model_pair`: its spans, its state flushed where its own span ends; with lines where a
+// knob of one moves (`line_group`), else the coefficients of the spans as they are (`still_group`)
 #[inline(never)]
 fn run_model_group(layout: Layout, passes: &mut [Pass], outs: &mut [[&mut [f32]; 2]], n: usize) {
-    let count = passes.len();
-    // the channels of each voice (the fourth: none of three)
+    if passes.iter().any(|pass| pass.moving) {
+        line_group(layout, passes, outs, n);
+    } else {
+        still_group(layout, passes, outs, n);
+    }
+}
+
+// the channels of each voice of a group (of the fourth: none of three) over the n samples of a block
+type GroupOuts<'a> = (GroupChannels<'a>, Option<(&'a mut [f32], &'a mut [f32])>);
+fn group_outs<'a>(outs: &'a mut [[&mut [f32]; 2]], n: usize) -> Option<GroupOuts<'a>> {
     let (head, tail) = outs.split_at_mut(2);
     let ([[al, ar], [bl, br]], Some(([cl, cr], fourth))) = (head, tail.split_first_mut()) else {
-        return;
+        return None;
     };
-    let (al, ar, bl, br) = (&mut al[..n], &mut ar[..n], &mut bl[..n], &mut br[..n]);
-    let (cl, cr) = (&mut cl[..n], &mut cr[..n]);
-    let mut fourth = match fourth {
+    let fourth = match fourth {
         [[dl, dr]] => Some((&mut dl[..n], &mut dr[..n])),
         _ => None,
     };
-    // the voice of each half of the lanes of a pair
-    let voices = |pair: usize| [2 * pair, (2 * pair + 1).min(count - 1)];
+    Some((
+        (
+            &mut al[..n],
+            &mut ar[..n],
+            &mut bl[..n],
+            &mut br[..n],
+            &mut cl[..n],
+            &mut cr[..n],
+        ),
+        fourth,
+    ))
+}
+
+// the voices of the halves of the lanes of each pair of a group of `count`
+fn group_voices(count: usize, pair: usize) -> [usize; 2] {
+    [2 * pair, (2 * pair + 1).min(count - 1)]
+}
+
+// the last sample of a span s..e of each pair of a group (the input the state of Drive takes after it: `end_span`)
+fn group_last(channels: &GroupChannels, fourth: &Option<(&mut [f32], &mut [f32])>, e: usize) -> [F32x4; 2] {
+    let (al, ar, bl, br, cl, cr) = channels;
+    let at = e - 1;
+    [
+        F32x4::new(al[at], ar[at], bl[at], br[at]),
+        match fourth {
+            Some((dl, dr)) => F32x4::new(cl[at], cr[at], dl[at], dr[at]),
+            None => F32x4::new(cl[at], cr[at], cl[at], cr[at]),
+        },
+    ]
+}
+
+// the state of the voices of a group back into their slots
+fn group_states(passes: &mut [Pass], lanes: &[LaneState; 2]) {
+    for (voice, pass) in passes.iter_mut().enumerate() {
+        if let Engine::Model { slot, .. } = &mut pass.engine {
+            slot.state = channels_of(&lanes[voice / 2], voice % 2);
+        }
+    }
+}
+
+// a group no knob of which moves: the coefficients of each span in locals of the span (`still_pair`)
+#[inline(never)]
+fn still_group(layout: Layout, passes: &mut [Pass], outs: &mut [[&mut [f32]; 2]], n: usize) {
+    let count = passes.len();
+    let Some((mut channels, mut fourth)) = group_outs(outs, n) else {
+        return;
+    };
+    let voices = |pair: usize| group_voices(count, pair);
     let mut lanes: [LaneState; 2] = core::array::from_fn(|pair| {
         let [p, q] = voices(pair);
         lanes_of(&passes[p].model().state, &passes[q].model().state)
@@ -1311,86 +1642,159 @@ fn run_model_group(layout: Layout, passes: &mut [Pass], outs: &mut [[&mut [f32];
             }
             e = e.min(pass.next);
         }
-        let c: [LaneCoefs; 2] = core::array::from_fn(|pair| {
+        let mut c: [LaneCoefs; 2] = core::array::from_fn(|pair| {
             let [p, q] = voices(pair);
             LaneCoefs::of(&passes[p].model().coefs, &passes[q].model().coefs)
         });
         for (pair, lanes) in lanes.iter_mut().enumerate() {
             fresh_steps(&c[pair], lanes, voices(pair).map(|voice| fresh[voice]));
         }
-        let at = e - 1;
-        let last = [
-            F32x4::new(al[at], ar[at], bl[at], br[at]),
-            match &fourth {
-                Some((dl, dr)) => F32x4::new(cl[at], cr[at], dl[at], dr[at]),
-                None => F32x4::new(cl[at], cr[at], cl[at], cr[at]),
-            },
-        ];
-        // (the state of the span in locals, as `run_model_pair` keeps it)
-        let [mut first, mut second] = lanes;
-        let mut i = s;
-        while i + REFRESH <= e {
-            let to = i + REFRESH;
-            let (third_l, third_r) = (F32x4::load(&cl[i..to]), F32x4::load(&cr[i..to]));
-            let (fourth_l, fourth_r) = match &fourth {
-                Some((dl, dr)) => (F32x4::load(&dl[i..to]), F32x4::load(&dr[i..to])),
-                None => (third_l, third_r),
-            };
-            let rows = [
-                [
-                    F32x4::load(&al[i..to]),
-                    F32x4::load(&ar[i..to]),
-                    F32x4::load(&bl[i..to]),
-                    F32x4::load(&br[i..to]),
-                ],
-                [third_l, third_r, fourth_l, fourth_r],
-            ];
-            let [y, z] = groups(layout, &c, &mut first, &mut second, rows);
-            y[0].store(&mut al[i..to]);
-            y[1].store(&mut ar[i..to]);
-            y[2].store(&mut bl[i..to]);
-            y[3].store(&mut br[i..to]);
-            z[0].store(&mut cl[i..to]);
-            z[1].store(&mut cr[i..to]);
-            if let Some((dl, dr)) = &mut fourth {
-                z[2].store(&mut dl[i..to]);
-                z[3].store(&mut dr[i..to]);
-            }
-            i = to;
-        }
-        // (the last samples of a block that is not of whole groups)
-        while i < e {
-            let refresh = i.is_multiple_of(REFRESH);
-            let x = F32x4::new(al[i], ar[i], bl[i], br[i]);
-            let z = match &fourth {
-                Some((dl, dr)) => F32x4::new(cl[i], cr[i], dl[i], dr[i]),
-                None => F32x4::new(cl[i], cr[i], cl[i], cr[i]),
-            };
-            let y = filter_model::tick(layout, &c[0], &mut first, x, refresh).lanes();
-            let w = filter_model::tick(layout, &c[1], &mut second, z, refresh).lanes();
-            (al[i], ar[i], bl[i], br[i]) = (y[0], y[1], y[2], y[3]);
-            (cl[i], cr[i]) = (w[0], w[1]);
-            if let Some((dl, dr)) = &mut fourth {
-                (dl[i], dr[i]) = (w[2], w[3]);
-            }
-            i += 1;
-        }
-        lanes = [first, second];
+        let last = group_last(&channels, &fourth, e);
+        let rest = fourth.as_mut().map(|(dl, dr)| (&mut **dl, &mut **dr));
+        group_samples(layout, &mut c, None, &mut lanes, s, e, &mut channels, rest);
         for (pair, lanes) in lanes.iter_mut().enumerate() {
             end_span(layout, &c[pair], lanes, Some(last[pair]));
             flush_halves(lanes, voices(pair).map(|voice| e == passes[voice].next));
         }
         s = e;
     }
-    for (voice, pass) in passes.iter_mut().enumerate() {
-        if let Engine::Model { slot, .. } = &mut pass.engine {
-            slot.state = channels_of(&lanes[voice / 2], voice % 2);
+    group_states(passes, &lanes);
+}
+
+// a group a knob of which moves: the coefficients of the lanes as a span that is a line left them (a voice goes on
+// along its line where the span of another ends) a step `d` on at every refresh (-0 of a span that is no line: the
+// bits of no step; a pair no knob of which moves keeps the -0 of `still`, its coefficients those of its spans)
+#[inline(never)]
+fn line_group(layout: Layout, passes: &mut [Pass], outs: &mut [[&mut [f32]; 2]], n: usize) {
+    let count = passes.len();
+    let Some((mut channels, mut fourth)) = group_outs(outs, n) else {
+        return;
+    };
+    let voices = |pair: usize| group_voices(count, pair);
+    let mut lanes: [LaneState; 2] = core::array::from_fn(|pair| {
+        let [p, q] = voices(pair);
+        lanes_of(&passes[p].model().state, &passes[q].model().state)
+    });
+    let mut c: [LaneCoefs; 2] = core::array::from_fn(|pair| {
+        let [p, q] = voices(pair);
+        before(&passes[p], &passes[q])
+    });
+    let mut d = [LaneCoefs::still(); 2];
+    let mut s = 0;
+    while s < n {
+        let mut e = n;
+        let mut fresh = [false; 4];
+        let mut stepped = [false; 4];
+        for (voice, pass) in passes.iter_mut().enumerate() {
+            if s == pass.next {
+                pass.step(s);
+                fresh[voice] = pass.take_fresh();
+                stepped[voice] = true;
+            }
+            e = e.min(pass.next);
         }
+        for pair in 0..2 {
+            let [p, q] = voices(pair);
+            let pair_stepped = [stepped[p], stepped[q]];
+            spans(
+                layout,
+                &mut c[pair],
+                &mut d[pair],
+                [&passes[p], &passes[q]],
+                pair_stepped,
+            );
+        }
+        for (pair, lanes) in lanes.iter_mut().enumerate() {
+            fresh_steps(&c[pair], lanes, voices(pair).map(|voice| fresh[voice]));
+        }
+        let last = group_last(&channels, &fourth, e);
+        let rest = fourth.as_mut().map(|(dl, dr)| (&mut **dl, &mut **dr));
+        group_samples(layout, &mut c, Some(&d), &mut lanes, s, e, &mut channels, rest);
+        for (pair, lanes) in lanes.iter_mut().enumerate() {
+            end_span(layout, &c[pair], lanes, Some(last[pair]));
+            flush_halves(lanes, voices(pair).map(|voice| e == passes[voice].next));
+        }
+        s = e;
+    }
+    group_states(passes, &lanes);
+}
+
+// the channels of three or four voices in a group
+type GroupChannels<'a> = (
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+    &'a mut [f32],
+);
+
+// the samples s..e of a group: the two pairs in turn (`groups`), their coefficients a step `d` on at every refresh
+// (None: they stay)
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn group_samples(
+    layout: Layout,
+    c: &mut [LaneCoefs; 2],
+    d: Option<&[LaneCoefs; 2]>,
+    lanes: &mut [LaneState; 2],
+    s: usize,
+    e: usize,
+    (al, ar, bl, br, cl, cr): &mut GroupChannels,
+    mut fourth: Option<(&mut [f32], &mut [f32])>,
+) {
+    // (the state of the span in locals, as `run_model_pair` keeps it)
+    let [mut first, mut second] = *lanes;
+    let mut i = s;
+    while i + REFRESH <= e {
+        let to = i + REFRESH;
+        let (third_l, third_r) = (F32x4::load(&cl[i..to]), F32x4::load(&cr[i..to]));
+        let (fourth_l, fourth_r) = match &fourth {
+            Some((dl, dr)) => (F32x4::load(&dl[i..to]), F32x4::load(&dr[i..to])),
+            None => (third_l, third_r),
+        };
+        let rows = [
+            [
+                F32x4::load(&al[i..to]),
+                F32x4::load(&ar[i..to]),
+                F32x4::load(&bl[i..to]),
+                F32x4::load(&br[i..to]),
+            ],
+            [third_l, third_r, fourth_l, fourth_r],
+        ];
+        let [y, z] = groups(layout, c, d, &mut first, &mut second, rows);
+        y[0].store(&mut al[i..to]);
+        y[1].store(&mut ar[i..to]);
+        y[2].store(&mut bl[i..to]);
+        y[3].store(&mut br[i..to]);
+        z[0].store(&mut cl[i..to]);
+        z[1].store(&mut cr[i..to]);
+        if let Some((dl, dr)) = &mut fourth {
+            z[2].store(&mut dl[i..to]);
+            z[3].store(&mut dr[i..to]);
+        }
+        i = to;
+    }
+    // (spans of whole groups: `run_group`)
+    debug_assert_eq!(i, e);
+    *lanes = [first, second];
+}
+
+// two voices of a layout: where a knob of one moves `line_pair`, else `still_pair`
+#[inline(never)]
+fn run_model_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
+    if passes[0].moving || passes[1].moving {
+        line_pair(layout, passes, outs, n);
+    } else {
+        still_pair(layout, passes, outs, n);
     }
 }
 
+// Two voices no knob of which moves: the coefficients of each span in locals of the span. A function of its own, not
+// the lines' with no step: there the coefficients live over the block, in memory the calls around take, and the loop
+// read them from there (a chord at rest 3 % slower)
 #[inline(never)]
-fn run_model_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
+fn still_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
     let [p, q] = passes;
     let [[pl, pr], [ql, qr]] = outs;
     let (pl, pr, ql, qr) = (&mut pl[..n], &mut pr[..n], &mut ql[..n], &mut qr[..n]);
@@ -1408,53 +1812,24 @@ fn run_model_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]
         }
         let e = n.min(p.next).min(q.next);
         if p.active || q.active {
-            let c = LaneCoefs::of(&p.model().coefs, &q.model().coefs);
+            let mut c = LaneCoefs::of(&p.model().coefs, &q.model().coefs);
             fresh_steps(&c, &mut lanes, fresh);
             // (a voice outside its span takes no input and keeps its state: its lanes run on zeros, then its
             // state of before; its outputs are left as they are)
             let (on_p, on_q) = (p.active, q.active);
             let kept = (!on_p || !on_q).then_some(lanes);
             let last = F32x4::new(pl[e - 1], pr[e - 1], ql[e - 1], qr[e - 1]);
-            // (the state of the span in locals: in `lanes`, whose address the calls around take, every sample
-            // would load and store it)
-            let mut state = lanes;
-            let mut i = s;
-            while i < e {
-                // both voices from a refresh on: a whole group; else (the samples up to the first refresh, the last
-                // ones, one voice of the two) one by one
-                if on_p && on_q && i.is_multiple_of(REFRESH) && i + REFRESH <= e {
-                    let rows = [
-                        F32x4::load(&pl[i..i + REFRESH]),
-                        F32x4::load(&pr[i..i + REFRESH]),
-                        F32x4::load(&ql[i..i + REFRESH]),
-                        F32x4::load(&qr[i..i + REFRESH]),
-                    ];
-                    let y = group(layout, &c, &mut state, rows);
-                    y[0].store(&mut pl[i..i + REFRESH]);
-                    y[1].store(&mut pr[i..i + REFRESH]);
-                    y[2].store(&mut ql[i..i + REFRESH]);
-                    y[3].store(&mut qr[i..i + REFRESH]);
-                    i += REFRESH;
-                    continue;
-                }
-                let x = F32x4::new(
-                    if on_p { pl[i] } else { 0.0 },
-                    if on_p { pr[i] } else { 0.0 },
-                    if on_q { ql[i] } else { 0.0 },
-                    if on_q { qr[i] } else { 0.0 },
-                );
-                let y = filter_model::tick(layout, &c, &mut state, x, i.is_multiple_of(REFRESH)).lanes();
-                if on_p {
-                    pl[i] = y[0];
-                    pr[i] = y[1];
-                }
-                if on_q {
-                    ql[i] = y[2];
-                    qr[i] = y[3];
-                }
-                i += 1;
-            }
-            lanes = state;
+            let mut channels = (&mut *pl, &mut *pr, &mut *ql, &mut *qr);
+            pair_samples(
+                layout,
+                &mut c,
+                None,
+                &mut lanes,
+                s,
+                e,
+                [on_p, on_q],
+                &mut channels,
+            );
             end_span(layout, &c, &mut lanes, Some(last));
             if let Some(kept) = kept {
                 // (the lanes of the voice that played, the others as they were)
@@ -1465,12 +1840,125 @@ fn run_model_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]
         }
         s = e;
     }
-    let halves = [channels_of(&lanes, 0), channels_of(&lanes, 1)];
-    for (pass, half) in [p, q].into_iter().zip(halves) {
+    pair_states([p, q], &lanes);
+}
+
+// Two voices a knob of one of which moves: the coefficients of the lanes as a span that is a line left them (a voice
+// goes on along its line where the span of the other ends) a step `d` on at every refresh, -0 of a span that is no
+// line (the bits of no step)
+#[inline(never)]
+fn line_pair(layout: Layout, passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
+    let [p, q] = passes;
+    let [[pl, pr], [ql, qr]] = outs;
+    let (pl, pr, ql, qr) = (&mut pl[..n], &mut pr[..n], &mut ql[..n], &mut qr[..n]);
+    let mut lanes = lanes_of(&p.model().state, &q.model().state);
+    let (mut c, mut d) = (before(p, q), LaneCoefs::still());
+    let mut s = 0;
+    while s < n {
+        let mut fresh = [false; 2];
+        let mut stepped = [false; 2];
+        if s == p.next {
+            p.step(s);
+            fresh[0] = p.take_fresh();
+            stepped[0] = true;
+        }
+        if s == q.next {
+            q.step(s);
+            fresh[1] = q.take_fresh();
+            stepped[1] = true;
+        }
+        let e = n.min(p.next).min(q.next);
+        if p.active || q.active {
+            take_spans(layout, &mut c, &mut d, [p, q], stepped);
+            fresh_steps(&c, &mut lanes, fresh);
+            let (on_p, on_q) = (p.active, q.active);
+            let kept = (!on_p || !on_q).then_some(lanes);
+            let last = F32x4::new(pl[e - 1], pr[e - 1], ql[e - 1], qr[e - 1]);
+            let mut channels = (&mut *pl, &mut *pr, &mut *ql, &mut *qr);
+            pair_samples(
+                layout,
+                &mut c,
+                Some(&d),
+                &mut lanes,
+                s,
+                e,
+                [on_p, on_q],
+                &mut channels,
+            );
+            end_span(layout, &c, &mut lanes, Some(last));
+            if let Some(kept) = kept {
+                lanes = lanes.pick(&kept, halves_of([on_p, on_q]));
+            }
+            flush_halves(&mut lanes, [p.active && e == p.next, q.active && e == q.next]);
+        }
+        s = e;
+    }
+    pair_states([p, q], &lanes);
+}
+
+// the state of the voices of a pair back into their slots
+fn pair_states(passes: [&mut Pass; 2], lanes: &LaneState) {
+    for (half, pass) in passes.into_iter().enumerate() {
         if let Engine::Model { slot, .. } = &mut pass.engine {
-            slot.state = half;
+            slot.state = channels_of(lanes, half);
         }
     }
+}
+
+// the samples s..e of two voices in the lanes (`on`: whether each plays there), their coefficients a step `d` on at
+// every refresh (None: they stay)
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn pair_samples(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: Option<&LaneCoefs>,
+    lanes: &mut LaneState,
+    s: usize,
+    e: usize,
+    [on_p, on_q]: [bool; 2],
+    (pl, pr, ql, qr): &mut (&mut [f32], &mut [f32], &mut [f32], &mut [f32]),
+) {
+    // (the state of the span in locals: in `lanes`, whose address the calls around take, every sample
+    // would load and store it)
+    let mut state = *lanes;
+    let mut i = s;
+    while i < e {
+        // both voices from a refresh on: a whole group; else (the samples up to the first refresh, the last
+        // ones, one voice of the two) one by one
+        if on_p && on_q && i.is_multiple_of(REFRESH) && i + REFRESH <= e {
+            let rows = [
+                F32x4::load(&pl[i..i + REFRESH]),
+                F32x4::load(&pr[i..i + REFRESH]),
+                F32x4::load(&ql[i..i + REFRESH]),
+                F32x4::load(&qr[i..i + REFRESH]),
+            ];
+            let y = group(layout, c, d, &mut state, rows);
+            y[0].store(&mut pl[i..i + REFRESH]);
+            y[1].store(&mut pr[i..i + REFRESH]);
+            y[2].store(&mut ql[i..i + REFRESH]);
+            y[3].store(&mut qr[i..i + REFRESH]);
+            i += REFRESH;
+            continue;
+        }
+        let x = F32x4::new(
+            if on_p { pl[i] } else { 0.0 },
+            if on_p { pr[i] } else { 0.0 },
+            if on_q { ql[i] } else { 0.0 },
+            if on_q { qr[i] } else { 0.0 },
+        );
+        let y = sample(layout, c, d, &mut state, x, i.is_multiple_of(REFRESH)).lanes();
+        if on_p {
+            pl[i] = y[0];
+            pr[i] = y[1];
+        }
+        if on_q {
+            ql[i] = y[2];
+            qr[i] = y[3];
+        }
+        i += 1;
+    }
+    *lanes = state;
 }
 
 // the steps of the small signal in the saturating sections of the voices of the lanes that are fresh (`fresh` of each
@@ -1511,53 +1999,95 @@ fn halves_of([p, q]: [bool; 2]) -> U32x4 {
     U32x4::new(all(p), all(p), all(q), all(q))
 }
 
+// the samples s..e of two voices of a BiquadFilterNode in the lanes (`on`: whether each plays there), their
+// coefficients a step `d` on a sample in a span that is a line
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn web_pair_samples(
+    c: &mut [F32x4; 6],
+    d: Option<&[F32x4; 6]>,
+    ic1: &mut F32x4,
+    ic2: &mut F32x4,
+    s: usize,
+    e: usize,
+    on: [bool; 2],
+    (pl, pr, ql, qr): &mut (&mut [f32], &mut [f32], &mut [f32], &mut [f32]),
+) {
+    match on {
+        [true, true] => {
+            for i in s..e {
+                web_advance(c, d);
+                let x = F32x4::new(pl[i], pr[i], ql[i], qr[i]);
+                let y = tick(c, ic1, ic2, x).lanes();
+                pl[i] = y[0];
+                pr[i] = y[1];
+                ql[i] = y[2];
+                qr[i] = y[3];
+            }
+        }
+        [true, false] => {
+            for i in s..e {
+                web_advance(c, d);
+                let x = F32x4::new(pl[i], pr[i], 0.0, 0.0);
+                let y = tick(c, ic1, ic2, x).lanes();
+                pl[i] = y[0];
+                pr[i] = y[1];
+            }
+        }
+        _ => {
+            for i in s..e {
+                web_advance(c, d);
+                let x = F32x4::new(0.0, 0.0, ql[i], qr[i]);
+                let y = tick(c, ic1, ic2, x).lanes();
+                ql[i] = y[2];
+                qr[i] = y[3];
+            }
+        }
+    }
+}
+
 #[inline(never)]
 fn run_web_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
     let [p, q] = passes;
     let [[pl, pr], [ql, qr]] = outs;
     let (pl, pr, ql, qr) = (&mut pl[..n], &mut pr[..n], &mut ql[..n], &mut qr[..n]);
-    let (ps, qs) = (p.web().0, q.web().0);
+    let (ps, qs) = (p.web(), q.web());
     let mut ic1 = F32x4::new(ps[0], ps[1], qs[0], qs[1]);
     let mut ic2 = F32x4::new(ps[2], ps[3], qs[2], qs[3]);
+    // the coefficients of the lanes as a span that is a line left them (a voice goes on along its line where the
+    // span of the other ends)
+    let mut c = [F32x4::splat(0.0); 6];
     let mut s = 0;
     while s < n {
+        let mut stepped = [false; 2];
         if s == p.next {
             p.step(s);
+            stepped[0] = true;
         }
         if s == q.next {
             q.step(s);
+            stepped[1] = true;
         }
         let e = n.min(p.next).min(q.next);
         if p.active || q.active {
-            let (cp, cq) = (p.web().1, q.web().1);
-            let c: [F32x4; 6] = core::array::from_fn(|k| F32x4::new(cp[k], cp[k], cq[k], cq[k]));
-            match (p.active, q.active) {
-                (true, true) => {
-                    for i in s..e {
-                        let x = F32x4::new(pl[i], pr[i], ql[i], qr[i]);
-                        let y = tick(&c, &mut ic1, &mut ic2, x).lanes();
-                        pl[i] = y[0];
-                        pr[i] = y[1];
-                        ql[i] = y[2];
-                        qr[i] = y[3];
-                    }
+            let line = p.ramps() || q.ramps();
+            let ((cp, dp), (cq, dq)) = (p.web_line(), q.web_line());
+            let mask = halves_of(stepped);
+            c = core::array::from_fn(|k| {
+                let starts = F32x4::new(cp[k], cp[k], cq[k], cq[k]);
+                if line {
+                    starts.or_else(mask, c[k])
+                } else {
+                    starts
                 }
-                (true, false) => {
-                    for i in s..e {
-                        let x = F32x4::new(pl[i], pr[i], 0.0, 0.0);
-                        let y = tick(&c, &mut ic1, &mut ic2, x).lanes();
-                        pl[i] = y[0];
-                        pr[i] = y[1];
-                    }
-                }
-                _ => {
-                    for i in s..e {
-                        let x = F32x4::new(0.0, 0.0, ql[i], qr[i]);
-                        let y = tick(&c, &mut ic1, &mut ic2, x).lanes();
-                        ql[i] = y[2];
-                        qr[i] = y[3];
-                    }
-                }
+            });
+            let on = [p.active, q.active];
+            let mut channels = (&mut *pl, &mut *pr, &mut *ql, &mut *qr);
+            if line {
+                let d: [F32x4; 6] = core::array::from_fn(|k| F32x4::new(dp[k], dp[k], dq[k], dq[k]));
+                web_pair_samples(&mut c, Some(&d), &mut ic1, &mut ic2, s, e, on, &mut channels);
+            } else {
+                web_pair_samples(&mut c, None, &mut ic1, &mut ic2, s, e, on, &mut channels);
             }
             // (the state of a voice is flushed where its own span ends, as `run` does: at the end of a span of
             // the other it would go to 0 a few samples sooner, other bits)
@@ -1976,10 +2506,340 @@ mod tests {
         }
     }
 
-    // the variation of an EQ type (the gain of its band) and of a one-pole is no FAT: no gain of 1 a sample, two of
-    // other variations of one type share the lanes
+    // the cutoff of a voice over the blocks of a test: a sweep that goes on from block to block
+    fn sweep(voice: usize, block: usize, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| 400.0 + 90.0 * voice as f32 + (3.0 + voice as f32) * (block * n + i) as f32)
+            .collect()
+    }
+
+    // A span whose cutoff moved goes to the coefficients of its knobs as a line (a step a refresh, a sample of a
+    // type of a BiquadFilterNode) from where the span before left them, over the blocks too; a voice next to it
+    // whose knobs are still plays the bits it plays alone, so does each voice on a line, however the spans of the
+    // other cut its own (voices that start late, blocks that are not of whole spans), the saturating sections too
+    // whose resonance moves with the cutoff (in pairs and in groups)
     #[test]
-    fn the_variation_of_an_eq_type_or_a_one_pole_is_no_fat() {
+    fn the_lines_of_voices_in_the_lanes_are_those_of_each_alone() {
+        let ladder = |ty: ModelType, resonance: f64| {
+            move |k: usize| model_of(ty, 900.0 + 100.0 * k as f32 as f64, resonance, 0.0, 0.0)
+        };
+        // (the filters, whose knobs move, whether their resonance moves too)
+        let cases: [(Vec<VoiceFilter>, Vec<bool>, bool); 9] = [
+            (
+                (0..4).map(ladder(ModelType::Ladder12, 30.0)).collect(),
+                vec![true, false, true, true],
+                false,
+            ),
+            (
+                (0..3).map(ladder(ModelType::Ladder12, 30.0)).collect(),
+                vec![false, true, false],
+                false,
+            ),
+            (
+                vec![
+                    model_of(ModelType::Low12, 700.0, 10.0, 0.0, 0.0),
+                    model_of(ModelType::Low12, 2000.0, 60.0, 0.0, 0.0),
+                ],
+                vec![true, false],
+                false,
+            ),
+            (
+                vec![
+                    model_of(ModelType::Low24, 700.0, 60.0, 30.0, 40.0),
+                    model_of(ModelType::Low24, 2000.0, 20.0, 30.0, 70.0),
+                ],
+                vec![false, true],
+                false,
+            ),
+            (
+                vec![
+                    model_of(ModelType::Low18, 700.0, 0.0, 0.0, 0.0),
+                    model_of(ModelType::High18, 1500.0, 0.0, 0.0, 0.0),
+                ],
+                vec![true, true],
+                false,
+            ),
+            (
+                vec![
+                    filter_of(FilterType::Lowpass, 700.0, 3.0, 0.0),
+                    filter_of(FilterType::Highpass, 1500.0, 6.0, 0.0),
+                ],
+                vec![true, false],
+                false,
+            ),
+            (
+                (0..4).map(ladder(ModelType::Ladder24, 60.0)).collect(),
+                vec![true, false, true, true],
+                true,
+            ),
+            (
+                (0..3).map(ladder(ModelType::Low24, 60.0)).collect(),
+                vec![false, true, true],
+                true,
+            ),
+            (
+                vec![
+                    model_of(ModelType::Low12, 700.0, 60.0, 0.0, 0.0),
+                    model_of(ModelType::Low12, 2000.0, 60.0, 0.0, 0.0),
+                ],
+                vec![true, false],
+                true,
+            ),
+        ];
+        let bits = |channel: &Vec<f32>| channel.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        for (filters, moving, resonant) in cases {
+            let count = filters.len();
+            let designs = Designs::default();
+            let (mut one, mut all) = (filters.clone(), filters);
+            // (the first voice starts late in the first block: its spans are not those of the others)
+            for (block, n) in [128, 128, 100, 128].into_iter().enumerate() {
+                let start = |k: usize| if block == 0 && k == 0 { 37 } else { 0 };
+                let cutoffs: Vec<Vec<f32>> = (0..count).map(|k| sweep(k, block, n)).collect();
+                // (from 45 % up: the layout of the voices whose resonance stays)
+                let resonances: Vec<Vec<f32>> = (0..count)
+                    .map(|k| {
+                        (0..n)
+                            .map(|i| 45.0 + 4.0 * k as f32 + 0.09 * (block * n + i) as f32)
+                            .collect()
+                    })
+                    .collect();
+                let moved = |k: usize| {
+                    [
+                        moving[k].then_some(cutoffs[k].as_slice()),
+                        (moving[k] && resonant).then_some(resonances[k].as_slice()),
+                        None,
+                        None,
+                        None,
+                    ]
+                };
+                let input: Vec<Vec<f32>> = (0..2 * count)
+                    .map(|k| {
+                        let mut channel = noise(n, (block * 16 + k) as u32 + 5);
+                        channel[..start(k / 2)].fill(0.0);
+                        channel
+                    })
+                    .collect();
+                let mut alone = input.clone();
+                for (k, filter) in one.iter_mut().enumerate() {
+                    let (left, right) = alone[2 * k..2 * k + 2].split_at_mut(1);
+                    run(
+                        &mut filter.pass(start(k), n, moved(k)),
+                        &mut left[0],
+                        &mut right[0],
+                    );
+                }
+                let mut grouped = input.clone();
+                {
+                    let mut passes: Vec<Pass> = all
+                        .iter_mut()
+                        .enumerate()
+                        .map(|(k, filter)| filter.pass(start(k), n, moved(k)).shared(&designs))
+                        .collect();
+                    let mut outs: Vec<[&mut [f32]; 2]> = grouped
+                        .chunks_mut(2)
+                        .map(|channels| {
+                            let (left, right) = channels.split_at_mut(1);
+                            [left[0].as_mut_slice(), right[0].as_mut_slice()]
+                        })
+                        .collect();
+                    run_group(&mut passes, &mut outs, n);
+                }
+                for k in 0..2 * count {
+                    assert_eq!(
+                        bits(&alone[k]),
+                        bits(&grouped[k]),
+                        "{moving:?} {resonant} block {block} channel {k}"
+                    );
+                }
+            }
+        }
+    }
+
+    // The spans of knobs that move are lines: at the end of each the coefficients are those of its knobs (the steps
+    // of a span add up to them within the rounding of f32), on the way between those of the span before and them (of
+    // a saturating section its g, k0, a, l, the products of its saturation those of them; the steps of its
+    // integrators, read at the ends alone, those of its knobs at once). The first span of a note and a cutoff that
+    // jumped are no lines. A block starts from the coefficients of its slot (`before`), where the lines of the block
+    // before ended: a note that starts late in its block (29: spans from 29, 61, 93) has a last span long enough to
+    // get there in its refreshes (`span_end`: none of under half a span)
+    #[test]
+    fn a_span_of_a_moving_cutoff_is_a_line_to_the_coefficients_of_its_knobs() {
+        let n = 128;
+        let silence = || (vec![0.0f32; n], vec![0.0f32; n]);
+        let near = |a: F32x4, b: F32x4| {
+            let (a, b) = (a.lanes(), b.lanes());
+            (0..4).all(|k| (a[k] - b[k]).abs() <= 2e-6 * b[k].abs().max(1e-3))
+        };
+        let half = |was: F32x4, to: F32x4| was + (to - was) * F32x4::splat(0.5);
+        let bits = |sat: &[[F32x4; 8]; 2]| {
+            sat.as_flattened()
+                .iter()
+                .map(|x| x.bits().lanes())
+                .collect::<Vec<_>>()
+        };
+        // (plain ones, a ladder too, their cutoff alone moving; a saturating one, its resonance with its cutoff)
+        for (ty, resonance, resonant) in [
+            (ModelType::Low24, 20.0, false),
+            (ModelType::Ladder24, 20.0, false),
+            (ModelType::Low12, 60.0, true),
+        ] {
+            let mut filter = model_of(ty, 500.0, resonance, 0.0, 0.0);
+            let layout = gated(ty, false, false, resonant);
+            assert_eq!(plain(layout), !resonant);
+            let mut d = LaneCoefs::still();
+            for block in 0..3 {
+                let start = if block == 0 { 29 } else { 0 };
+                let cutoffs = sweep(0, block, n);
+                let resonances: Vec<f32> = (0..n)
+                    .map(|i| (resonance + 0.05 * (block * n + i) as f64) as f32)
+                    .collect();
+                let knobs = [
+                    Some(cutoffs.as_slice()),
+                    resonant.then_some(resonances.as_slice()),
+                    None,
+                    None,
+                    None,
+                ];
+                let mut pass = filter.pass(start, n, knobs);
+                let (mut left, mut right) = silence();
+                let mut lanes = LaneState::default();
+                let mut c = before(&pass, &pass);
+                let mut s = start;
+                while s < n {
+                    let was = c;
+                    pass.step(s);
+                    let fresh = pass.take_fresh();
+                    let e = pass.next;
+                    let line = spans(layout, &mut c, &mut d, [&pass, &pass], [true; 2]);
+                    // (the first span of the note alone is no line)
+                    assert_eq!(line, !fresh, "{ty:?} block {block} at {s}");
+                    assert!(
+                        refreshes(s, e) >= SEGMENT / REFRESH / 2,
+                        "{ty:?} block {block}: {s}..{e}"
+                    );
+                    let to = LaneCoefs::of(&pass.model().coefs, &pass.model().coefs);
+                    if line {
+                        // (half its refreshes: half the way)
+                        let mid = (s.div_ceil(REFRESH) + refreshes(s, e) / 2) * REFRESH;
+                        model_line(layout, &mut c, &d, &mut lanes, s, mid, &mut left, &mut right);
+                        let at = format!("{ty:?} block {block} at {s}");
+                        for i in 0..layout.svfs {
+                            let saturates = i == 0 && layout.sat || i == 1 && layout.sat2;
+                            for k in 0..6 {
+                                let steps = k < 3 && saturates;
+                                let there = if steps {
+                                    to.svf[i][k]
+                                } else {
+                                    half(was.svf[i][k], to.svf[i][k])
+                                };
+                                assert!(near(c.svf[i][k], there), "{at}: {i} {k}");
+                            }
+                            for k in 0..4 {
+                                if saturates {
+                                    let there = half(was.saturation[i][k], to.saturation[i][k]);
+                                    assert!(near(c.saturation[i][k], there), "{at}: {i} saturation {k}");
+                                }
+                            }
+                        }
+                        let products = c
+                            .saturation
+                            .map(|section| filter_model::sat_products(section, F32x4::splat(1.0)));
+                        assert_eq!(bits(&c.sat), bits(&products), "{at}");
+                        model_line(layout, &mut c, &d, &mut lanes, mid, e, &mut left, &mut right);
+                    }
+                    for i in 0..layout.svfs {
+                        for k in 0..6 {
+                            assert!(
+                                near(c.svf[i][k], to.svf[i][k]),
+                                "{ty:?} block {block} at {s}: {i} {k}"
+                            );
+                        }
+                        let saturates = i == 0 && layout.sat || i == 1 && layout.sat2;
+                        for k in 0..4 {
+                            assert!(
+                                !saturates || near(c.saturation[i][k], to.saturation[i][k]),
+                                "{ty:?} block {block} at {s}: {i} saturation {k}"
+                            );
+                        }
+                    }
+                    s = e;
+                }
+            }
+        }
+        // a cutoff that jumps (over JUMP times a span): its coefficients at once
+        let jumping: Vec<f32> = (0..n)
+            .map(|i| {
+                if (i / SEGMENT).is_multiple_of(2) {
+                    300.0
+                } else {
+                    3000.0
+                }
+            })
+            .collect();
+        for web in [false, true] {
+            let mut filter = if web {
+                filter_of(FilterType::Lowpass, 500.0, 3.0, 0.0)
+            } else {
+                model_of(ModelType::Low12, 500.0, 20.0, 0.0, 0.0)
+            };
+            let mut pass = filter.pass(0, n, [Some(jumping.as_slice()), None, None, None, None]);
+            for s in (0..n).step_by(SEGMENT) {
+                pass.step(s);
+                pass.take_fresh();
+                assert!(!pass.ramps(), "web {web} at {s}");
+            }
+            // (and one that moves by less: a line, of a type of a BiquadFilterNode too)
+            let cutoffs = sweep(1, 0, n);
+            let mut pass = filter.pass(0, n, [Some(cutoffs.as_slice()), None, None, None, None]);
+            pass.step(0);
+            pass.step(SEGMENT);
+            assert!(pass.ramps(), "web {web}");
+        }
+    }
+
+    // A cutoff and a resonance that jump together by under JUMP (a line), a square on both, noise in: the lines of the
+    // saturating sections go along their g, k0, a, l, the filter rings as loud as where the knobs are held (a line of
+    // the products of the saturation went to a damping under 0 on the way: peaks of 22 and 32 here, under 0.6 held a
+    // span each)
+    #[test]
+    fn a_jump_of_the_cutoff_and_the_resonance_together_is_no_burst() {
+        let n = 128;
+        // (the type, its cutoff, the octaves and the resonances it jumps between, every so many samples)
+        for (ty, cutoff, octaves, low, high, every) in [
+            (ModelType::Low12, 5306.0, 1.32, 42.0, 95.9, 2400),
+            (ModelType::Band24, 3960.0, 1.807, 40.6, 96.2, 2400),
+            (ModelType::Band24, 3960.0, 1.807, 40.6, 96.2, SEGMENT),
+            (ModelType::Low24, 3000.0, 1.0, 50.0, 100.0, 2400),
+            (ModelType::Ladder24, 3000.0, 1.0, 50.0, 100.0, 3 * SEGMENT),
+        ] {
+            let mut filter = model_of(ty, cutoff, low, 0.0, 0.0);
+            let mut peak = 0.0f32;
+            for block in 0..80 {
+                let up = |i: usize| ((block * n + i) / every) % 2 == 1;
+                let cutoffs: Vec<f32> = (0..n)
+                    .map(|i| (cutoff * pow(2.0, if up(i) { octaves } else { 0.0 })) as f32)
+                    .collect();
+                let resonances: Vec<f32> = (0..n).map(|i| if up(i) { high } else { low } as f32).collect();
+                let mut left: Vec<f32> = noise(n, block as u32 + 1).iter().map(|x| 0.5 * x).collect();
+                let mut right = left.clone();
+                let knobs = [
+                    Some(cutoffs.as_slice()),
+                    Some(resonances.as_slice()),
+                    None,
+                    None,
+                    None,
+                ];
+                run(&mut filter.pass(0, n, knobs), &mut left, &mut right);
+                peak = left.iter().chain(&right).fold(peak, |most, x| most.max(x.abs()));
+            }
+            assert!(peak < 1.0, "{ty:?} every {every}: {peak}");
+        }
+    }
+
+    // the variation of an EQ type (the gain of its band), of a one-pole and of a notch is no FAT: no gain of 1 a
+    // sample, two of other variations of one type share the lanes
+    #[test]
+    fn the_variation_of_an_eq_type_a_one_pole_or_a_notch_is_no_fat() {
         let layout = |ty: ModelType, variation: f64| {
             let mut filter = model_of(ty, 1000.0, 60.0, 0.0, variation);
             filter.pass(0, 128, [None; KNOBS]).layout.expect("a model type")
@@ -1991,6 +2851,8 @@ mod tests {
             ModelType::BandEq12,
             ModelType::HighEq6,
             ModelType::Low6,
+            ModelType::Notch12,
+            ModelType::Notch24,
         ] {
             assert!(!layout(ty, 70.0).fat, "{ty:?}");
             assert!(layout(ty, 70.0) == layout(ty, 0.0), "{ty:?}");
@@ -2414,8 +3276,8 @@ mod tests {
         }
     }
 
-    // a cell the design is not smooth across (the poles of Peak 24 at Res 0 turn real up there): a cutoff that
-    // moves in it takes designs of its own
+    // a cell the design is not smooth across (of Peak 24 at Res 0 up there: the second pole of its prototype turns
+    // where it meets the root of the delay): a cutoff that moves in it takes designs of its own
     #[test]
     fn a_cell_the_design_is_not_smooth_across_takes_designs() {
         let ty = ModelType::Peak24;
@@ -2449,6 +3311,45 @@ mod tests {
         assert_eq!(coefs_of(&filter), design(cutoff[n - SEGMENT] as f64));
         // (the first span, the three of the cell, then one a span)
         assert_eq!(designs.worked_out.get(), 1 + 3 + 3);
+    }
+
+    // Without resonance, a cutoff swept down from the top as ENV 2 of a preset does (16.8 kHz to 8 kHz in 90 ms):
+    // the poles of the prototype are real there and move with the cutoff, so the cells are smooth and the sweep
+    // takes the designs of its cells: 38 for its 136 spans (a pole that went from one root to another left the cells
+    // from 0.22 to 0.31 fs rough: a design a span there, 70 in all, and a click at each)
+    #[test]
+    fn a_sweep_without_resonance_through_the_top_takes_the_designs_of_its_cells() {
+        let (n, blocks) = (128, 34);
+        for ty in [
+            ModelType::Low12,
+            ModelType::Low24,
+            ModelType::High18,
+            ModelType::Notch12,
+        ] {
+            let mut filter = model_of(ty, 16800.0, 0.0, 0.0, 0.0);
+            let designs = Designs::default();
+            for block in 0..blocks {
+                let cutoff: Vec<f32> = (0..n)
+                    .map(|i| {
+                        let t = (block * n + i) as f64 / RATE;
+                        (284.0 * jsmath::pow(2.0, 5.886 * (1.0 - t / 0.5))) as f32
+                    })
+                    .collect();
+                let (mut left, mut right) = (noise(n, 5 + block as u32), noise(n, 77 + block as u32));
+                let knobs = [Some(cutoff.as_slice()), None, None, None, None];
+                run(
+                    &mut filter.pass(0, n, knobs).shared(&designs),
+                    &mut left,
+                    &mut right,
+                );
+            }
+            let spans = blocks * n / SEGMENT;
+            assert!(
+                designs.worked_out.get() * 3 < spans,
+                "{ty:?}: {}",
+                designs.worked_out.get()
+            );
+        }
     }
 
     // Res 100 %: the resonance as narrow as the floor of the damping, no cell is smooth (a ladder's from 40 Hz up to
@@ -2514,25 +3415,40 @@ mod tests {
             for (drive, fat) in [(0.0, 0.0), (0.6, 0.6)] {
                 let p = Coefs::of(&filter_model::model_design(ty, 1200.0, 0.85, fat, RATE), drive);
                 let q = Coefs::of(&filter_model::model_design(ty, 5000.0, 0.6, fat, RATE), drive);
-                let c = LaneCoefs::of(&p, &q);
                 let layout = Layout {
                     drive: drive > 0.0,
                     fat: fat > 0.0,
                     ..ty.layout()
                 };
-                let (mut grouped, mut one_by_one) = (LaneState::default(), LaneState::default());
-                for i in (0..64).step_by(REFRESH) {
-                    let at = |k: usize| F32x4::load(&rows[k][i..i + REFRESH]);
-                    let out = group(layout, &c, &mut grouped, [at(0), at(1), at(2), at(3)]).map(F32x4::lanes);
-                    for j in 0..REFRESH {
-                        let x = F32x4::new(rows[0][i + j], rows[1][i + j], rows[2][i + j], rows[3][i + j]);
-                        let y = filter_model::tick(layout, &c, &mut one_by_one, x, j == 0).lanes();
-                        for lane in 0..4 {
-                            assert_eq!(out[lane][j].to_bits(), y[lane].to_bits(), "{ty:?} at {}", i + j);
+                // (still, then along a line: the first voice to the coefficients of the second one)
+                let mut step = LaneCoefs::default();
+                let all = |on: bool| U32x4::splat(if on { u32::MAX } else { 0 });
+                LaneCoefs::of(&p, &q).steer(
+                    &mut step,
+                    &LaneCoefs::of(&q, &q),
+                    layout,
+                    F32x4::splat(1.0 / 16.0),
+                    halves_of([true, false]),
+                    all(true),
+                );
+                for d in [None, Some(&step)] {
+                    let (mut c, mut one) = (LaneCoefs::of(&p, &q), LaneCoefs::of(&p, &q));
+                    let (mut grouped, mut one_by_one) = (LaneState::default(), LaneState::default());
+                    for i in (0..64).step_by(REFRESH) {
+                        let at = |k: usize| F32x4::load(&rows[k][i..i + REFRESH]);
+                        let out = group(layout, &mut c, d, &mut grouped, [at(0), at(1), at(2), at(3)]);
+                        let out = out.map(F32x4::lanes);
+                        for j in 0..REFRESH {
+                            let x =
+                                F32x4::new(rows[0][i + j], rows[1][i + j], rows[2][i + j], rows[3][i + j]);
+                            let y = sample(layout, &mut one, d, &mut one_by_one, x, j == 0).lanes();
+                            for lane in 0..4 {
+                                assert_eq!(out[lane][j].to_bits(), y[lane].to_bits(), "{ty:?} at {}", i + j);
+                            }
                         }
                     }
+                    assert_eq!(bits(&grouped), bits(&one_by_one), "{ty:?}");
                 }
-                assert_eq!(bits(&grouped), bits(&one_by_one), "{ty:?}");
             }
         }
     }
