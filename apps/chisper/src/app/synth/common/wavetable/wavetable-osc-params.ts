@@ -45,7 +45,7 @@ export const releaseStart = (seen: number, held: number, lead: number) =>
 
 // frequency: Hz of the note (portamento glides it), both oscillators play it; gate: 1 while the key is held,
 // RELEASE_GATE + h: released after h seconds, 0: released at that sample, below 0 fades it out (a stolen
-// voice): automated with setValueAtTime, exact to the sample from its time on (its event may come later: from the
+// voice) over -gate of KILL_FADE (-1: all of it): automated with setValueAtTime, exact to the sample from its time on (its event may come later: from the
 // block it comes in); position: share of the table (frame k of N at k / (N - 1)); detune: cents (1200 · octave +
 // pitch modulation); spread: cents from the lowest unison voice to the highest; gain: linear; blend: the level of
 // the centre voices of the unison against the others (0 the centre, the others 27 dB under it; 1 the others, the

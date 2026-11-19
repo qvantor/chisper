@@ -1675,6 +1675,7 @@ pub struct Voice {
     held_gate: f64,
     hold_from: f64,
     released: bool,
+    // the frames of the fade of a stolen voice: the share of KILL_FADE its gate asks for (set as it is stolen)
     kill_length: f64,
     fade_length: i32,
     crossfade_length: f64,
@@ -1770,7 +1771,7 @@ impl Voice {
             held_gate: HELD_GATE,
             hold_from: -1.0,
             released: false,
-            kill_length: max(1.0, round(KILL_FADE * sample_rate)),
+            kill_length: 0.0,
             fade_length: max(1.0, round(FADE_IN * sample_rate)) as i32,
             crossfade_length: max(1.0, round(CROSSFADE * sample_rate)),
             frame_fade_limit: FRAME_FADE * sample_rate,
@@ -2098,7 +2099,13 @@ impl Voice {
                 i += 1.0;
                 continue;
             }
-            self.kill_from = min(self.kill_from, frame + i);
+            // a gate below 0: stolen, it fades out over -gate of KILL_FADE (-1 and under: all of it; a quiet voice
+            // under a note of a sharp attack over less, the main thread says: the splatter of a fade goes with
+            // its level, a voice more for 20 ms at every note is what a short fade saves)
+            if frame + i < self.kill_from {
+                self.kill_from = frame + i;
+                self.kill_length = max(1.0, round(KILL_FADE * self.sample_rate * min(1.0, -value)));
+            }
             self.stop_frame = min(self.stop_frame, self.kill_from + self.kill_length);
             break;
         }

@@ -1,6 +1,13 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { curveShape, EnvelopeParams, envelopeLevel, envelopeStage, envelopeValue } from './envelope-curve';
+import {
+  attackRise,
+  curveShape,
+  EnvelopeParams,
+  envelopeLevel,
+  envelopeStage,
+  envelopeValue,
+} from './envelope-curve';
 
 const env: EnvelopeParams = { attack: 0.1, hold: 0.2, decay: 0.4, sustain: 0.5, release: 1 };
 
@@ -54,6 +61,22 @@ describe('envelope curve', () => {
     expect(envelopeValue(env, 0.55, 0.05, 0.6)).toBeCloseTo(0.4);
     // no attack: a step to 1
     expect(envelopeLevel({ ...env, attack: 0 }, 0, 0.6)).toBe(1);
+  });
+
+  // the attack as its curve makes it: one that does its rise in a few samples (at its start, k > 0, or at its end,
+  // k < 0) is as sharp as a shorter line
+  it('attackRise: the attack of a line, shorter by the steepest slope of its curve', () => {
+    const envelope = { attack: 0.02, hold: 0, decay: 1, sustain: 1, release: 1 };
+    const curves = (attack: number) => ({ attack, decay: 0, release: 0 });
+    expect(attackRise(envelope)).toBe(0.02);
+    expect(attackRise({ ...envelope, curves: curves(0) })).toBe(0.02);
+    expect(attackRise({ ...envelope, curves: curves(10) })).toBeCloseTo(0.002, 6);
+    expect(attackRise({ ...envelope, curves: curves(-10) })).toBe(
+      attackRise({ ...envelope, curves: curves(10) })
+    );
+    // the slope of curveShape at its start
+    const slope = curveShape(4, 1e-6) / 1e-6;
+    expect(attackRise({ ...envelope, curves: curves(4) })).toBeCloseTo(0.02 / slope, 6);
   });
 
   it('ends at once with a release of 0', () => {

@@ -74,6 +74,16 @@ describe('the work of a note on the main thread', () => {
     expect(measure(() => onPress(note(2)))).toEqual({ messages: 1, voices: 0, automation: 4, changes: 0 });
   });
 
+  it('a note over the polyphony with ENV 1 attack 0: the oldest voice fades out, one voice for the note', async () => {
+    const { onPress, synthActions, envelopes, measure } = await setup();
+    envelopes[1].setEnvelopeValue('env1', 'attack', 0);
+    synthActions.setMaxVoices(2);
+    onPress(note(0));
+    onPress(note(1));
+    // the stolen voice: its gate below 0 (a cancel, a set); the new one: its note on, in the same message
+    expect(measure(() => onPress(note(2)))).toEqual({ messages: 1, voices: 1, automation: 2, changes: 0 });
+  });
+
   it('in legato a note over the polyphony fades the oldest voice out', async () => {
     const { onPress, synthActions, measure } = await setup();
     synthActions.setLegato(true);
