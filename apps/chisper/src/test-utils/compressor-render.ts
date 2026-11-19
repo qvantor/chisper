@@ -15,7 +15,7 @@ export const COMPRESSOR_DEFAULTS: CompressorDspParams = {
 
 let core: CompressorExports | undefined;
 // one instance of the core for a spec file (a scope)
-export const compressorCore = () => (core ??= wasmCore<CompressorExports>('chain'));
+export const compressorCore = () => (core ??= wasmCore<CompressorExports>('engine'));
 
 export type CompressorChange = FxChange<CompressorDspParams>;
 

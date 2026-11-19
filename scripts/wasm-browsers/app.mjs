@@ -6,7 +6,7 @@
 // run over its deadline in a trace of it, nor a glitch (headless: the device callbacks aren't real, the render times
 // are). Then the tables are switched under the notes (one of 256 frames no buffer of the store holds yet, one of 11
 // frames), traced as well. It checks that the oscillator, the master limiter and every effect are ready, that the
-// engine counts the voices (in the voices node) and their mix samples, that the output sounds and that the page
+// engine counts the voices (in the engine node) and their mix samples, that the output sounds and that the page
 // threw nothing; then every LFO on over the notes (traced in Chromium too), the voices play their positions
 // directly, and in Chromium the page is not restyled, laid out nor painted while the LFOs move the marks and the
 // charts (the synth and the FX screen). The tables come from the
@@ -206,7 +206,7 @@ try {
         Object.values(statuses.fx).every((status) => status === 'ready'),
         JSON.stringify(statuses.fx)
       );
-      const wanted = ['chain', 'wavetable-osc'];
+      const wanted = ['engine'];
       check(
         'the bundles load',
         wanted.every((bundle) => loaded.includes(bundle)),
@@ -214,7 +214,7 @@ try {
       );
       check('the 12 notes play', after?.worklet.voices === 12, `${after?.worklet.voices} voices`);
       check(
-        'they play in the voices node',
+        'they play in the node of the engine',
         after?.worklet.scopeVoices === 12,
         `${after?.worklet.scopeVoices} voices, ${after?.worklet.events} events held`
       );

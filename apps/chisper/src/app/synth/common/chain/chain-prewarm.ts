@@ -1,14 +1,12 @@
 import {
-  CHAIN_KEYS,
   ChainRoute,
+  chainTarget,
   FX_KINDS,
   FxKind,
   LFO_SOURCE,
   LFO_TABLE,
   LFO_TARGET,
-  MIX_KEY,
   neutralState,
-  TARGET_KEYS,
 } from './chain-params';
 import { ChainExports, createChainWasm } from './chain-wasm';
 
@@ -38,14 +36,14 @@ const KNOBS: [FxKind, string, number, number, number][] = [
 // of LFO 1
 export const warmRoutes = (): ChainRoute[] => [
   ...KNOBS.map(([kind, key, amount, min, max], index) => ({
-    target: FX_KINDS.indexOf(kind) * TARGET_KEYS + CHAIN_KEYS[kind].indexOf(key),
+    target: chainTarget(kind, key),
     source: index % 2 ? LFO_SOURCE : 0,
     amount,
     min,
     max,
   })),
-  ...FX_KINDS.map((_, slot) => ({
-    target: slot * TARGET_KEYS + MIX_KEY,
+  ...FX_KINDS.map((kind, slot) => ({
+    target: chainTarget(kind, 'mix'),
     source: slot % 2 ? 1 : LFO_SOURCE + 1,
     amount: -0.3,
     min: 0,
@@ -54,14 +52,20 @@ export const warmRoutes = (): ChainRoute[] => [
   { target: LFO_TARGET, source: 3, amount: 1, min: 0.01, max: 100, scale: 'log' },
 ];
 
-// whether every block rendered with every stage (a core that traps here would trap in a node too)
-export const prewarmChain = (core: ChainExports, sampleRate: number) => {
+// the chain of a warm-up: every effect on at half its mix, in the order of the slots
+export const warmState = () => {
   const state = neutralState();
   FX_KINDS.forEach((kind, slot) => {
     state.slots[kind].active = true;
     state.slots[kind].mix = 0.5;
     state.order.push(slot);
   });
+  return state;
+};
+
+// whether every block rendered with every stage (a core that traps here would trap in a node too)
+export const prewarmChain = (core: ChainExports, sampleRate: number) => {
+  const state = warmState();
   const chain = createChainWasm(core, sampleRate, state);
   const input = new Float32Array(BLOCK);
   const [outL, outR] = [new Float32Array(BLOCK), new Float32Array(BLOCK)];

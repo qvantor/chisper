@@ -21,7 +21,7 @@ import { createDistortionWasm, DISTORTION_KEYS, DistortionExports } from './dist
 // the Rust core of the distortion (dsp/distortion): the bits of every output sample of every block on the golden
 // scenarios (their hashes in dsp/goldens/distortion.json), and random ones: finite
 
-const core = wasmCore<DistortionExports>('chain');
+const core = wasmCore<DistortionExports>('engine');
 const goldens = createGoldens('distortion');
 afterAll(() => goldens.save());
 

@@ -13,7 +13,7 @@ Chisper is an experimental browser wavetable synth (TypeScript + Web Audio API, 
 - `netlify/` — Functions v2 (presets, usage, clips, bucket lists) and their specs; Postgres for presets and clips
   (`db/migrations/`, applied manually, in order; a change of the preset schema has no file there: the presets are
   rewritten by `scripts/presets/rehash.mjs`, a dry run unless `--apply`).
-- `dsp/` — the DSP of the audio worklets in Rust → wasm32 (two cores: the chain, the oscillator).
+- `dsp/` — the DSP of the audio worklet in Rust → wasm32 (one core, `engine`: the oscillator into the chain).
 
 Deployed to Netlify at chisper.qvantor.org (`waveform.qvantor.org` is an old alias that `netlify.toml` redirects).
 
@@ -41,9 +41,10 @@ Dev and build:
 - `npm run build` — production build into `dist/apps/chisper` (wasm, minified worklets, then the site merged in and
   the lastmods of the sitemap dated against the live site: needs the network).
 - `npm run build:perf` — build with the test hook `window.__chisperPerf` into `dist/apps/chisper-perf`.
-- `npm run wasm` — Rust cores → `tmp/wasm/` (prod) and `tmp/wasm-perf/` (cargo feature `perf`, used by specs and
-  `build:perf`). Flags: `--only=prod|perf`, `--watch`, `--sizes`, `--check-sizes`.
-- `npm run worklets` — esbuild bundles of the worklet modules (wasm inlined) and the classic workers into
+- `npm run wasm` — the Rust core → `tmp/wasm/` (prod) and `tmp/wasm-perf/` (cargo feature `perf`, used by specs and
+  `build:perf`); a `.wasm` there that is no core any more is removed. Flags: `--only=prod|perf`, `--watch`,
+  `--sizes`, `--check-sizes`.
+- `npm run worklets` — esbuild bundles of the worklet module (`engine`, wasm inlined) and the classic workers into
   `tmp/worklets/` (served as `assets/worklets/`).
 - `npx nx dev site` (:4321), `npx nx run site:verify` (build + HTML checks).
 
@@ -51,7 +52,7 @@ Checks:
 
 - `npx nx test <project>` — `chisper`, `math`, `rxjs-react`, `ui-kit`, `preset-schema`, `netlify`. One file:
   `npx nx test rxjs-react rx-model.spec.tsx` (a Jest pattern; `--testFile` is ignored). Run from the root.
-- The `chisper` specs load `tmp/wasm-perf/*.wasm`: run `npm run wasm` after any change in `dsp/` (the bytes are an
+- The `chisper` specs load `tmp/wasm-perf/engine.wasm`: run `npm run wasm` after any change in `dsp/` (the bytes are an
   Nx input, so the cache follows).
 - `UPDATE_GOLDENS=1 npx nx test chisper <module>-goldens.spec.ts` — re-record golden hashes
   (`dsp/goldens/<module>.json`). A change of sound is always an explicit golden update.
@@ -66,10 +67,11 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `scripts/bench-perf/run.mjs [--against=<ref>] [--only=…]` — perf suite (`scripts/bench-perf/README.md`).
   Regressions are judged only in an A/B run with `--against` (sessions differ by ~10%).
 - `scripts/bench-osc/run.mjs` — the oscillator vs a native `OscillatorNode` (README in its folder).
-- `scripts/wasm-browsers/run.mjs` — bit parity of the wasm cores in browsers vs Node; `app.mjs` — the app in each
-  browser (sound, no glitches, no paints over the LFOs).
+- `scripts/wasm-browsers/run.mjs` — bit parity of the wasm core in browsers vs Node (the chain alone on an input, the
+  voices apart, the whole node); `app.mjs` — the app in each browser (sound, no glitches, no paints over the LFOs).
 - `node scripts/null-test/run.mjs --against=<ref> [--only=…] [--limit=<dB>]` — the scenes of the browser parity
-  rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal (a scene of a core
+  rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal (a half of the engine
+  against the core `<ref>` has it in, `chain.wasm` or `wavetable-osc.wasm` before the engine; a scene of a core
   `<ref>` has not, the chain: against the scene of that name as `<ref>` renders it, ours without the limiter).
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
   `dsp/measurements/*.json`, which the specs compare the engine with. An effect of its rack goes into its state
@@ -101,7 +103,9 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   phase a voice keeps between spans (a whole number of 2^-52 of a cycle). A pass that reorders
   a loop (the chunks of the reverb, the voices filtered in pairs, the segments of the delay, the blocks a silent
   chain skips) gives the bits of the plain order: its cargo test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
-  flush-to-zero). Any change of the bits is an explicit golden update, checked by the quality specs with their
+  flush-to-zero). Nothing is worked out of a denormal: the audio thread of Chromium and Firefox takes them as 0, Node
+  and WebKit don't (the mean square of a band of the compressor and its peak held are flushed at every sample; its cargo
+  tests run the tail with the CPU flushing them). Any change of the bits is an explicit golden update, checked by the quality specs with their
   tolerances as they are and by `node scripts/null-test/run.mjs --against=<ref>` (the difference from a commit, dB
   under the signal). Goldens specs import `test-utils/js-math.ts` first.
 - **`__PERF__`** (`src/globals.d.ts`) gates instrumentation: true only in the `perf` build and in specs. Any script
@@ -133,16 +137,19 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   AudioParams), a `Worker` stub (`test-utils/worker-stub.ts`) and a recording 2D canvas context
   (`installCanvasStub`: `drawn(canvas)`, `svgPath`). There's no global MessageChannel: `createSynthCore`
   (test-utils) gives the engine a stub channel; providers rendered without it see the engine `unsupported`.
-- Voices are read from the events posted to the voices node: `voiceEvents(audioCtx, wavetables)`
+- Voices are read from the events posted to the engine node: `voiceEvents(audioCtx, wavetables)`
   (`test-utils/voice-events.ts`), `wavetables.flush()` sends a task's events, `end(voice)`/`started(voice, …)`;
-  `offline-engine.ts` renders the voices on the real core.
+  what its chain is told: `chainPosts(chainNode(audioCtx))` (`test-utils/chain-node.ts`, the same node).
+  `offline-engine.ts` renders the whole node on the real core (the voices through the chain; `limited: false`:
+  without the limiter and its latency).
 - antd under test gives every component the id `test-id`: the setup mocks its `useId` (`test-utils/rc-use-id.ts`).
   `ResizeObserver` is stubbed.
-- Count `addModule` calls with `workletLoads` (the synth core adds chain and wavetable-osc itself).
+- Count `addModule` calls with `workletLoads` (the synth core adds `engine` itself, once).
 - Presets specs without the synth pass `immediateSoundSwitch` of test-utils.
 - Server specs: the DB is the fake `sql` tag of `netlify/tests/fake-sql.ts` (records queries, answers by regex).
 - DSP specs: `<module>-dsp.spec.ts` (the core through its facade), `<module>-goldens.spec.ts` (golden scenarios and
-  fuzzing, `test-utils/fuzz-signals.ts`); the crates have `cargo test` (lanes run as arrays off wasm).
+  fuzzing, `test-utils/fuzz-signals.ts`; `engine-goldens`: the whole node); the crates have `cargo test` (lanes run
+  as arrays off wasm).
 - New features need good coverage (actions, audio wiring, snapshot round-trip incl. falsy values and defaults,
   schema, non-trivial UI): follow `filter.spec.ts`, `fx.spec.ts`.
 
@@ -174,15 +181,31 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 
 ### Audio graph (`synth/common/modules`)
 
-- `synth-core.ts` owns the single `AudioContext`, the wavetable engine and the chain:
-  `voices node → chain.input → [the chain node: fx slots → mute · master gain → limiter] → chain.output →
-destination`. Every note plays in the one voices node (the filter is inside each voice), everything after it in
-  the one chain node. Header analysers tap the output after the limiter and sleep when nothing sounds.
-- The chain (`synth/common/chain/`, core `dsp/chain`): one worklet node with one core for the effects, the master
-  gain and the limiter. `chain.ts` (main thread) keeps its whole state and tells the node in messages only, no
-  AudioParam (`ChainMessage` of `chain-params.ts`; an event may carry its time `at`, the node is made with the state
-  in `processorOptions`); `chain.worklet.ts` is a thin wrapper of `chain-wasm.ts`, the facade a render on the main
-  thread drives the same way. In the core (`chain.rs`): events queued by frame (one without a time is never
+- `synth-core.ts` owns the single `AudioContext` and the one worklet node of the sound (`synth/common/engine/`,
+  core `dsp/engine`): `[the engine node: voices → fx slots → mute · master gain → limiter] → output → destination`.
+  Every note plays in it (the filter is inside each voice) and everything after the notes too: the voices sum
+  straight into the input of the chain inside the core, a block is one call of the core and only the output crosses
+  to JS. Header analysers tap the output after the limiter and sleep when nothing sounds.
+- The engine node (`engine-node.ts` on the main thread, `engine.worklet.ts` a thin wrapper of `engine-wasm.ts`, the
+  facade a render on the main thread drives the same way): it loads the module `engine`, makes the node of what its
+  clients are (the chain: its state; the wavetable engine: the worker of the store, the bend), tells them its status,
+  what the node posts and when it is gone, and sends the LFOs once for the voices and the chain (the LFO model alone
+  tells them, `lfos.take`; a half only says that it reads one, `lfos.use`: sent only while one of them does, a state
+  only to the halves that do: `readers`). `engine-messages.ts` is a node whoever runs it (the worklet, a render on the
+  main thread, the parity in Node): the engine of its options (`createNodeEngine`), what a message tells it
+  (`takeEngineMessage`; `stop` and `probe` are the node's), its meters (`createEngineMeters`). `engine_process` tells what there is to read after a block (voices that started or ended,
+  stages that failed, bytes the store freed): a block with nothing to tell is one call. A trap is of the half it
+  was in (`engine_fail`/`engine_resume`): a voice ends alone, an effect is dropped, a trap of the voices in no voice
+  is a block without them (`MAX_SILENCED` such blocks in a row end the node as `broken` does), one of the chain in no stage ends the node (`broken`: both are 'failed', a retry makes a
+  node of the state, `MAX_REMAKES` times at most). Options of the processor for the parity and the benches: `tap`
+  (each voice apart, before the chain), `fed` (the chain alone on the input of the node), `unlimited`, `events`, `seed` (what a note draws at random:
+  two renders alike); in
+  the perf build a second output has the voices as the chain takes them while a probe listens (`tapVoices`).
+- The chain (`synth/common/chain/`, core `dsp/chain`, a half of the engine): the effects, the master gain and the
+  limiter. `chain.ts` (main thread) keeps its whole state and tells the node in messages only, no AudioParam
+  (`ChainMessage` of `chain-params.ts`; an event may carry its time `at`, the node is made with the state in
+  `processorOptions`); `chain-wasm.ts` is its facade (`takeChainMessage` of `engine-messages.ts`: a message as the
+  worklet and a render take it). In the core (`chain.rs`): events queued by frame (one without a time is never
   taken before one with a time sent before it), a slot per effect in the order
   (`Law`: equal power, linear for the distortion, inside for the chorus and the compressor; the dry signal late by
   the latency of the effect; gains glide 10 ms; a slot that is off is a wire and its effect forgotten once faded;
@@ -193,9 +216,8 @@ destination`. Every note plays in the one voices node (the filter is inside each
   drops that effect alone (`work` in memory before the call, `chain_fail`/`chain_resume` from the `step` the block
   was at, an event that trapped taken again without the unit; the limiter: the master silent) and is told back
   (`status(stage)` 'failed'; `retryStage`: 'loading' until the node tells the unit is made, `remade`, or failed
-  again); a trap that is in no stage ends the node (`broken`: the chain is
-  'failed', a retry makes a node of the state). What trapped is never freed: a stage, and a node after `broken`,
-  is made again `MAX_REMAKES` times at most. The numbers of the ABI the wrapper has of its own (`chain-params.ts`)
+  again); a trap that is in no stage ends the node (`broken`). What trapped is never freed: a stage, and a node
+  after `broken`, is made again `MAX_REMAKES` times at most. The numbers of the ABI the wrapper has of its own (`chain-params.ts`)
   are held to the core by `chain-layout.spec.ts` (`chain_layout`/`chain_key` of the perf build: a new param is
   named in `key_names` of `units.rs` too). Until the module is ready the master is silent (no fallback); a failure
   shows a toast with Retry (`retryAudio`). `unit_*` of the same core is one effect alone (the specs, the benches).
@@ -239,7 +261,7 @@ destination`. Every note plays in the one voices node (the filter is inside each
   the taps as it has them (its meter, posted as the one of the compressor is, only while watched:
   `meter-report.ts` in the worklet, `createFxMeter` on the main thread), between two posts the main thread moves
   the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
-- Without AudioWorklet or wasm SIMD, or when the module of the chain fails, no effect and no sound; until `ready`
+- Without AudioWorklet or wasm SIMD, or when the module of the engine fails, no effect and no sound; until `ready`
   nothing plays. One effect failing in the core leaves the others playing.
 - Knob modulation of the effects is in the core (`dsp/chain/src/modulation.rs`; the envelopes and the LFOs of the
   last note, `dsp-core/src/{envelope,lfo}.rs` as the voices run them, worked out once for the chain and only while
@@ -252,12 +274,12 @@ destination`. Every note plays in the one voices node (the filter is inside each
 
 - No native fallback: without AudioWorklet, Worker, MessageChannel or wasm SIMD the synth doesn't play and says why
   (`OscillatorStatus`).
-- `wavetable-engine.ts` (one per context): `$status`, `retry`; a store node, the voices node (`VOICES_PROCESSOR`,
-  `voices-processor.ts`), a worker (`wavetable.worker.ts` → `wavetable-builder.ts`, builds mip levels,
-  `wavetable-mipmap.ts`) and a MessageChannel between worker and store. Tables arrive in chunks; each version is
+- `wavetable-engine.ts` (one per context, in the engine node): `$status`, `retry`; a worker (`wavetable.worker.ts` →
+  `wavetable-builder.ts`, builds mip levels, `wavetable-mipmap.ts`) and a MessageChannel between the worker and the
+  store of the node (the store is the worklet module's: it outlives a node). An error of the worker fails the node. Tables arrive in chunks; each version is
   `sending`/`stored`/`refused`/`failed` in `$tables`; versions only grow.
 - `createVoice(options, values)` gives a `VoiceHandle` whose params mimic AudioParam calls; each call is an event
-  of the voices node, a task's events go in one message (by a microtask). The node reports `started`/`ended`.
+  of the engine node, a task's events go in one message (by a microtask). The node reports `started`/`ended`.
   A trap in a voice (as it renders or as its filter finishes its block; those filtered together all end)
   ends only that voice.
 - The core (`dsp/wavetable-osc/src`): `scope.rs` (the voices of a node, filtered in pairs; up to four wide ones,
@@ -293,7 +315,8 @@ destination`. Every note plays in the one voices node (the filter is inside each
   a spec holds them alike; Drive and Var are the knobs of `FILTER_EXTRA` (appended to `targets.rs`). Two voices of
   one layout of sections share the lanes, others each alone; a change of type on a note into or out of a model type
   crossfades 10 ms (a filter that never played: no fade).
-- Worklet modules prewarm their core on load (lazy wasm compilation would hit the first note).
+- The worklet module prewarms its core on load (lazy wasm compilation would hit the first note): the chain alone,
+  then the voices in an engine of their own (`voices-prewarm.ts`: the block the node calls is the one compiled).
 
 ### Synth, input, transport (`synth/common/modules`, `synth/common/*`)
 
@@ -323,16 +346,18 @@ destination`. Every note plays in the one voices node (the filter is inside each
 
 ### Rust cores (`dsp/`)
 
-- One cdylib per worklet bundle with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `chain` (the effects
-  `limiter`, `reverb`, `distortion`, `compressor`, `chorus` are its rlibs, the delay, the slots and the modulation
-  its modules) and `wavetable-osc`; shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay
-  blocks, lanes, the envelopes and the LFOs), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
+- One cdylib with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `engine`, whose rlibs are `wavetable-osc` (the
+  voices and the store, `osc_*`) and `chain` (`chain_*`, `unit_*`; the effects `limiter`, `reverb`, `distortion`,
+  `compressor`, `chorus` are its rlibs, the delay, the slots and the modulation its modules); `engine_*` is the block
+  of both. Shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, lanes, the envelopes
+  and the LFOs), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.
-- A bundle `<name>.worklet.ts` registers its processors; its facade `<name>-wasm.ts` wraps the core
-  (`fx/effects/<effect>-wasm.ts`: an effect as a unit, for the specs and the benches). A new bundle is also named
-  in `WASM_MODULES` (`wasm-support.ts`), `CORES` of `scripts/wasm.mjs`, the `worklets` script of `package.json`,
-  the scenes of `scripts/wasm-browsers/scenes.mjs`. Specs import the wasm bytes via `@chisper/wasm/<name>.wasm`
-  (`apps/chisper/wasm-babel-plugin.js`).
+- The bundle `engine.worklet.ts` registers the one processor; the facades wrap the halves of the core
+  (`wavetable-osc-wasm.ts`, `chain-wasm.ts`, `engine-wasm.ts`; `fx/effects/<effect>-wasm.ts`: an effect as a unit,
+  for the specs and the benches). A new bundle is also named in `WASM_MODULES` (`wasm-support.ts`), `CORES` of
+  `scripts/wasm.mjs`, the `worklets` script of `package.json`, the scenes of `scripts/wasm-browsers/scenes.mjs`.
+  Specs load the perf build of the core with `wasmCore('engine')` (`test-utils/wasm.ts`; the bundle's import of
+  `@chisper/wasm/engine.wasm` through `apps/chisper/wasm-babel-plugin.js`).
 - NaN/±Inf input is taken as 0 by the effects, the decoded files and the worker.
 
 ### Snapshots

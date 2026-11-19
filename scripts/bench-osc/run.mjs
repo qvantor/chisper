@@ -42,8 +42,8 @@ const bounded = (ours, native, ref, bound) => ours <= Math.max(bound, native, re
 const bundle = async () => {
   const esbuild = require('esbuild');
   fs.mkdirSync(site, { recursive: true });
-  if (!fs.existsSync(path.join(root, 'tmp/wasm/wavetable-osc.wasm')))
-    throw new Error('tmp/wasm/wavetable-osc.wasm is missing: run `npm run wasm` first');
+  if (!fs.existsSync(path.join(root, 'tmp/wasm/engine.wasm')))
+    throw new Error('tmp/wasm/engine.wasm is missing: run `npm run wasm` first');
   const common = {
     bundle: true,
     format: 'esm',
@@ -63,10 +63,7 @@ const bundle = async () => {
   await esbuild.build({
     ...common,
     entryPoints: {
-      'wavetable-osc': path.join(
-        root,
-        'apps/chisper/src/app/synth/common/wavetable/wavetable-osc.worklet.ts'
-      ),
+      engine: path.join(root, 'apps/chisper/src/app/synth/common/engine/engine.worklet.ts'),
       'wavetable-worker': path.join(root, 'apps/chisper/src/app/synth/common/wavetable/wavetable.worker.ts'),
     },
     outdir: site,

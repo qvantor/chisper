@@ -34,7 +34,7 @@ const FIELDS = [
   'fat',
 ];
 
-const core = wasmCore<DesignExports>('wavetable-osc');
+const core = wasmCore<DesignExports>('engine');
 
 const coreDesign = (
   index: number,

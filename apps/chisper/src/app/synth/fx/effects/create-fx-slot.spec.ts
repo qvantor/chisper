@@ -4,6 +4,7 @@ import { divisionIndex, FX_TYPES, FxType, TEMPO_DEFAULT } from '@chisper/preset-
 import { chainNode, chainPosts, chainReports, flushChain as flush } from '../../../../test-utils/chain-node';
 import { Chain, createChain } from '../../common/chain/chain';
 import { CHAIN_KEYS, FX_KINDS, NEUTRAL_PARAMS } from '../../common/chain/chain-params';
+import { createEngineNode } from '../../common/engine/engine-node';
 import { createFxSlot } from './create-fx-slot';
 import { DELAY_LINE_MAX } from './delay-params';
 import { REVERB_ERAS } from './reverb-era';
@@ -313,7 +314,7 @@ describe('createFxSlot', () => {
   describe('on the chain', () => {
     const onChain = async () => {
       const audioCtx = new AudioContext();
-      const chain = createChain(audioCtx);
+      const chain = createChain(audioCtx, createEngineNode(audioCtx));
       const slots = Object.fromEntries(
         FX_TYPES.map((type) => [
           type,
@@ -406,7 +407,7 @@ describe('createFxSlot', () => {
       const addModule = audioCtx.audioWorklet.addModule as jest.Mock;
       addModule.mockRejectedValueOnce(new Error('404'));
       const slot = createFxSlot(
-        createChain(audioCtx),
+        createChain(audioCtx, createEngineNode(audioCtx)),
         slotOf('delay'),
         FX_REGISTRY.delay,
         audioCtx.sampleRate

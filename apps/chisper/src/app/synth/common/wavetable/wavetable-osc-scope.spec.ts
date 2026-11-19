@@ -537,7 +537,7 @@ describe('the voices of one node', () => {
     voices.free();
   });
 
-  it('takes the LFOs in the order of the other events: the voices of the block play them from their time on', () => {
+  it('plays the LFOs of what its voices share: a voice made before a state plays it as one made after', () => {
     const lfo = (change: Partial<LfoWire> = {}): LfoWire => ({
       mode: RETRIG,
       delay: 0,
@@ -554,9 +554,10 @@ describe('the voices of one node', () => {
       lfos: [lfo(change), lfo(), lfo(), lfo()],
     });
     const routes = [{ source: 4, param: 'gain1', amount: -1, min: 0, max: 1 }];
-    const play = (events: VoiceEvent[]) => {
-      const { voices } = node();
-      voices.apply(events);
+    // the states and the notes on in their order
+    const play = (steps: (LfosState | VoiceEvent)[]) => {
+      const { voices, shared } = node();
+      steps.forEach((step) => ('kind' in step ? voices.apply([step]) : shared.setLfos(step)));
       const blocks = Array.from({ length: 4 }, (_, block) => render(voices, block * BLOCK));
       voices.free();
       return blocks.flatMap(({ taps }) => taps);
@@ -570,25 +571,13 @@ describe('the voices of one node', () => {
       options: note({ routes, phrase: voice }),
       params: {},
     });
-    const both = play([{ kind: 'lfos', ...state(silent) }, on(1), { kind: 'lfos', ...state(open) }, on(2)]);
-    const plain = play([{ kind: 'lfos', ...state(open) }, on(1), on(2)]);
+    const both = play([state(silent), on(1), state(open), on(2)]);
+    const plain = play([state(open), on(1), on(2)]);
     // the LFOs are the node's: both voices play the last state
     expect(both.map(({ left }) => Array.from(left))).toEqual(plain.map(({ left }) => Array.from(left)));
     expect(plain.some(({ left }) => left.some((value) => value !== 0))).toBe(true);
-    const quiet = play([{ kind: 'lfos', ...state(silent) }, on(1)]);
+    const quiet = play([state(silent), on(1)]);
     expect(quiet.every(({ left }) => left.every((value) => value === 0))).toBe(true);
-  });
-
-  it('loses only a state of the LFOs it can not read: the events after it are applied', () => {
-    const errors: unknown[] = [];
-    const { voices } = node((error) => errors.push(error));
-    voices.apply([
-      { kind: 'lfos', at: 0, lfos: [{ table: {} } as unknown as LfoWire] },
-      { kind: 'on', voice: 1, options: note(), params: {} },
-    ]);
-    expect(errors).toEqual([expect.any(TypeError)]);
-    expect(voices.stats()).toEqual({ voices: 1, events: 0 });
-    voices.free();
   });
 
   it('the pitch bend of the node at rest, or one that is not finite: the same bits as none', () => {

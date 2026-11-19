@@ -1,5 +1,5 @@
 import type { EnvelopeParams } from '../envelope/envelope-curve';
-import { lateState, LFO_TABLE_SIZE, LfosState } from '../lfo/lfo-curve';
+import { LFO_TABLE_SIZE, LfosState } from '../lfo/lfo-curve';
 import { CoreExports, createView } from '../wasm/wasm-core';
 import type {
   BuilderPortMessage,
@@ -36,7 +36,7 @@ import {
 import type { WavetableLevels } from './wavetable-levels';
 import { VOICE_PARAMETERS, VoiceParam } from './wavetable-osc-params';
 
-// the Rust core of the wavetable oscillator (dsp/wavetable-osc, wavetable-osc.wasm): the store of the tables in the
+// the Rust core of the wavetable oscillator (dsp/wavetable-osc, in engine.wasm): the store of the tables in the
 // memory of the core, the voices and what they share, with the API of createTableStore, createVoiceShared and
 // createVoiceDsp. A scope is one instance (one AudioWorkletGlobalScope: its memory), its stores, shareds and
 // voices are handles into it. No import of wavetable-osc-dsp.ts but its types: the wasm bundle has no TS core
@@ -179,7 +179,7 @@ export interface WasmTableEntry {
 // worker sends them one at a time, abort drops a version that won't be committed); onFree gets the levels of a
 // version once no voice plays it (the specs: the store keeps the levels set to give them back, the worklet passes
 // none and keeps nothing). `epoch` counts the workers it took chunks from (reset: a new one). listen() gets the
-// bytes of the versions the core frees (the store processor tells the main thread: a version it refused may fit
+// bytes of the versions the core frees (the processor of the engine tells the main thread: a version it refused may fit
 // now)
 export const createTableStoreWasm = (scope: OscScope, onFree?: (levels: WavetableLevels) => void) => {
   const { exports } = scope;
@@ -195,13 +195,12 @@ export const createTableStoreWasm = (scope: OscScope, onFree?: (levels: Wavetabl
 
   // the versions the core freed since the last call (after every call that may free one: a block of a voice too)
   const drain = () => {
-    if (onFreedBytes) {
-      const freed = freedView(freedAt, 1);
-      if (freed[0] !== 0) {
-        const bytes = freed[0];
-        freed[0] = 0;
-        onFreedBytes(bytes);
-      }
+    // (read with no listener too: bytes left there would have every block of an engine say there is something to read)
+    const freed = freedView(freedAt, 1);
+    if (freed[0] !== 0) {
+      const bytes = freed[0];
+      freed[0] = 0;
+      onFreedBytes?.(bytes);
     }
     if (!onFree) return;
     const count = exports.osc_store_freed(handle);
@@ -679,7 +678,7 @@ export interface TappedVoice {
   right: Float32Array;
 }
 
-// the voices of a node in the core (scope.rs, one per voices processor): on() makes the voice of a note (its
+// the voices of a node in the core (scope.rs, one per processor of the engine): on() makes the voice of a note (its
 // options as createVoiceWasm takes them, the values of its params at the note on), apply() takes the events of the
 // main thread in their order (a new voice, the automation of its params, its routes and its filter), process()
 // renders a block of every voice in the order they were made, by the same Voice::process, into the sum of their
@@ -737,9 +736,8 @@ export const createVoiceScopeWasm = (
     }
   };
 
-  // (an event the core finds no memory for ends its voice: it is told ended); `now`: the frame of the next block
-  // of a node (a state of the LFOs that comes after its time takes over then: lateState)
-  const apply = (events: VoiceEvent[], now = -Infinity) => {
+  // (an event the core finds no memory for ends its voice: it is told ended)
+  const apply = (events: VoiceEvent[]) => {
     let count = 0;
     const flush = () => {
       const n = count;
@@ -780,9 +778,6 @@ export const createVoiceScopeWasm = (
       } else if (event.kind === 'bend') {
         flush();
         guard(() => exports.osc_scope_bend(handle, event.cents, event.instantly ? 1 : 0));
-      } else if (event.kind === 'lfos') {
-        flush();
-        guard(() => shared.setLfos(lateState(event, now / sampleRate)));
       } else {
         // (a param the core has not: nothing; as an index of -1 the core would take it as the frequency)
         const param = VOICE_PARAM_ORDER.indexOf(event.param);
@@ -848,6 +843,8 @@ export const createVoiceScopeWasm = (
       outL.set(leftView(output, n));
       outR.set(rightView(output + 4 * n, n));
     },
+    // a note on trapped since the last reports(): there is something to tell though no block had it
+    failing: () => failed.length > 0,
     // the starts and ends since the last call, null: none
     reports: (): VoicesReportMessage | null => {
       const count = exports.osc_scope_reports(handle);
@@ -919,7 +916,6 @@ export const createVoiceScopeWasm = (
     },
   };
 };
-export type VoiceScopeWasm = ReturnType<typeof createVoiceScopeWasm>;
 
 // samples of a chunk of a version the worker sends (1 MB): its copy into the memory of the core takes a fraction of
 // a render quantum, the chunks of 64 MB go between the blocks
@@ -944,12 +940,12 @@ type StoreMessage =
   | StoreChunkMessage
   | StoreAbortMessage;
 
-// the messages of the store processor of the wasm worklet, from its node (the port of the worker, a stats request,
+// the messages of the processor of the engine of the wasm worklet, from its node (the port of the worker, a stats request,
 // a version posted whole) and from the worker (versions in chunks, removals, a version it stopped sending):
 // `reply` posts to the main thread (`stored`, `refused`), `stats` answers a stats request. A chunk is acked
 // whatever happens to it (the worker sends the next one then); a chunk that fails (a trap of the core, a slot that
 // is gone) aborts its version: refused. The port of a new worker (a retry) aborts the versions the old one was
-// sending, and the receiver of the processor before it (a store node of before the retry) drops what still
+// sending, and the receiver of the processor before it (an engine node of before the retry) drops what still
 // comes to it: its slots may be another version's by then
 export const createStoreReceiver = (
   store: TableStoreWasm,

@@ -352,3 +352,80 @@ fn a_hit_after_a_silence_gets_the_gains_of_its_samples() {
         }
     }
 }
+
+// the CPU takes the denormals as 0 while `call` runs, as the audio thread of Chromium and Firefox does (Node and
+// WebKit don't): FZ of the FPCR, FTZ and DAZ of the MXCSR
+fn denormals_as_zero<T>(call: &mut dyn FnMut() -> T) -> T {
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let before: u64;
+        core::arch::asm!("mrs {}, fpcr", out(reg) before);
+        core::arch::asm!("msr fpcr, {}", in(reg) before | (1 << 24));
+        let result = call();
+        core::arch::asm!("msr fpcr, {}", in(reg) before);
+        result
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let mut before = 0u32;
+        core::arch::asm!("stmxcsr [{}]", in(reg) &mut before);
+        let flushed = before | 0x8040;
+        core::arch::asm!("ldmxcsr [{}]", in(reg) &flushed);
+        let result = call();
+        core::arch::asm!("ldmxcsr [{}]", in(reg) &before);
+        result
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    call()
+}
+
+// the tail of the bands after a hit, lifted by Below while it decays: no value of it is worked out of a denormal
+// (the square of a band that has decayed, from a mean square flushed to 0), so a thread that takes the denormals
+// as 0 renders the bits of one that doesn't (the parity of the browsers: the three bands, down and up)
+#[test]
+fn the_tail_of_the_bands_is_the_same_where_the_denormals_are_zero() {
+    let mut values = params(1.0, 0.75);
+    values[RATIO] = 20.0;
+    values[LOW] = 4.0;
+    values[MID] = -2.0;
+    values[HIGH] = 6.0;
+    values[MIX] = 0.8;
+    let plain = tail(&values, false);
+    // (the tail sounds on long after the hit)
+    assert!(plain[30000] != 0.0);
+    assert_eq!(bits(&plain), bits(&tail(&values, true)));
+}
+
+// a hit, then a silence, rendered with the CPU taking the denormals as 0 or not
+fn tail(values: &[f64; PARAMS], flushed: bool) -> Vec<f32> {
+    let frames = 60000;
+    let (mut left, mut right) = program(frames, 3);
+    left[9000..].fill(0.0);
+    right[9000..].fill(0.0);
+    let input = (left, right);
+    let mut compressor = Compressor::new(48000.0, values);
+    let mut run = || render(&mut compressor, &input, &mut || 128);
+    if flushed {
+        denormals_as_zero(&mut run)
+    } else {
+        run()
+    }
+}
+
+// the peak held of a mean square falls on after the mean square is flushed to 0: at a short Release through the
+// denormals within a block, where a small Below still reads its level (the gain is not at its ceiling)
+#[test]
+fn the_peak_held_of_a_band_never_passes_through_a_denormal() {
+    for release in [0.1, 1.0, 5.0] {
+        for below in [0.02, 0.1, 0.3] {
+            let mut values = params(1.0, below);
+            values[RELEASE] = release;
+            values[MIX] = 0.5;
+            // (not assert_eq: a failure would print both renders)
+            assert!(
+                bits(&tail(&values, false)) == bits(&tail(&values, true)),
+                "release {release} ms, below {below}"
+            );
+        }
+    }
+}

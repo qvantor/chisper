@@ -43,7 +43,7 @@ export interface LfoAnchor {
   period: number;
 }
 
-// an LFO as the main thread sends it to the voices node and the chain node: its knobs, the newest anchor of its
+// an LFO as the main thread sends it to the engine node: its knobs, the newest anchor of its
 // clock and its shape (only when it changed)
 export interface LfoWire {
   // RETRIG or FREE
@@ -69,7 +69,7 @@ export interface LfosState {
 export const mergeLfos = (before: LfoWire[] | null, { lfos }: LfosState): LfoWire[] =>
   lfos.map((wire, i) => ({ ...wire, table: wire.table ?? before?.[i]?.table }));
 
-// the LFOs a consumer takes (the voices node, the chain node): every state merged (the table of each kept),
+// the LFOs a consumer takes (the engine node: its voices, its chain): every state merged (the table of each kept),
 // sent on only while the consumer reads an LFO (`use`): a state is a message every audio thread deserializes (a
 // table of 8 KB allocated there) and takes in, one that reads none gets none. Once it reads one it gets the LFOs as
 // they are at once (instantly, before the message that gives it the route), then every state; a node made later

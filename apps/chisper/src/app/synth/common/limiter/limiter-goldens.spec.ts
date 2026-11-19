@@ -11,7 +11,7 @@ import { createLimiterWasm, LimiterExports } from './limiter-wasm';
 // the Rust core of the limiter (dsp/limiter): the bits of every output sample of every block on the golden
 // scenarios (their hashes in dsp/goldens/limiter.json), and random ones: finite, never over the ceiling
 
-const core = wasmCore<LimiterExports>('chain');
+const core = wasmCore<LimiterExports>('engine');
 const goldens = createGoldens('limiter');
 afterAll(() => goldens.save());
 

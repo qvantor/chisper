@@ -149,7 +149,7 @@ const createWasmTables = () => {
   const queue: (() => void)[] = [];
   const reply = jest.fn();
   const builder = createTableBuilder((run) => queue.push(run), reply);
-  const scope = createOscScope(wasmCore<OscExports>('wavetable-osc'));
+  const scope = createOscScope(wasmCore<OscExports>('engine'));
   const store = createTableStoreWasm(scope);
   const chunks: number[] = [];
   type End = {

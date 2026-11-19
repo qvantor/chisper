@@ -148,13 +148,13 @@ describe('lfos', () => {
   });
 
   it('runs the LFOs on the main thread as it sends them: the knobs from their time on', async () => {
-    const { model, actions, audioCtx, travel } = await setup();
+    const { model, actions, audioCtx, travel, lfos } = await setup();
     travel(2);
     actions.setLfoValue('lfo3', 'delay', 0.25);
     const at = audioCtx.currentTime + LFO_LEAD;
     expect(model.globals.lfo3.knobs(at - 0.001).delay).toBe(0);
     expect(model.globals.lfo3.knobs(at).delay).toBe(0.25);
-    expect(model.$state.value?.lfos[2]).toMatchObject({ delay: 0.25, table: lfoTable('sine') });
+    expect(lfos().at(-1)?.lfos[2]).toMatchObject({ delay: 0.25 });
   });
 
   describe('in BPM', () => {

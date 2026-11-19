@@ -114,12 +114,15 @@ reference may have no setting. A baseline of before it was taken at normal (256 
 - **A latency case**: Playwright's keyboard while the hook traces each note: its input event (`window.event`
   while the note on runs, the time a capture listener got it), the end of the synth's note on, the frame its
   voice was scheduled at and the one it started at (posted by its processor, matched to its press), the onsets
-  an extra worklet (`probe.worklet.ts`, served by the runner) hears before the filter and after the limiter
-  (L1).
+  an extra worklet (`probe.worklet.ts`, served by the runner) hears of the voices as the chain takes them (the
+  second output of the engine node, there in the perf build only and filled while the probe listens) and after the
+  limiter (L1).
 - **The DSP** (Node): voices (held, a moving position on 16 frames and on 256, a chord of 12 notes × 2 × u8 struck every 40 blocks:
   its attack, the direct path and the mix builds under the budget), table building, the effects and the limiter
-  each alone (units of the chain core; in a tree before it their own cores, under the same names), the whole chain
-  (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), ns per sample divided by the ns of a
+  each alone (units of the chain, a half of the engine core; in a tree before them their own cores, under the same
+  names), the whole chain (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), the
+  whole node (`engine chord S5`, `engine chord, no effect`: the chord of `scope chord attack` into the chain in
+  one block of the core), ns per sample divided by the ns of a
   fixed multiply-add of the same run (the speed of the machine out), 7 samples each. V8, not JSC: it catches
   algorithmic regressions (a hot loop that boxes doubles) the operation counts of the specs can't. A module with
   a Rust core (`dsp/`, `tmp/wasm` of the tree) runs it under the names of its cases; a tree of before stage 5 of

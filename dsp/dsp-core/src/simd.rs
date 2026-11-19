@@ -210,6 +210,13 @@ mod lanes4 {
             let tiny = f32x4_lt(f32x4_abs(self.0), f32x4_splat(super::TINY));
             F32x4(v128_andnot(self.0, tiny))
         }
+        /// `flush` of lanes that are never under 0 (a mean square, a peak held), the same bits there without the
+        /// absolute value: one operation less where every sample waits for the one before
+        #[inline(always)]
+        pub fn flush_positive(self) -> F32x4 {
+            let tiny = f32x4_lt(self.0, f32x4_splat(super::TINY));
+            F32x4(v128_andnot(self.0, tiny))
+        }
         /// the lanes that equal those of `other`: all their bits set, else none
         #[inline(always)]
         pub fn equal(self, other: F32x4) -> U32x4 {
@@ -422,6 +429,10 @@ mod lanes4 {
         #[inline(always)]
         pub fn flush(self) -> F32x4 {
             F32x4(self.0.map(|x| if x.abs() < super::TINY { 0.0 } else { x }))
+        }
+        #[inline(always)]
+        pub fn flush_positive(self) -> F32x4 {
+            F32x4(self.0.map(|x| if x < super::TINY { 0.0 } else { x }))
         }
         #[inline(always)]
         pub fn equal(self, other: F32x4) -> U32x4 {
@@ -672,5 +683,10 @@ mod tests {
         let flushed = F32x4::new(1e-26, -1e-30, -1e-24, f32::NAN).flush().lanes();
         assert_eq!(flushed[..3], [0.0, 0.0, -1e-24]);
         assert!(flushed[0].is_sign_positive() && flushed[1].is_sign_positive() && flushed[3].is_nan());
+        let positive = F32x4::new(1e-26, -0.0, 1e-24, f32::NAN).flush_positive().lanes();
+        assert_eq!(positive[..3], [0.0, 0.0, 1e-24]);
+        assert!(positive[1].is_sign_positive() && positive[3].is_nan());
+        let kept = F32x4::new(0.0, 1e-40, 0.5, f32::INFINITY);
+        assert_eq!(kept.flush_positive().lanes(), kept.flush().lanes());
     }
 }

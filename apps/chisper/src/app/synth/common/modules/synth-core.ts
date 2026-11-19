@@ -3,6 +3,7 @@ import { PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { underrunEvents, watchDropouts } from '../latency/dropouts';
 import { keepNormalLatency, LATENCY_HINTS, readLatencyMode, resolveLatency } from '../latency/latency';
 import { createChain } from '../chain/chain';
+import { createEngineNode } from '../engine/engine-node';
 import { LIMITER_STAGE } from '../chain/chain-params';
 import { createWavetableEngine, WavetableEngineDependencies } from '../wavetable/wavetable-engine';
 
@@ -31,15 +32,16 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
     // null: the browser picks its own (latency.ts)
     const latency = resolveLatency();
     const audioCtx = new AudioContext(latency ? { latencyHint: LATENCY_HINTS[latency] } : undefined);
-    // everything after the voices in one worklet node with one core: the fx chain (its slots are told by the fx
-    // model; the filter is in each voice), the master gain and the limiter, the last stage. The analysers tap its
-    // output, they show what is played; until it has loaded the master is silent
-    const chain = createChain(audioCtx);
-    const { input, output } = chain;
+    // the whole path of the sound in one worklet node with one core (engine-node.ts), loaded at the start: the
+    // oscillators of every voice (the filter is in each), their sum through the fx chain (its slots are told by the
+    // fx model), the master gain and the limiter, the last stage. The analysers tap its output, they show what is
+    // played; until it has loaded nothing sounds
+    const engine = createEngineNode(audioCtx);
+    const chain = createChain(audioCtx, engine);
+    const { output } = chain;
     // the master limiter of the chain: its status (failed: the module, or the limiter itself in the core)
     const masterLimiter = { $status: chain.status(LIMITER_STAGE) };
-    // the oscillators of every voice (an audio worklet, one node into the chain), loaded at the start like it
-    const wavetables = createWavetableEngine(audioCtx, input, wavetableDependencies);
+    const wavetables = createWavetableEngine(audioCtx, engine, wavetableDependencies);
 
     output.connect(audioCtx.destination);
 
@@ -57,14 +59,14 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
       $dropoutWarning,
       $muted,
       chain,
-      input,
+      engine,
       masterLimiter,
       output,
       wavetables,
       $masterGain,
     };
   })
-    .actions(({ $masterGain, $dropoutWarning, $muted, chain, wavetables }) => {
+    .actions(({ $masterGain, $dropoutWarning, $muted, chain, engine }) => {
       return {
         setMasterGain: (value: number) => $masterGain.next(value),
         // a preset switch (soundSwitch) silences the output after the tails of the fx, before the limiter: it
@@ -79,11 +81,10 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
         },
         // the user answered the warning (it isn't shown again)
         dismissDropoutWarning: () => $dropoutWarning.next(false),
-        // loads again the oscillators and the chain that failed, makes its limiter again if it did (each only
-        // then): one Retry brings the sound back when both did (the network down at the start)
+        // loads the engine again if it failed, makes its limiter again if that did (each only then): one Retry
+        // brings the sound back
         retryAudio: () => {
-          wavetables.retry();
-          chain.retry();
+          engine.retry();
           chain.retryStage(LIMITER_STAGE);
         },
       };
@@ -107,9 +108,10 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
             ),
           ]),
     ])
-    .destroy(({ chain, wavetables }) => {
+    .destroy(({ chain, engine, wavetables }) => {
       chain.destroy();
       wavetables.destroy();
+      engine.destroy();
     });
 
 export const {

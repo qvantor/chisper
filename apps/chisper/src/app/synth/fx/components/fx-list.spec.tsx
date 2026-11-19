@@ -8,7 +8,7 @@ import { renderWithFx } from '../../../../test-utils/fx-wrapper';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import { applySnapshot } from '../../../app';
-import { CHAIN_MODULE, CHAIN_PROCESSOR } from '../../common/chain/chain-params';
+import { ENGINE_MODULE, ENGINE_PROCESSOR } from '../../common/engine/engine-params';
 import { FX_REGISTRY } from '../effects';
 import { FxList } from './fx-list';
 import { FX_COLORS } from './fx-colors';
@@ -19,16 +19,16 @@ const setup = (ui = <FxList />) => {
   return { fx, user: userEvent.setup() };
 };
 
-// the module of the chain loads asynchronously
+// the module of the engine (the chain is in it) loads asynchronously
 const flush = () => act(() => new Promise((resolve) => setTimeout(resolve)));
 
-// the first load of the module of the chain fails (404, offline), the next ones and the other modules succeed;
-// test-setup restores the mock
+// the first load of the module of the engine fails (404, offline), the next ones succeed; test-setup restores the
+// mock
 const failFirstWorkletLoad = () => {
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
   let failed = false;
   const addModule = jest.fn((url: string) => {
-    if (failed || !url.endsWith(`/${CHAIN_MODULE}.js`)) return Promise.resolve();
+    if (failed || !url.endsWith(`/${ENGINE_MODULE}.js`)) return Promise.resolve();
     failed = true;
     return Promise.reject(new Error('404'));
   });
@@ -43,7 +43,7 @@ interface NodeStub extends AudioWorkletNode {
   name: string;
   port: AudioWorkletNode['port'] & { postMessage: jest.Mock };
 }
-// the node of the chain once it is made (test-setup restores the stub)
+// the node of the engine, the one of the chain, once it is made (test-setup restores the stub)
 const recordChainNode = () => {
   const created: NodeStub[] = [];
   const Stub = globalThis.AudioWorkletNode;
@@ -54,7 +54,7 @@ const recordChainNode = () => {
     }
   }
   Object.assign(globalThis, { AudioWorkletNode: Recording });
-  return () => created.find(({ name }) => name === CHAIN_PROCESSOR) as NodeStub;
+  return () => created.find(({ name }) => name === ENGINE_PROCESSOR) as NodeStub;
 };
 
 // the sortable item is a button with the same name, the lamp is the one with aria-pressed
@@ -248,7 +248,7 @@ describe('FxList', () => {
       expect(row).not.toHaveClass('unsupported');
 
       await user.click(row);
-      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
+      expect(workletLoads(addModule, ENGINE_MODULE)).toBe(2);
       expect(fx[0].$effects.value.reverb.added).toBe(true);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
@@ -271,7 +271,7 @@ describe('FxList', () => {
       expect(getRowOf('Reverb')).toHaveClass('on', 'unavailable');
 
       await user.click(screen.getByRole('button', { name: 'Retry Reverb' }));
-      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
+      expect(workletLoads(addModule, ENGINE_MODULE)).toBe(2);
       expect(fx[0].$effects.value.reverb.added).toBe(true);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
@@ -288,7 +288,7 @@ describe('FxList', () => {
       await user.click(getRowOf('Reverb'));
       expect(fx[0].$effects.value.reverb.added).toBe(false);
       expect(fx[0].$status.value.reverb).toBe('failed');
-      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(1);
+      expect(workletLoads(addModule, ENGINE_MODULE)).toBe(1);
       expect(getLampOf('Reverb')).toHaveAttribute('aria-pressed', 'false');
     });
 
@@ -298,7 +298,7 @@ describe('FxList', () => {
       await flush();
       screen.getByRole('button', { name: 'Retry Reverb' }).focus();
       await user.keyboard('{Enter}');
-      expect(workletLoads(addModule, CHAIN_MODULE)).toBe(2);
+      expect(workletLoads(addModule, ENGINE_MODULE)).toBe(2);
       await flush();
       expect(fx[0].$status.value.reverb).toBe('ready');
       expect(fx[0].$effects.value.reverb.added).toBe(false);

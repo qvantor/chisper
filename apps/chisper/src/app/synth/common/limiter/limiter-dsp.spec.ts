@@ -17,7 +17,7 @@ type CreateLimiter = (
 ) => Pick<ReturnType<typeof createLimiterWasm>, 'process' | 'latency'>;
 
 // the Rust core (dsp/limiter), one instance of it for the spec (a scope)
-const core = wasmCore<LimiterExports>('chain');
+const core = wasmCore<LimiterExports>('engine');
 const createLimiter: CreateLimiter = (sampleRate) => createLimiterWasm(core, sampleRate);
 
 // renders in render quanta like the worklet

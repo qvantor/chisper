@@ -535,8 +535,13 @@ impl Compressor {
                 let last = split.of(fourth, d.tick(&high_cut, fourth));
                 let left = passed.pick::<0, 4, 6, 6>(last);
                 let right = passed.pick::<1, 5, 7, 7>(last);
-                mean = mean + (left * left + right * right - mean) * mean_step;
-                held = mean.max(held * held_share);
+                // (flushed at every sample, not with the states at the end of the block: from 0 the square of a band
+                // that has decayed is a denormal, which the audio thread of Chromium and Firefox takes as 0 and Node
+                // and WebKit do not; `log2` of the level reads its bits, the gains would differ. The peak held too:
+                // it falls on after the mean square is 0, at a short Release through the denormals within a block.
+                // Neither is ever under 0, a step and a share are within 0..1: `flush_positive`, the bits of `flush`)
+                mean = (mean + (left * left + right * right - mean) * mean_step).flush_positive();
+                held = mean.max(held * held_share).flush_positive();
                 lefts[k] = left;
                 rights[k] = right;
                 helds[k] = held;
@@ -581,8 +586,8 @@ impl Compressor {
             section.flush();
         }
         self.sections = [a, b, c, d];
-        self.mean = mean.flush();
-        self.held = held.flush();
+        self.mean = mean;
+        self.held = held;
         self.band_gains = band_gains;
     }
 

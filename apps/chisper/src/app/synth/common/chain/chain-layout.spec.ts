@@ -24,7 +24,7 @@ import type { ChainExports } from './chain-wasm';
 // against what the core says of itself (chain_layout and chain_key of the perf build): a param or a value added
 // on one side alone would move the others to the keys next to them, and no golden of a crate would tell
 
-const core = wasmCore<ChainExports>('chain');
+const core = wasmCore<ChainExports>('engine');
 const command = (count: number) => [
   ...new Float64Array(core.memory.buffer, core.unit_command() >>> 0, count),
 ];

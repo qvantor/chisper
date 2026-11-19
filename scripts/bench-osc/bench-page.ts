@@ -5,7 +5,7 @@
 import { wave } from '@chisper/math';
 import { buildLevels } from '../../apps/chisper/src/app/synth/common/wavetable/wavetable-mipmap';
 import type { WavetableLevels } from '../../apps/chisper/src/app/synth/common/wavetable/wavetable-levels';
-import bytes from '@chisper/wasm/wavetable-osc.wasm';
+import bytes from '@chisper/wasm/engine.wasm';
 import { instantiateCore } from '../../apps/chisper/src/app/synth/common/wasm/wasm-core';
 import {
   createOscScope,
@@ -16,9 +16,12 @@ import {
   OscScope,
 } from '../../apps/chisper/src/app/synth/common/wavetable/wavetable-osc-wasm';
 import {
-  STORE_PROCESSOR,
+  ENGINE_NODE_OPTIONS,
+  ENGINE_PROCESSOR,
+  EngineOptions,
+} from '../../apps/chisper/src/app/synth/common/engine/engine-params';
+import {
   VOICE_PARAMETERS,
-  VOICES_PROCESSOR,
   VoiceParam,
 } from '../../apps/chisper/src/app/synth/common/wavetable/wavetable-osc-params';
 import type {
@@ -29,7 +32,7 @@ import { unisonPower, voiceLevel } from '../../apps/chisper/src/app/synth/common
 import { parseWav } from '../../apps/chisper/src/app/synth/services/wav';
 import { analyze, frameOf, kaiser, sawFrame, SIZE } from './sound.mjs';
 
-const WORKLET_URL = 'wavetable-osc.js';
+const WORKLET_URL = 'engine.js';
 const WAVE_SIZE = 2048;
 // the render plays this many more samples before those of a spectrum (the start of the note is left out)
 const LEAD = 8192;
@@ -74,10 +77,11 @@ const nativeRender = async (
   return (await ctx.startRendering()).getChannelData(0);
 };
 
-// the store of a context with the tables in it (the ack arrives before the rendering starts)
+// the store of a context with the tables in it (the ack arrives before the rendering starts): a node of the engine
+// takes them, the store is the module's
 const createStore = async (ctx: BaseAudioContext, levels: Record<string, WavetableLevels>) => {
   await ctx.audioWorklet.addModule(WORKLET_URL);
-  const node = new AudioWorkletNode(ctx, STORE_PROCESSOR, { numberOfInputs: 0, numberOfOutputs: 1 });
+  const node = new AudioWorkletNode(ctx, ENGINE_PROCESSOR, { numberOfInputs: 0, numberOfOutputs: 1 });
   for (const [id, value] of Object.entries(levels)) await storeTable(node, id, 1, value);
   return node;
 };
@@ -111,7 +115,8 @@ interface VoiceSetup {
 const FLAT = { attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 };
 const ENVELOPES = [FLAT, FLAT, FLAT];
 
-// the voices node of the voices of `setups` (a setup and the second oscillator of its voice), voice k of them
+// the node of the engine with the voices of `setups`, its chain a wire (no effect, no limiter: the sum of the
+// voices as it is) (a setup and the second oscillator of its voice), voice k of them
 // has the id k: their note ons, the ends of their gates and `automation` as the events of its options (a message
 // would come in a block no one can tell)
 const createVoices = (
@@ -145,11 +150,10 @@ const createVoices = (
       ? []
       : [{ kind: 'set', voice, param: 'gate', value: 0, time: setup.stop } as const]),
   ]);
-  return new AudioWorkletNode(ctx, VOICES_PROCESSOR, {
-    numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [2],
-    processorOptions: { events: [...events, ...automation] },
+  const processorOptions: EngineOptions = { events: [...events, ...automation], unlimited: true };
+  return new AudioWorkletNode(ctx, ENGINE_PROCESSOR, {
+    ...ENGINE_NODE_OPTIONS,
+    processorOptions,
   });
 };
 
@@ -522,12 +526,12 @@ const unisonLevel = async ({ rate, notes }: { rate: number; notes: number }) => 
 // voices play their mix tables); env-moving: the same envelope decaying for the whole render
 // lfo-wdg: an LFO on the same params as the envelopes (the direct path they are compared with);
 // still-sustain: no route, the knobs where ENV 2 holds them on its sustain (the same sound as env-sustain). An
-// LFO of ours is a triangle of linear ramps (the voices node has no AudioParams): a value every sample
+// LFO of ours is a triangle of linear ramps (the engine node has no AudioParams): a value every sample
 type Modulation = 'none' | 'position' | 'detune' | 'env-sustain' | 'env-moving' | 'lfo-wdg' | 'still-sustain';
 
 // 8 voices of a chord, both oscillators with unison 4: 64 oscillators. Native: the graph the synth had,
 // per oscillator 4 OscillatorNodes in pairs into a merger, its gain, the envelope of the voice; ours: the
-// voices node with the 8 voices, their envelopes inside. Modulation: an LFO on the position of every voice (ours
+// engine node with the 8 voices, their envelopes inside. Modulation: an LFO on the position of every voice (ours
 // only, native has no morph) or on the detune of every oscillator, or ENV 2 of the voices (ours only)
 const cpu = async ({
   rate,
@@ -658,7 +662,7 @@ const delivery = async ({ rate, name }: { rate: number; name: string }) => {
   const frames = await table(name);
   const ctx = new OfflineAudioContext(2, 4096, rate);
   await ctx.audioWorklet.addModule(WORKLET_URL);
-  const store = new AudioWorkletNode(ctx, STORE_PROCESSOR, { numberOfInputs: 0, numberOfOutputs: 1 });
+  const store = new AudioWorkletNode(ctx, ENGINE_PROCESSOR, { numberOfInputs: 0, numberOfOutputs: 1 });
   const worker = new Worker('wavetable-worker.js');
   const channel = new MessageChannel();
   store.port.postMessage({ port: channel.port1 }, [channel.port1]);

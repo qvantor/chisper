@@ -144,8 +144,8 @@ export const createPerfApi = (models: PerfModels) => {
   };
   const stopRuns = () => generation++;
 
-  // the probe of the onsets (probe.worklet.ts, served by the runner): input 0 the voices (the input of
-  // the chain, before the effects), 1 the output (after the limiter)
+  // the probe of the onsets (probe.worklet.ts, served by the runner): input 0 the voices (as the chain takes
+  // them, before the effects: the second output of the engine node), 1 the output (after the limiter)
   let probe: AudioWorkletNode | null = null;
   let onsets: ProbeOnsetMessage[] = [];
   // one probe however many installs: one before the module has loaded shares the first; a removal meanwhile
@@ -165,7 +165,7 @@ export const createPerfApi = (models: PerfModels) => {
     core.output.connect(node, 0, 1);
     node.connect(audioCtx.destination);
     // the voices before the fx (the filter is in each voice)
-    core.input.connect(node, 0, 0);
+    core.engine.tapVoices(node);
     probe = node;
   };
   const installProbe = (url: string, options: Partial<ProbeOptions> = {}) => {
@@ -180,7 +180,7 @@ export const createPerfApi = (models: PerfModels) => {
     installing = null;
     if (!probe) return;
     probe.port.postMessage({ stop: true });
-    core.input.disconnect(probe);
+    core.engine.tapVoices(null);
     core.output.disconnect(probe);
     probe.disconnect();
     probe = null;

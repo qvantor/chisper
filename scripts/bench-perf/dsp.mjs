@@ -27,8 +27,15 @@ const TS_CORES = [
 
 // the Rust cores (dsp/, `npm run wasm`: tmp/wasm, as in production) of the tree that has them: its facade and
 // the bytes of the core. An effect is a module of its own in a tree before the chain core, a unit of chain.wasm
-// (`within`) from it on: its cases keep their names, an A/B run pairs them
+// (`within`) from it on; the chain and the oscillator are engine.wasm (`WHOLE`) in a tree that has it: their cases
+// keep their names, an A/B run pairs them
+const WHOLE = 'engine';
 const WASM_CORES = [
+  {
+    core: 'engine',
+    facade: 'src/app/synth/common/engine/engine-wasm',
+    create: 'createEngineWasm',
+  },
   {
     core: 'chain',
     facade: 'src/app/synth/common/chain/chain-wasm',
@@ -74,7 +81,7 @@ const WASM_CORES = [
     core: 'wavetable-osc',
     facade: 'src/app/synth/common/wavetable/wavetable-osc-wasm',
     create: 'createOscScope, createTableStoreWasm, createVoiceSharedWasm, createVoiceWasm',
-    // (a tree of the voices node: its scope too; the params of a block in their order: a tree whose oscillators
+    // (a tree of the engine node: its scope too; the params of a block in their order: a tree whose oscillators
     // have the blend of their unison as a param has blend1)
     optional: ['createVoiceScopeWasm', 'VOICE_PARAM_ORDER'],
   },
@@ -96,7 +103,7 @@ export const loadDsp = async (source = root, name) => {
   // (the file of each: the module it is a unit of in a tree that has that one, else its own; a file of its own
   // left in tmp/wasm by a build of before is not of this tree)
   const cores = WASM_CORES.filter(({ facade }) => fs.existsSync(path.join(app, `${facade}.ts`)))
-    .map((entry) => ({ ...entry, file: [entry.within, entry.core].find(built) }))
+    .map((entry) => ({ ...entry, file: [WHOLE, entry.within, entry.core].find(built) }))
     .filter(({ file }) => file);
   const exports = (module, name) => {
     const file = path.join(app, `${module}.ts`);
@@ -270,7 +277,7 @@ const createCases = (dsp) => {
   const wasmStore = oscScope && dsp.createTableStoreWasm(oscScope);
   wasmStore?.set('a', 1, levels);
   wasmStore?.set('b', 1, levels256);
-  // (as the worklet: its store processor listens for the memory the store frees, read after every block)
+  // (as the worklet: its processor of the engine listens for the memory the store frees, read after every block)
   wasmStore?.listen?.(() => undefined);
   const createShared = { ts: () => dsp.createVoiceShared(), wasm: () => dsp.createVoiceSharedWasm(oscScope) };
   const createVoice = {
@@ -492,7 +499,7 @@ const createCases = (dsp) => {
         if (block % ATTACK === 0) {
           voices?.free();
           voices = dsp.createVoiceScopeWasm(oscScope, RATE, wasmStore, shared);
-          voices.apply([{ kind: 'lfos', ...lfoState(0.25) }]);
+          shared.setLfos(lfoState(0.25));
           voices.apply(
             chord.map((params, voice) => ({
               kind: 'on',
@@ -622,52 +629,56 @@ const createCases = (dsp) => {
   // a chain with `kinds` playing (the knobs of the heavy patch), `moved`: by the LFOs
   const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
   const CHAIN_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+  // the state of a chain of `kinds` in this order, `moved`: its knobs by LFOs
+  const chainStateOf = (kinds, moved = false) => {
+    const neutral = {
+      distortion: { mode: 0, drive: 8, tone: 20000, level: 0 },
+      chorus: { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 },
+      delay: DELAY,
+      compressor: {
+        ...{ multi: 0, thresh: 0.6, ratio: 4, attack: 90, release: 90, gain: 0, xlow: 131, xhigh: 2500 },
+        ...{ below: 0, low: 0, mid: 0, high: 0, level: 0.5, mix: 1 },
+      },
+      reverb: { ...REVERB, decay: 3 },
+    };
+    const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3 };
+    const target = (kind, key) =>
+      CHAIN_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
+    const lfo = {
+      mode: 1,
+      delay: 0,
+      rise: 0,
+      smooth: 0,
+      phase: 0,
+      anchor: { time: 0, phase: 0, period: 0.31 },
+    };
+    return {
+      slots: Object.fromEntries(
+        CHAIN_KINDS.map((kind) => [
+          kind,
+          { params: neutral[kind], mix: mixes[kind], active: kinds.includes(kind) },
+        ])
+      ),
+      order: kinds.map((kind) => CHAIN_KINDS.indexOf(kind)),
+      masterGain: 1,
+      muted: false,
+      routes: moved
+        ? [
+            { target: target('distortion', 'level'), source: 4, amount: -6, min: -24, max: 12 },
+            { target: target('compressor', 'thresh'), source: 5, amount: 0.3, min: 0, max: 1 },
+            { target: target('delay', 'time'), source: 6, amount: 0.01, min: 0.01, max: 1 },
+            { target: target('reverb', 'mix'), source: 7, amount: 0.4, min: 0, max: 1 },
+          ]
+        : [],
+      note: null,
+      lfos: moved ? { at: 0, instantly: true, lfos: [lfo, lfo, lfo, lfo] } : null,
+      meters: [],
+    };
+  };
   const chainOf =
     (kinds, source, moved = false) =>
     () => {
-      const neutral = {
-        distortion: { mode: 0, drive: 8, tone: 20000, level: 0 },
-        chorus: { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 },
-        delay: DELAY,
-        compressor: {
-          ...{ multi: 0, thresh: 0.6, ratio: 4, attack: 90, release: 90, gain: 0, xlow: 131, xhigh: 2500 },
-          ...{ below: 0, low: 0, mid: 0, high: 0, level: 0.5, mix: 1 },
-        },
-        reverb: { ...REVERB, decay: 3 },
-      };
-      const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3 };
-      const target = (kind, key) =>
-        CHAIN_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
-      const lfo = {
-        mode: 1,
-        delay: 0,
-        rise: 0,
-        smooth: 0,
-        phase: 0,
-        anchor: { time: 0, phase: 0, period: 0.31 },
-      };
-      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, {
-        slots: Object.fromEntries(
-          CHAIN_KINDS.map((kind) => [
-            kind,
-            { params: neutral[kind], mix: mixes[kind], active: kinds.includes(kind) },
-          ])
-        ),
-        order: kinds.map((kind) => CHAIN_KINDS.indexOf(kind)),
-        masterGain: 1,
-        muted: false,
-        routes: moved
-          ? [
-              { target: target('distortion', 'level'), source: 4, amount: -6, min: -24, max: 12 },
-              { target: target('compressor', 'thresh'), source: 5, amount: 0.3, min: 0, max: 1 },
-              { target: target('delay', 'time'), source: 6, amount: 0.01, min: 0.01, max: 1 },
-              { target: target('reverb', 'mix'), source: 7, amount: 0.4, min: 0, max: 1 },
-            ]
-          : [],
-        note: null,
-        lfos: moved ? { at: 0, instantly: true, lfos: [lfo, lfo, lfo, lfo] } : null,
-        meters: [],
-      });
+      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds, moved));
       let at = 0;
       let frame = 0;
       const inL = new Float32Array(BLOCK);
@@ -680,6 +691,48 @@ const createCases = (dsp) => {
         frame += BLOCK;
       };
     };
+  // the whole node of a tree that has it in one core: the chord of `scope chord attack` struck every ATTACK blocks
+  // (its voices made again, the chain kept: its tails sound on) through a chain. `engine …`: one block of the core,
+  // the voices summed into the input of the chain inside it (what the node of the worklet runs); `two calls …`: the
+  // voices into JS, then into the chain (the two nodes of a tree before the engine, without what the graph cost
+  // between them)
+  const engineOf = (kinds, whole) => () => {
+    const shared = createShared.wasm();
+    const { exports } = oscScope;
+    const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds));
+    const at = exports.chain_buffers(chain.handle, BLOCK);
+    const [midL, midR] = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
+    let [viewL, viewR] = [new Float32Array(0), new Float32Array(0)];
+    let voices = null;
+    let engine = 0;
+    let block = 0;
+    return () => {
+      if (block % ATTACK === 0) {
+        if (engine) exports.engine_free(engine);
+        voices?.free();
+        voices = dsp.createVoiceScopeWasm(oscScope, RATE, wasmStore, shared);
+        scopeNotes(voices);
+        engine = whole ? exports.engine_new(voices.handle, wasmStore.handle, shared.handle, chain.handle) : 0;
+      }
+      if (whole) {
+        const flags = exports.engine_process(engine, block * BLOCK);
+        // (the views of the facade: made again when the memory grew)
+        if (viewL.buffer !== exports.memory.buffer) {
+          viewL = new Float32Array(exports.memory.buffer, at + 8 * BLOCK, BLOCK);
+          viewR = new Float32Array(exports.memory.buffer, at + 12 * BLOCK, BLOCK);
+        }
+        outL.set(viewL);
+        outR.set(viewR);
+        if (flags & 1) voices.reports();
+      } else {
+        voices.process(block * BLOCK, midL, midR);
+        voices.reports();
+        chain.process(midL, midR, outL, outR, block * BLOCK);
+        chain.reports();
+      }
+      block++;
+    };
+  };
   const input = noise(RATE, 0.5);
   const hits = input.map((value, i) => (i % (RATE / 5) < RATE / 20 ? value : 0));
   // (a threshold the noise is over)
@@ -904,6 +957,13 @@ const createCases = (dsp) => {
       'chain no effect': chainOf([], input),
       'chain at rest': chainOf(CHAIN_KINDS, new Float32Array(RATE)),
     }),
+    ...(dsp.createEngineWasm &&
+      oscScope && {
+        'engine chord S5': engineOf(['distortion', 'delay', 'reverb'], true),
+        'two calls chord S5': engineOf(['distortion', 'delay', 'reverb'], false),
+        'engine chord, no effect': engineOf([], true),
+        'two calls chord, no effect': engineOf([], false),
+      }),
   };
 };
 

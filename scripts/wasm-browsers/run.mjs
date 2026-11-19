@@ -3,20 +3,20 @@
 // `npm run worklets`): every scene renders in an OfflineAudioContext with the worklet bundle of the app and in Node
 // with its wasm core alone (tmp/wasm); the worklet must give the bits of Node in every browser (jsmath: the same
 // Math everywhere). The params go only through processorOptions (a message would arrive in an unpredictable block):
-// the voices of the oscillator in the events of their node, their params at the note on and the steps of the gate
+// the voices of the oscillator in the events of the node, their params at the note on and the steps of the gate
 // worked out by the timelines of the core (in Node: the arrays of each block).
 // Exit 1 when a render differs
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { loadPlaywright, parseArgs, root } from '../bench-common.mjs';
-import { nodeRender, SCENES, sceneLevels, sceneLfos } from './scenes.mjs';
+import { nodeRender, PROCESSOR, sceneEvents, SCENES, sceneLevels, sceneLfos } from './scenes.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const browsers = (args.browsers ?? 'chromium,webkit,firefox').split(',');
 const scenes = SCENES.filter(({ name }) => !args.only || name.includes(args.only));
 const worklets = path.join(root, 'tmp/worklets');
-if (!fs.existsSync(path.join(worklets, 'chain.js')))
+if (!fs.existsSync(path.join(worklets, 'engine.js')))
   throw new Error('tmp/worklets has no bundles: run `npm run wasm && npm run worklets` first');
 
 // the worklet bundles and an empty page on localhost (a secure context: AudioWorklet)
@@ -71,12 +71,14 @@ const renderInPage = (page, { bundle, processor, options, rate, input }) =>
     { bundle, processor, options, rate, input }
   );
 
-// renders an oscillator scene in the page: the store node gets the tables (the page waits for their acks), the
-// voices node every voice of the scene from the events of its options (each voice, its params at the note on, the
-// steps of its gate), each voice into a pair of channels of its own (a tap) split into the destination
-const renderOscInPage = (page, { bundle, rate, frames, tables, voices, lfos }) =>
+// renders an oscillator scene in the page: a node of the engine gets the tables (the page waits for their acks:
+// the store is the module's, it outlives the node) and ends, then the node of the scene plays every voice from the
+// events of its options (each voice, its params at the note on, the steps of its gate), each voice into a pair of
+// channels of its own (a tap) split into the destination. `state` (a scene of the whole node): no tap, the voices
+// through the chain of that state into the two channels of the output
+const renderOscInPage = (page, { bundle, processor, rate, frames, tables, voices, events, lfos, state }) =>
   page.evaluate(
-    async ({ bundle, rate, frames, tables, voices, lfos }) => {
+    async ({ bundle, processor, rate, frames, tables, voices, events, lfos, state }) => {
       const decode = (text) => {
         const binary = atob(text);
         const bytes = new Uint8Array(binary.length);
@@ -90,12 +92,13 @@ const renderOscInPage = (page, { bundle, rate, frames, tables, voices, lfos }) =
           binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         return btoa(binary);
       };
-      const channels = 2 * voices.length;
+      const channels = state ? 2 : 2 * voices.length;
       const context = new OfflineAudioContext(channels, frames, rate);
       await context.audioWorklet.addModule(`/${bundle}.js`);
-      const store = new AudioWorkletNode(context, 'chisper-wavetable-store', {
+      const store = new AudioWorkletNode(context, processor, {
         numberOfInputs: 0,
         numberOfOutputs: 1,
+        outputChannelCount: [2],
       });
       await new Promise((resolve) => {
         let waiting = tables.length;
@@ -118,27 +121,22 @@ const renderOscInPage = (page, { bundle, rate, frames, tables, voices, lfos }) =
           })
         );
       });
-      const events = [
-        // the LFOs first, their tables Float32Arrays
-        ...(lfos
-          ? [
-              {
-                kind: 'lfos',
-                ...lfos,
-                lfos: lfos.lfos.map((wire) => ({ ...wire, table: Float32Array.from(wire.table) })),
-              },
-            ]
-          : []),
-        ...voices.flatMap(({ options, params, gate }, voice) => [
-          { kind: 'on', voice, options, params },
-          ...gate.map(([frame, value]) => ({ kind: 'set', voice, param: 'gate', value, time: frame / rate })),
-        ]),
-      ];
-      const node = new AudioWorkletNode(context, 'chisper-wavetable-voices', {
+      store.port.postMessage({ stop: true });
+      const node = new AudioWorkletNode(context, processor, {
         numberOfInputs: 0,
         numberOfOutputs: 1,
         outputChannelCount: [channels],
-        processorOptions: { events, tap: true },
+        processorOptions: {
+          events,
+          ...(state ? { state } : { tap: true }),
+          // the LFOs at once, their tables Float32Arrays
+          ...(lfos && {
+            lfos: {
+              ...lfos,
+              lfos: lfos.lfos.map((wire) => ({ ...wire, table: Float32Array.from(wire.table) })),
+            },
+          }),
+        },
       });
       const split = context.createChannelSplitter(channels);
       const merger = context.createChannelMerger(channels);
@@ -150,7 +148,7 @@ const renderOscInPage = (page, { bundle, rate, frames, tables, voices, lfos }) =
         encode(rendered.getChannelData(channel))
       );
     },
-    { bundle, rate, frames, tables, voices, lfos }
+    { bundle, processor, rate, frames, tables, voices, events, lfos, state }
   );
 
 const differences = (a, b) => {
@@ -192,12 +190,21 @@ try {
           })
         );
       {
-        const bundle = scene.module;
         let result;
         try {
           const rendered = await (scene.kind === 'osc'
-            ? renderOscInPage(page, { ...scene, bundle, tables, lfos: await sceneLfos(scene) })
-            : renderInPage(page, { ...scene, bundle, input: encoded }));
+            ? renderOscInPage(page, {
+                bundle: scene.bundle,
+                processor: PROCESSOR,
+                rate: scene.rate,
+                frames: scene.frames,
+                voices: scene.voices,
+                state: scene.whole ? scene.state : null,
+                tables,
+                events: sceneEvents(scene),
+                lfos: await sceneLfos(scene),
+              })
+            : renderInPage(page, { ...scene, input: encoded }));
           const channels = rendered.map(fromBase64);
           const found = channels.map((data, channel) => differences(data, output[channel]));
           const first = found.find((item) => item.first >= 0)?.first ?? -1;

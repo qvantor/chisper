@@ -5,7 +5,7 @@ import type { WavetableLevels } from './wavetable-levels';
 import type { StatsRequest, StoreFreedMessage, StoreTableMessage } from './voice-options';
 
 // the worker that builds the levels of the tables (wavetable.worker.ts): the main thread posts it the port of
-// the store (a MessageChannel to the store processor of the worklet) and the frames of each new version of a
+// the store (a MessageChannel to the processor of the engine of the worklet) and the frames of each new version of a
 // table, it posts the levels to the store, their buffer transferred. A version that arrives while an older
 // one of the table waits replaces it (an edited frame rebuilds the whole table). The store hands back the
 // buffers of the versions no voice plays anymore, a table of the same size reuses one.

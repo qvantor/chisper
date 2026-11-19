@@ -1,6 +1,8 @@
 import { BehaviorSubject } from 'rxjs';
-import { isWorkletSupported, loadWorklet, workletUrl } from '../../fx/effects/load-worklet';
-import { createLfoFeed, LfosState } from '../lfo/lfo-curve';
+import { workletUrl } from '../../fx/effects/load-worklet';
+import type { EngineNode } from '../engine/engine-node';
+import type { EngineReport } from '../engine/engine-params';
+import type { LfosState } from '../lfo/lfo-curve';
 import { isLfoSource } from '../../fx/effects/fx-modulation';
 import type {
   BuilderFailedMessage,
@@ -14,28 +16,21 @@ import type {
   KnobsModule,
   StatsRequest,
   StoreStatsMessage,
-  StoreStoredMessage,
   StoreTableMessage,
   VoiceEvent,
-  StopMessage,
-  VoiceEventsMessage,
   VoiceFilterOptions,
   VoiceModuleKnobs,
   VoiceOptions,
   VoiceRoute,
-  VoicesReportMessage,
   VoiceVelocity,
 } from './voice-options';
-import { STORE_PROCESSOR, VOICE_PARAMETERS, VOICES_PROCESSOR, VoiceParam } from './wavetable-osc-params';
-import type { StoreFreedBytesMessage, StoreRefusedMessage } from './wavetable-osc-wasm';
+import { VOICE_PARAMETERS, VoiceParam } from './wavetable-osc-params';
 
-// the worklet module (wavetable-osc.worklet.ts) and the worker (wavetable.worker.ts), bundled by `npm run
-// worklets` into assets/worklets/
-export const WAVETABLE_WORKLET = 'wavetable-osc';
+// the worker (wavetable.worker.ts), bundled by `npm run worklets` into assets/worklets/
 export const WAVETABLE_WORKER = 'wavetable-worker';
 
-// loading: the module is being added; unsupported: no AudioWorklet (http on a LAN IP, old Safari) or no
-// Worker; failed: the module, the worker or the store failed, retry() loads it again (a voice that fails
+// loading: the module of the engine is being added; unsupported: no AudioWorklet (http on a LAN IP, old Safari)
+// or no Worker; failed: the module, the node or the worker failed, retry() loads it again (a voice that fails
 // only ends: the synth takes it off). Without it the synth doesn't play: there is no native fallback
 export type WavetableStatus = 'loading' | 'ready' | 'unsupported' | 'failed';
 
@@ -44,14 +39,7 @@ export type WavetableStatus = 'loading' | 'ready' | 'unsupported' | 'failed';
 // before it plays on, retryTable() sends it again
 export type TableState = 'sending' | 'stored' | 'refused' | 'failed';
 
-// the voices node: no input, every voice into one stereo output
-const VOICES_NODE_OPTIONS: AudioWorkletNodeOptions = {
-  numberOfInputs: 0,
-  numberOfOutputs: 1,
-  outputChannelCount: [2],
-};
-
-// a param of a voice as the synth automates it: the calls of an AudioParam it makes, each sent to the voices node
+// a param of a voice as the synth automates it: the calls of an AudioParam it makes, each sent to the node
 // as an event (its value in f32, as an AudioParam keeps it), worked out there by the formulas of the spec
 export interface ParamAutomation {
   setValueAtTime: (value: number, time: number) => void;
@@ -60,7 +48,7 @@ export interface ParamAutomation {
   cancelScheduledValues: (time: number) => void;
 }
 
-// a voice of the voices node: its params; the node tells its start (the frames it started and was scheduled at,
+// a voice of the engine node: its params; the node tells its start (the frames it started and was scheduled at,
 // once) and its end (released to 0, stolen, failed, or the node failed)
 export interface VoiceHandle {
   readonly id: number;
@@ -84,22 +72,24 @@ export interface WavetableEngineStats {
 }
 type Waiter<T> = (answer: T | null) => void;
 
-// the wavetable oscillator of an AudioContext, one for both oscillators: loads the worklet module (the synth
-// core does it at its start, like the limiter), creates the store node (it receives the tables), the voices node
-// (every note plays in it, into `output`) and the worker that builds the levels of the tables, connected to the
-// store by a MessageChannel: the levels go from the worker to the audio thread, transferred, never through
-// the main thread. setTable() sends a new version of a table (the latest frames are kept: they are sent once
-// it is ready, and again after a retry); createVoice() makes the voice of a note, null until it is ready (a note
-// played meanwhile is not played later). What the voices do goes to the node as events, those of a task in one
-// message (a microtask sends them), in the order they were made
+// the wavetable oscillator of an AudioContext, one for both oscillators, in the node of the engine (`engine`:
+// engine-node.ts; its worklet has the store of the tables and the voices of every note, the chain after them): it
+// makes the worker that builds the levels of the tables, connected to the store by a MessageChannel: the levels go
+// from the worker to the audio thread, transferred, never through the main thread. setTable() sends a new version
+// of a table (the latest frames are kept: they are sent once it is ready, and again after a retry); createVoice()
+// makes the voice of a note, null until it is ready (a note played meanwhile is not played later). What the voices
+// do goes to the node as events, those of a task in one message (a microtask sends them), in the order they were
+// made
 export const createWavetableEngine = (
   audioCtx: BaseAudioContext,
-  output: AudioNode,
+  engine: EngineNode,
   {
     createWorker = (url) => new Worker(url),
     createChannel = typeof MessageChannel === 'undefined' ? undefined : defaultChannel,
   }: WavetableEngineDependencies = {}
 ) => {
+  // (jsdom has neither: the engine plays its chain all the same)
+  const supported = typeof Worker !== 'undefined' && createChannel !== undefined;
   const $status = new BehaviorSubject<WavetableStatus>('loading');
   const $tables = new BehaviorSubject<Record<string, TableState>>({});
   // (a sample of the noise: its channels at its rate)
@@ -119,10 +109,10 @@ export const createWavetableEngine = (
     versions.set(table, version);
     return version;
   };
-  let store: AudioWorkletNode | null = null;
-  let voices: AudioWorkletNode | null = null;
-  let worker: Worker | null = null;
+  // whether the node is there with the worker of its store
+  let live = false;
   let destroyed = false;
+  let worker: Worker | null = null;
   // the voices playing, by id (unique in the engine: the node of a retry starts empty), and the events of this
   // task
   const handles = new Map<number, VoiceHandle>();
@@ -133,9 +123,7 @@ export const createWavetableEngine = (
   // the LFOs (every state merged: a node made again takes them at once), sent on only while a voice reads one:
   // the voices whose routes read an LFO
   const lfoVoices = new Set<number>();
-  const feed = createLfoFeed((state) => {
-    if (voices) enqueue({ kind: 'lfos', ...state });
-  });
+  const tellLfos = () => engine.lfos.use('voices', lfoVoices.size > 0);
   const readsLfo = (routes: VoiceRoute[]) => routes.some(({ source }) => isLfoSource(source));
   let sending = false;
   // the version of each table the store has acknowledged (when it is the latest, new voices play it)
@@ -144,13 +132,13 @@ export const createWavetableEngine = (
   const storeWaiters: Waiter<StoreStatsMessage['stats']>[] = [];
   const workerWaiters: Waiter<BuilderStats>[] = [];
 
-  // the events of this task to the voices node, in one message
+  // the events of this task to the engine node, in one message
   const flush = () => {
     sending = false;
     if (events.length === 0) return;
-    const message: VoiceEventsMessage = { events };
+    const message = { events };
     events = [];
-    voices?.port.postMessage(message);
+    if (live) engine.post(message);
   };
   const enqueue = (event: VoiceEvent) => {
     events.push(event);
@@ -159,42 +147,40 @@ export const createWavetableEngine = (
     queueMicrotask(flush);
   };
 
-  // the voices node stopped (its voices give their tables back to the store); `end`: every voice is ended (the
+  // the node is gone (it frees its voices: their tables go back to the store); `end`: every voice is ended (the
   // synth lets their keys go)
   const teardown = (end: boolean) => {
+    live = false;
     worker?.terminate();
     worker = null;
-    store?.disconnect();
-    store = null;
-    if (voices) {
-      const stop: StopMessage = { stop: true };
-      voices.port.postMessage(stop);
-      voices.disconnect();
-      voices = null;
-    }
     events = [];
     const ended = [...handles.values()];
     handles.clear();
     lfoVoices.clear();
-    feed.use(false);
+    tellLfos();
     if (end) ended.forEach((handle) => handle.onEnded?.());
     stored.clear();
     storeWaiters.splice(0).forEach((answer) => answer(null));
     workerWaiters.splice(0).forEach((answer) => answer(null));
+    // the store is gone with every table in it: none has a state until the engine is ready again (every one is
+    // sent then), as before it first was (a table on its way would wait for an answer that never comes)
+    if (end && Object.keys($tables.value).length > 0) $tables.next({});
   };
 
-  const fail = (error: unknown) => {
-    if (destroyed || $status.value === 'failed') return;
-    console.error('The wavetable oscillator failed', error);
-    teardown(true);
-    // the store is gone with every table in it: none has a state until the engine is ready again (load() sends
-    // them all), as before it first was (a table on its way would wait for an answer that never comes)
-    if (Object.keys($tables.value).length > 0) $tables.next({});
-    $status.next('failed');
-  };
-
-  // the starts and the ends of a block of the voices node
-  const report = ({ started, ended }: VoicesReportMessage) => {
+  // the starts and the ends of a block of the engine node
+  const report = (data: EngineReport) => {
+    const { started, ended } = data;
+    // the answers of the store: its counters (the perf build), the memory it freed (a refused version is sent
+    // again, once), a version refused or stored
+    if (data.stats) storeWaiters.shift()?.(data.stats);
+    if (data.freedBytes !== undefined) retryRefused();
+    if (data.refused !== undefined && data.version !== undefined)
+      answer(data.refused, data.version, 'refused');
+    if (data.stored !== undefined && data.version !== undefined) {
+      if (tables.get(data.stored)?.version === data.version) stored.set(data.stored, data.version);
+      answer(data.stored, data.version, 'stored');
+    }
+    if (!started && !ended) return;
     started?.forEach(([id, at, scheduled]) => handles.get(id)?.onStarted?.(at, scheduled));
     ended?.forEach((id) => {
       const handle = handles.get(id);
@@ -202,7 +188,7 @@ export const createWavetableEngine = (
       lfoVoices.delete(id);
       handle?.onEnded?.();
     });
-    feed.use(lfoVoices.size > 0);
+    tellLfos();
   };
 
   // the params of voice `id`: their calls as events (none once it has ended)
@@ -263,85 +249,6 @@ export const createWavetableEngine = (
     );
   };
 
-  const load = () => {
-    if (!isWorkletSupported(audioCtx, WAVETABLE_WORKLET) || typeof Worker === 'undefined' || !createChannel) {
-      $status.next('unsupported');
-      return;
-    }
-    $status.next('loading');
-    loadWorklet(audioCtx, WAVETABLE_WORKLET)
-      .then(() => {
-        if (destroyed) return;
-        const node = new AudioWorkletNode(audioCtx, STORE_PROCESSOR, {
-          numberOfInputs: 0,
-          numberOfOutputs: 1,
-        });
-        node.onprocessorerror = (event) => {
-          if (store === node) fail(event);
-        };
-        // the answers of the store (its port is started: nothing piles up in it): a version stored or refused, the
-        // memory it freed (a refused version is sent again, once), its counters (the perf build)
-        node.port.onmessage = ({
-          data,
-        }: MessageEvent<
-          StoreStoredMessage | StoreRefusedMessage | StoreFreedBytesMessage | StoreStatsMessage
-        >) => {
-          if (store !== node) return;
-          if ('stats' in data) storeWaiters.shift()?.(data.stats);
-          else if ('freedBytes' in data) retryRefused();
-          else if ('refused' in data) answer(data.refused, data.version, 'refused');
-          else {
-            if (tables.get(data.stored)?.version === data.version) stored.set(data.stored, data.version);
-            answer(data.stored, data.version, 'stored');
-          }
-        };
-        const created = createWorker(workletUrl(WAVETABLE_WORKER));
-        // an error of the worker itself (its script) fails the engine; a version that failed to build only its
-        // table: it plays the version before, the engine stays ready
-        created.onerror = (event) => {
-          if (worker === created) fail(event);
-        };
-        created.onmessage = ({ data }: MessageEvent<BuilderStatsMessage | BuilderFailedMessage>) => {
-          if (worker !== created) return;
-          if ('failed' in data) {
-            console.error(
-              `The version ${data.version} of the table ${data.failed} failed to build`,
-              data.reason
-            );
-            answer(data.failed, data.version, 'failed');
-            return;
-          }
-          // (the counters of the perf build)
-          if (__PERF__ && data.stats) workerWaiters.shift()?.(data.stats);
-        };
-        const { port1, port2 } = (createChannel as () => MessageChannel)();
-        const toStore: BuilderPortMessage = { port: port1 };
-        const toWorker: BuilderPortMessage = { port: port2 };
-        node.port.postMessage(toStore, [port1]);
-        created.postMessage(toWorker, [port2]);
-        // every voice in one node: an error outside its voices (a voice that traps only ends) fails the engine,
-        // its voices end, Retry makes it again
-        const voicesNode = new AudioWorkletNode(audioCtx, VOICES_PROCESSOR, VOICES_NODE_OPTIONS);
-        voicesNode.onprocessorerror = (event) => {
-          if (voices === voicesNode) fail(event);
-        };
-        voicesNode.port.onmessage = ({ data }: MessageEvent<VoicesReportMessage>) => {
-          if (voices === voicesNode) report(data);
-        };
-        voicesNode.connect(output);
-        store = node;
-        voices = voicesNode;
-        worker = created;
-        if (bend !== 0) enqueue({ kind: 'bend', cents: bend, instantly: true });
-        const lfos = feed.initial();
-        if (lfos) enqueue({ kind: 'lfos', ...lfos });
-        $status.next('ready');
-        tables.forEach((_, table) => send(table));
-      })
-      .catch(fail);
-  };
-  load();
-
   // the store freed memory: every table whose latest version it refused is sent again, once
   const retryRefused = () =>
     Object.entries($tables.value).forEach(([table, state]) => {
@@ -349,6 +256,48 @@ export const createWavetableEngine = (
       retried.add(table);
       send(table);
     });
+
+  // a node was made: the worker of its store (the port of one end of their channel to each), the bend of now
+  const start = () => {
+    if (!supported || destroyed) return;
+    const created = createWorker(workletUrl(WAVETABLE_WORKER));
+    // an error of the worker itself (its script) fails the engine; a version that failed to build only its
+    // table: it plays the version before, the engine stays ready
+    created.onerror = (event) => {
+      if (worker === created) engine.fail(event);
+    };
+    created.onmessage = ({ data }: MessageEvent<BuilderStatsMessage | BuilderFailedMessage>) => {
+      if (worker !== created) return;
+      if ('failed' in data) {
+        console.error(`The version ${data.version} of the table ${data.failed} failed to build`, data.reason);
+        answer(data.failed, data.version, 'failed');
+        return;
+      }
+      // (the counters of the perf build)
+      if (__PERF__ && data.stats) workerWaiters.shift()?.(data.stats);
+    };
+    const { port1, port2 } = (createChannel as () => MessageChannel)();
+    const toStore: BuilderPortMessage = { port: port1 };
+    const toWorker: BuilderPortMessage = { port: port2 };
+    engine.post(toStore, [port1]);
+    created.postMessage(toWorker, [port2]);
+    worker = created;
+    live = true;
+    if (bend !== 0) enqueue({ kind: 'bend', cents: bend, instantly: true });
+  };
+
+  engine.attach({
+    start,
+    stop: teardown,
+    report,
+    // (ready: every table to the store of the node)
+    status: (status) => {
+      const next = supported ? status : 'unsupported';
+      if (destroyed) return;
+      if ($status.value !== next) $status.next(next);
+      if (status === 'ready' && supported) tables.forEach((_, table) => send(table));
+    },
+  });
 
   return {
     $status,
@@ -391,7 +340,7 @@ export const createWavetableEngine = (
     // the voice of a note, its options and the values of its params at the note on (in f32); a voice that fails
     // ends alone (the synth takes it off), the store, the worker and the other voices play on
     createVoice: (options: VoiceOptions, values: Partial<Record<VoiceParam, number>>): VoiceHandle | null => {
-      if ($status.value !== 'ready') return null;
+      if ($status.value !== 'ready' || destroyed) return null;
       const id = ++lastVoice;
       const params = Object.fromEntries(
         VOICE_PARAMETERS.map(({ name }) => [name, automation(id, name as VoiceParam)])
@@ -403,7 +352,7 @@ export const createWavetableEngine = (
       ) as Partial<Record<VoiceParam, number>>;
       // (the LFOs before the voice that reads them)
       if (readsLfo(options.routes)) lfoVoices.add(id);
-      feed.use(lfoVoices.size > 0);
+      tellLfos();
       enqueue({ kind: 'on', voice: id, options, params: initial });
       return handle;
     },
@@ -412,7 +361,7 @@ export const createWavetableEngine = (
       if (ids.length === 0) return;
       const reads = readsLfo(routes);
       ids.forEach((id) => (reads ? lfoVoices.add(id) : lfoVoices.delete(id)));
-      feed.use(lfoVoices.size > 0);
+      tellLfos();
       enqueue({ kind: 'routes', voices: ids, routes });
     },
     setFilter: (ids: number[], filter: VoiceFilterOptions | null) => {
@@ -434,7 +383,7 @@ export const createWavetableEngine = (
     },
     // the LFOs of every voice from `state.at` on (their tables only when they changed), while a voice reads one
     // (the LFOs as they are first, once one does); a node made later (ready, Retry) takes the last ones at once
-    setLfos: (state: LfosState) => feed.take(state),
+    setLfos: (state: LfosState) => engine.lfos.take(state),
     // the events of this task to the node now (the specs)
     flush,
     // the tables whose latest version the store hasn't acknowledged yet (a note meanwhile plays the previous
@@ -446,7 +395,7 @@ export const createWavetableEngine = (
     // the counters of the store, the voices and the worker (the perf build); null unless ready or when an
     // answer doesn't come in time (a late answer still takes its own request: the queues stay in order)
     stats: (timeout = 1000): Promise<WavetableEngineStats | null> => {
-      if (!__PERF__ || !store || !worker) return Promise.resolve(null);
+      if (!__PERF__ || !live || !worker) return Promise.resolve(null);
       const request: StatsRequest = { stats: true };
       const ask = <T>(waiters: Waiter<T>[], post: () => void) =>
         new Promise<T | null>((resolve) => {
@@ -457,15 +406,13 @@ export const createWavetableEngine = (
           });
           post();
         });
-      const [node, builder] = [store, worker];
+      const builder = worker;
       return Promise.all([
-        ask(storeWaiters, () => node.port.postMessage(request)),
+        ask(storeWaiters, () => engine.post(request)),
         ask(workerWaiters, () => builder.postMessage(request)),
       ]).then(([worklet, built]) => (worklet && built ? { worklet, worker: built } : null));
     },
-    retry: () => {
-      if ($status.value === 'failed') load();
-    },
+    retry: engine.retry,
     destroy: () => {
       destroyed = true;
       teardown(false);

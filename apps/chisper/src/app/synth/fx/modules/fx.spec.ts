@@ -8,7 +8,7 @@ import {
   chainReports,
   flushChain as flush,
 } from '../../../../test-utils/chain-node';
-import { createFx, createLfos, createModulation, createSynthCore } from '../../../../test-utils/models';
+import { createFx, createSynthCore } from '../../../../test-utils/models';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import {
@@ -44,7 +44,6 @@ const setup = (synthCore = createSynthCore()) => {
     setOrder: jest.spyOn(chain, 'setOrder'),
     setRoutes: jest.spyOn(chain, 'setRoutes'),
     setNote: jest.spyOn(chain, 'setNote'),
-    setLfos: jest.spyOn(chain, 'setLfos'),
     clear: jest.spyOn(chain, 'clear'),
   };
   const { fx, transport, modulation, lfos, $fxNote } = createFx(synthCore);
@@ -718,14 +717,14 @@ describe('fx', () => {
   });
 
   describe('status', () => {
-    // the module of the chain fails to load on the first try, the other modules load. The chain loads it as the
-    // synth core is made: the worklet of its context fails from the start (test-setup puts the one of the mock
-    // back after the test)
+    // the module of the engine (the chain is in it) fails to load on the first try. The synth core loads it as it
+    // is made: the worklet of its context fails from the start (test-setup puts the one of the mock back after the
+    // test)
     const failing = () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
       let failed = false;
       const addModule = jest.fn((url: string) => {
-        if (failed || !url.endsWith('/chain.js')) return Promise.resolve();
+        if (failed || !url.endsWith('/engine.js')) return Promise.resolve();
         failed = true;
         return Promise.reject(new Error('404'));
       });
@@ -742,7 +741,7 @@ describe('fx', () => {
       await flush();
       expect(model.$status.value).toEqual(ALL('ready'));
       const addModule = audioCtx.audioWorklet.addModule as jest.Mock;
-      expect(workletLoads(addModule, 'chain')).toBe(1);
+      expect(workletLoads(addModule, 'engine')).toBe(1);
       // one node for all of them
       expect(chainNodes(audioCtx)).toHaveLength(1);
       FX_TYPES.forEach((type) => expect(workletLoads(addModule, type)).toBe(0));
@@ -832,10 +831,10 @@ describe('fx', () => {
       const { model, actions, audioCtx, told, active, addModule } = failing();
       await flush();
       expect(model.$status.value.reverb).toBe('failed');
-      expect(workletLoads(addModule, 'chain')).toBe(1);
+      expect(workletLoads(addModule, 'engine')).toBe(1);
 
       actions.setAdded('reverb', true);
-      expect(workletLoads(addModule, 'chain')).toBe(2);
+      expect(workletLoads(addModule, 'engine')).toBe(2);
       expect(model.$status.value.reverb).toBe('loading');
       expect(model.$effects.value.reverb.added).toBe(true);
       expect(told.setOrder).toHaveBeenLastCalledWith([SLOT.reverb]);
@@ -861,7 +860,7 @@ describe('fx', () => {
       const { model, actions, addModule } = failing();
       await flush();
       actions.setAdded('reverb', false);
-      expect(workletLoads(addModule, 'chain')).toBe(1);
+      expect(workletLoads(addModule, 'engine')).toBe(1);
       expect(model.$status.value.reverb).toBe('failed');
     });
 
@@ -869,14 +868,14 @@ describe('fx', () => {
       const { model, actions, told, addModule } = failing();
       await flush();
       actions.retry('reverb');
-      expect(workletLoads(addModule, 'chain')).toBe(2);
+      expect(workletLoads(addModule, 'engine')).toBe(2);
       expect(model.$status.value.reverb).toBe('loading');
       await flush();
       expect(model.$status.value.reverb).toBe('ready');
       expect(model.$effects.value.reverb.added).toBe(false);
       expect(told.setOrder.mock.calls.every(([order]) => order.length === 0)).toBe(true);
       actions.retry('reverb');
-      expect(workletLoads(addModule, 'chain')).toBe(2);
+      expect(workletLoads(addModule, 'engine')).toBe(2);
     });
 
     it('a failed effect does not play, a retry has it play once ready', async () => {
@@ -956,7 +955,7 @@ describe('fx', () => {
         { active: [SLOT.reverb, true] },
       ]);
       // the module had loaded: nothing is added again
-      expect(workletLoads(audioCtx.audioWorklet.addModule as jest.Mock, 'chain')).toBe(1);
+      expect(workletLoads(audioCtx.audioWorklet.addModule as jest.Mock, 'engine')).toBe(1);
       expect(chainNodes(audioCtx)).toHaveLength(1);
     });
 
@@ -1298,26 +1297,8 @@ describe('fx', () => {
       expect(told.setRoutes).toHaveBeenLastCalledWith([]);
     });
 
-    it('gives the chain the LFOs: as they are at once, then every state', async () => {
-      const synthCore = createSynthCore();
-      const lfosModule = createLfos(synthCore);
-      const setLfos = jest.spyOn(synthCore[0].chain, 'setLfos');
-      createFx(synthCore, createModulation(), lfosModule);
-      // (a node made now starts there: no glide, no crossfade)
-      expect(setLfos).toHaveBeenCalledTimes(1);
-      expect(setLfos.mock.calls[0][0]).toMatchObject({ instantly: true });
-      expect(setLfos.mock.calls[0][0].lfos).toHaveLength(4);
-      lfosModule[1].setMode('lfo3', 'free');
-      // (a change within LFO_STATE_INTERVAL of the first state waits for it)
-      await new Promise((resolve) => setTimeout(resolve, LFO_STATE_INTERVAL * 1000 + 5));
-      expect(setLfos).toHaveBeenCalledTimes(2);
-      expect(setLfos.mock.lastCall?.[0].lfos[2].mode).toBe(1);
-      expect(setLfos.mock.lastCall?.[0].instantly).toBeUndefined();
-      await flush();
-    });
-
     it('the node gets the LFOs only while a route of an effect that plays reads one', async () => {
-      const { actions, modulation, lfos, posted, forget } = await ready();
+      const { actions, modulation, lfos, posts, posted, forget } = await ready();
       const change = async (mode: 'free' | 'retrig') => {
         lfos[1].setMode('lfo3', mode);
         await new Promise((resolve) => setTimeout(resolve, LFO_STATE_INTERVAL * 1000 + 5));
@@ -1333,8 +1314,14 @@ describe('fx', () => {
       expect(posted('lfos')[0]?.lfos[2].mode).toBe(1);
       expect(posted('lfos')[0]?.lfos.every(({ table }) => table instanceof Float32Array)).toBe(true);
       await change('retrig');
+      // every state after it once (the LFO model tells the node, the fx only that it reads), gliding as it is
       expect(posted('lfos')).toHaveLength(2);
       expect(posted('lfos')[1]?.lfos[2].mode).toBe(0);
+      expect(posted('lfos')[1]?.instantly).toBeUndefined();
+      expect(posts().flatMap((message) => ('readers' in message ? [message.readers] : []))).toEqual([
+        ['chain'],
+        ['chain'],
+      ]);
 
       actions.setOn('reverb', false);
       forget();

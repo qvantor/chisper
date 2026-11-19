@@ -3,7 +3,7 @@ import { paramsCore, UNIT, UnitExports } from '../../common/wasm/stereo-core';
 import { compressorMeterReader } from './compressor-params';
 import type { CompressorDspParams, CompressorMeterValues, CompressorOptions } from './compressor-params';
 
-// the Rust core of the compressor (dsp/compressor, a unit of chain.wasm): a highpass, then one band (the louder channel
+// the Rust core of the compressor (dsp/compressor, a unit of the chain in engine.wasm): a highpass, then one band (the louder channel
 // against the threshold, the reduction smoothed by the attack and the release) or three (crossovers, the mean
 // square of each band compressed down and up), the mix inside, the level
 

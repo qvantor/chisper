@@ -14,6 +14,9 @@ export const launch = async (playwright, name, { headless = false, fakeOutput = 
   if (name === 'chromium') {
     options.args = ['--autoplay-policy=no-user-gesture-required'];
     if (fakeOutput) options.args.push('--disable-audio-output');
+    // BENCH_WINDOW_POSITION=x,y: where the window of a headed run opens (another display than the one in use)
+    if (process.env.BENCH_WINDOW_POSITION)
+      options.args.push(`--window-position=${process.env.BENCH_WINDOW_POSITION}`);
     if (headless) options.channel = 'chromium';
   }
   const browser = await playwright[name].launch(options);

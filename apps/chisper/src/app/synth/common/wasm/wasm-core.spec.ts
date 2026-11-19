@@ -37,7 +37,7 @@ const params = () =>
   ) as Record<VoiceParam, Float32Array>;
 
 const createOsc = () => {
-  const scope = createOscScope(wasmCore<OscExports>('wavetable-osc'));
+  const scope = createOscScope(wasmCore<OscExports>('engine'));
   const store = createTableStoreWasm(scope);
   const shared = createVoiceSharedWasm(scope);
   store.set('a', 1, buildLevels([SINE]));
@@ -95,7 +95,7 @@ describe('the calls of a core put its stack pointer back when they trap', () => 
   });
 
   it('a stereo core: its constructor and its blocks', () => {
-    const core = wasmCore<DistortionExports>('chain');
+    const core = wasmCore<DistortionExports>('engine');
     const { __stack_pointer: stack } = core;
     const top = stack.value;
     const create = () =>

@@ -137,7 +137,7 @@ export const fx = ({
   synthCore: [{ audioCtx, chain }],
   synth: [{ $fxNote }],
   transport: [{ $tempo }],
-  lfo: [{ $state: $lfoState, $changes: $lfoChanges, $ranges: $lfoRanges }],
+  lfo: [{ $ranges: $lfoRanges }],
   modulation: [{ $routes }],
 }: Dependencies) =>
   rxModel(() => {
@@ -216,9 +216,6 @@ export const fx = ({
       };
     })
     .subscriptions(({ $effects, $status, $chain, slots }) => {
-      // the LFOs as they are (the chain takes them once a route reads one), then every state
-      const lfoState = $lfoState.value;
-      if (lfoState) chain.setLfos({ ...lfoState, instantly: true });
       // the effects that play: in the chain, on and ready
       const $active = combineLatest([$effects, $status]).pipe(
         map(
@@ -239,7 +236,6 @@ export const fx = ({
       return [
         // the tempo of the synth: an effect in BPM follows it
         $tempo.subscribe((bpm) => FX_TYPES.forEach((type) => slots[type].setTempo(bpm))),
-        $lfoChanges.subscribe((state) => chain.setLfos(state)),
         $chainRoutes.subscribe((routes) => chain.setRoutes(routes)),
         combineLatest([$fxNote, $chainRoutes])
           .pipe(

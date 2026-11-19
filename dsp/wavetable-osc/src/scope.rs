@@ -1,4 +1,4 @@
-//! the voices of one node (the voices processor of a context): each with its params as AudioParams would give them
+//! the voices of one node (the engine node of a context): each with its params as AudioParams would give them
 //! (a timeline of the events of the main thread per param, timeline.rs), rendered one after another in the order
 //! they were created by the same Voice::process, their outputs summed in f32 in that order. A block also tells the
 //! voices that started late (or on time too: `report`) and those that ended. A voice that traps (as it renders or as
@@ -68,6 +68,11 @@ pub struct Scope {
     params: Vec<f32>,
     outs: [Vec<f32>; GROUP],
     pub sum: Vec<f32>,
+    // where the sum of the block goes (left, then right): `sum`, or the buffers of whoever plays the voices on
+    // (process_into: the input of the chain, no copy between them); whether a voice is in the sum of the block (none:
+    // it is all 0)
+    into: *mut f32,
+    pub mixed: bool,
     // the voices rendered up to their filters, in outs[0..waiting] (at the places before the cursor, the a..b of the
     // block of each in `spans`): they wait for the next ones, the filters of up to GROUP run in one loop
     // (Voice::finish_group)
@@ -133,6 +138,8 @@ impl Scope {
             spans: [(0, 0); GROUP],
             layout: None,
             sum: Vec::new(),
+            into: core::ptr::null_mut(),
+            mixed: false,
             frame: 0.0,
             length: 0,
             cursor: 0,
@@ -317,6 +324,25 @@ impl Scope {
 
     /// a block of `n` frames at `frame`: every voice, the sum at sum[..n] (left) and sum[n..2n] (right)
     pub fn process(&mut self, frame: f64, n: usize, store: &mut Store, shared: &mut Shared) {
+        self.grow(n);
+        let into = self.sum.as_mut_ptr();
+        // SAFETY: the sum has the room of the block and is not moved while it renders
+        unsafe { self.process_into(frame, n, into, store, shared) };
+    }
+
+    /// the block of `process`, its sum at `into` (left at 0, right at `n`) and not in `sum`: the same values
+    ///
+    /// # Safety
+    /// `into` has room for 2 × `n` values no one else holds, and stays where it is until the block is over (after a
+    /// trap: until `fail` and `resume` are)
+    pub unsafe fn process_into(
+        &mut self,
+        frame: f64,
+        n: usize,
+        into: *mut f32,
+        store: &mut Store,
+        shared: &mut Shared,
+    ) {
         self.failed = None;
         self.work = Work::Idle;
         compiler_fence(Ordering::SeqCst);
@@ -325,7 +351,9 @@ impl Scope {
         self.length = n;
         self.cursor = 0;
         self.waiting = 0;
-        self.sum[..2 * n].fill(0.0);
+        self.into = into;
+        self.mixed = false;
+        core::slice::from_raw_parts_mut(into, 2 * n).fill(0.0);
         self.bend.render(0, n);
         self.resume(store, shared);
     }
@@ -539,12 +567,14 @@ impl Scope {
         let voice = &mut self.voices[at];
         {
             let (out_l, out_r) = self.outs[slot][..2 * n].split_at(n);
-            let (sum_l, sum_r) = self.sum[..2 * n].split_at_mut(n);
+            // SAFETY: the room of the block (process_into), held here alone
+            let (sum_l, sum_r) = unsafe { core::slice::from_raw_parts_mut(self.into, 2 * n) }.split_at_mut(n);
             for i in 0..n {
                 sum_l[i] += out_l[i];
                 sum_r[i] += out_r[i];
             }
         }
+        self.mixed = true;
         if self.tap {
             self.tapped.push(voice.id);
             self.taps.extend_from_slice(&self.outs[slot][..2 * n]);

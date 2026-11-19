@@ -8,7 +8,7 @@ import { HF_RATIO } from './reverb-decay';
 import { createReverbWasm, ReverbExports } from './reverb-wasm';
 
 // the Rust core (dsp/reverb), one instance of it for the spec (a scope)
-const core = wasmCore<ReverbExports>('chain');
+const core = wasmCore<ReverbExports>('engine');
 const create = (sampleRate: number, options: ReverbOptions) => createReverbWasm(core, sampleRate, options);
 
 const SAMPLE_RATE = 48000;
