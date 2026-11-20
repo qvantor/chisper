@@ -9,7 +9,9 @@
 // engine counts the voices (in the engine node) and their mix samples, that the output sounds and that the page
 // threw nothing; then every LFO on over the notes (traced in Chromium too), the voices play their positions
 // directly, and in Chromium the page is not restyled, laid out nor painted while the LFOs move the marks and the
-// charts (the synth and the FX screen). The tables come from the
+// charts (the synth and the FX screen). Last, the clip of the track cases exported as a WAV under the notes (Export
+// WAV renders it on the main thread, a core of its own): in Chromium nothing dropped and no long task meanwhile, one
+// seed one file, twice and in every browser. The tables come from the
 // cache of bench-perf (the domain of their bucket otherwise). Exit 1 on a failed check
 import { loadPlaywright, parseArgs } from '../bench-common.mjs';
 import { launch, openPage, traceEvents } from '../bench-perf/browser.mjs';
@@ -22,7 +24,7 @@ import {
   PAINT_CATEGORIES,
   QUANTA_CATEGORIES,
 } from '../bench-perf/chrome-trace.mjs';
-import { CPU_CASES, TABLES } from '../bench-perf/scenes.mjs';
+import { CLIP, CPU_CASES, PPQ, TABLES } from '../bench-perf/scenes.mjs';
 import { buildSite, downloadTables, serve } from '../bench-perf/site.mjs';
 import { sleep } from '../bench-perf/util.mjs';
 
@@ -97,6 +99,9 @@ server.on('request', (request) => {
 });
 const playwright = loadPlaywright();
 let failed = false;
+// the file of each browser, one export of the clip with every LFO on, one seed (1×)
+const EXPORT = { format: 'pcm24', sampleRate: 48000, span: 'tail', seed: 23 };
+const exportedFiles = {};
 const check = (name, ok, detail = '') => {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}`);
   if (!ok) failed = true;
@@ -260,6 +265,36 @@ try {
           'the LFOs move the marks and the charts of the effects without painting the page'
         );
       }
+      // Export WAV: the clip rendered on the main thread (a core of its own) while the 12 notes play on. In
+      // Chromium the sound drops nothing meanwhile and no task of the page lasts over 50 ms (it answers); one seed,
+      // one file, twice and in every browser
+      await page.evaluate(() => {
+        window.__longTasks = [];
+        if (!PerformanceObserver.supportedEntryTypes?.includes('longtask')) return;
+        new PerformanceObserver((list) =>
+          window.__longTasks.push(...list.getEntries().map((e) => e.duration))
+        ).observe({ type: 'longtask' });
+      });
+      let exported = null;
+      await dropsNothing('an export under the notes drops nothing', async () => {
+        exported = await call('exportWav', CLIP, EXPORT);
+      });
+      const longTasks = await page.evaluate(() => window.__longTasks);
+      const seconds = (exported.size - 44) / 6 / EXPORT.sampleRate;
+      check(
+        'an export makes the file of the clip and its tail',
+        seconds >= (CLIP.length / PPQ) * (60 / CLIP.bpm),
+        `${seconds.toFixed(2)} s in ${Math.round(exported.ms)} ms (${(seconds / (exported.ms / 1000)).toFixed(1)}×)`
+      );
+      if (name === 'chromium')
+        check(
+          'no task of the page over 50 ms while it renders',
+          longTasks.length === 0,
+          longTasks.map((ms) => `${Math.round(ms)} ms`).join(', ')
+        );
+      const again = await call('exportWav', CLIP, EXPORT);
+      check('one seed, the same file twice', again.sha256 === exported.sha256, again.sha256.slice(0, 12));
+      exportedFiles[name] = exported.sha256;
       check('the page threw nothing', errors.length === 0, errors.join('; '));
     } catch (error) {
       check('the page runs', false, error.message.split('\n')[0]);
@@ -268,6 +303,14 @@ try {
       await browser.close();
     }
   }
+  // (the file of a seed is the same in every browser: the core gives the same bits, the main thread the same events)
+  const files = Object.entries(exportedFiles);
+  if (files.length > 1)
+    check(
+      'one seed, the same file in every browser',
+      files.every(([, sha]) => sha === files[0][1]),
+      files.map(([browser, sha]) => `${browser} ${sha.slice(0, 12)}`).join(', ')
+    );
 } finally {
   server.close();
 }

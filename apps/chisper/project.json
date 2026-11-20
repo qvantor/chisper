@@ -7,6 +7,13 @@
   "targets": {
     "build": {
       "outputs": ["{workspaceRoot}/dist/apps/{options.env.CHISPER_DIST}"],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "runtime": "cat tmp/wasm/*.wasm tmp/wasm-perf/*.wasm tmp/worklets/*.js tmp/worklets-perf/*.js 2>/dev/null | git hash-object --stdin"
+        }
+      ],
       "defaultConfiguration": "production",
       "options": {
         "env": { "NODE_ENV": "production", "CHISPER_DIST": "chisper" }

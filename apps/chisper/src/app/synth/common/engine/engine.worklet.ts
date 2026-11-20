@@ -9,6 +9,7 @@ import {
   createTableStoreWasm,
   createVoiceSharedWasm,
   StoreFreedBytesMessage,
+  StoreMessage,
 } from '../wavetable/wavetable-osc-wasm';
 import { createEngineRunner } from './engine-messages';
 import {
@@ -85,7 +86,7 @@ class EngineProcessor extends AudioWorkletProcessor {
   private get engine() {
     return this.runner.engine;
   }
-  private fromStore: (event: MessageEvent) => void;
+  private fromStore: (message: StoreMessage) => void;
 
   constructor(options: AudioWorkletNodeOptions) {
     super();
@@ -118,7 +119,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     const message = event.data;
     // (the store takes its messages whatever became of the engine: the tables are the context's)
     if (isStoreMessage(message)) {
-      this.fromStore(event);
+      this.fromStore(message);
       return;
     }
     this.runner.take(message, this.next);

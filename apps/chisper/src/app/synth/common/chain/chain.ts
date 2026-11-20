@@ -1,7 +1,8 @@
 import { BehaviorSubject } from 'rxjs';
 import { isEqual } from 'lodash';
 import type { FxStatus } from '../../fx/effects/types';
-import { EngineNode, MAX_REMAKES, spent } from '../engine/engine-node';
+import { EngineHost, MAX_REMAKES, spent } from '../engine/engine-host';
+import type { SynthClock } from '../clock/synth-clock';
 import {
   ChainMessage,
   ChainNote,
@@ -24,12 +25,11 @@ import {
 // core (a trap inside an effect or the limiter) is told back: `status(stage)` is 'failed' until retryStage() makes
 // its unit again ('loading' until the node tells it did, 'failed' again if it could not); the others play on. What
 // trapped is never freed (a free could trap again), so a stage is made again MAX_REMAKES times at most, as a node
-// whose core trapped is (engine-node.ts)
+// whose core trapped is (engine-host.ts)
 
-// `host`: the node it plays in (the one of the synth core: the voices play in it too, and it is the core's to
-// destroy)
-export const createChain = (audioCtx: BaseAudioContext, host: EngineNode) => {
-  const { output } = host;
+// `host`: the node it plays in (that of the synth core, or the engine of a render: the voices play in it too, and it
+// is the core's to destroy)
+export const createChain = (clock: Pick<SynthClock, 'currentTime'>, host: EngineHost) => {
   const $status = new BehaviorSubject<FxStatus>('loading');
   const state: ChainState = neutralState();
   // the stages that failed in the core (bits), the status of each stage: that of the module unless it failed
@@ -90,7 +90,6 @@ export const createChain = (audioCtx: BaseAudioContext, host: EngineNode) => {
   const slotOf = (slot: number) => state.slots[FX_KINDS[slot]];
 
   return {
-    output,
     $status,
     // the status of a stage (a slot by its kind, LIMITER_STAGE)
     status: (stage: number) => statuses[stage],
@@ -150,7 +149,7 @@ export const createChain = (audioCtx: BaseAudioContext, host: EngineNode) => {
     // context goes with it: the fade ends then, however late the node takes the message), opens again at once
     mute: (seconds: number) => {
       state.muted = true;
-      post({ mute: seconds, at: audioCtx.currentTime });
+      post({ mute: seconds, at: clock.currentTime });
     },
     unmute: () => {
       state.muted = false;

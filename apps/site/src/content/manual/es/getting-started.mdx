@@ -207,6 +207,44 @@ dos personas lo hayan tocado un minuto cada una. A partir de ahí se queda.
 
 </Note>
 
+## ¿Cómo exporto un clip como WAV?
+
+**.wav**, en la cabecera del piano roll, guarda el clip como archivo de audio: las notas del clip tocadas por el
+sonido tal como está ahora, con sus efectos, al tempo del piano roll. En el móvil es la misma tecla, sin su
+etiqueta, junto a **Save** en la pantalla **CLIP**. La ventana pide:
+
+- **Format**: **16-bit** (por defecto), **24-bit** o **32-bit float**.
+- **Sample rate**: **44.1 kHz** (por defecto) o **48 kHz**.
+- **Length**: **Clip** (por defecto) dura exactamente lo que el clip y empieza desde el silencio; lo que aún suena al
+  final se desvanece rápido, así que el archivo se repite en cualquier reproductor sin chasquido, sin su cola.
+  **Clip + tail** toca el clip una vez y guarda lo que aún suena después de su final (un **Release** largo, **Reverb**,
+  los ecos de **Delay**) hasta un minuto después de la última nota, y una cola que aún suena entonces se desvanece; el
+  silencio del final se corta en el siguiente pulso, así que el archivo dura un número entero de pulsos.
+  **Seamless loop** dura exactamente lo que el clip, con su final sonando dentro de su comienzo, así que un DAW o un
+  sampler que lo repite con precisión de muestra lo toca sin hueco. Su punto de loop cae en medio del sonido: un
+  reproductor que hace ahí una pausa o un fundido suena con un chasquido.
+- **Level**: **As played** (por defecto) suena tan fuerte como el sonido: al volumen de **Master**, a través del
+  limitador del sintetizador. **Headroom** deja fuera el limitador (**Master** sigue contando): un sonido que lo
+  superaría se baja entero hasta que sus picos llegan a −0,5 dBTP, así que el archivo suena más bajo, pero sus picos no
+  se aplastan. Un sonido que se queda por debajo del limitador es igual con los dos.
+
+La ventana guarda tus elecciones en el navegador: la siguiente exportación empieza con ellas.
+
+**Export** crea el archivo sin reproducirlo en voz alta, más rápido de lo que dura el clip; la barra muestra cuánto
+lleva y **Cancel** lo detiene. Mientras tanto el clip se para; las teclas siguen sonando. El archivo lleva el
+nombre del preset, el del clip y el tempo, por ejemplo *Warm Pad - Riff 120 BPM.wav*; un clip que se llama como el
+preset, o sin nombre, deja solo el nombre del preset (*Warm Pad 120 BPM.wav*). La ventana muestra ese nombre arriba
+y, debajo, **Clip** (la longitud del clip en compases), **Duration** y **Size** del archivo; con **Clip + tail** no
+cuentan la cola, que solo se conoce al crear el archivo. Con **Phase rand** por encima de 0, cada exportación
+arranca las voces en fases aleatorias nuevas, como cada nota que tocas, así que dos exportaciones del mismo clip
+pueden diferir un poco.
+
+El archivo también dice a otros programas lo que contiene. Un DAW que lee el tempo de un WAV (FL Studio, por
+ejemplo) lo ajusta al tempo del proyecto. **Clip** y **Seamless loop** marcan el archivo entero como loop, y un
+sampler que lee loops lo toca así. Los reproductores y los DAW que muestran las etiquetas de un archivo ven su nombre
+(el preset y el clip), Chisper como artista, el icono de Chisper como imagen de portada y un enlace al preset,
+mientras el sonido sea el preset tal como lo abriste; un sonido que cambiaste después, o *Init*, enlaza a Chisper.
+
 ## Chisper en el móvil
 
 <Figure name='phone-keys' alt='Chisper en un móvil en el modo Keys: el sintetizador encima de dos filas de teclas, los botones de octava y la rueda de pitch' phone>

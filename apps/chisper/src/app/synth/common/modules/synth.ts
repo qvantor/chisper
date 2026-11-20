@@ -1,5 +1,4 @@
 import {
-  asyncScheduler,
   BehaviorSubject,
   combineLatest,
   distinctUntilChanged,
@@ -34,7 +33,8 @@ import type {
   VoiceVelocity,
 } from '../wavetable/voice-options';
 import { KILL_FADE } from '../wavetable/voice-options';
-import type { ParamAutomation, VoiceHandle } from '../wavetable/wavetable-engine';
+import type { ParamAutomation, VoiceHandle, WavetableEngine } from '../wavetable/wavetable-engine';
+import { after, SynthClock } from '../clock/synth-clock';
 import { attackRise, EnvelopeParams, envelopeValue } from '../envelope/envelope-curve';
 import { velocityAmp, velocityLevel, velocityShare } from '../envelope/velocity';
 import {
@@ -75,11 +75,11 @@ import { ModRoute, ModulationModule } from './modulation';
 import type { NoiseModel, NoiseModule } from './noise';
 import type { SubModel, SubModule } from './sub';
 import { OscillatorModel, OscillatorModule } from './oscillator';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 import type { TransportModule } from './transport';
 
 interface Deps {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
   transport: TransportModule;
   inputController: InputControllerModule;
   envelopes: EnvelopesModule;
@@ -283,7 +283,7 @@ interface Stopped {
   held: number;
 }
 
-// a key is pressed: performance.now() then (the time it is held: currentTime moves by device buffers) and, for a note
+// a key is pressed: now() of the clock then (the time it is held: currentTime moves by device buffers) and, for a note
 // of a time (the track: `at`), the seconds of the context it plays at (null: now). The ms of a note ahead of its
 // time are those of its time
 interface Pressed {
@@ -292,20 +292,20 @@ interface Pressed {
 }
 
 // the seconds of the context a note of `at` plays at (none, or one past: now)
-const timeOf = (audioCtx: AudioContext, at: number | undefined) =>
-  at === undefined ? audioCtx.currentTime : Math.max(at, audioCtx.currentTime);
+const timeOf = (clock: SynthClock, at: number | undefined) =>
+  at === undefined ? clock.currentTime : Math.max(at, clock.currentTime);
 
-const pressedAt = (audioCtx: AudioContext, at: number | undefined): Pressed => {
-  const time = timeOf(audioCtx, at);
-  return { ms: performance.now() + (time - audioCtx.currentTime) * 1000, at: at === undefined ? null : time };
+const pressedAt = (clock: SynthClock, at: number | undefined): Pressed => {
+  const time = timeOf(clock, at);
+  return { ms: clock.now() + (time - clock.currentTime) * 1000, at: at === undefined ? null : time };
 };
 
 // the seconds a key was held, released at `at` (none: now): from one time to the other for notes of a time (the
-// track: exact), else by performance.now(); never below 0 (a note of the track stopped before it started)
-const heldSeconds = (audioCtx: AudioContext, pressed: Pressed, at: number | undefined) => {
-  const time = timeOf(audioCtx, at);
+// track: exact), else by now() of the clock; never below 0 (a note of the track stopped before it started)
+const heldSeconds = (clock: SynthClock, pressed: Pressed, at: number | undefined) => {
+  const time = timeOf(clock, at);
   if (pressed.at !== null && at !== undefined) return Math.max(0, time - pressed.at);
-  const ms = performance.now() + (time - audioCtx.currentTime) * 1000;
+  const ms = clock.now() + (time - clock.currentTime) * 1000;
   return Math.max(0, (ms - pressed.ms) / 1000);
 };
 
@@ -372,8 +372,8 @@ const noteVelocity = (velocity: number, { amp, k }: VelocityKnobs): NoteVelocity
 let phrases = 0;
 
 interface VoiceConfig {
-  audioCtx: AudioContext;
-  createVoice: SynthCoreModule[0]['wavetables']['createVoice'];
+  clock: SynthClock;
+  createVoice: WavetableEngine['createVoice'];
   note: Note;
   // the key it is held under (sourceKey)
   key: string;
@@ -418,7 +418,7 @@ interface CreatedVoice {
 // unison voices and its envelopes (ENV 1 is its volume); the knobs are the base of its params (oscillator
 // $params), the unison and its shape, the phases, on/off and the envelopes are read now
 const createVoiceHandle = ({
-  audioCtx,
+  clock,
   createVoice,
   start: now,
   oscillators,
@@ -515,7 +515,7 @@ class Voice {
     this.config = config;
     this.handle = handle;
     this.startedAt = config.start;
-    this.pressed = pressedAt(config.audioCtx, config.at);
+    this.pressed = pressedAt(config.clock, config.at);
     this.note = config.note;
     this.key = config.key;
     this.noteAt = config.start;
@@ -527,7 +527,7 @@ class Voice {
     this.routes = JSON.stringify(routes);
     handle.onStarted = (started, scheduled) => {
       if (__PERF__) config.onStarted?.({ started, scheduled });
-      if (started > scheduled) this.startLate(started / config.audioCtx.sampleRate);
+      if (started > scheduled) this.startLate(started / config.clock.sampleRate);
       this.restarts = null;
     };
     handle.onEnded = () => config.onEnded(this);
@@ -607,7 +607,7 @@ class Voice {
   // canRetrigger); its release is off, the time its key is held
   // counts from then. The gate held at its other value tells its voice (automation: exact to the sample)
   retrigger = (at?: number) => {
-    const now = timeOf(this.config.audioCtx, at);
+    const now = timeOf(this.config.clock, at);
     this.restarts?.push({ at: now, stopped: this.stopped });
     this.startAgain(now, this.stopped);
     // at another value than its voice has seen: one set at this same time (two notes within a device buffer)
@@ -615,7 +615,7 @@ class Voice {
     if (now !== this.heldAt) this.heldGate = this.heldGate === HELD_GATE ? HELD_AGAIN_GATE : HELD_GATE;
     this.heldAt = now;
     setParam(this.gate, this.heldGate, now);
-    this.pressed = pressedAt(this.config.audioCtx, at);
+    this.pressed = pressedAt(this.config.clock, at);
     this.stopped = null;
   };
 
@@ -670,10 +670,10 @@ class Voice {
   // replace it before the voice sees it, which would release the voice from its last release (and end it sooner).
   // A note of the track is released at its time (`at`), held from the time of its note on
   stop = (at?: number) => {
-    const { audioCtx } = this.config;
-    const now = timeOf(audioCtx, at);
-    const held = heldSeconds(audioCtx, this.pressed, at);
-    const time = this.heldAt === now ? now + 1 / audioCtx.sampleRate : now;
+    const { clock } = this.config;
+    const now = timeOf(clock, at);
+    const held = heldSeconds(clock, this.pressed, at);
+    const time = this.heldAt === now ? now + 1 / clock.sampleRate : now;
     setParam(this.gate, RELEASE_GATE + held, time);
     this.stopped = { now: time, held };
   };
@@ -681,7 +681,7 @@ class Voice {
   // a stolen voice: it fades out (a raised cosine over `share` of KILL_FADE: 20 ms, less under a note of a sharp
   // attack, stealFade) instead of being cut, from `at` (a note of the track steals at its time; none: now)
   immediatelyStop(at?: number, share = 1) {
-    setParam(this.gate, -share, timeOf(this.config.audioCtx, at));
+    setParam(this.gate, -share, timeOf(this.config.clock, at));
   }
 
   // held, it is silent at `now` and stays so: ENV 1 has come down to a sustain of 0 (not a voice in its attack: at
@@ -711,21 +711,19 @@ class Voice {
   // the knob of a param of an oscillator: the octave at once, the others glide
   setParam = (osc: number, param: OscParam, value: number) => {
     const automation = this.handle.params[oscParamName(param, osc)];
-    (param === 'detune' ? setParam : glideParam)(automation, value, this.config.audioCtx.currentTime);
+    (param === 'detune' ? setParam : glideParam)(automation, value, this.config.clock.currentTime);
   };
 }
 
-type Wavetables = SynthCoreModule[0]['wavetables'];
-
 interface VoicingContext {
-  audioCtx: AudioContext;
-  createVoice: Wavetables['createVoice'];
+  clock: SynthClock;
+  createVoice: WavetableEngine['createVoice'];
   // the routes, the filter and the velocity of playing voices changed
-  setRoutes: Wavetables['setRoutes'];
-  setFilter: Wavetables['setFilter'];
-  setVelocity: Wavetables['setVelocity'];
+  setRoutes: WavetableEngine['setRoutes'];
+  setFilter: WavetableEngine['setFilter'];
+  setVelocity: WavetableEngine['setVelocity'];
   // the knobs of a module of playing voices changed (those no param carries: the noise's, the sub's)
-  setKnobs: Wavetables['setKnobs'];
+  setKnobs: WavetableEngine['setKnobs'];
   // the wavetable oscillator can play (its module is ready)
   isReady: () => boolean;
 
@@ -784,7 +782,7 @@ class Voicing {
   // the notes for the fx waiting for their time (notes of the track sent ahead of it), by their time; the timer of
   // the first one
   private fxWaiting: { at: number; note: FxNote }[] = [];
-  private fxTimer: ReturnType<typeof setTimeout> | null = null;
+  private fxTimer: (() => void) | null = null;
   // Poly 1 (mono): its voice and the keys held, the last one pressed on top. A note pressed while another key
   // is held takes the voice over (it glides there; in legato its envelopes go on), the key on top released
   // hands it back to the key below, the last key releases it. Null until a note in mono, after the voice ended
@@ -810,10 +808,10 @@ class Voicing {
   // from `from` (Hz: the note of the last key held, in mono where its voice is). In mono a note starts a phrase
   // of its own: its voice takes the next notes over, no other voice joins it
   private getVoice = (note: Note, key: string, from: number | undefined, at?: number): Voice | null => {
-    const { audioCtx, createVoice, $legato, $portamento, $envelopes, $routes, oscillators, noise, sub } =
+    const { clock, createVoice, $legato, $portamento, $envelopes, $routes, oscillators, noise, sub } =
       this.config;
     const { voiceFilter, lfoRanges, tempo, $voiceStarts, $maxVoices } = this.config;
-    const now = timeOf(audioCtx, at);
+    const now = timeOf(clock, at);
     const own: Phrase = {
       id: ++phrases,
       // the knobs and the curves of their stages (in BPM the seconds of their divisions at the tempo now)
@@ -826,7 +824,7 @@ class Voicing {
     const frequency = getFq(note);
 
     const voiceConfig: VoiceConfig = {
-      audioCtx,
+      clock,
       createVoice,
       note,
       key,
@@ -899,20 +897,17 @@ class Voicing {
   // the fx take the last of the notes whose time has come (FX_EARLY ahead), the others wait for theirs: a timer for
   // the first one, and every tick of the track (a timer of a hidden page waits a second)
   private sendFx() {
-    const now = this.config.audioCtx.currentTime;
+    const now = this.config.clock.currentTime;
     let due: FxNote | null = null;
     while (this.fxWaiting.length > 0 && this.fxWaiting[0].at - now <= FX_EARLY)
       due = (this.fxWaiting.shift() as { note: FxNote }).note;
     if (due) this.config.$fxNote.next(due);
     this.stopTimers();
     if (this.fxWaiting.length === 0) return;
-    this.fxTimer = setTimeout(
-      () => {
-        this.fxTimer = null;
-        this.sendFx();
-      },
-      (this.fxWaiting[0].at - now) * 1000
-    );
+    this.fxTimer = after(this.config.clock, this.fxWaiting[0].at - now, () => {
+      this.fxTimer = null;
+      this.sendFx();
+    });
   }
 
   // a released voice is no longer counted: it has ended or it is stolen; true if it was
@@ -992,7 +987,7 @@ class Voicing {
   private startVoice(note: Note, key: string, glide = true, at?: number) {
     const keys = Object.keys(this.voices);
     const last = glide && keys.length > 0 ? this.voices[keys[keys.length - 1]] : undefined;
-    const now = timeOf(this.config.audioCtx, at);
+    const now = timeOf(this.config.clock, at);
     const max = this.config.$maxVoices.value;
     const from = last && (max === 1 ? last.pitchAt(now) : getFq(last.note));
     const sharp = this.sharp();
@@ -1043,7 +1038,7 @@ class Voicing {
   private handOver(voice: Voice, note: Note, key: string, seconds: number, again: boolean, at?: number) {
     this.uncount(voice);
     this.voices[key] = voice;
-    voice.glide(note, key, seconds, timeOf(this.config.audioCtx, at));
+    voice.glide(note, key, seconds, timeOf(this.config.clock, at));
     this.takeVelocity(voice, key, at);
     if (!again) {
       // in legato a note for the fx only by its velocity
@@ -1068,7 +1063,7 @@ class Voicing {
     if (!mono) return false;
     const { voice } = mono;
     const again = !held || !this.config.$legato.value;
-    if (!voice.outlives(timeOf(this.config.audioCtx, at))) return false;
+    if (!voice.outlives(timeOf(this.config.clock, at))) return false;
     if (again && !this.canRetrigger(voice)) return false;
     this.handOver(voice, note, key, held ? this.config.$portamento.value / 1000 : 0, again, at);
     return true;
@@ -1102,7 +1097,7 @@ class Voicing {
     }
     if (!this.config.isReady()) return;
     // the released voices whose release is over are not counted (their ended message is on its way)
-    const now = timeOf(this.config.audioCtx, at);
+    const now = timeOf(this.config.clock, at);
     this.released = this.released.filter((voice) => voice.releaseEnd > now);
     if (this.config.$maxVoices.value !== 1) {
       this.startVoice(note, key, true, at);
@@ -1202,7 +1197,7 @@ class Voicing {
 
   // the fx wait for no timer (another one comes, the synth paused or destroyed)
   stopTimers() {
-    if (this.fxTimer !== null) clearTimeout(this.fxTimer);
+    this.fxTimer?.();
     this.fxTimer = null;
   }
 
@@ -1250,7 +1245,7 @@ class Voicing {
 }
 
 export const synth = ({
-  synthCore: [{ audioCtx, wavetables }],
+  synthCore: [{ clock, wavetables }],
   inputController: [{ $onPress, $onRelease, $bend }],
   transport: [{ $tempo }],
   envelopes: [{ $envelopes, $velocity }],
@@ -1274,7 +1269,7 @@ export const synth = ({
 
     // move to another module
     const voicingContext: VoicingContext = {
-      audioCtx,
+      clock,
       createVoice: wavetables.createVoice,
       setRoutes: wavetables.setRoutes,
       setFilter: wavetables.setFilter,
@@ -1299,7 +1294,7 @@ export const synth = ({
     };
     const voicing = new Voicing(voicingContext);
     // the LFOs of the last note on the main thread (the marks of the knobs, the chart of an LFO)
-    const noteLfos = noteLfosOf(audioCtx.sampleRate, lfo, $fxNote, $routes);
+    const noteLfos = noteLfosOf(clock.sampleRate, lfo, $fxNote, $routes);
 
     return {
       $maxVoices,
@@ -1373,7 +1368,7 @@ export const synth = ({
             map(([bend, down, up]) => bendCents(bend, down, up)),
             distinctUntilChanged(),
             skip(1),
-            throttleTime(BEND_INTERVAL, asyncScheduler, { leading: true, trailing: true })
+            throttleTime(BEND_INTERVAL, clock.scheduler, { leading: true, trailing: true })
           )
           .subscribe((cents) => wavetables.setBend(cents)),
         // the playing notes follow the knobs (the base of the params of each oscillator)

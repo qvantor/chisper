@@ -12,6 +12,7 @@ import {
   createTableStoreWasm,
   OscExports,
   STORE_CHUNK,
+  StoreMessage,
 } from './wavetable-osc-wasm';
 
 // the memory of the wavetable oscillator worked out (it replaces the memory checks of the browser suite but the
@@ -174,7 +175,7 @@ const createWasmTables = () => {
     (message) => stored.push(message),
     () => undefined
   );
-  receive({ data: { port: storeEnd } } as MessageEvent);
+  receive({ port: storeEnd } as unknown as StoreMessage);
   // the messages of a worker straight to the store (its port)
   const post = (message: unknown) => storeEnd.onmessage?.({ data: message });
   const setTable = (table: string, version: number) => {
@@ -404,7 +405,7 @@ describe('the memory of the wasm store', () => {
       () => undefined
     );
     const port = { onmessage: null, postMessage: jest.fn() };
-    next({ data: { port } } as unknown as MessageEvent);
+    next({ port } as unknown as StoreMessage);
     const size = memory();
     // the new worker's version takes the slot and the buffer the old one had
     const slot = store.begin('b', 1, layout(STORE_CHUNK));

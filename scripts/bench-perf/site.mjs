@@ -62,6 +62,8 @@ const TYPES = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain',
+  // (the core of the engine on the main thread: a render of the track, compiled as it streams)
+  '.wasm': 'application/wasm',
 };
 
 // the tree of the list of the served files (get-wavetables-list, get-noises-list)

@@ -10,8 +10,12 @@ import { ENGINE_PROCESSOR } from '../synth/common/engine/engine-params';
 import { voiceEvents } from '../../test-utils/voice-events';
 import { fx } from '../synth/fx/modules/fx';
 import { noteToString, Wavetable } from '../synth/services';
+import { exportWav } from '../synth/track/export';
 import { createPerfApi, PerfModels } from './perf-api';
 import { PROBE_PROCESSOR } from './probe-dsp';
+
+jest.mock('../synth/track/export', () => ({ exportWav: jest.fn() }));
+const exportMock = exportWav as jest.MockedFunction<typeof exportWav>;
 
 jest.mock('../presets/services', () => ({
   clearUrlPresetId: jest.fn(),
@@ -270,6 +274,36 @@ describe('perf test hook api', () => {
       api.track.play(CLIP);
       expect(model.$rollOpen.value).toBe(false);
       expect(model.$playing.value).toBe(true);
+    });
+  });
+
+  describe('exportWav', () => {
+    it('renders a clip as Export WAV does, at its tempo: the sha-256 of the file, its size, its bytes if asked', async () => {
+      const { api, modules } = await setup();
+      const file = new Uint8Array([82, 73, 70, 70]);
+      exportMock.mockResolvedValue({ arrayBuffer: () => Promise.resolve(file.buffer) } as Blob);
+      const options = { format: 'pcm24', sampleRate: 48000, span: 'tail', seed: 3 } as const;
+      // (jsdom has no subtle crypto: a digest of its own, its bytes in hex)
+      const digest = jest.fn((_algorithm: string, _data: ArrayBuffer) =>
+        Promise.resolve(Uint8Array.from({ length: 32 }, (_, i) => i).buffer)
+      );
+      Object.defineProperty(crypto, 'subtle', { value: { digest }, configurable: true });
+      const result = await api.exportWav(CLIP, { ...options, bytes: true });
+      const [sound, clip, given] = exportMock.mock.calls[0];
+      expect(sound.bpm).toBe(CLIP.bpm);
+      expect(sound.snapshot).toEqual(getSnapshot());
+      expect(sound.oscillators[0].frames).toEqual(
+        modules.osc1[0].$waveTable.value.map(($frame) => $frame.value)
+      );
+      expect(clip).toEqual({ notes: CLIP.notes, length: CLIP.length });
+      expect(given).toEqual(options);
+      expect(digest).toHaveBeenCalledWith('SHA-256', file.buffer);
+      expect(result.sha256).toBe(
+        Array.from({ length: 32 }, (_, i) => i.toString(16).padStart(2, '0')).join('')
+      );
+      expect(result.size).toBe(4);
+      expect(result.base64).toBe('UklGRg==');
+      expect((await api.exportWav(CLIP, options)).base64).toBeUndefined();
     });
   });
 

@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { BehaviorSubject } from 'rxjs';
 import { rxModel } from '../rx-model';
+import type { Meta } from '../../types/rx-model';
 
 const simpleData = { value: 1, string: 'string', object: { value: 1, string: 'string' } };
 const rxjsData = { $array: new BehaviorSubject([1, 2, 3]), $object: new BehaviorSubject(simpleData) };
@@ -70,6 +71,16 @@ describe('RxModel', () => {
     stop();
     expect(onStop.mock.calls[0]).toEqual([simpleData, { active: false, name: 'name' }]);
     expect(onStop.mock.calls.length).toBe(1);
+  });
+
+  it('gives its plugins the scope it was inited in', () => {
+    const onInit = jest.fn((_model: unknown, meta: Meta) => meta);
+    const onStop = jest.fn((_model: unknown, meta: Meta) => meta);
+    const scope = {};
+    const [, , { stop }] = rxModel(simpleData).plugins({ onInit, onStop }).init('name', {}, scope);
+    expect(onInit.mock.calls[0][1].scope).toBe(scope);
+    stop();
+    expect(onStop.mock.calls[0][1].scope).toBe(scope);
   });
 
   it('runs destroy before unsubscribing and plugins onStop', () => {

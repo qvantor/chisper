@@ -46,6 +46,7 @@ import type { SynthModule } from '../../common/modules/synth';
 import type { TransportModule } from '../../common/modules/transport';
 import { CreateTrackClock, createTrackClock } from '../track-clock';
 import {
+  keysOf,
   loopEvents,
   loopTick,
   passStart,
@@ -65,7 +66,8 @@ import { fetchClip } from '../services/clips-api';
 // buffer: up to 40 ms on Android) and the way of a message to the audio thread
 export const TRACK_LEAD = 0.05;
 
-const TRACK = 'track' as const;
+// the source the track presses its keys as (the input controller)
+export const TRACK = 'track' as const;
 
 // the inputs a recording takes: the computer keyboard and the piano on the screen, MIDI. Not the track's own notes,
 // nor the roll's (its keys and the sound of its edits: an edit would be recorded again)
@@ -530,14 +532,12 @@ export const track = ({
         origin,
         releaseHeld,
       } = model;
-      const send = ({ tick, on, pitch, velocity }: TrackEvent) => {
-        const at = timeAt(tick / CLIP_PPQ);
-        const note = midiToNote(pitch);
-        if (on) {
-          if (player.held.has(pitch)) onRelease(note, { source: TRACK, at });
-          onPress(note, velocity, { source: TRACK, at });
-          player.held.add(pitch);
-        } else if (player.held.delete(pitch)) onRelease(note, { source: TRACK, at });
+      const send = (event: TrackEvent) => {
+        const at = timeAt(event.tick / CLIP_PPQ);
+        keysOf(event, player.held).forEach(({ on, pitch, velocity }) => {
+          if (on) onPress(midiToNote(pitch), velocity, { source: TRACK, at });
+          else onRelease(midiToNote(pitch), { source: TRACK, at });
+        });
       };
       const showSounding = (pitches: number[]) => {
         if (!isEqual(pitches, $sounding.value)) $sounding.next(pitches);

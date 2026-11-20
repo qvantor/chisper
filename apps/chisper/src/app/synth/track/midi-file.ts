@@ -468,10 +468,9 @@ export const writeMidiFile = (clip: Clip): Uint8Array<ArrayBuffer> => {
 // the characters a file system may refuse in a name (and the controls)
 const UNSAFE = '/\\:*?"<>|';
 
+// a name as a file system takes it: the characters it may refuse as `_`
+export const safeFileName = (name: string) =>
+  Array.from(name, (char) => (isControl(char.charCodeAt(0)) || UNSAFE.includes(char) ? '_' : char)).join('');
+
 // the name of the file of a clip: its name (or 'clip') with the characters a file system may refuse as `_`
-export const midiFileName = (clip: Clip) => {
-  const name = Array.from(clip.name?.trim() || UNNAMED, (char) =>
-    isControl(char.charCodeAt(0)) || UNSAFE.includes(char) ? '_' : char
-  ).join('');
-  return `${name}.mid`;
-};
+export const midiFileName = (clip: Clip) => `${safeFileName(clip.name?.trim() || UNNAMED)}.mid`;

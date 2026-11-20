@@ -37,4 +37,51 @@ describe('searchParamsSnapshotPlugin', () => {
     expect(changes).toEqual(['model']);
     expect(getSnapshot()).toEqual({});
   });
+
+  describe('scope', () => {
+    afterEach(() => window.history.replaceState(null, '', '/'));
+
+    it('keeps the models inited in it apart from those of the page, under the same names', () => {
+      const { plugin, getSnapshot, applySnapshot, scope } = searchParamsSnapshotPlugin();
+      const own = scope();
+      const [page] = createModel(plugin).init('model', undefined);
+      const [copy, , { stop }] = createModel(plugin).init('model', undefined, own);
+      own.applySnapshot({ model: { v: 7, f: false } });
+      expect(copy.$value.value).toBe(7);
+      expect(page.$value.value).toBe(1);
+      expect(own.getSnapshot()).toEqual({ model: { v: 7, f: false } });
+      expect(getSnapshot()).toEqual({ model: { v: 1, f: true } });
+      applySnapshot({ model: { v: 3 } });
+      expect(copy.$value.value).toBe(7);
+      stop();
+      expect(own.getSnapshot()).toEqual({});
+      expect(getSnapshot()).toEqual({ model: { v: 3, f: true } });
+    });
+
+    it('reads no url and tells its own changes', () => {
+      window.history.replaceState(null, '', '/?model-v=9');
+      const { plugin, $changes, scope } = searchParamsSnapshotPlugin();
+      const own = scope();
+      const [page] = createModel(plugin).init('model', undefined);
+      const pageChanges: string[] = [];
+      const ownChanges: string[] = [];
+      $changes.subscribe((name) => pageChanges.push(name));
+      own.$changes.subscribe((name) => ownChanges.push(name));
+      const [copy] = createModel(plugin).init('model', undefined, own);
+      expect(page.$value.value).toBe(9);
+      expect(copy.$value.value).toBe(1);
+      copy.$value.next(2);
+      expect(ownChanges).toEqual(['model']);
+      expect(pageChanges).toEqual([]);
+    });
+
+    it('registers a model of a scope it did not make nowhere', () => {
+      const { plugin, getSnapshot } = searchParamsSnapshotPlugin();
+      const other = searchParamsSnapshotPlugin().scope();
+      const [, , { stop }] = createModel(plugin).init('model', undefined, other);
+      expect(getSnapshot()).toEqual({});
+      expect(other.getSnapshot()).toEqual({});
+      stop();
+    });
+  });
 });

@@ -30,8 +30,8 @@ export const rxModel = <
     cloneSelf(model, { plugins: Array.isArray(plugin) ? plugin : [plugin] });
   const destroy = (fn: (model: M) => void) => cloneSelf(model, { destroy: [fn] });
 
-  const init = (name: string, initial: I): ModelInternal<M, A> => {
-    const meta = { name, active: true };
+  const init = (name: string, initial: I, scope?: object): ModelInternal<M, A> => {
+    const meta = { name, active: true, scope };
     const modelValue = typeof model === 'function' ? model(initial) : model;
     const actions = initializers.actions.reduce((sum, fn) => ({ ...sum, ...fn(modelValue) }), {} as A);
     const subscriptions = initializers.subscriptions.map((fn) => fn(modelValue, actions)).flat();

@@ -20,7 +20,7 @@ const setup = ({ failFirstLoad = false } = {}) => {
   if (failFirstLoad) addModule.mockRejectedValueOnce(new Error('404'));
   // the node of the engine: the voices and their store are in it
   const core = createEngineNode(audioCtx);
-  const engine = createWavetableEngine(audioCtx, core, { createChannel });
+  const engine = createWavetableEngine(core, { createChannel });
   const statuses: WavetableStatus[] = [];
   engine.$status.subscribe((status) => statuses.push(status));
   const worker = () => WorkerStub.created.at(-1);
@@ -232,7 +232,7 @@ describe('wavetable engine', () => {
 
   it('without MessageChannel (and none passed): unsupported', () => {
     const audioCtx = new AudioContext();
-    const engine = createWavetableEngine(audioCtx, createEngineNode(audioCtx));
+    const engine = createWavetableEngine(createEngineNode(audioCtx));
     expect(engine.$status.value).toBe('unsupported');
   });
 

@@ -1,11 +1,4 @@
-import {
-  asyncScheduler,
-  BehaviorSubject,
-  combineLatest,
-  distinctUntilChanged,
-  map,
-  throttleTime,
-} from 'rxjs';
+import { BehaviorSubject, combineLatest, distinctUntilChanged, map, throttleTime } from 'rxjs';
 import { isEqual } from 'lodash';
 import { ObjectBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import {
@@ -51,11 +44,11 @@ import {
   phaseAt,
   RETRIG,
 } from '../lfo/lfo-curve';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 import { TransportModule } from './transport';
 
 interface Deps {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
   transport: TransportModule;
 }
 
@@ -222,7 +215,7 @@ const sameShape = (a: LfoParams, b: LfoParams) =>
 // division since beat 0: a new Rate may step it), in HZ it takes the position of the transport where it moves (a
 // MIDI Start). `globals` are the LFOs as they run on the main thread, `$ranges` the bounds of the routes to their
 // knobs in BPM. The tab of the section (`$selected`) is the state of the UI, not in the preset
-export const lfos = ({ synthCore: [{ audioCtx, wavetables }], transport: [transport] }: Deps) =>
+export const lfos = ({ synthCore: [{ clock, wavetables }], transport: [transport] }: Deps) =>
   rxModel(() => {
     const $lfos = new ObjectBS<Lfos>(lfosFrom({}));
     const $selected = new BehaviorSubject<LfoId>(LFOS[0]);
@@ -337,8 +330,8 @@ export const lfos = ({ synthCore: [{ audioCtx, wavetables }], transport: [transp
       };
       return [
         $lfos
-          .pipe(throttleTime(LFO_STATE_INTERVAL * 1000, asyncScheduler, { leading: true, trailing: true }))
-          .subscribe((next) => send(next, audioCtx.currentTime + LFO_LEAD)),
+          .pipe(throttleTime(LFO_STATE_INTERVAL * 1000, clock.scheduler, { leading: true, trailing: true }))
+          .subscribe((next) => send(next, clock.currentTime + LFO_LEAD)),
         // a new tempo: the LFOs in BPM from its segment on; the transport moved: those on its grid (HOST, free)
         transport.$changes.subscribe(({ segment, locate }) => {
           const sent = previous;

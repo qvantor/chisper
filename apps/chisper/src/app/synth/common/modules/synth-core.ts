@@ -5,7 +5,13 @@ import { keepNormalLatency, LATENCY_HINTS, readLatencyMode, resolveLatency } fro
 import { createChain } from '../chain/chain';
 import { createEngineNode } from '../engine/engine-node';
 import { LIMITER_STAGE } from '../chain/chain-params';
-import { createWavetableEngine, WavetableEngineDependencies } from '../wavetable/wavetable-engine';
+import {
+  createWavetableEngine,
+  WavetableEngine,
+  WavetableEngineDependencies,
+} from '../wavetable/wavetable-engine';
+import type { Chain } from '../chain/chain';
+import { contextClock, SynthClock } from '../clock/synth-clock';
 
 // browsers (iOS Safari especially) keep the context suspended until a user gesture,
 // and iOS suspends/interrupts it again when the page goes to the background
@@ -36,12 +42,14 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
     // oscillators of every voice (the filter is in each), their sum through the fx chain (its slots are told by the
     // fx model), the master gain and the limiter, the last stage. The analysers tap its output, they show what is
     // played; until it has loaded nothing sounds
+    // the time the models read: the context's
+    const clock = contextClock(audioCtx);
     const engine = createEngineNode(audioCtx);
-    const chain = createChain(audioCtx, engine);
-    const { output } = chain;
+    const chain = createChain(clock, engine);
+    const { output } = engine;
     // the master limiter of the chain: its status (failed: the module, or the limiter itself in the core)
     const masterLimiter = { $status: chain.status(LIMITER_STAGE) };
-    const wavetables = createWavetableEngine(audioCtx, engine, wavetableDependencies);
+    const wavetables = createWavetableEngine(engine, wavetableDependencies);
 
     output.connect(audioCtx.destination);
 
@@ -55,6 +63,7 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
 
     return {
       audioCtx,
+      clock,
       $dropouts,
       $dropoutWarning,
       $muted,
@@ -121,3 +130,12 @@ export const {
 } = rxModelReact('synthCore', synthCore);
 
 export type SynthCoreModule = ReturnType<typeof useSynthCore>;
+
+// what the models of the sound take of a core: its clock, the voices and the chain. The synth core's, or the one of
+// a render of the track (render-core.ts) that plays a copy of them
+export interface SoundCore {
+  clock: SynthClock;
+  wavetables: WavetableEngine;
+  chain: Chain;
+}
+export type SoundCoreModule = readonly [SoundCore, ...unknown[]];

@@ -5,8 +5,10 @@ import { CaretDownOutlined, CaretUpOutlined } from '@ant-design/icons';
 import { number } from '@chisper/math';
 import { SegmentDisplay, singlePointerTracker, text10, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { tempoOf } from '@chisper/preset-schema';
 import { CaretButton } from '../../../common/components';
 import { useTransport } from '../../common/modules';
+import type { TempoSource } from '../../common/modules/transport';
 
 // the tempo the display sets: dragged, stepped or typed, within them
 const MIN = 30;
@@ -18,6 +20,12 @@ const FINE_STEP = 0.01;
 const PX_PER_STEP = 4;
 // within the range of the display (setBpm puts it on the grid of 0.01)
 const toTempo = (value: number) => number.thresholds(value, MIN, MAX);
+
+// the tempo the piano roll shows (and an export of the clip plays at): the field's, or the one a MIDI Clock leads to
+// 0.1 (its last digits jitter), as a transport takes it
+export const rollTempo = (source: TempoSource, bpm: number, tempo: number) =>
+  source === 'internal' ? bpm : tempoOf(number.round(tempo, 10));
+
 // what the display has room for: 3 digits, a point, 2 decimals
 const TYPED = /^\d{0,3}(\.\d{0,2})?$/;
 
@@ -111,15 +119,15 @@ export const TempoDisplay = () => {
   const [{ $bpm, $tempo, $source }, { setBpm }] = useTransport();
   const bpm = useBehaviorSubject($bpm);
   const tempo = useBehaviorSubject($tempo);
-  const editable = useBehaviorSubject($source) === 'internal';
+  const source = useBehaviorSubject($source);
+  const editable = source === 'internal';
   // the text typed; fresh: the value as it was, all of it selected, until the first key replaces it
   const [typing, setTyping] = React.useState<{ text: string; fresh: boolean } | null>(null);
   const [active, setActive] = React.useState(false);
   const [track] = React.useState(singlePointerTracker);
 
-  // the field's own at once (the tempo in effect follows it at most every 20 ms); a measured tempo to 0.1: its last
-  // digits jitter
-  const shown = editable ? bpm : number.round(tempo, 10);
+  // the field's own at once (the tempo in effect follows it at most every 20 ms); a measured tempo to 0.1
+  const shown = rollTempo(source, bpm, tempo);
   // from the tempo of the field now: two clicks before a render step twice
   const step = (by: number) => setBpm(toTempo($bpm.value + by));
   const onPointerDown = (e: React.PointerEvent) => {

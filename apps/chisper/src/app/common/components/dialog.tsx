@@ -4,7 +4,7 @@ import hexToRgba from 'hex-to-rgba';
 import { ConfigProvider, Modal, ModalProps } from 'antd';
 import { AiOutlineClose } from 'react-icons/ai';
 import { checkboxLit, checkboxOff, text12, textBold12, theme } from '@chisper/ui-kit';
-import { barStyle, keyStyle, screenStyle, sectionStyle } from './section-bar';
+import { barStyle, Key, keyStyle, screenStyle, sectionStyle } from './section-bar';
 
 const { colors } = theme;
 
@@ -109,12 +109,55 @@ const Root = styled(Modal)`
 
 const MASK = { background: hexToRgba(colors.primaryDark, 0.55) };
 
+// the close key of a dialog whose keys take no focus, where the one of antd is (its button takes no tabIndex)
+const CloseKey = styled(Key)`
+  position: absolute;
+  z-index: 1;
+  top: 9px;
+  inset-inline-end: 9px;
+`;
+
+type Props = Omit<ModalProps, 'footer' | 'closeIcon' | 'centered' | 'styles' | 'closable'> & {
+  // nothing in it takes focus (Export WAV: the keys of the QWERTY play notes over it, a focused key would show its
+  // outline then): its keys out of the tab order (ChoiceKeys `focusable`, Key `tabIndex`), so the trap of antd
+  // focuses the dialog itself, with a close key of its own
+  focusless?: boolean;
+};
+
+// no Tab while a dialog of no focus is open: nothing in it to go to, the trap of antd would let it out to the page
+const useNoTab = (on: boolean) =>
+  React.useEffect(() => {
+    if (!on) return;
+    const stop = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') e.preventDefault();
+    };
+    window.addEventListener('keydown', stop, true);
+    return () => window.removeEventListener('keydown', stop, true);
+  }, [on]);
+
 // a dialog of the synth: its title in its header, a close key, no footer of antd (a Bar of keys in its content)
-export const Dialog = (props: Omit<ModalProps, 'footer' | 'closeIcon' | 'centered' | 'styles'>) => (
-  <ConfigProvider theme={DIALOG_THEME}>
-    <Root closeIcon={<AiOutlineClose />} footer={null} centered styles={{ mask: MASK }} {...props} />
-  </ConfigProvider>
-);
+export const Dialog = ({ focusless = false, children, ...props }: Props) => {
+  useNoTab(focusless && Boolean(props.open));
+  return (
+    <ConfigProvider theme={DIALOG_THEME}>
+      <Root
+        closable={!focusless}
+        closeIcon={<AiOutlineClose />}
+        footer={null}
+        centered
+        styles={{ mask: MASK }}
+        {...props}
+      >
+        {focusless && (
+          <CloseKey className='square' aria-label='Close' tabIndex={-1} onClick={(e) => props.onCancel?.(e)}>
+            <AiOutlineClose />
+          </CloseKey>
+        )}
+        {children}
+      </Root>
+    </ConfigProvider>
+  );
+};
 
 // a line of text over the screen
 export const DialogIntro = styled.div`

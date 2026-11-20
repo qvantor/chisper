@@ -1,4 +1,5 @@
 import { Subscription } from 'rxjs';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { Clip, normalizePreset } from '@chisper/preset-schema';
 import { applySnapshot } from '../app';
 import { eventTime } from '../common/services';
@@ -19,6 +20,8 @@ import type { FxStatus } from '../synth/fx/effects';
 import type { useFx } from '../synth/fx/modules';
 import type { usePresets } from '../presets/modules/presets';
 import type { useTrack } from '../synth/track';
+import type { WavExportOptions } from '../synth/track/export/export-wav';
+import { pageSound } from '../synth/track/export/page-sound';
 import { noteToString, stringToNote } from '../synth/services';
 import { matchNotes, NoteLatency, NoteRecord, noteLatency, PressRecord, ReleaseRecord } from './latency';
 import { PROBE_PROCESSOR, ProbeOnsetMessage, ProbeOptions } from './probe-dsp';
@@ -276,6 +279,37 @@ export const createPerfApi = (models: PerfModels) => {
     stop: () => models.track[1].stop(),
   };
 
+  // a clip rendered to a .wav as Export WAV makes it, of the sound now at the tempo of the clip (a seed: the same
+  // file in every browser): the sha-256 of its bytes, their count, the bytes themselves (base64) if asked for, the ms
+  // it took
+  const exportWav = async (
+    clip: Clip,
+    { bytes = false, ...options }: Omit<WavExportOptions, 'signal' | 'onProgress'> & { bytes?: boolean }
+  ) => {
+    const started = performance.now();
+    const { exportWav: render } = await import('../synth/track/export');
+    const sound = pageSound(
+      [models.osc1[0], models.osc2[0]],
+      models.noise[0],
+      clip.bpm,
+      core.$masterGain.value
+    );
+    const buffer = await (
+      await render(sound, { notes: clip.notes, length: clip.length }, options)
+    ).arrayBuffer();
+    const ms = performance.now() - started;
+    const sha256 = bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)));
+    let base64: string | undefined;
+    if (bytes) {
+      const view = new Uint8Array(buffer);
+      let binary = '';
+      for (let at = 0; at < view.length; at += 0x8000)
+        binary += String.fromCharCode(...view.subarray(at, at + 0x8000));
+      base64 = btoa(binary);
+    }
+    return { sha256, size: buffer.byteLength, ms, ...(base64 !== undefined && { base64 }) };
+  };
+
   return {
     models,
     ready,
@@ -286,6 +320,7 @@ export const createPerfApi = (models: PerfModels) => {
     stats,
     trace: { start: startTrace, stop: takeTrace },
     track,
+    exportWav,
     probe: { install: installProbe },
     destroy: () => {
       stopRuns();

@@ -1,2 +1,2 @@
-export { PresetsProvider, usePresets, chosenId } from './modules/presets';
+export { PresetsProvider, PresetsContext, usePresets, chosenId } from './modules/presets';
 export { PresetSection } from './components';

@@ -78,7 +78,7 @@ const HELD = ['C3', 'D3', 'E3', 'G3', 'A3', 'C4', 'D4', 'E4', 'G4', 'A4', 'B4', 
 
 // --- the clip of the track cases (libs/preset-schema/src/clip.ts) ---
 
-const PPQ = 960;
+export const PPQ = 960;
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 // MIDI 60 is C4 (services/note.ts)
 const pitchOf = (name) => {
@@ -91,7 +91,7 @@ const nameOf = (pitch) => `${NOTE_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1
 // ~10 notes on a second, up to 12 voices with their releases where the chords change (Poly 12: stealing). No
 // pitch overlaps itself: the script of a reference plays the same notes through the keys
 const ARPEGGIO = ['C4', 'E4', 'G4', 'B4', 'C5', 'B4', 'G4', 'E4'];
-const CLIP = {
+export const CLIP = {
   bpm: 120,
   length: 8 * PPQ,
   notes: [

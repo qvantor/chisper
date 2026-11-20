@@ -6,10 +6,10 @@ import { urlSnapshotPlugin } from '../../../app';
 import { subShapeFrame, subTable } from '../wavetable/sub-shapes';
 import type { VoiceSubKnobs, VoiceSubOptions } from '../wavetable/voice-options';
 import type { TableState } from '../wavetable/wavetable-engine';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 
 interface Dependencies {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
 }
 
 // the knobs of the sub: its shape, Octave and Coarse (semitones, not whole) over the note, Phase (the share of a

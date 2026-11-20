@@ -9,7 +9,7 @@ import {
   MOD_SOURCES,
 } from '@chisper/preset-schema';
 import { ArrayBS, ObjectBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
-import { SynthCoreModule } from '../../common/modules/synth-core';
+import type { SoundCoreModule } from '../../common/modules/synth-core';
 import type { SynthModule } from '../../common/modules/synth';
 import type { ModRoute, ModulationModule } from '../../common/modules/modulation';
 import type { LfoModule, LfoRanges } from '../../common/modules/lfos';
@@ -33,7 +33,7 @@ import { delayTime } from '../effects/delay';
 const VELO = MOD_SOURCES.indexOf('velo');
 
 interface Dependencies {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
   // the tempo (the delay in BPM)
   transport: TransportModule;
   // the envelopes of the last note, the LFOs and the routes the fx knobs follow
@@ -134,7 +134,7 @@ export const getChain = (
 ) => order.filter((type) => effects[type].added && isFxUsable(status[type]));
 
 export const fx = ({
-  synthCore: [{ audioCtx, chain }],
+  synthCore: [{ clock, chain }],
   synth: [{ $fxNote }],
   transport: [{ $tempo }],
   lfo: [{ $ranges: $lfoRanges }],
@@ -145,10 +145,7 @@ export const fx = ({
     const $effects = new ObjectBS<Record<FxType, FxState>>(defaultEffects());
     // the slot of each effect in the chain of the synth core (one node for all of them)
     const slots = Object.fromEntries(
-      FX_TYPES.map((type, index) => [
-        type,
-        createFxSlot(chain, index, FX_REGISTRY[type], audioCtx.sampleRate),
-      ])
+      FX_TYPES.map((type, index) => [type, createFxSlot(chain, index, FX_REGISTRY[type], clock.sampleRate)])
     ) as Record<FxType, FxSlot>;
     // mirrors the slot statuses (see the subscriptions)
     const $status = new ObjectBS<Record<FxType, FxStatus>>(

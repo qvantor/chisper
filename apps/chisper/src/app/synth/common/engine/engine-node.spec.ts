@@ -4,7 +4,8 @@ import { workletLoads } from '../../../../test-utils/worklet-loads';
 import type { FxStatus } from '../../fx/effects/types';
 import { lfoTable } from '../lfo/lfo-curve';
 import type { LfosState, LfoWire } from '../lfo/lfo-curve';
-import { createEngineNode, EngineClient, MAX_REMAKES } from './engine-node';
+import { EngineClient, MAX_REMAKES } from './engine-host';
+import { createEngineNode } from './engine-node';
 import { ENGINE_MODULE, ENGINE_PROCESSOR, EngineOptions, PROBED_NODE_OPTIONS } from './engine-params';
 
 interface NodeStub extends AudioWorkletNode {

@@ -89,6 +89,18 @@ export const loopEvents = (
   return events.sort(playOrder).map(({ tick, on, pitch, velocity }) => ({ tick, on, pitch, velocity }));
 };
 
+// the keys an event presses (on) and releases at its tick, the pitches held (`held`) after it: an on of a pitch held
+// releases it first (a voice of a pitch at a time), an off of a pitch not held releases nothing
+export const keysOf = (event: TrackEvent, held: Set<number>): TrackEvent[] => {
+  const { on, pitch } = event;
+  if (on) {
+    const keys = held.has(pitch) ? [{ ...event, on: false }] : [];
+    held.add(pitch);
+    return [...keys, event];
+  }
+  return held.delete(pitch) ? [event] : [];
+};
+
 // the events (in the order they are played) but the ons of the notes that ended: their end `ended` (a tick over
 // the loops whose time has passed: sent late, the page stood) — they would sound all at once with the rest. A note
 // that still sounds plays (late). Its end is the next off of its pitch (the notes of a pitch don't overlap; an off

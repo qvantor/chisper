@@ -1261,7 +1261,7 @@ describe('the toolbar of the roll', () => {
     const createObjectURL = jest.fn(() => 'blob:x');
     Object.assign(URL, { createObjectURL, revokeObjectURL: jest.fn() });
     const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-    fireEvent.click(screen.getByLabelText('Export'));
+    fireEvent.click(screen.getByLabelText('Export MIDI'));
     expect(createObjectURL).toHaveBeenCalled();
     expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe('clip.mid');
     click.mockRestore();

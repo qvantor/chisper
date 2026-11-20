@@ -4,9 +4,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GlobalStyle, theme, useIsMobile } from '@chisper/ui-kit';
 import { Toasts } from '../common/components';
 import { AppProvider, useApp } from './modules';
-import { urlSnapshotPlugin, getSnapshot, applySnapshot, $snapshotChanges } from './plugins/snapshot';
+import {
+  urlSnapshotPlugin,
+  getSnapshot,
+  applySnapshot,
+  $snapshotChanges,
+  snapshotScope,
+} from './plugins/snapshot';
 
-export { AppProvider, useApp, urlSnapshotPlugin, getSnapshot, applySnapshot, $snapshotChanges };
+export {
+  AppProvider,
+  useApp,
+  urlSnapshotPlugin,
+  getSnapshot,
+  applySnapshot,
+  $snapshotChanges,
+  snapshotScope,
+};
 
 const queryClient = new QueryClient();
 

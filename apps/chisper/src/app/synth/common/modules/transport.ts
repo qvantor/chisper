@@ -1,16 +1,7 @@
-import {
-  asyncScheduler,
-  BehaviorSubject,
-  combineLatest,
-  filter,
-  map,
-  skip,
-  Subject,
-  throttleTime,
-} from 'rxjs';
+import { BehaviorSubject, combineLatest, filter, map, skip, Subject, throttleTime } from 'rxjs';
 import { PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { divisionSeconds, TEMPO_DEFAULT, TEMPO_MAX, TEMPO_MIN, tempoOf } from '@chisper/preset-schema';
-import { contextTimeAt, readStored, writeStored } from '../../../common/services';
+import { readStored, writeStored } from '../../../common/services';
 import { LFO_LEAD, LFO_STATE_INTERVAL } from '../lfo/lfo-curve';
 import {
   beatAt,
@@ -21,10 +12,13 @@ import {
   timeAt,
   withSegment,
 } from '../transport/tempo-map';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 
 interface Deps {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
+  // the tempo of its field, not kept (a render of the track: a copy of the transport at the tempo of the page); none:
+  // the one the browser keeps, kept as it changes
+  bpm?: number;
 }
 
 // internal: the tempo of the field; midi: a MIDI Clock leads the tempo and the position
@@ -62,10 +56,10 @@ const applySegment = ({ $tempo, $segments, $changes }: Segments, segment: TempoS
 // transport is at there (the grid goes on), at most every LFO_STATE_INTERVAL (a drag of the field: each segment is a
 // state of the LFOs in BPM to five threads). The LFOs, the envelopes, the delay and the voices read it; the MIDI
 // controller leads it by a MIDI Clock
-export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
+export const transport = ({ synthCore: [{ clock }], bpm }: Deps) =>
   rxModel(() => {
-    // the tempo of the field (kept)
-    const $bpm = new PrimitiveBS<number>(readTempo());
+    // the tempo of the field (kept, unless given)
+    const $bpm = new PrimitiveBS<number>(bpm === undefined ? readTempo() : tempoOf(bpm));
     const $source = new PrimitiveBS<TempoSource>('internal');
     // the tempo in effect: of the newest segment (the field's, or of the MIDI Clock, not kept)
     const $tempo = new PrimitiveBS<number>($bpm.value);
@@ -87,7 +81,7 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
       // the time a segment can start at: its states reach the audio threads before it, and the notes the track has
       // sent stay at their times (one before them would move their beats: a note off of a faster tempo would come
       // before the note on sent at the tempo before)
-      soonest: () => Math.max(audioCtx.currentTime + LFO_LEAD, scheduled.until),
+      soonest: () => Math.max(clock.currentTime + LFO_LEAD, scheduled.until),
       // the beat the transport is at at `t` (seconds of the context)
       beatAt: (t: number) => beatAt($segments.value, t),
       // the tempo at `t`
@@ -97,7 +91,7 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
       // seconds of a division (TEMPO_DIVISIONS) at the tempo in effect
       secondsOf: (division: number) => divisionSeconds(division, $tempo.value),
       // the time of the context the output plays at `ms` of performance.now() (an event, a MIDI Clock)
-      contextTimeAt: (ms: number) => contextTimeAt(audioCtx, ms),
+      contextTimeAt: (ms: number) => clock.contextTimeAt(ms),
     };
   })
     .actions((model) => {
@@ -134,7 +128,9 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
       };
     })
     .subscriptions((model) => [
-      model.$bpm.pipe(skip(1)).subscribe((bpm) => writeStored('localStorage', TEMPO_KEY, bpm)),
+      ...(bpm === undefined
+        ? [model.$bpm.pipe(skip(1)).subscribe((next) => writeStored('localStorage', TEMPO_KEY, next))]
+        : []),
       // the tempo of the field, while no MIDI Clock leads it
       combineLatest([model.$bpm, model.$source])
         .pipe(
@@ -144,7 +140,7 @@ export const transport = ({ synthCore: [{ audioCtx }] }: Deps) =>
           // filter of the tempo in effect before the throttle: a last value equal to it would leave the one
           // between them waiting, applied after it
           skip(1),
-          throttleTime(LFO_STATE_INTERVAL * 1000, asyncScheduler, { leading: true, trailing: true })
+          throttleTime(LFO_STATE_INTERVAL * 1000, clock.scheduler, { leading: true, trailing: true })
         )
         // (a value equal to the tempo in effect, the last one of a drag back to it, changes nothing)
         .subscribe((bpm) => {
