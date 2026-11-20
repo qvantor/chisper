@@ -9,7 +9,6 @@ import {
   of,
   combineLatest,
   throttleTime,
-  asyncScheduler,
   distinctUntilChanged,
 } from 'rxjs';
 import { ObjectBS, rxModel, rxModelReact, PrimitiveBS, ArrayBS } from '@chisper/rxjs-react';
@@ -28,7 +27,7 @@ import {
 } from '../wavetable/wavetable-frames';
 import { OscParam } from '../wavetable/wavetable-osc-params';
 import { tableLoads } from './load-share';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 
 // one sine cycle, played until a table loads (a wave of 2 samples has no harmonics)
 const PLACEHOLDER_WAVE = [0, 1, 0, -1];
@@ -36,7 +35,7 @@ const PLACEHOLDER_WAVE = [0, 1, 0, -1];
 export const TABLE_THROTTLE = 100;
 
 interface Dependencies {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
   loadWavetable?: LoadWavetable;
 }
 
@@ -70,7 +69,7 @@ const baseParams = (
 });
 
 export const oscillator = ({
-  synthCore: [{ wavetables }],
+  synthCore: [{ clock, wavetables }],
   loadWavetable: load = loadWavetable,
 }: Dependencies) =>
   rxModel(({ active, initialWavePath }: { active: boolean; initialWavePath: string[] }) => {
@@ -215,7 +214,7 @@ export const oscillator = ({
         .pipe(
           switchMap((waves) =>
             combineLatest(waves.filter(Boolean)).pipe(
-              throttleTime(TABLE_THROTTLE, asyncScheduler, { leading: true, trailing: true })
+              throttleTime(TABLE_THROTTLE, clock.scheduler, { leading: true, trailing: true })
             )
           )
         )
@@ -305,15 +304,17 @@ export const oscillator = ({
       wavetables.removeTable(id);
     });
 
-export const { ModelProvider: Oscillator1Provider, useModel: useOscillator1 } = rxModelReact(
-  'osc1',
-  oscillator
-);
+export const {
+  ModelProvider: Oscillator1Provider,
+  useModel: useOscillator1,
+  Context: Oscillator1Context,
+} = rxModelReact('osc1', oscillator);
 
-export const { ModelProvider: Oscillator2Provider, useModel: useOscillator2 } = rxModelReact(
-  'osc2',
-  oscillator
-);
+export const {
+  ModelProvider: Oscillator2Provider,
+  useModel: useOscillator2,
+  Context: Oscillator2Context,
+} = rxModelReact('osc2', oscillator);
 
 export type OscillatorModule = ReturnType<typeof useOscillator1>;
 export type OscillatorModel = OscillatorModule[0];

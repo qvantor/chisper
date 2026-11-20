@@ -932,7 +932,7 @@ export interface StoreFreedBytesMessage {
 }
 
 type Port = Pick<MessagePort, 'postMessage'> & { onmessage: ((event: MessageEvent) => void) | null };
-type StoreMessage =
+export type StoreMessage =
   | BuilderPortMessage
   | StatsRequest
   | StoreTableMessage
@@ -970,12 +970,12 @@ export const createStoreReceiver = (
       worker?.postMessage(ack, [data.chunk]);
     }
   };
-  const receive = ({ data }: MessageEvent<StoreMessage>) => {
+  const receive = (data: StoreMessage) => {
     if ('port' in data) {
       slots.clear();
       epoch = store.reset();
       worker = data.port;
-      worker.onmessage = receive;
+      worker.onmessage = (event: MessageEvent<StoreMessage>) => receive(event.data);
       const chunks: StoreChunksMessage = { chunks: STORE_CHUNK };
       worker.postMessage(chunks);
       return;

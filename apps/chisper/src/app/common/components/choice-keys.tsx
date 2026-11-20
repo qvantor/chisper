@@ -75,6 +75,10 @@ interface Props<T> {
   value: T;
   // only for another choice than the one made (a choice may cost: a reload)
   onChange: (value: T) => void;
+  // false: the keys out of the tab order (a click doesn't focus them either): never focused, never an outline
+  focusable?: boolean;
+  // the keys off (the one chosen still shown): nothing is chosen meanwhile
+  disabled?: boolean;
 }
 
 // a choice of one of a few on keys of a plate (the latency, the channel of the MIDI): radios, each key its value in
@@ -83,6 +87,8 @@ export const ChoiceKeys = <T extends string | number>({
   options,
   value,
   onChange,
+  focusable = true,
+  disabled = false,
   'aria-label': label,
 }: Props<T>) => (
   <Plate role='radiogroup' aria-label={label}>
@@ -92,6 +98,8 @@ export const ChoiceKeys = <T extends string | number>({
         role='radio'
         aria-checked={option.value === value}
         aria-label={option.name}
+        tabIndex={focusable ? undefined : -1}
+        disabled={disabled}
         data-value={option.value}
         onClick={() => option.value !== value && onChange(option.value)}
       >

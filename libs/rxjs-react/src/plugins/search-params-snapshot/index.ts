@@ -1,4 +1,13 @@
-import { merge, skip, Subject, Subscription, BehaviorSubject, map, distinctUntilChanged } from 'rxjs';
+import {
+  merge,
+  skip,
+  Subject,
+  Subscription,
+  BehaviorSubject,
+  map,
+  distinctUntilChanged,
+  Observable,
+} from 'rxjs';
 import { Plugin } from '../../types';
 import { isSnapshotable } from '../snapshot';
 
@@ -40,32 +49,65 @@ const searchToSnapshots = () => {
 const isSnapshotableBS = (value: unknown): value is BehaviorSubject<unknown> =>
   value instanceof BehaviorSubject && isSnapshotable(value);
 
-export const searchParamsSnapshotPlugin = () => {
+// the models of a snapshot by their names, and the names of those whose persisted state changed
+const createRegistry = () => {
   const modelForSnap = new Map<string, ModelForSnap<any, any>>();
-  const snapshots = searchToSnapshots();
   const $changes = new Subject<string>();
-
-  const getSnapshot = () => {
-    const result: Record<string, Snap> = {};
-    for (const [name, { model, modelToSnap }] of modelForSnap) result[name] = modelToSnap(model);
-    return result;
+  return {
+    modelForSnap,
+    $changes,
+    getSnapshot: () => {
+      const result: Record<string, Snap> = {};
+      for (const [name, { model, modelToSnap }] of modelForSnap) result[name] = modelToSnap(model);
+      return result;
+    },
+    // (a model missing from it takes its defaults)
+    applySnapshot: (snapshot: Record<string, Snap>) => {
+      for (const [name, { model, applySnap }] of modelForSnap) applySnap(snapshot[name] ?? {}, model);
+    },
   };
+};
+type Registry = ReturnType<typeof createRegistry>;
 
-  const applySnapshot = (snapshot: Record<string, Snap>) => {
-    for (const [name, { model, applySnap }] of modelForSnap) applySnap(snapshot[name] ?? {}, model);
-  };
+export interface SnapshotScope {
+  getSnapshot: () => Record<string, Snap>;
+  applySnapshot: (snapshot: Record<string, Snap>) => void;
+  $changes: Observable<string>;
+}
+
+const scopeOf = ({ getSnapshot, applySnapshot, $changes }: Registry): SnapshotScope => ({
+  getSnapshot,
+  applySnapshot,
+  $changes: $changes.asObservable(),
+});
+
+// The snapshot of the models of the page: each under its name (or prefix), the one of the url applied as it inits.
+// `scope()` is a snapshot of its own: the models inited in it (init's scope) register there, never in the one of the
+// page, and read no url (a copy of the models under the same names leaves those of the page as they are)
+export const searchParamsSnapshotPlugin = () => {
+  const page = createRegistry();
+  const snapshots = searchToSnapshots();
+  const scopes = new WeakMap<object, Registry>();
+  // (a scope of none of ours: the model is in no snapshot)
+  const registryOf = (scope: object | undefined) => (scope === undefined ? page : scopes.get(scope));
 
   return {
-    getSnapshot,
-    applySnapshot,
-    $changes: $changes.asObservable(),
+    ...scopeOf(page),
+    scope: (): SnapshotScope => {
+      const registry = createRegistry();
+      const scope = scopeOf(registry);
+      scopes.set(scope, registry);
+      return scope;
+    },
     plugin: <M extends Record<string | number, unknown>, S extends Snap>({
       modelToSnap,
       applySnap,
       prefix,
     }: PluginConfig<M, S>): Plugin<M> => {
       return {
-        onInit: (model, { name }) => {
+        onInit: (model, { name, scope }) => {
+          const registry = registryOf(scope);
+          if (!registry) return;
           const snapName = prefix ?? name;
           // emits only when the persisted state changes, not on every snapshotable subject
           const subscription = merge(...Object.values(model).filter(isSnapshotableBS))
@@ -74,18 +116,19 @@ export const searchParamsSnapshotPlugin = () => {
               distinctUntilChanged(),
               skip(1)
             )
-            .subscribe(() => $changes.next(snapName));
-          modelForSnap.set(snapName, { model, modelToSnap, applySnap, subscription });
-          const value = snapshots[snapName] as S;
+            .subscribe(() => registry.$changes.next(snapName));
+          registry.modelForSnap.set(snapName, { model, modelToSnap, applySnap, subscription });
+          const value = registry === page ? (snapshots[snapName] as S) : undefined;
           if (!value) return;
           applySnap(value, model);
         },
-        onStop: (model, { name }) => {
+        onStop: (model, { name, scope }) => {
+          const registry = registryOf(scope);
           const snapName = prefix ?? name;
-          const entry = modelForSnap.get(snapName);
-          if (entry?.model !== model) return;
+          const entry = registry?.modelForSnap.get(snapName);
+          if (!registry || entry?.model !== model) return;
           entry.subscription.unsubscribe();
-          modelForSnap.delete(snapName);
+          registry.modelForSnap.delete(snapName);
         },
       };
     },

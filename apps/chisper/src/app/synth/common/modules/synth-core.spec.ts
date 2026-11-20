@@ -55,8 +55,7 @@ const failLoads = (count: number) => {
 describe('synthCore', () => {
   it('plays everything in one node: the engine → its output → destination', async () => {
     const { model, audioCtx, node } = setup();
-    const { chain, engine, output } = model;
-    expect(output).toBe(chain.output);
+    const { engine, output } = model;
     expect(output).toBe(engine.output);
     await flush();
     // the voices (the filter is in each), the effects, the master gain and the limiter: no other worklet node

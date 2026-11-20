@@ -1,6 +1,6 @@
 import { BehaviorSubject } from 'rxjs';
 import { workletUrl } from '../../fx/effects/load-worklet';
-import type { EngineNode } from '../engine/engine-node';
+import type { EngineHost } from '../engine/engine-host';
 import type { EngineReport } from '../engine/engine-params';
 import type { LfosState } from '../lfo/lfo-curve';
 import { isLfoSource } from '../../fx/effects/fx-modulation';
@@ -72,8 +72,9 @@ export interface WavetableEngineStats {
 }
 type Waiter<T> = (answer: T | null) => void;
 
-// the wavetable oscillator of an AudioContext, one for both oscillators, in the node of the engine (`engine`:
-// engine-node.ts; its worklet has the store of the tables and the voices of every note, the chain after them): it
+// the wavetable oscillator of a core, one for both oscillators, in the node of the engine (`engine`: engine-host.ts,
+// the worklet node or the engine of a render; it has the store of the tables and the voices of every note, the chain
+// after them): it
 // makes the worker that builds the levels of the tables, connected to the store by a MessageChannel: the levels go
 // from the worker to the audio thread, transferred, never through the main thread. setTable() sends a new version
 // of a table (the latest frames are kept: they are sent once it is ready, and again after a retry); createVoice()
@@ -81,8 +82,7 @@ type Waiter<T> = (answer: T | null) => void;
 // do goes to the node as events, those of a task in one message (a microtask sends them), in the order they were
 // made
 export const createWavetableEngine = (
-  audioCtx: BaseAudioContext,
-  engine: EngineNode,
+  engine: EngineHost,
   {
     createWorker = (url) => new Worker(url),
     createChannel = typeof MessageChannel === 'undefined' ? undefined : defaultChannel,
@@ -421,3 +421,4 @@ export const createWavetableEngine = (
     },
   };
 };
+export type WavetableEngine = ReturnType<typeof createWavetableEngine>;

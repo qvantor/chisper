@@ -55,29 +55,53 @@ The names of the synth (knobs, sections, modes, buttons, presets, tables) stay i
 | to glide (from frame to frame)          | deslizarse                                                   | gleiten                                                      |                                                                                                          |
 | in steps, steppy                        | a escalones                                                  | in Stufen, stufig                                            |                                                                                                          |
 | crossfade                               | el fundido cruzado                                           | die Überblendung                                             |                                                                                                          |
+| phase (of a wave)                       | la fase                                                      | die Phase                                                    |                                                                                                          |
 
 ## On the screen
 
-| en                         | es                     | de                                          | Not                                                             |
-| -------------------------- | ---------------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| knob                       | la perilla             | der Regler                                  | es: control (but Control Change); de: Knopf, Poti               |
-| button                     | el botón               | die Taste, with its name: die Taste **BPM** | de: Button, Schaltfläche                                        |
-| tab (of a source)          | la pestaña             | der Tab                                     | de: Reiter                                                      |
-| dot (of a route)           | el punto               | der Punkt                                   |                                                                 |
-| field (a box with a value) | el recuadro            | das Feld                                    |                                                                 |
-| shape menu                 | el selector de forma   | die Formauswahl                             | en: shape select; de: Formen-Select                             |
-| mode                       | el modo                | der Modus                                   |                                                                 |
-| wavetable browser          | el navegador de tablas | der Wavetable-Browser                       | es: navegador alone, navegador de wavetables; de: Browser alone |
-| web browser                | el navegador           | der Browser                                 |                                                                 |
-| library                    | la biblioteca          | die Bibliothek                              |                                                                 |
-| folder                     | la carpeta             | der Ordner                                  |                                                                 |
-| circular arrow (of _Init_) | la flecha circular     | der Kreispfeil                              |                                                                 |
-| on-screen piano            | el piano en pantalla   | das Bildschirmklavier                       |                                                                 |
-| pitch wheel                | la rueda de pitch      | das Pitch-Rad                               |                                                                 |
-| piano roll                 | el piano roll          | die Piano Roll                              |                                                                 |
-| clip                       | el clip                | der Clip                                    |                                                                 |
-| track (of a DAW)           | la pista               | die Spur                                    |                                                                 |
-| preset                     | el preset              | das Preset                                  |                                                                 |
+| en                                        | es                       | de                                          | Not                                                             |
+| ----------------------------------------- | ------------------------ | ------------------------------------------- | --------------------------------------------------------------- |
+| knob                                      | la perilla               | der Regler                                  | es: control (but Control Change); de: Knopf, Poti               |
+| button                                    | el botón                 | die Taste, with its name: die Taste **BPM** | de: Button, Schaltfläche                                        |
+| tab (of a source)                         | la pestaña               | der Tab                                     | de: Reiter                                                      |
+| dot (of a route)                          | el punto                 | der Punkt                                   |                                                                 |
+| field (a box with a value)                | el recuadro              | das Feld                                    |                                                                 |
+| shape menu                                | el selector de forma     | die Formauswahl                             | en: shape select; de: Formen-Select                             |
+| mode                                      | el modo                  | der Modus                                   |                                                                 |
+| wavetable browser                         | el navegador de tablas   | der Wavetable-Browser                       | es: navegador alone, navegador de wavetables; de: Browser alone |
+| web browser                               | el navegador             | der Browser                                 |                                                                 |
+| library                                   | la biblioteca            | die Bibliothek                              |                                                                 |
+| folder                                    | la carpeta               | der Ordner                                  |                                                                 |
+| circular arrow (of _Init_)                | la flecha circular       | der Kreispfeil                              |                                                                 |
+| on-screen piano                           | el piano en pantalla     | das Bildschirmklavier                       |                                                                 |
+| pitch wheel                               | la rueda de pitch        | das Pitch-Rad                               |                                                                 |
+| piano roll                                | el piano roll            | die Piano Roll                              |                                                                 |
+| clip                                      | el clip                  | der Clip                                    |                                                                 |
+| track (of a DAW)                          | la pista                 | die Spur                                    |                                                                 |
+| audio file                                | el archivo de audio      | die Audiodatei                              | es: fichero                                                     |
+| MIDI file (.mid)                          | el archivo MIDI          | die MIDI-Datei                              |                                                                 |
+| bar (of 4 beats)                          | el compás                | der Takt                                    |                                                                 |
+| length (of a clip)                        | la longitud              | die Länge                                   | es: duración                                                    |
+| duration (of a file)                      | la duración              | die Dauer                                   |                                                                 |
+| size (of a file)                          | el tamaño                | die Größe                                   |                                                                 |
+| to export, an export                      | exportar, la exportación | exportieren, der Export                     |                                                                 |
+| tail (what sounds on after the last note) | la cola                  | der Ausklang                                | de: Fahne (of a reverb alone)                                   |
+| seamless loop                             | el loop sin cortes       | der nahtlose Loop                           | es: bucle                                                       |
+| loop point (where a loop starts again)    | el punto de loop         | der Loop-Punkt                              | es: punto de bucle                                              |
+| player (of audio files)                   | el reproductor           | der Player                                  | de: Abspieler                                                   |
+| click (a short noise in the sound)        | el chasquido             | der Knackser                                | es: clic (of the mouse); de: Klick                              |
+| to fade out                               | desvanecerse             | ausblenden                                  | de: ausfaden                                                    |
+| limiter                                   | el limitador             | der Limiter                                 | es: limiter                                                     |
+| peak (of the level)                       | el pico                  | die Spitze                                  | de: Peak                                                        |
+| to turn down (as a whole)                 | bajar (entero)           | leiser machen (als Ganzes)                  | es: atenuar; de: absenken                                       |
+| beat (a quarter of a bar)                 | el pulso                 | der Schlag                                  |                                                                 |
+| project (of a DAW)                        | el proyecto              | das Projekt                                 |                                                                 |
+| sampler                                   | el sampler               | der Sampler                                 | es: muestreador                                                 |
+| tags (of a file: its name, artist…)       | las etiquetas            | die Tags                                    | es: metadatos; de: Metadaten                                    |
+| artist (a tag)                            | el artista               | der Interpret                               | de: Künstler                                                    |
+| cover picture (a tag)                     | la imagen de portada     | das Coverbild                               | es: carátula; de: Cover                                         |
+| icon (of Chisper)                         | el icono                 | das Icon                                    | de: Symbol                                                      |
+| preset                                    | el preset                | das Preset                                  |                                                                 |
 
 ## Playing
 

@@ -6,6 +6,7 @@
     "apps/chisper/src/**/*.worklet.ts",
     "apps/chisper/src/**/*.worker.ts",
     "apps/chisper/src/app/perf/perf-hook.perf.tsx",
+    "apps/chisper/src/app/synth/common/engine/engine-wasm-url.perf.ts",
     "apps/chisper/webpack.config.js",
     "libs/*/src/index.ts",
     "netlify/functions/*.{ts,mts}",

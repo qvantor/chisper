@@ -418,4 +418,9 @@ export const presets = ({
         .subscribe($loadProgress)
     );
 
-export const { ModelProvider: PresetsProvider, useModel: usePresets } = rxModelReact('presets', presets);
+export const {
+  ModelProvider: PresetsProvider,
+  useModel: usePresets,
+  // (null outside the provider: the roll of a spec)
+  Context: PresetsContext,
+} = rxModelReact('presets', presets);

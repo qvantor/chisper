@@ -200,6 +200,42 @@ it for a minute. From then on it stays.
 
 </Note>
 
+## How do I export a clip as a WAV?
+
+**.wav** in the header of the piano roll saves the clip as an audio file: the notes of the clip played by the sound
+as it is now, with its effects, at the tempo of the piano roll. On a phone the same key, without its label, is
+beside **Save** on the **CLIP** screen. The dialog asks for:
+
+- **Format**: **16-bit** (the default), **24-bit** or **32-bit float**.
+- **Sample rate**: **44.1 kHz** (the default) or **48 kHz**.
+- **Length**: **Clip** (the default) is exactly as long as the clip and starts from silence; what still sounds at its
+  end fades out quickly, so the file loops in any player without a click, its tail cut off. **Clip + tail** plays the
+  clip once and keeps what still sounds after its end (a long **Release**, **Reverb**, the echoes of **Delay**) for up
+  to a minute after the last note, a tail that still sounds then fading out; the silence at the end is cut off at the
+  next beat, so that the file lasts a whole number of beats. **Seamless loop** is exactly as long as the clip, its end
+  sounding on into its start, so a DAW or a sampler that loops it sample-accurately plays it without a gap. Its loop
+  point lies in the middle of the sound: a player that pauses or fades there clicks.
+- **Level**: **As played** (the default) is as loud as the sound plays: at the volume of **Master**, through the limiter
+  of the synth. **Headroom** leaves the limiter out (**Master** still counts): a sound that would go over it is turned
+  down as a whole until its peaks reach −0.5 dBTP, so the file is quieter but its peaks are not squashed. A sound that
+  stays under the limiter is the same with both.
+
+The dialog keeps your choices in the browser: the next export starts from them.
+
+**Export** makes the file without playing it aloud, faster than the clip plays; the bar shows how far it is and
+**Cancel** stops it. The clip stops meanwhile, the keys still play. The file is named after the preset, the clip
+and the tempo, for example *Warm Pad - Riff 120 BPM.wav*; a clip named as the preset, or without a name, leaves the
+name of the preset alone (*Warm Pad 120 BPM.wav*). The dialog shows the name at its top, and under it **Clip** (the
+length of the clip in bars), **Duration** and **Size** of the file; with **Clip + tail** these leave the tail out,
+known only once the file is made. A **Phase rand** above 0 starts the voices at new random phases in each export,
+as in each note you play, so two exports of one clip can differ a little.
+
+The file also tells other programs what it holds. A DAW that reads the tempo of a WAV (FL Studio, for example) fits
+it to the tempo of the project. **Clip** and **Seamless loop** mark the whole file as a loop, and a sampler that
+reads loops plays it so. Players and DAWs that show the tags of a file see its name (the preset and the clip),
+Chisper as the artist, the icon of Chisper as its cover picture and a link to the preset, as long as the sound is
+the preset as you opened it; a sound you changed since, or *Init*, links to Chisper instead.
+
 ## Chisper on a phone
 
 <Figure name='phone-keys' alt='Chisper on a phone in the Keys mode: the synth above two rows of keys, the octave keys and the pitch wheel' phone>

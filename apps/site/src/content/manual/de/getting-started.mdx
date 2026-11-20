@@ -207,6 +207,45 @@ mindestens zwei Leute es je eine Minute gespielt. Ab dann bleibt es.
 
 </Note>
 
+## Wie exportiere ich einen Clip als WAV?
+
+**.wav** in der Kopfzeile der Piano Roll speichert den Clip als Audiodatei: die Noten des Clips, gespielt vom Sound,
+wie er gerade ist, mit seinen Effekten, im Tempo der Piano Roll. Auf dem Smartphone liegt dieselbe Taste ohne
+Beschriftung neben **Save** auf dem Bildschirm **CLIP**. Der Dialog fragt nach:
+
+- **Format**: **16-bit** (Standard), **24-bit** oder **32-bit float**.
+- **Sample rate**: **44.1 kHz** (Standard) oder **48 kHz**.
+- **Length**: **Clip** (Standard) ist genau so lang wie der Clip und beginnt in der Stille; was an seinem Ende noch
+  klingt, wird schnell ausgeblendet, sodass die Datei in jedem Player ohne Knackser loopt, ohne ihren Ausklang.
+  **Clip + tail** spielt den Clip einmal und behält, was nach seinem Ende noch klingt (ein langes **Release**,
+  **Reverb**, die Echos von **Delay**) bis zu einer Minute nach der letzten Note; ein Ausklang, der dann noch klingt,
+  wird ausgeblendet. Die Stille am Ende wird beim nächsten Schlag abgeschnitten, sodass die Datei eine ganze Zahl von
+  Schlägen dauert. **Seamless loop** ist genau so lang wie der Clip, sein Ende klingt in seinen Anfang hinein, sodass
+  eine DAW oder ein Sampler, der ihn samplegenau loopt, ihn ohne Lücke spielt. Sein Loop-Punkt liegt mitten im Klang:
+  Ein Player, der dort pausiert oder ausblendet, knackst.
+- **Level**: **As played** (Standard) ist so laut, wie der Sound spielt: mit der Lautstärke von **Master**, durch den
+  Limiter des Synthesizers. **Headroom** lässt den Limiter weg (**Master** zählt weiter): Ein Sound, der über ihn ginge,
+  wird als Ganzes leiser gemacht, bis seine Spitzen bei −0,5 dBTP liegen; die Datei ist leiser, ihre Spitzen werden aber
+  nicht gestaucht. Ein Sound, der unter dem Limiter bleibt, ist mit beiden gleich.
+
+Der Dialog merkt sich deine Auswahl im Browser: Der nächste Export beginnt damit.
+
+**Export** erstellt die Datei, ohne sie hörbar abzuspielen, schneller als der Clip dauert; der Balken zeigt den
+Fortschritt, **Cancel** bricht ab. Der Clip hält währenddessen an, die Tasten spielen weiter. Die Datei heißt wie
+das Preset und der Clip mit dem Tempo, zum Beispiel *Warm Pad - Riff 120 BPM.wav*; heißt der Clip wie das Preset
+oder hat er keinen Namen, bleibt der Name des Presets allein (*Warm Pad 120 BPM.wav*). Der Dialog zeigt den Namen
+oben, darunter **Clip** (die Länge des Clips in Takten), **Duration** und **Size** der Datei; bei **Clip + tail**
+ohne den Ausklang, der erst feststeht, wenn die Datei erstellt ist. Mit **Phase rand** über 0 startet jeder Export
+die Stimmen mit neuen zufälligen Phasen, wie jede Note, die du spielst; zwei Exporte desselben Clips können sich
+daher leicht unterscheiden.
+
+Die Datei sagt anderen Programmen auch, was sie enthält. Eine DAW, die das Tempo einer WAV liest (zum Beispiel FL
+Studio), passt sie an das Tempo des Projekts an. **Clip** und **Seamless loop** markieren die ganze Datei als Loop,
+und ein Sampler, der Loops liest, spielt sie so. Player und DAWs, die die Tags einer Datei zeigen, sehen ihren Namen
+(das Preset und den Clip), Chisper als Interpret, das Icon von Chisper als Coverbild und einen Link zum Preset,
+solange der Sound das Preset ist, wie du es geöffnet hast; ein Sound, den du seitdem geändert hast, oder *Init*
+verlinkt stattdessen auf Chisper.
+
 ## Chisper auf dem Smartphone
 
 <Figure name='phone-keys' alt='Chisper auf einem Smartphone im Modus Keys: der Synth über zwei Tastenreihen, die Oktavtasten und das Pitch-Rad' phone>

@@ -10,7 +10,8 @@ interface Encoding {
 
 export const ascii = (value: string) => Uint8Array.from(value, (char) => char.charCodeAt(0));
 
-const concat = (...parts: Uint8Array[]) => {
+// the parts one after another
+export const concat = (...parts: Uint8Array[]) => {
   const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let offset = 0;
   for (const part of parts) {

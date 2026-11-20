@@ -8,7 +8,7 @@ import {
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import type { FxStatus } from '../../fx/effects/types';
-import { createEngineNode, EngineNode } from '../engine/engine-node';
+import { createEngineNode } from '../engine/engine-node';
 import { ENGINE_PROCESSOR, PROBED_NODE_OPTIONS } from '../engine/engine-params';
 import type { LfosState } from '../lfo/lfo-curve';
 import { createChain } from './chain';
@@ -75,18 +75,18 @@ describe('createChain', () => {
 
   describe('the module and the node', () => {
     it('adds the module of the engine once and is silent while it loads', () => {
-      const { audioCtx, addModule, chain, statuses, stages } = setup();
+      const { audioCtx, addModule, engine, statuses, stages } = setup();
       expect(statuses).toEqual(['loading']);
       expect(stages()).toEqual(STAGES.map(() => 'loading'));
       expect(workletLoads(addModule as jest.Mock, 'engine')).toBe(1);
       expect(addModule).toHaveBeenCalledTimes(1);
       // no fallback: no node, nothing plays unlimited
       expect(chainNodes(audioCtx)).toHaveLength(0);
-      expect(chain.output.connect).not.toHaveBeenCalled();
+      expect(engine.output.connect).not.toHaveBeenCalled();
     });
 
     it('plays in the node of the engine, into its output, once the module has loaded', async () => {
-      const { audioCtx, chain, statuses, stages } = setup();
+      const { audioCtx, engine, statuses, stages } = setup();
       await flush();
       expect(statuses).toEqual(['loading', 'ready']);
       expect(stages()).toEqual(STAGES.map(() => 'ready'));
@@ -98,7 +98,7 @@ describe('createChain', () => {
       expect(node.options).toMatchObject(PROBED_NODE_OPTIONS);
       expect(node.options.numberOfInputs).toBe(0);
       // its first output alone, the one after the limiter
-      expect((node.connect as jest.Mock).mock.calls).toEqual([[chain.output, 0]]);
+      expect((node.connect as jest.Mock).mock.calls).toEqual([[engine.output, 0]]);
     });
 
     it('a chain no one told anything starts neutral: no effect, the master open, nothing followed', async () => {
@@ -154,7 +154,7 @@ describe('createChain', () => {
 
     it('retry loads a failed module again and makes the node', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { audioCtx, addModule, chain, statuses, stages } = setup({ failFirstLoad: true });
+      const { audioCtx, addModule, chain, engine, statuses, stages } = setup({ failFirstLoad: true });
       await flush();
       chain.retry();
       expect(workletLoads(addModule as jest.Mock, 'engine')).toBe(2);
@@ -162,7 +162,7 @@ describe('createChain', () => {
       await flush();
       expect(statuses).toEqual(['loading', 'failed', 'loading', 'ready']);
       expect(stages()).toEqual(STAGES.map(() => 'ready'));
-      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(chain.output, 0);
+      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(engine.output, 0);
     });
 
     it('retry does nothing while loading or ready', async () => {
@@ -184,7 +184,7 @@ describe('createChain', () => {
           throw new Error('InvalidStateError');
         },
       });
-      const { audioCtx, addModule, chain, statuses } = setup();
+      const { audioCtx, addModule, chain, engine, statuses } = setup();
       await flush();
       expect(statuses).toEqual(['loading', 'failed']);
       expect(chainNodes(audioCtx)).toHaveLength(0);
@@ -195,7 +195,7 @@ describe('createChain', () => {
       expect(statuses).toEqual(['loading', 'failed', 'loading', 'ready']);
       // (the module had loaded: it is not added again)
       expect(addModule).toHaveBeenCalledTimes(1);
-      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(chain.output, 0);
+      expect(chainNode(audioCtx).connect).toHaveBeenCalledWith(engine.output, 0);
     });
 
     it('a processor error: failed, the node stopped (its core freed) and dropped, the master silent', async () => {
@@ -267,7 +267,7 @@ describe('createChain', () => {
 
     it('a retry after a processor error makes a new node with the state of now', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      const { audioCtx, addModule, chain, node, statuses } = await ready();
+      const { audioCtx, addModule, chain, engine, node, statuses } = await ready();
       chain.setOrder([REVERB]);
       chain.setActive(REVERB, true);
       node.onprocessorerror?.call(node, new Event('processorerror') as ErrorEvent);
@@ -285,7 +285,7 @@ describe('createChain', () => {
         order: [REVERB],
         slots: { reverb: { params: { ...NEUTRAL_PARAMS.reverb, decay: 5 }, mix: 0.4, active: true } },
       });
-      expect(next.connect).toHaveBeenCalledWith(chain.output, 0);
+      expect(next.connect).toHaveBeenCalledWith(engine.output, 0);
       // it has it all already: nothing is posted again
       expect(chainPosts(next)).toEqual([]);
       chain.setMix(REVERB, 0.6);
@@ -836,7 +836,7 @@ describe('createChain', () => {
       engine.destroy();
       expect(posts()).toEqual([{ meter: [CHORUS, true] }, { stop: true }]);
       expect(node.disconnect).toHaveBeenCalled();
-      expect(chain.output.disconnect).toHaveBeenCalled();
+      expect(engine.output.disconnect).toHaveBeenCalled();
       expect(completed).toHaveBeenCalledTimes(1 + STAGES.length);
 
       // nothing reaches it or comes from it any more

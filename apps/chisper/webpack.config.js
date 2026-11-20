@@ -5,7 +5,8 @@ const { NxReactWebpackPlugin } = require('@nx/react/webpack-plugin');
 const { DefinePlugin } = require('webpack');
 
 // robots.txt at the root (the promo pages of apps/site join the folder after the build: scripts/site/merge.mjs);
-// the worklet bundles of a configuration (`npm run worklets`)
+// the worklet bundles of a configuration (`npm run worklets`). The core of the engine a render of the track runs on
+// the main thread is a module of the bundle (engine-wasm-url.ts: named by its bytes)
 const assetsOf = (worklets) => [
   './src/favicon.ico',
   './src/robots.txt',
@@ -50,6 +51,11 @@ const build = {
       {
         replace: 'apps/chisper/src/app/perf/perf-hook.tsx',
         with: 'apps/chisper/src/app/perf/perf-hook.perf.tsx',
+      },
+      // the core of the engine of a render on the main thread: the perf build's (tmp/wasm-perf)
+      {
+        replace: 'apps/chisper/src/app/synth/common/engine/engine-wasm-url.ts',
+        with: 'apps/chisper/src/app/synth/common/engine/engine-wasm-url.perf.ts',
       },
     ],
   },

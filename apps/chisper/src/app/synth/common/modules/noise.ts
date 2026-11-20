@@ -17,10 +17,10 @@ import { abortable } from '../../../common/services';
 import { loadNoiseSample, LoadNoiseSample, NoiseSample, wavetableId } from '../../services';
 import type { VoiceNoiseKnobs, VoiceNoiseOptions } from '../wavetable/voice-options';
 import { tableLoads } from './load-share';
-import { SynthCoreModule } from './synth-core';
+import type { SoundCoreModule } from './synth-core';
 
 interface Dependencies {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
   loadNoiseSample?: LoadNoiseSample;
 }
 
@@ -214,7 +214,11 @@ export const noise = ({
       wavetables.removeTable(id);
     });
 
-export const { ModelProvider: NoiseProvider, useModel: useNoise } = rxModelReact('noise', noise);
+export const {
+  ModelProvider: NoiseProvider,
+  useModel: useNoise,
+  Context: NoiseContext,
+} = rxModelReact('noise', noise);
 
 export type NoiseModule = ReturnType<typeof useNoise>;
 export type NoiseModel = NoiseModule[0];

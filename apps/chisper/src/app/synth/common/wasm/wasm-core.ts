@@ -62,6 +62,11 @@ const guardExports = <T extends CoreExports>(exports: WebAssembly.Exports) => {
 export const instantiateCore = <T extends CoreExports>(module: WebAssembly.Module) =>
   guardExports<T>(new WebAssembly.Instance(module, {}).exports);
 
+// an instance on the main thread (a render of the track), its calls guarded: made asynchronously, a browser may refuse
+// to make one of a module of this size synchronously there
+export const instantiateCoreAsync = async <T extends CoreExports>(module: WebAssembly.Module) =>
+  guardExports<T>((await WebAssembly.instantiate(module, {})).exports);
+
 type ViewType = Float32ArrayConstructor | Float64ArrayConstructor | Int32ArrayConstructor;
 // one of them on a buffer: their constructors are generic over the buffer (TS 5.7 on), their union has no common
 // signature for it

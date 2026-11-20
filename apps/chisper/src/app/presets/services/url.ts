@@ -19,6 +19,9 @@ const pageUrl = (preset: string | null, clip: string | null) => {
 
 export const presetUrl = (id: string) => pageUrl(id, null);
 
+// the url of the synth alone
+export const synthUrl = () => pageUrl(null, null);
+
 // a link to a clip, with the preset it plays (null: none)
 export const clipUrl = (id: string, preset: string | null) => pageUrl(preset, id);
 

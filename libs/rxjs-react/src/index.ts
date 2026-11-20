@@ -1,6 +1,7 @@
 export * from './services';
 export * from './hooks';
 export { searchParamsSnapshotPlugin } from './plugins';
+export type { SnapshotScope } from './plugins';
 export { PrimitiveBS, ArrayBS, ObjectBS } from './observables';
 
 export type { Model, ModelFactory } from './types';

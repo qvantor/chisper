@@ -4,7 +4,7 @@ import { FilterRange, FilterRanges, FilterParams, valueScale } from '@chisper/ui
 import { ObjectBS, PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
 import { FilterType, isFilterType, isWebFilterType } from '@chisper/preset-schema';
-import { SynthCoreModule } from '../../common/modules/synth-core';
+import type { SoundCoreModule } from '../../common/modules/synth-core';
 import type { VoiceFilterOptions } from '../../common/wavetable/voice-options';
 import { urlSnapshotPlugin } from '../../../app';
 import {
@@ -18,7 +18,7 @@ import {
 } from '../constants';
 
 interface Dependencies {
-  synthCore: SynthCoreModule;
+  synthCore: SoundCoreModule;
 }
 
 export type FilterValues = Omit<FilterParams, 'type'>;
@@ -36,9 +36,9 @@ const kindOf = (vk: unknown): VariationKind => (vk === 'eq' ? 'eq' : 'comp');
 
 // the filter of the voices: each note filters its oscillators (voice-filter.ts), before its volume, so its
 // envelopes move its own filter; the synth sends them $voiceFilter
-export const filter = ({ synthCore: [{ audioCtx }] }: Dependencies) =>
+export const filter = ({ synthCore: [{ clock }] }: Dependencies) =>
   rxModel(() => {
-    const { sampleRate } = audioCtx;
+    const { sampleRate } = clock;
     const $active = new PrimitiveBS<boolean>(false);
     const $ranges = new ObjectBS<FilterRanges>(defaultFilterRanges);
     const $filterType = new PrimitiveBS<FilterType>('lowpass');
