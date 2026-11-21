@@ -12,6 +12,7 @@ import {
 import { rxModel, rxModelReact } from '@chisper/rxjs-react';
 import toast from 'react-hot-toast';
 import { messageTime, readStored, writeStored } from '../../../common/services';
+import { featureUsed } from '../../../common/services/analytics';
 import { midiToNote } from '../../services';
 import { CLOCK_LOST_MS, createMidiClock } from '../transport/midi-clock';
 import { InputControllerModule } from './input-controller';
@@ -302,7 +303,10 @@ export const midiController = ({
                     const channels = held.get(midi);
                     held.set(midi, (channels ?? new Set<number>()).add(channel));
                     // (held on another channel: one voice of the input)
-                    if (!channels?.size) onPress(midiToNote(midi), velocity, MIDI_SOURCE);
+                    if (!channels?.size) {
+                      featureUsed('input', 'midi');
+                      onPress(midiToNote(midi), velocity, MIDI_SOURCE);
+                    }
                   } else if (noteOn || noteOff) {
                     const channels = held.get(midi);
                     // not pressed on this channel: filtered out then, or another source's note

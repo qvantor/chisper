@@ -1,4 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
+import { captureEngineFailure, captureWorkerError, errorMessage } from '../../../common/services/analytics';
 import type { FxStatus } from '../../fx/effects/types';
 import { createLfoFeed, LfosState } from '../lfo/lfo-curve';
 import { EngineMessage, EngineOptions, EngineReport, LfoReader } from './engine-params';
@@ -15,11 +16,26 @@ export interface EngineClient {
   report?: (report: EngineReport) => void;
 }
 
+// the node of the synth (its failures are reported: analytics.ts), or the engine of a render (its export reports
+// what failed in it)
+export type EngineKind = 'live' | 'render';
+// why a node failed: its module didn't load (or the node couldn't be made), its processor threw, its core trapped
+// out of its voices and its stages
+type EngineFailReason = 'load' | 'processor' | 'broken';
+
+// what a host reports of the failures of its node and its clients (analytics.ts): a render none
+interface EngineReporter {
+  failure: typeof captureEngineFailure;
+  worker: typeof captureWorkerError;
+}
+const REPORTERS: Record<EngineKind, EngineReporter> = {
+  live: { failure: captureEngineFailure, worker: captureWorkerError },
+  render: { failure: () => undefined, worker: () => undefined },
+};
+
 // a node whose core trapped out of its voices and its stages is made again this many times at most: what trapped
 // is never freed (a free could trap again), the memory of the module is back with the page
 export const MAX_REMAKES = 4;
-export const spent = (what: string) =>
-  console.error(`${what} failed ${MAX_REMAKES} times and is not made again: reload the page`);
 
 // a node as its host has it: told the messages of the main thread, ended (its engine freed, it plays no more)
 export interface EngineLink {
@@ -46,7 +62,9 @@ export type LoadEngine = () => Promise<MakeEngine> | null;
 // alone) for the voices and the chain: a half only says whether it reads one. They go to the node only while one of
 // them reads an LFO and only for the halves that do (`lfos.use`: a state is a table of 8 KB the audio thread takes
 // in; a half that starts to read gets the last ones); a node made later starts with the last ones
-export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine worklet') => {
+export const createEngineHost = (loadEngine: LoadEngine, kind: EngineKind = 'live') => {
+  const what = kind === 'live' ? 'The engine worklet' : 'The engine of the render';
+  const reporter = REPORTERS[kind];
   const $status = new BehaviorSubject<FxStatus>('loading');
   const clients: EngineClient[] = [];
   let link: EngineLink | undefined;
@@ -75,10 +93,18 @@ export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine work
     clients.forEach((client) => client.stop?.(ended));
   };
 
-  // (a node that threw still takes messages: stopped, its engine is freed)
-  const fail = (error: unknown) => {
+  // `what` (`stage`: 'engine', an effect, 'limiter') failed MAX_REMAKES times
+  const spent = (what: string, stage: string) => {
+    console.error(`${what} failed ${MAX_REMAKES} times and is not made again: reload the page`);
+    reporter.failure('spent', stage);
+  };
+
+  // (a node that threw still takes messages: stopped, its engine is freed). No reason: a client failed it, and
+  // reported where (the worker of the store: wavetable-engine.ts)
+  const fail = (error: unknown, reason?: EngineFailReason, trap?: string) => {
     if (destroyed || $status.value === 'failed') return;
     console.error(`${what} failed`, error);
+    if (reason) reporter.failure(reason, 'engine', { message: errorMessage(error), trap });
     loads += 1;
     drop(true);
     setStatus('failed');
@@ -108,11 +134,17 @@ export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine work
             // (the core trapped out of its voices and stages: its node is over, as one that threw)
             if (report.broken) {
               trapped = true;
-              fail(new Error('The engine core trapped'));
-            } else clients.forEach((client) => client.report?.(report));
+              fail(new Error('The engine core trapped'), 'broken', report.trap);
+              return;
+            }
+            // the warm-up of its module failed; a voice (or a message) trapped: a stage that did is the chain's
+            if (report.prewarm !== undefined) reporter.failure('prewarm', 'engine', { trap: report.prewarm });
+            if (report.trap !== undefined && !report.failed)
+              reporter.failure('trap', 'voice', { trap: report.trap });
+            clients.forEach((client) => client.report?.(report));
           },
           fail: (error) => {
-            if (link === current) fail(error);
+            if (link === current) fail(error, 'processor');
           },
         });
         link = current;
@@ -120,7 +152,7 @@ export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine work
         setStatus('ready');
       })
       .catch((error) => {
-        if (own === loads) fail(error);
+        if (own === loads) fail(error, 'load');
       });
   };
   load();
@@ -128,7 +160,11 @@ export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine work
   return {
     $status,
     post,
-    fail,
+    // a client failed the node (the worker of the store), having reported why
+    fail: (error: unknown) => fail(error),
+    // what a client reports of its failures (a render: nothing), what failed MAX_REMAKES times
+    report: reporter,
+    spent,
     attach: (client: EngineClient) => {
       clients.push(client);
       client.status?.($status.value);
@@ -152,7 +188,7 @@ export const createEngineHost = (loadEngine: LoadEngine, what = 'The engine work
       if ($status.value !== 'failed') return;
       if (trapped) {
         if (rebuilds >= MAX_REMAKES) {
-          spent('The engine core');
+          spent('The engine core', 'engine');
           return;
         }
         rebuilds += 1;

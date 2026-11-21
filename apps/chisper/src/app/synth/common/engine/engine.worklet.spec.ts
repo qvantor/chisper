@@ -47,8 +47,11 @@ const create = (options?: EngineOptions): Processor => {
   const processor = new processors[ENGINE_PROCESSOR](
     options ? { processorOptions: options } : {}
   ) as unknown as Processor;
+  // (what its constructor posted first)
+  const constructed = jest.mocked(processor.port.postMessage).mock.calls.map(([message]) => message);
   processor.posts = jest.fn();
   processor.port.postMessage = (message) => processor.posts(JSON.parse(JSON.stringify(message)));
+  constructed.forEach((message) => processor.port.postMessage(message));
   nodes.push(processor);
   return processor;
 };
@@ -594,7 +597,8 @@ describe('engine wasm worklet', () => {
       const { left, right } = block(processor, 0);
       expect(silent(left)).toBe(true);
       expect(silent(right)).toBe(true);
-      expect(reports(processor)).toEqual([{ ended: [1] }]);
+      // (the message of the trap told apart: a voice's, the main thread reports it)
+      expect(reports(processor)).toEqual([{ ended: [1] }, { trap: 'unreachable' }]);
       tell(store, { table: 'thrown', version: 2, levels: buildLevels([sine]) });
       // version 1 is free: no voice holds it
       expect(stats(store).versions).toBe(held);
@@ -628,7 +632,7 @@ describe('engine wasm worklet', () => {
       const rest = run(processor, 10, 10 * 128).left;
       expect(peak(rest)).toBeGreaterThan(0.4);
       expect(rest).toEqual(alone.subarray(10 * 128));
-      expect(reports(processor)).toEqual([{ ended: [1] }]);
+      expect(reports(processor)).toEqual([{ ended: [1] }, { trap: 'unreachable' }]);
       expect(error).toHaveBeenCalledTimes(1);
       expect(error).toHaveBeenCalledWith('A voice or a stage of the engine failed', expect.anything());
       expect(stats(processor)).toMatchObject({ scopeVoices: 1 });
@@ -1146,7 +1150,8 @@ describe('engine wasm worklet', () => {
       processor.posts.mockClear();
       processor.engine?.chain.trap(chorus);
       const failed = run(processor, 60, 20 * 128).left;
-      expect(reports(processor)).toEqual([{ failed: [chorus] }]);
+      // (with the message of its trap)
+      expect(reports(processor)).toEqual([{ failed: [chorus], trap: 'unreachable' }]);
       expect(error).toHaveBeenCalledTimes(1);
       expect(error).toHaveBeenCalledWith('A voice or a stage of the engine failed', expect.anything());
       expect(stats(processor)).toMatchObject({ scopeVoices: 2 });
@@ -1182,7 +1187,7 @@ describe('engine wasm worklet', () => {
       expect(processor.process([[]], out)).toBe(false);
       expect(peak(out[0][0])).toBe(0);
       expect(peak(out[0][1])).toBe(0);
-      expect(reports(processor)).toEqual([{ broken: true }]);
+      expect(reports(processor)).toEqual([{ broken: true, trap: 'unreachable' }]);
       expect(processor.engine).toBeNull();
       // (told once: no block after it, a message is ignored)
       expect(processor.process([[]], out)).toBe(false);
@@ -1228,6 +1233,8 @@ describe('an engine worklet whose prewarm fails', () => {
         };
       });
       await import('./engine.worklet');
+      // (the module of a load after it has its own)
+      jest.dontMock('../wavetable/wavetable-osc-wasm');
     });
     logged = [...error.mock.calls];
     taken = [...stores[0].takeKernels.mock.calls];
@@ -1241,6 +1248,11 @@ describe('an engine worklet whose prewarm fails', () => {
     expect(processors[ENGINE_PROCESSOR]).toBeDefined();
   });
 
+  it('tells the main thread in the first report of its first node, once', () => {
+    expect(create().posts.mock.calls[0]).toEqual([{ prewarm: 'a trap of the prewarm' }]);
+    expect(create().posts).not.toHaveBeenCalledWith(expect.objectContaining({ prewarm: expect.anything() }));
+  });
+
   it('plays all the same', () => {
     const store = create();
     tell(store, { table: 'posted', version: 1, levels: buildLevels([sine.map((x) => x / 2)]) });
@@ -1249,5 +1261,48 @@ describe('an engine worklet whose prewarm fails', () => {
     expect(alive).toBe(true);
     expect(left[0]).toBeCloseTo(0.5, 4);
     expect(right[0]).toBeCloseTo(0.5, 4);
+  });
+});
+
+describe('an engine worklet whose prewarm traps without a throw', () => {
+  // the module once more with `path` mocked: what it logged, the first message of its first node
+  const load = async (path: string, factory: () => unknown) => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock(path, factory);
+      await import('./engine.worklet');
+      jest.dontMock(path);
+    });
+    const logged = [...error.mock.calls];
+    error.mockRestore();
+    return { logged, first: create().posts.mock.calls[0]?.[0] };
+  };
+
+  it('a stage of the warm-up of the chain (its core tells it: no throw)', async () => {
+    const { logged, first } = await load('../chain/chain-prewarm', () => ({
+      ...jest.requireActual('../chain/chain-prewarm'),
+      prewarmChain: () => false,
+    }));
+    expect(logged).toEqual([['The prewarm of the engine failed', 'a stage of the chain trapped']]);
+    expect(first).toEqual({ prewarm: 'a stage of the chain trapped' });
+  });
+
+  it('a voice of the engine of the warm-up (its error told as a node takes it), the first trap alone', async () => {
+    const { logged, first } = await load('./engine-wasm', () => {
+      const actual = jest.requireActual<typeof import('./engine-wasm')>('./engine-wasm');
+      return {
+        ...actual,
+        createEngineWasm: jest
+          .fn(actual.createEngineWasm)
+          .mockImplementationOnce((...args: Parameters<typeof actual.createEngineWasm>) => {
+            const engine = actual.createEngineWasm(...args);
+            args[5]?.onError?.(new Error('unreachable'));
+            args[5]?.onError?.(new Error('out of bounds memory access'));
+            return engine;
+          }),
+      };
+    });
+    expect(logged).toHaveLength(2);
+    expect(first).toEqual({ prewarm: 'unreachable' });
   });
 });

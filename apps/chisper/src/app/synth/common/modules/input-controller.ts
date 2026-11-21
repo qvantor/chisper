@@ -1,6 +1,7 @@
 import { Subject } from 'rxjs';
 import { rxModel, rxModelReact, ObjectBS, PrimitiveBS } from '@chisper/rxjs-react';
 import { Note, Notes } from '@chisper/ui-kit';
+import { featureUsed } from '../../../common/services/analytics';
 import { noteToString, stringToNote } from '../../services';
 
 // the velocity of a note of the computer keyboard and of the piano on the screen (MIDI: 1..127)
@@ -82,13 +83,20 @@ export const inputController = () =>
       const shown = new Map([...held].filter(([key]) => !key.startsWith('track:')));
       $pressed.next(pressedOf(shown));
     };
+    const onPress = (note: Note, velocity = DEFAULT_VELOCITY, { source = 'keys', at }: NoteTiming = {}) => {
+      const key = sourceKey(source, note);
+      if (held.has(key)) return;
+      held.set(key, note);
+      $onPress.next({ note, velocity, source, ...(at !== undefined && { at }) });
+      show(source);
+    };
     return {
-      onPress: (note: Note, velocity = DEFAULT_VELOCITY, { source = 'keys', at }: NoteTiming = {}) => {
-        const key = sourceKey(source, note);
-        if (held.has(key)) return;
-        held.set(key, note);
-        $onPress.next({ note, velocity, source, ...(at !== undefined && { at }) });
-        show(source);
+      onPress,
+      // a press of a key of the piano on the screen (its source is 'keys', as QWERTY's: the analytics tell them
+      // apart)
+      onScreenPress: (note: Note) => {
+        featureUsed('input', 'piano');
+        onPress(note);
       },
       onRelease: (note: Note, { source = 'keys', at }: NoteTiming = {}) => {
         const key = sourceKey(source, note);

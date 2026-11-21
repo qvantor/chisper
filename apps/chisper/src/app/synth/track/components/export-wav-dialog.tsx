@@ -21,6 +21,7 @@ import {
   Spacer,
 } from '../../../common/components';
 import { isChunkGone, readStored, saveFile, UPDATED, writeStored } from '../../../common/services';
+import { captureError, errorMessage, featureUsed, track } from '../../../common/services/analytics';
 import { PresetsContext } from '../../../presets';
 import { presetUrl, synthUrl } from '../../../presets/services';
 import type { NoiseModel, OscillatorModel } from '../../common/modules';
@@ -446,7 +447,8 @@ export const ExportWavDialog = ({
     const clip = $clip.value;
     const bpm = tempoNow({ $bpm, $tempo, $source });
     const preset = presets?.[0].$current.value ?? null;
-    const tags = wavTagsOf(clip, preset, presets?.[0].$dirty.value ?? false);
+    const dirty = presets?.[0].$dirty.value ?? false;
+    const tags = wavTagsOf(clip, preset, dirty);
     // the sound of the click, as its name and its tags (a preset applied while the chunk of the render loads is not
     // in it: its knobs on the tables of the one before)
     const sound = pageSound(oscillators, noise, bpm, $masterGain.value);
@@ -472,13 +474,27 @@ export const ExportWavDialog = ({
       );
       controller.signal.throwIfAborted();
       saveFile(blob, wavFileName(clip, preset?.name ?? null, bpm));
+      track('wav_export', {
+        ...options,
+        seconds: Math.round((clip.length / CLIP_PPQ) * (60 / bpm)),
+        // (a public preset as it was saved: its id is in its link)
+        preset: preset && !dirty ? preset.id : null,
+      });
+      featureUsed('export', 'wav');
       onClose();
     } catch (error) {
-      // (the chunk of the render gone: a page of before a deploy)
-      if (!controller.signal.aborted)
-        toast.error(
-          isChunkGone(error) ? UPDATED : error instanceof Error ? error.message : 'The export failed'
-        );
+      if (!controller.signal.aborted) {
+        // (the chunk of the render gone: a page of before a deploy)
+        const gone = isChunkGone(error);
+        toast.error(gone ? UPDATED : error instanceof Error ? error.message : 'The export failed');
+        // reported once, here (the engine of a render reports nothing itself: engine-host.ts)
+        if (!gone)
+          captureError(error, {
+            source: 'engine',
+            kind: 'render',
+            fingerprint: `engine:render:${errorMessage(error).slice(0, 100)}`,
+          });
+      }
     } finally {
       // (a cancelled one: the dialog was free at once, maybe rendering anew)
       if (abort.current === controller) {

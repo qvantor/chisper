@@ -42,6 +42,28 @@
   to = "https://noises.chisper.qvantor.org/:splat"
   status = 200
 
+# the analytics and the error reports of the synth (PostHog Cloud EU) through the site: a blocker sees no domain of
+# theirs. The path is ANALYTICS_PATH of apps/chisper/src/app/common/services/analytics.ts (no word a filter list
+# blocks); the assets first, as PostHog's guide for Netlify has them. Only on a domain of the site: *.netlify.app
+# changes the encoding of a proxied request (the app sends nothing there)
+[[redirects]]
+  from = "/stave/static/*"
+  to = "https://eu-assets.i.posthog.com/static/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/stave/array/*"
+  to = "https://eu-assets.i.posthog.com/array/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/stave/*"
+  to = "https://eu.i.posthog.com/:splat"
+  status = 200
+  force = true
+
 # the folders of the manual and of Learn (apps/site) have no page of their own: each opens its hub, the Getting
 # started of the manual and the first article of Learn, in its language (Netlify takes a path with and without its
 # trailing slash alike)

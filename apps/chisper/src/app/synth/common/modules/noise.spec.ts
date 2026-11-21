@@ -1,4 +1,5 @@
 import { applySnapshot, getSnapshot } from '../../../app';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createNoise, createSynthCore, stopModels } from '../../../../test-utils/models';
 import type { NoiseSample } from '../../services';
 import type { TableState } from '../wavetable/wavetable-engine';
@@ -126,12 +127,14 @@ describe('noise', () => {
 
     it('retries a failed load twice a second apart, then gives up: the next switch on tries again', async () => {
       const { model, actions, load, reject } = createLoading();
+      const { fingerprints } = recordAnalytics();
       actions.toggleActive();
       for (let attempt = 0; attempt < 3; attempt++) {
         await reject('Analog/White.wav');
         jest.advanceTimersByTime(1000);
       }
       expect(load).toHaveBeenCalledTimes(3);
+      expect(fingerprints()).toEqual(['load:noise:Error']);
       expect(model.$sampleLoading.value).toBe(false);
       actions.toggleActive();
       actions.toggleActive();

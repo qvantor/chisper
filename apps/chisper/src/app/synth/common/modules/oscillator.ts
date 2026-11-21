@@ -16,6 +16,7 @@ import { FINE_MAX, OSC_DEFAULTS, SEMI_MAX, withLegacyPhase } from '@chisper/pres
 import { generateId, Vector2D } from '@chisper/math';
 import { urlSnapshotPlugin } from '../../../app';
 import { abortable } from '../../../common/services';
+import { captureLoadError, featureUsed } from '../../../common/services/analytics';
 import { loadWavetable, LoadWavetable, wavetableId } from '../../services';
 import { UNISON_SHAPE, UnisonShape } from '../wavetable/voice-options';
 import {
@@ -181,11 +182,13 @@ export const oscillator = ({
     };
   })
     .actions(({ $osc, $position, $active, $gain, $waveTable, $waveTablePath, $morph }) => ({
-      setOscValue: (key: keyof typeof $osc.value, value: number) =>
+      setOscValue: (key: keyof typeof $osc.value, value: number) => {
+        if (key === 'unison' && value > 1) featureUsed('unison');
         $osc.next({
           ...$osc.value,
           [key]: value,
-        }),
+        });
+      },
       setPosition: (position: number) => $position.next(position),
       toggleActive: () => $active.next(!$active.value),
       setGain: (value: number) => $gain.next(value),
@@ -197,7 +200,11 @@ export const oscillator = ({
         $morph.next(morph);
         $waveTable.next(wavetable.map((value) => new BehaviorSubject(value)));
       },
-      setWaveTablePath: (path: (string | number)[]) => $waveTablePath.next(path),
+      // a table chosen (a preset sets the path itself: no use of the selector)
+      setWaveTablePath: (path: (string | number)[]) => {
+        featureUsed('wavetable');
+        $waveTablePath.next(path);
+      },
     }))
     .actions(({ $unisonShape }) => ({
       setUnisonShape: (shape: Partial<UnisonShape>) => $unisonShape.next({ ...$unisonShape.value, ...shape }),
@@ -249,6 +256,7 @@ export const oscillator = ({
               retry({ count: 2, delay: 1000 }),
               catchError((error) => {
                 console.error(`Failed to load the wavetable ${id}`, error);
+                captureLoadError(error, 'wavetable', id);
                 tableId = '';
                 return of(null);
               })

@@ -1,5 +1,6 @@
 import { firstValueFrom } from 'rxjs';
 import { applySnapshot, getSnapshot } from '../../../app';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createOscillator, createSynthCore, stopModels } from '../../../../test-utils/models';
 import { WorkerStub } from '../../../../test-utils/worker-stub';
 import type { Wavetable } from '../../services';
@@ -339,6 +340,7 @@ describe('oscillator', () => {
       const { model, actions, load, resolve, fail, table } = createLoading();
       await resolve('a.wav', [saw]);
 
+      const { errors } = recordAnalytics();
       actions.setWaveTablePath(['folder', 'b.wav']);
       await fail('b.wav');
 
@@ -346,6 +348,10 @@ describe('oscillator', () => {
       expect(table()).toEqual([saw]);
       expect(model.$waveTableLoading.value).toBe(false);
       expect(error).toHaveBeenCalledTimes(1);
+      // reported once, after its retries: its file (of the bucket), the error of its last try
+      expect(errors.map(({ properties }) => properties)).toEqual([
+        { source: 'load', what: 'wavetable', file: 'b.wav', $exception_fingerprint: 'load:wavetable:Error' },
+      ]);
 
       applySnapshot({ osc1: { p: ['folder', 'b.wav'] } });
       expect(load).toHaveBeenCalledTimes(5);

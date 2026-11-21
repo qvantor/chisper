@@ -21,6 +21,7 @@ import {
 } from '@chisper/preset-schema';
 import { applySnapshot, getSnapshot, $snapshotChanges } from '../../app';
 import { readStored, writeStored } from '../../common/services';
+import { captureLoadError, featureUsed } from '../../common/services/analytics';
 import type { SoundSwitchModule } from '../../synth/common/modules/sound-switch';
 import type { TrackModule } from '../../synth/track/modules/track';
 import {
@@ -239,15 +240,23 @@ export const presets = ({
 
       // in silence, once the sound of the preset before has faded out (a preset chosen meanwhile replaces it), its
       // clip with it (the track keeps a clip of the user); one that throws as it is applied doesn't become the
-      // current one. Its opening (`token`) ends with it
+      // current one. Its opening (`token`) ends with it. Data the schema refuses throws at once; that and a throw
+      // as it is applied are reported (its id is public), whoever opened it
       const applyPreset = (preset: Preset, token: number, auto = false) => {
-        const data = normalizePreset(preset.data);
+        let data: PresetData;
+        try {
+          data = normalizePreset(preset.data);
+        } catch (e) {
+          captureLoadError(e, 'preset', preset.id);
+          throw e;
+        }
         const { clip } = preset;
         setOpening(token, { name: preset.name, requested: false });
         switchSound(() => {
           try {
             applySnapshot(data);
           } catch (e) {
+            captureLoadError(e, 'preset', preset.id);
             loadFailed(e);
             failOpening(token);
             return;
@@ -308,6 +317,8 @@ export const presets = ({
         }
         const list = $list.value;
         if (list.length === 0) return;
+        // (a step taken: ◀ ▶ opened a preset of the list)
+        featureUsed('preset', 'open');
         const index = list.findIndex(({ id }) => id === $current.value?.id);
         // not in the list: ▶ starts from the first (most popular), ◀ from the last
         const next =
@@ -346,11 +357,15 @@ export const presets = ({
           }
           failOpening(token);
         },
+        // the next or the one before of the list (◀ ▶): opened by the user
         next: () => step(1),
         prev: () => step(-1),
         setList: (list: PresetListItem[]) => $list.next(list),
         // the saved preset becomes current, current params are its params
-        setSaved: (preset: SavedPreset) => setCurrent(currentOf(preset), currentHash()),
+        setSaved: (preset: SavedPreset) => {
+          featureUsed('preset', 'save');
+          setCurrent(currentOf(preset), currentHash());
+        },
         // back to Init: the default sound without a preset
         reset: () => {
           lastRequest++; // a preset still loading is not applied over Init

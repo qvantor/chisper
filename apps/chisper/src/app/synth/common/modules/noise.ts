@@ -14,6 +14,7 @@ import { FINE_MAX, NOISE_DEFAULTS, NOISE_PITCH_MAX } from '@chisper/preset-schem
 import { generateId, Vector2D } from '@chisper/math';
 import { urlSnapshotPlugin } from '../../../app';
 import { abortable } from '../../../common/services';
+import { captureLoadError, featureUsed } from '../../../common/services/analytics';
 import { loadNoiseSample, LoadNoiseSample, NoiseSample, wavetableId } from '../../services';
 import type { VoiceNoiseKnobs, VoiceNoiseOptions } from '../wavetable/voice-options';
 import { tableLoads } from './load-share';
@@ -118,7 +119,10 @@ export const noise = ({
     };
   })
     .actions(({ $active, $samplePath, $noise, id }) => ({
-      toggleActive: () => $active.next(!$active.value),
+      toggleActive: () => {
+        if (!$active.value) featureUsed('noise');
+        $active.next(!$active.value);
+      },
       setSamplePath: (path: (string | number)[]) => $samplePath.next(path),
       setNoiseValue: (key: NoiseNumeric, value: number) => $noise.next({ ...$noise.value, [key]: value }),
       setLoop: (loop: boolean) => $noise.next({ ...$noise.value, loop }),
@@ -157,6 +161,7 @@ export const noise = ({
                 retry({ count: 2, delay: 1000 }),
                 catchError((error) => {
                   console.error(`Failed to load the noise ${key}`, error);
+                  captureLoadError(error, 'noise', key);
                   sampleId = '';
                   return of(null);
                 })

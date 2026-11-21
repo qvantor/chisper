@@ -3,6 +3,7 @@ import { ObjectBS, PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-reac
 import { SUB_COARSE_MAX, SUB_DEFAULTS, SUB_OCTAVE_MAX, SubShape } from '@chisper/preset-schema';
 import { Vector2D } from '@chisper/math';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import { subShapeFrame, subTable } from '../wavetable/sub-shapes';
 import type { VoiceSubKnobs, VoiceSubOptions } from '../wavetable/voice-options';
 import type { TableState } from '../wavetable/wavetable-engine';
@@ -92,7 +93,10 @@ export const sub = ({ synthCore: [{ wavetables }] }: Dependencies) =>
     return { ranges, $active, $sub, $params, $shapeState, sent, shapePlayed, voiceSub };
   })
     .actions(({ $active, $sub }) => ({
-      toggleActive: () => $active.next(!$active.value),
+      toggleActive: () => {
+        if (!$active.value) featureUsed('sub');
+        $active.next(!$active.value);
+      },
       setShape: (shape: SubShape) => $sub.next({ ...$sub.value, shape }),
       setSubValue: (key: SubNumeric, value: number) => $sub.next({ ...$sub.value, [key]: value }),
       setContiguous: (contiguous: boolean) => $sub.next({ ...$sub.value, contiguous }),

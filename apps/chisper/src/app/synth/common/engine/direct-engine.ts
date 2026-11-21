@@ -71,7 +71,7 @@ export const createDirectEngine = (
       },
     };
   };
-  const host = createEngineHost(() => Promise.resolve(make), 'The engine of the render');
+  const host = createEngineHost(() => Promise.resolve(make), 'render');
 
   return {
     ...host,

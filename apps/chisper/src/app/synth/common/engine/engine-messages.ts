@@ -13,7 +13,7 @@ import {
 import type { ChainWasm } from '../chain/chain-wasm';
 import { lateState } from '../lfo/lfo-curve';
 import type { OscScope, TableStoreWasm, VoiceSharedWasm } from '../wavetable/wavetable-osc-wasm';
-import type { EngineKnobsMessage, EngineOptions, EngineReport } from './engine-params';
+import type { EngineFaultReport, EngineKnobsMessage, EngineOptions, EngineReport } from './engine-params';
 import { createEngineWasm, ENGINE_BROKEN, ENGINE_FLAGS, EngineWasm, EngineWasmOptions } from './engine-wasm';
 import { seeded } from './seeded';
 
@@ -177,12 +177,21 @@ export const takeEngineMessage = (
   }
 };
 
+// the message of a trap (or of what else threw) as the main thread is told it: EngineFaultReport
+const TRAP_MESSAGE = 200;
+export const trapMessage = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).slice(0, TRAP_MESSAGE);
+
 // what a block left to read (the flags of process(), not ENGINE_BROKEN), told the main thread: the voices that
-// started and ended, the stages that failed (one report kept: nothing is made on the audio thread), the bytes the
-// store freed (to its listener)
-const createEngineTeller = (store: TableStoreWasm, post: (report: EngineReport) => void) => {
+// started and ended, the stages that failed with the trap that failed them (one report kept: nothing is made on
+// the audio thread), the bytes the store freed (to its listener)
+const createEngineTeller = (
+  store: TableStoreWasm,
+  post: (report: EngineReport) => void,
+  takeTrap: () => string | undefined
+) => {
   const stages: number[] = [];
-  const failedReport: ChainReport = { failed: stages };
+  const failedReport: ChainReport & EngineFaultReport = { failed: stages, trap: undefined };
   return (engine: EngineWasm, flags: number) => {
     if (flags & ENGINE_FLAGS.voices) {
       const report = engine.voices.reports();
@@ -192,7 +201,10 @@ const createEngineTeller = (store: TableStoreWasm, post: (report: EngineReport) 
       const bits = engine.chain.reports();
       stages.length = 0;
       for (let stage = 0; stage <= LIMITER_STAGE; stage++) if (bits & (1 << stage)) stages.push(stage);
-      if (stages.length > 0) post(failedReport);
+      if (stages.length > 0) {
+        failedReport.trap = takeTrap();
+        post(failedReport);
+      }
     }
     if (flags & ENGINE_FLAGS.freed) store.drain();
   };
@@ -209,11 +221,23 @@ export const createEngineRunner = (
   shared: VoiceSharedWasm,
   { post, ...run }: EngineRun
 ) => {
-  const { engine, state } = createNodeEngine(scope, sampleRate, options, store, shared, run);
+  // the message of the first trap since the last report (EngineFaultReport): only a trap makes it
+  let trap: string | undefined;
+  const takeTrap = () => {
+    const taken = trap;
+    trap = undefined;
+    return taken;
+  };
+  const onError = (error: unknown) => {
+    run.onError(error);
+    trap ??= trapMessage(error);
+  };
+  const { engine, state } = createNodeEngine(scope, sampleRate, options, store, shared, { ...run, onError });
   const meters = createEngineMeters(engine.chain, state, post);
-  const tell = createEngineTeller(store, post);
-  const taking: EngineTake = { onError: run.onError, post, meters };
-  const brokenReport: ChainReport = { broken: true };
+  const tell = createEngineTeller(store, post, takeTrap);
+  const taking: EngineTake = { onError, post, meters };
+  const brokenReport: ChainReport & EngineFaultReport = { broken: true, trap: undefined };
+  const trapReport: EngineFaultReport = { trap: undefined };
   let live: EngineWasm | null = engine;
   return {
     // the engine (none: the node is over)
@@ -228,23 +252,28 @@ export const createEngineRunner = (
         try {
           engine.free();
         } catch (error) {
-          run.onError(error);
+          onError(error);
         }
         return;
       }
       takeEngineMessage(live, shared, message, sampleRate, next, taking);
     },
     // after a block of `frames` and the `flags` of its process(): what it left to read told, the meters that are
-    // due. False: the core trapped in no stage (not freed: that could trap again), the node is over and the main
-    // thread, told so, makes another of its state
+    // due, a trap that failed no stage (a voice, a message) alone. False: the core trapped in no stage (not freed:
+    // that could trap again), the node is over and the main thread, told so, makes another of its state
     after: (flags: number, frames: number) => {
       if (!live) return false;
       if (flags === ENGINE_BROKEN) {
         live = null;
+        brokenReport.trap = takeTrap();
         post(brokenReport);
         return false;
       }
       if (flags !== 0) tell(live, flags);
+      if (trap !== undefined) {
+        trapReport.trap = takeTrap();
+        post(trapReport);
+      }
       meters.due(frames, sampleRate);
       return true;
     },

@@ -1,3 +1,4 @@
+import { recordAnalytics } from '../../../test-utils/analytics';
 import { jsonResponse as response } from '../../../test-utils/query-client';
 import {
   bucketLoader,
@@ -123,11 +124,14 @@ describe('bucketLoader', () => {
     ['a page that is not the file', () => fetchMock.mockResolvedValueOnce(file(200, '<html>Blocked'))],
   ])('loads through the site where the domain gives %s, then through the site first', async (_, fail) => {
     const load = bucketLoader(ORIGIN, PROXY);
+    const { named } = recordAnalytics();
     fail();
     fetchMock.mockResolvedValueOnce(file(200));
 
     await expect(load('one.wav', parse)).resolves.toBe('file');
     expect(urls()).toEqual([domain('one.wav'), site('one.wav')]);
+    // reported once a session for the bucket (not an error: the file loaded)
+    expect(named('bucket_fallback')).toEqual([{ bucket: 'bucket' }]);
     // the site within its limits too
     expect(signal(1)).toBeInstanceOf(AbortSignal);
     expect(warn).toHaveBeenCalledTimes(1);

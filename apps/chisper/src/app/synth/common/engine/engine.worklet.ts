@@ -11,7 +11,7 @@ import {
   StoreFreedBytesMessage,
   StoreMessage,
 } from '../wavetable/wavetable-osc-wasm';
-import { createEngineRunner } from './engine-messages';
+import { createEngineRunner, trapMessage } from './engine-messages';
 import {
   ENGINE_PROCESSOR,
   EngineMessage,
@@ -49,12 +49,21 @@ const failed = (error: unknown) => console.error('A voice or a stage of the engi
 const store = createTableStoreWasm(scope);
 // The functions of a block compile lazily, on their first call: as the module loads, the chain alone, then the
 // voices of the warm-up (voices-prewarm.ts) in an engine of their own with every effect on: the block of the
-// node is the one compiled. A prewarm that fails (a trap of the core on some engine) leaves its functions to the
-// first note and what it made where it is: a voice may still hold its versions; the synth plays all the same
+// node is the one compiled. A prewarm that fails (a trap of the core on some engine: thrown, or a stage or a voice
+// that trapped, as a node takes it) leaves its functions to the first note and what it made where it is: a voice
+// may still hold its versions; the synth plays all the same (the first node tells the main thread its first trap:
+// EngineFaultReport)
+let prewarmFailure: string | undefined;
+const prewarmFailed = (error: unknown) => {
+  console.error('The prewarm of the engine failed', error);
+  prewarmFailure ??= trapMessage(error);
+};
 try {
-  prewarmChain(core, sampleRate);
+  if (!prewarmChain(core, sampleRate)) prewarmFailed('a stage of the chain trapped');
   prewarmVoices(scope, store, sampleRate, (warmStore, warmShared) => {
-    const engine = createEngineWasm(scope, sampleRate, warmState(), warmStore, warmShared);
+    const engine = createEngineWasm(scope, sampleRate, warmState(), warmStore, warmShared, {
+      onError: prewarmFailed,
+    });
     return {
       apply: engine.voices.apply,
       process: engine.process,
@@ -63,7 +72,7 @@ try {
     };
   });
 } catch (error) {
-  console.error('The prewarm of the engine failed', error);
+  prewarmFailed(error);
 }
 const shared = createVoiceSharedWasm(scope);
 
@@ -113,6 +122,10 @@ class EngineProcessor extends AudioWorkletProcessor {
       this.post(answer);
     });
     this.port.onmessage = (event: MessageEvent<EngineMessage>) => this.take(event);
+    if (prewarmFailure !== undefined) {
+      this.post({ prewarm: prewarmFailure });
+      prewarmFailure = undefined;
+    }
   }
 
   private take(event: MessageEvent<EngineMessage>) {

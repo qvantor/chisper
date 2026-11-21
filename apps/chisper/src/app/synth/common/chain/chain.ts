@@ -1,12 +1,12 @@
 import { BehaviorSubject } from 'rxjs';
 import { isEqual } from 'lodash';
 import type { FxStatus } from '../../fx/effects/types';
-import { EngineHost, MAX_REMAKES, spent } from '../engine/engine-host';
+import { EngineHost, MAX_REMAKES } from '../engine/engine-host';
+import type { EngineReport } from '../engine/engine-params';
 import type { SynthClock } from '../clock/synth-clock';
 import {
   ChainMessage,
   ChainNote,
-  ChainReport,
   ChainRoute,
   ChainState,
   FX_KINDS,
@@ -26,6 +26,9 @@ import {
 // its unit again ('loading' until the node tells it did, 'failed' again if it could not); the others play on. What
 // trapped is never freed (a free could trap again), so a stage is made again MAX_REMAKES times at most, as a node
 // whose core trapped is (engine-host.ts)
+
+// the name of a stage in the reports (analytics.ts): its effect, the limiter
+const stageName = (stage: number) => FX_KINDS[stage] ?? 'limiter';
 
 // `host`: the node it plays in (that of the synth core, or the engine of a render: the voices play in it too, and it
 // is the core's to destroy)
@@ -52,7 +55,7 @@ export const createChain = (clock: Pick<SynthClock, 'currentTime'>, host: Engine
 
   const post: (message: ChainMessage) => void = host.post;
 
-  const take = ({ meter, failed: stages, remade }: ChainReport) => {
+  const take = ({ meter, failed: stages, remade, trap }: EngineReport) => {
     if (meter) listeners.get(meter[0])?.(meter[1]);
     if (remade !== undefined) {
       failed &= ~(1 << remade);
@@ -65,6 +68,7 @@ export const createChain = (clock: Pick<SynthClock, 'currentTime'>, host: Engine
         retrying &= ~(1 << stage);
       });
       console.error('A stage of the chain failed', stages);
+      stages.forEach((stage) => host.report.failure('stage', stageName(stage), { trap }));
       refresh();
     }
   };
@@ -102,7 +106,7 @@ export const createChain = (clock: Pick<SynthClock, 'currentTime'>, host: Engine
       const bit = 1 << stage;
       if (!live || !(failed & bit) || retrying & bit) return;
       if (remakes[stage] >= MAX_REMAKES) {
-        spent(`Stage ${stage} of the chain`);
+        host.spent(`Stage ${stage} of the chain`, stageName(stage));
         return;
       }
       remakes[stage] += 1;

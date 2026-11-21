@@ -9,6 +9,7 @@ import {
   ModValue,
 } from '@chisper/preset-schema';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import { centered, isModTarget } from '../modulation/modulation-targets';
 
 // a source (ENV 1–3, VELO, LFO 1–4) moves a knob (a target of modulation-targets.ts) by amount × its level: amount
@@ -97,6 +98,7 @@ export const modulation = () =>
           if (find(source, target) || !takesSource(source, target)) return;
           if (routesFull($routes.value) || knobFull($routes.value, target)) return;
           const route: ModRoute = { source, target, amount: clampAmount(amount) };
+          featureUsed('route', source);
           $routes.next([...$routes.value, bipolar ? { ...route, bipolar } : route]);
         },
         setAmount: (source: ModSource, target: string, amount: number) => {

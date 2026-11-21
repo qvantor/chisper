@@ -36,6 +36,7 @@ import {
 } from '@chisper/preset-schema';
 import type { AppModule } from '../../../app/modules';
 import { readStored, writeStored } from '../../../common/services';
+import { countBucket, featureUsed, track as trackEvent } from '../../../common/services/analytics';
 import { getUrlClipId, setUrlClipId } from '../../../presets/services/url';
 import { midiToNote, noteToMidi } from '../../services';
 import { sourceKey } from '../../common/modules/input-controller';
@@ -352,6 +353,7 @@ export const track = ({
       // leads: armed, it records once its Start plays it)
       const startRecording = () => {
         if ($recording.value) return;
+        featureUsed('track', 'rec');
         recorder.history = null;
         recorder.full = false;
         $recording.next(true);
@@ -370,7 +372,8 @@ export const track = ({
       };
       // the clip of a .mid in place of the notes (it can be undone): its tempo, its name (none without one). A new
       // clip, as New makes: a Save would put the file under the link of the clip before
-      const applyMidi = ({ clip, truncated, tempo }: MidiImport) => {
+      const applyMidi = ({ clip, truncated, tempo, parts }: MidiImport) => {
+        trackEvent('midi_import', { parts: parts.length, notes: countBucket(clip.notes.length) });
         edit({ length: clip.length, notes: clip.notes });
         const rest = omit($clip.value, 'name');
         setClip(clip.name ? { ...rest, name: clip.name } : rest);
@@ -401,9 +404,15 @@ export const track = ({
       };
       return {
         // an edit of the notes (one step of the undo); the loop follows them (loopLength)
-        setNotes: (notes: ClipNote[]) => edit({ notes, length: loopLength(bodyOf($clip.value), notes) }),
+        setNotes: (notes: ClipNote[]) => {
+          featureUsed('track', 'edit');
+          edit({ notes, length: loopLength(bodyOf($clip.value), notes) });
+        },
         // the length of the loop (its flag): the notes that start past it go, those through it end there
-        setLength: (length: number) => edit({ length, notes: withLength($clip.value.notes, length) }),
+        setLength: (length: number) => {
+          featureUsed('track', 'edit');
+          edit({ length, notes: withLength($clip.value.notes, length) });
+        },
         // a drag: its moves are one step of the undo
         startGesture: () => {
           gesture.before = bodyOf($clip.value);
@@ -419,6 +428,7 @@ export const track = ({
           const length = loopLength(gesture.before ?? bodyOf($clip.value), notes);
           // (a move that changes nothing: the pointer within a step of the grid)
           if (length === $clip.value.length && isEqual(notes, $clip.value.notes)) return;
+          featureUsed('track', 'edit');
           applyBody({ length, notes });
         },
         endGesture,
@@ -440,6 +450,7 @@ export const track = ({
         },
         // a new empty clip of the default length (it can be undone; not saved, out of the url)
         newClip: () => {
+          featureUsed('track', 'edit');
           edit({ notes: [], length: CLIP_LENGTH_DEFAULT });
           setClip(omit($clip.value, 'name'));
           detach();
@@ -494,11 +505,15 @@ export const track = ({
         // Play: from beat 0 TRACK_LEAD from now (the free LFOs of HOST with it); a MIDI Clock leads: armed, its Start
         // and Stop play it
         play: () => {
+          featureUsed('track', 'play');
           if (!$armed.value) playFrom(0);
         },
         // Play from a beat of the loop (a bar of the ruler); while it plays the track goes there, what it holds goes;
         // a MIDI Clock leads: armed only (the clock places the transport)
-        playFrom,
+        playFrom: (beat: number) => {
+          featureUsed('track', 'play');
+          playFrom(beat);
+        },
         stop: () => {
           stopRecording();
           if (!$armed.value) return;

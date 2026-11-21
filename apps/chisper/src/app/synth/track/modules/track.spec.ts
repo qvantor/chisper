@@ -9,6 +9,7 @@ import {
   ClipNote,
   clipHash,
 } from '@chisper/preset-schema';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { songFile } from '../../../../test-utils/midi-file';
 import { createSynth, createTrack, stopModels } from '../../../../test-utils/models';
 import { voiceEvents } from '../../../../test-utils/voice-events';
@@ -952,8 +953,11 @@ describe('track', () => {
 
     it('imports a MIDI file: its notes, its length, its name and its tempo', async () => {
       const { actions, model, transportModel } = await setup();
+      const { named } = recordAnalytics();
       const bytes = writeMidiFile({ bpm: 140, length: CLIP_BAR, notes: [note(0, 1, 48)], name: 'Riff' });
       expect(actions.importMidi(bytes)).toBe(true);
+      // (its parts and its notes reported, a file that is none is not)
+      expect(named('midi_import')).toEqual([{ parts: 1, notes: '1-9' }]);
       expect(model.$clip.value).toEqual({
         bpm: 140,
         length: CLIP_BAR,
@@ -964,6 +968,7 @@ describe('track', () => {
       actions.undo();
       expect(model.$clip.value.notes).toEqual([]);
       expect(actions.importMidi(new Uint8Array([1, 2, 3]))).toBe(false);
+      expect(named('midi_import')).toHaveLength(1);
     });
 
     it('a MIDI file of several parts waits for those to import, then imports them in one step of the undo', async () => {
@@ -976,12 +981,15 @@ describe('track', () => {
         ],
         140
       );
+      const { named } = recordAnalytics();
       expect(actions.importMidi(bytes)).toBe(true);
       // nothing yet
+      expect(named('midi_import')).toEqual([]);
       expect(model.$clip.value.notes).toEqual([note(0, 1)]);
       expect(transportModel.$bpm.value).toBe(120);
       expect(model.$midiImport.value?.parts.map(({ name }) => name)).toEqual(['Lead', 'Bass']);
       actions.importParts([1]);
+      expect(named('midi_import')).toEqual([{ parts: 2, notes: '1-9' }]);
       expect(model.$midiImport.value).toBeNull();
       expect(model.$clip.value).toEqual({
         bpm: 140,

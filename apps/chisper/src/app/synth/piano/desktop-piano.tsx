@@ -62,13 +62,13 @@ const DesktopKeys = ({
   keyWidth: number;
   $played?: Observable<number[]>;
 }) => {
-  const [{ $pressed }, { onPress, onRelease }] = useInputController();
+  const [{ $pressed }, { onScreenPress, onRelease }] = useInputController();
   const pressed = useBehaviorSubject($pressed);
   const pitches = useObservable($played ?? NEVER, NO_PITCHES);
   const played = React.useMemo(() => pitchesByOctave(pitches), [pitches]);
   return (
     <PianoKeyboard
-      onPress={onPress}
+      onPress={onScreenPress}
       onRelease={onRelease}
       pressed={pressed}
       played={played}

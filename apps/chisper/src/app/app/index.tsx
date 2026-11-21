@@ -1,6 +1,6 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { GlobalStyle, theme, useIsMobile } from '@chisper/ui-kit';
 import { Toasts } from '../common/components';
 import { AppProvider, useApp } from './modules';
@@ -11,6 +11,7 @@ import {
   $snapshotChanges,
   snapshotScope,
 } from './plugins/snapshot';
+import { createQueryClient } from './query-client';
 
 export {
   AppProvider,
@@ -22,7 +23,7 @@ export {
   snapshotScope,
 };
 
-const queryClient = new QueryClient();
+const queryClient = createQueryClient();
 
 const Root = styled.div`
   background: ${theme.colors.primary};

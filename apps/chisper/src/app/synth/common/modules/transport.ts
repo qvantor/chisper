@@ -2,6 +2,7 @@ import { BehaviorSubject, combineLatest, filter, map, skip, Subject, throttleTim
 import { PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import { divisionSeconds, TEMPO_DEFAULT, TEMPO_MAX, TEMPO_MIN, tempoOf } from '@chisper/preset-schema';
 import { readStored, writeStored } from '../../../common/services';
+import { featureUsed } from '../../../common/services/analytics';
 import { LFO_LEAD, LFO_STATE_INTERVAL } from '../lfo/lfo-curve';
 import {
   beatAt,
@@ -116,7 +117,10 @@ export const transport = ({ synthCore: [{ clock }], bpm }: Deps) =>
           apply({ time: at, beat: beat + ((at - time) * bpm) / 60, bpm }, false);
         },
         setSource: (source: TempoSource) => {
-          if (source !== $source.value) $source.next(source);
+          if (source === $source.value) return;
+          // (a MIDI Clock of a device took the tempo over: the user's set up)
+          if (source === 'midi') featureUsed('midi_clock');
+          $source.next(source);
         },
         setPlaying: (playing: boolean) => {
           if (playing !== $playing.value) $playing.next(playing);

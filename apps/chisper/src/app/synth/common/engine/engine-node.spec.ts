@@ -1,10 +1,11 @@
 import { registrar } from 'standardized-audio-context-mock';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import type { FxStatus } from '../../fx/effects/types';
 import { lfoTable } from '../lfo/lfo-curve';
 import type { LfosState, LfoWire } from '../lfo/lfo-curve';
-import { EngineClient, MAX_REMAKES } from './engine-host';
+import { createEngineHost, EngineClient, MAX_REMAKES } from './engine-host';
 import { createEngineNode } from './engine-node';
 import { ENGINE_MODULE, ENGINE_PROCESSOR, EngineOptions, PROBED_NODE_OPTIONS } from './engine-params';
 
@@ -778,6 +779,89 @@ describe('createEngineNode', () => {
       expect(node.disconnect).toHaveBeenCalledTimes(1);
       expect(told).toEqual(['ready', { stop: true }, 'failed', { stop: false }]);
       expect(engine.output.disconnect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('the reports of its failures (analytics.ts)', () => {
+    beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => undefined));
+
+    it('a module that fails to load, a processor that throws, a core broken (its trap): each its fingerprint', async () => {
+      const { errors, fingerprints } = recordAnalytics();
+      const failing = setup({ failFirstLoad: true });
+      await flush();
+      failing.engine.retry();
+      await flush();
+      throws(failing.nodes()[0]);
+      failing.engine.retry();
+      await flush();
+      reports(failing.nodes()[1], { broken: true, trap: 'unreachable' });
+      expect(fingerprints()).toEqual([
+        'engine:load:engine',
+        'engine:processor:engine',
+        'engine:broken:engine',
+      ]);
+      expect(errors.map(({ properties }) => properties)).toEqual([
+        expect.objectContaining({ source: 'engine', reason: 'load', stage: 'engine', message: '404' }),
+        expect.objectContaining({ reason: 'processor' }),
+        expect.objectContaining({
+          reason: 'broken',
+          message: 'The engine core trapped',
+          trap: 'unreachable',
+        }),
+      ]);
+    });
+
+    it('the worker of the store failed: its owner reports it, not the node', async () => {
+      const { errors } = recordAnalytics();
+      const { engine, statuses } = await ready();
+      engine.fail(new Event('error'));
+      expect(statuses.at(-1)).toBe('failed');
+      expect(errors).toEqual([]);
+    });
+
+    it(`made again ${MAX_REMAKES} times: spent, reported every time it is asked`, async () => {
+      const { engine, nodes } = await ready();
+      for (let remake = 0; remake < MAX_REMAKES; remake++) {
+        reports(nodes().at(-1) as NodeStub, { broken: true });
+        engine.retry();
+        await flush();
+      }
+      reports(nodes().at(-1) as NodeStub, { broken: true });
+      const { fingerprints } = recordAnalytics();
+      engine.retry();
+      engine.retry();
+      expect(fingerprints()).toEqual(['engine:spent:engine', 'engine:spent:engine']);
+    });
+
+    it('a trap of a voice, the failed warm-up of the module: reported, the clients told as before', async () => {
+      const { errors, fingerprints } = recordAnalytics();
+      const { engine, node } = await ready();
+      const { it: listener, told } = client();
+      engine.attach(listener);
+      reports(node, { ended: [3] });
+      reports(node, { trap: 'out of bounds memory access' });
+      reports(node, { prewarm: 'unreachable' });
+      // (a stage that failed is the chain's to report)
+      reports(node, { failed: [2], trap: 'unreachable' });
+      expect(fingerprints()).toEqual(['engine:trap:voice', 'engine:prewarm:engine']);
+      expect(errors.map(({ properties }) => properties['trap'])).toEqual([
+        'out of bounds memory access',
+        'unreachable',
+      ]);
+      expect(told.slice(1)).toEqual([
+        { report: { ended: [3] } },
+        { report: { trap: 'out of bounds memory access' } },
+        { report: { prewarm: 'unreachable' } },
+        { report: { failed: [2], trap: 'unreachable' } },
+      ]);
+    });
+
+    it('the engine of a render reports nothing (its export does)', async () => {
+      const { errors } = recordAnalytics();
+      const host = createEngineHost(() => Promise.reject(new Error('no memory')), 'render');
+      await flush();
+      expect(host.$status.value).toBe('failed');
+      expect(errors).toEqual([]);
     });
   });
 });

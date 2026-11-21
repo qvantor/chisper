@@ -17,10 +17,12 @@ import {
   fakeTrack,
   immediateSoundSwitch,
   initModel,
+  stopModels,
 } from '../../../test-utils/models';
 import * as app from '../../app';
 import { getSnapshot } from '../../app';
 import type { SoundSwitchModule } from '../../synth/common/modules/sound-switch';
+import { recordAnalytics } from '../../../test-utils/analytics';
 import {
   clearUrlPresetId,
   getEditToken,
@@ -155,7 +157,8 @@ describe('presets model', () => {
     expect($envelopes.value.env1.attack).toBe(ENVELOPE_DEFAULTS.env1.attack);
   });
 
-  it('a preset that throws as it is applied shows an error and does not become current', async () => {
+  it('a preset that throws as it is applied shows an error, is reported and does not become current', async () => {
+    const { errors, fingerprints } = recordAnalytics();
     // the switch applies it from its poll, after loadById returned
     const { pending, soundSwitch } = deferredSwitch();
     const {
@@ -163,13 +166,30 @@ describe('presets model', () => {
     } = setup(soundSwitch);
     getPresetMock.mockResolvedValue(preset('p1', 0.5));
     jest.spyOn(app, 'applySnapshot').mockImplementationOnce(() => {
-      throw new Error('Broken preset');
+      throw new TypeError('Broken preset');
     });
 
     await loadById('p1');
     expect(() => pending.shift()?.()).not.toThrow();
     expect(toast.error).toHaveBeenCalledWith('Broken preset');
     expect($current.value).toBeNull();
+    expect(fingerprints()).toEqual(['load:preset:TypeError']);
+    expect(errors[0].properties).toMatchObject({ source: 'load', what: 'preset', file: 'p1' });
+  });
+
+  it('a preset of a link the schema refuses shows an error and is reported once (not its request)', async () => {
+    const { errors, fingerprints } = recordAnalytics();
+    const data = { osc1: { u: 1.5 } };
+    const {
+      model: [{ $current }, { loadById }],
+    } = setup();
+    getPresetMock.mockResolvedValue({ ...preset('p1', 0.5), data } as unknown as Preset);
+
+    await loadById('p1');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect($current.value).toBeNull();
+    expect(fingerprints()).toEqual(['load:preset:ZodError']);
+    expect(errors[0].properties).toMatchObject({ what: 'preset', file: 'p1' });
   });
 
   it('applies only the last requested preset', async () => {
@@ -345,6 +365,34 @@ describe('presets model', () => {
     expect($current.value?.id).toBe('c');
   });
 
+  it('reports what the user did: a save, ◀ ▶; not a preset of the link, of the tab or of the random start', async () => {
+    const { features } = recordAnalytics();
+    getUrlPresetIdMock.mockReturnValue('x');
+    getPresetMock.mockImplementation((id) => Promise.resolve(preset(id, 0.1)));
+    const linked = setup();
+    await flush();
+    expect(linked.model[0].$current.value?.id).toBe('x');
+    stopModels();
+    // reloaded: its state restored from the tab
+    storeTabState({ id: 'x', name: 'Preset x' }, 0.3, 0.1);
+    setup();
+    await flush();
+    stopModels();
+    getUrlPresetIdMock.mockReturnValue(null);
+    sessionStorage.clear();
+    getTopPresetsMock.mockResolvedValue(['a', 'b'].map(listItem));
+    const {
+      model: [{ $current }, { setSaved, next, prev }],
+    } = setup();
+    await flush();
+    expect($current.value?.auto).toBe(true);
+    expect(features()).toEqual([]);
+    await next();
+    await prev();
+    setSaved({ id: 'b', name: 'B' });
+    expect(features()).toEqual(['preset:open', 'preset:save']);
+  });
+
   it('◀ ▶ after a failed init retry the load and show an error if it fails again', async () => {
     getTopPresetsMock.mockRejectedValueOnce(new Error('Server down'));
     const {
@@ -453,7 +501,8 @@ describe('presets model', () => {
     expect($current.value).toBeNull();
   });
 
-  it('a popular preset the schema refuses stays in Init without an error, its opening ends', async () => {
+  it('a popular preset the schema refuses stays in Init without an error, its opening ends; reported', async () => {
+    const { fingerprints, errors } = recordAnalytics();
     const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     const data = { osc1: { u: 1.5 } };
     expect(() => normalizePreset(data)).toThrow();
@@ -472,6 +521,8 @@ describe('presets model', () => {
     expect($opening.value).toBeNull();
     expect($loadProgress.value).toBe('failed');
     expect(getSnapshot()).toEqual(before);
+    expect(fingerprints()).toEqual(['load:preset:ZodError']);
+    expect(errors[0].properties).toMatchObject({ what: 'preset', file: 'a' });
     error.mockRestore();
   });
 

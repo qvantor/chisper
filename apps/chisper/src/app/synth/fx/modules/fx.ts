@@ -16,6 +16,7 @@ import type { LfoModule, LfoRanges } from '../../common/modules/lfos';
 import type { TransportModule } from '../../common/modules/transport';
 import { fxRoute, lfoKnobRoutes, MOD_TARGETS } from '../../common/modulation/modulation-targets';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import {
   CHAIN_KEYS,
   ChainNote,
@@ -189,11 +190,15 @@ export const fx = ({
         setAdded: (type: FxType, added: boolean) => {
           if (added && $status.value[type] === 'unsupported') return;
           if (added && $status.value[type] === 'failed') slots[type].retry();
+          if (added) featureUsed('fx', type);
           update(type, { added });
         },
         // loads a failed effect again, added or not (nothing to do in any other status)
         retry: (type: FxType) => slots[type].retry(),
-        setOn: (type: FxType, on: boolean) => update(type, { on }),
+        setOn: (type: FxType, on: boolean) => {
+          if (on) featureUsed('fx', type);
+          update(type, { on });
+        },
         setMix: (type: FxType, mix: number) => update(type, { mix }),
         // a change of the user: with the params it sets at the tempo (the delay in BPM: paramChange)
         setParam: (type: FxType, key: string, value: number) => {

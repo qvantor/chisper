@@ -25,6 +25,7 @@ import {
   VelocityKnob,
 } from '@chisper/preset-schema';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import type { TransportModule } from './transport';
 
@@ -113,63 +114,64 @@ export const envelopes = ({ transport: [{ $tempo }] }: Deps) =>
     const $envelope = new BehaviorSubject<EnvelopeId>(ENVELOPES[0]);
     return { $envelopes, $velocity, $selected, $envelope };
   })
-    .actions(({ $envelopes, $velocity, $selected, $envelope }) => ({
-      setEnvelopeValue: (id: EnvelopeId, key: EnvelopeStage, value: number) =>
-        $envelopes.next({ ...$envelopes.value, [id]: { ...$envelopes.value[id], [key]: value } }),
-      // BPM: each time takes the division nearest to its seconds at the tempo; MS: the seconds of its division
-      // (32 s at most)
-      setEnvelopeBpm: (id: EnvelopeId, bpm: boolean) => {
-        const envelope = $envelopes.value[id];
-        if (envelope.bpm === bpm) return;
-        const tempo = $tempo.value;
-        const next = bpm
-          ? {
-              ...envelope,
-              bpm,
-              divs: mapValues(envelope.divs, (_, stage) =>
-                nearestDivision(
-                  quartersOf(envelope[stage as EnvelopeTimeStage], tempo),
-                  ENVELOPE_TIME_DIVISIONS
-                )
-              ),
-            }
-          : {
-              ...envelope,
-              bpm,
-              ...Object.fromEntries(
-                ENVELOPE_TIME_STAGES.map((stage) => [
-                  stage,
-                  Math.min(ENVELOPE_TIME_MAX, divisionSeconds(envelope.divs[stage], tempo)),
-                ])
-              ),
-            };
-        $envelopes.next({ ...$envelopes.value, [id]: next });
-      },
-      // a division of a time in BPM (one of its steps, else the nearest)
-      setEnvelopeDivision: (id: EnvelopeId, stage: EnvelopeTimeStage, division: number) => {
-        const envelope = $envelopes.value[id];
-        $envelopes.next({
-          ...$envelopes.value,
-          [id]: {
+    .actions(({ $envelopes, $velocity, $selected, $envelope }) => {
+      // an edit of an envelope by the user (ENV 2 or 3 counted: ENV 1, the amplitude, is every patch's)
+      const put = (id: EnvelopeId, envelope: EnvelopeKnobs) => {
+        if (id !== ENVELOPES[0]) featureUsed('env', id);
+        $envelopes.next({ ...$envelopes.value, [id]: envelope });
+      };
+      return {
+        setEnvelopeValue: (id: EnvelopeId, key: EnvelopeStage, value: number) =>
+          put(id, { ...$envelopes.value[id], [key]: value }),
+        // BPM: each time takes the division nearest to its seconds at the tempo; MS: the seconds of its division
+        // (32 s at most)
+        setEnvelopeBpm: (id: EnvelopeId, bpm: boolean) => {
+          const envelope = $envelopes.value[id];
+          if (envelope.bpm === bpm) return;
+          const tempo = $tempo.value;
+          const next = bpm
+            ? {
+                ...envelope,
+                bpm,
+                divs: mapValues(envelope.divs, (_, stage) =>
+                  nearestDivision(
+                    quartersOf(envelope[stage as EnvelopeTimeStage], tempo),
+                    ENVELOPE_TIME_DIVISIONS
+                  )
+                ),
+              }
+            : {
+                ...envelope,
+                bpm,
+                ...Object.fromEntries(
+                  ENVELOPE_TIME_STAGES.map((stage) => [
+                    stage,
+                    Math.min(ENVELOPE_TIME_MAX, divisionSeconds(envelope.divs[stage], tempo)),
+                  ])
+                ),
+              };
+          put(id, next);
+        },
+        // a division of a time in BPM (one of its steps, else the nearest)
+        setEnvelopeDivision: (id: EnvelopeId, stage: EnvelopeTimeStage, division: number) => {
+          const envelope = $envelopes.value[id];
+          put(id, {
             ...envelope,
             divs: { ...envelope.divs, [stage]: divisionWithin(division, ENVELOPE_TIME_DIVISIONS) },
-          },
-        });
-      },
-      setEnvelopeCurve: (id: EnvelopeId, stage: EnvelopeCurveStage, k: number) => {
-        const envelope = $envelopes.value[id];
-        $envelopes.next({
-          ...$envelopes.value,
-          [id]: { ...envelope, curves: { ...envelope.curves, [stage]: k } },
-        });
-      },
-      setVelocity: (knob: VelocityKnob, value: number) =>
-        $velocity.next({ ...$velocity.value, [knob]: value }),
-      select: (id: ModSource) => {
-        $selected.next(id);
-        if (isEnvelope(id)) $envelope.next(id);
-      },
-    }))
+          });
+        },
+        setEnvelopeCurve: (id: EnvelopeId, stage: EnvelopeCurveStage, k: number) => {
+          const envelope = $envelopes.value[id];
+          put(id, { ...envelope, curves: { ...envelope.curves, [stage]: k } });
+        },
+        setVelocity: (knob: VelocityKnob, value: number) =>
+          $velocity.next({ ...$velocity.value, [knob]: value }),
+        select: (id: ModSource) => {
+          $selected.next(id);
+          if (isEnvelope(id)) $envelope.next(id);
+        },
+      };
+    })
     .plugins(
       urlSnapshotPlugin({
         // env: { e1, e2, e3, vel }, each envelope { attack, hold, decay, sustain, release, curves: { attack,

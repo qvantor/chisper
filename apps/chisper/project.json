@@ -11,8 +11,11 @@
         "production",
         "^production",
         {
-          "runtime": "cat tmp/wasm/*.wasm tmp/wasm-perf/*.wasm tmp/worklets/*.js tmp/worklets-perf/*.js 2>/dev/null | git hash-object --stdin"
-        }
+          "runtime": "cat tmp/wasm/*.wasm tmp/wasm-perf/*.wasm tmp/worklets/*.js tmp/worklets/*.js.map tmp/worklets-perf/*.js 2>/dev/null | git hash-object --stdin"
+        },
+        { "env": "COMMIT_REF" },
+        { "env": "NX_PUBLIC_RELEASE" },
+        { "env": "NX_PUBLIC_ANALYTICS_KEY" }
       ],
       "defaultConfiguration": "production",
       "options": {

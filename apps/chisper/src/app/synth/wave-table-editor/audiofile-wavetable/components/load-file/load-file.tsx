@@ -2,6 +2,7 @@ import React from 'react';
 import toast from 'react-hot-toast';
 import { styled } from 'styled-components';
 import { AUDIO_ACCEPT, FileDrop, isAudioFile, textLight14, theme } from '@chisper/ui-kit';
+import { featureUsed } from '../../../../../common/services/analytics';
 import { MAX_FRAMES } from '../../../../common/wavetable/wavetable-mipmap';
 import { AudioFile, readAudioFile } from '../../../../services/audio-file';
 import { Wavetable } from '../../../../services/wavetable';
@@ -47,13 +48,14 @@ interface Props {
 // an audio file of MAX_SECONDS at most goes to the cutter; a toast says why another one is not taken
 export const LoadFile = ({ onLoad, onWavetable }: Props) => {
   const input = React.useRef<HTMLInputElement>(null);
+  // whether the file was taken
   const load = async (buffer: ArrayBuffer, name: string) => {
     let file: AudioFile;
     try {
       file = await readAudioFile(buffer);
     } catch {
       toast.error(`${name} can't be read as audio`);
-      return;
+      return false;
     }
     if (file.kind === 'wavetable') {
       const { wavetable, frames } = file;
@@ -64,15 +66,19 @@ export const LoadFile = ({ onLoad, onWavetable }: Props) => {
           ? `${name}: the first ${kept} of ${waves(frames)}`
           : `${name}: a wavetable of ${waves(kept)}`
       );
-      return;
+      return true;
     }
     if (file.samples.length / file.sampleRate > MAX_SECONDS) {
       toast.error(`${name} is longer than ${MAX_SECONDS} seconds`);
-      return;
+      return false;
     }
     onLoad(file.samples);
+    return true;
   };
-  const loadFile = async (file: File) => load(await file.arrayBuffer(), file.name);
+  // a file of the user (not an example)
+  const loadFile = async (file: File) => {
+    if (await load(await file.arrayBuffer(), file.name)) featureUsed('wavetable_editor', 'audio_import');
+  };
   const onChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     // the same file may be chosen again

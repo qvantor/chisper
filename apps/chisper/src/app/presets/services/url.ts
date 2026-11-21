@@ -9,12 +9,19 @@ const param = (name: string) => new URLSearchParams(window.location.search).get(
 export const getUrlPresetId = () => param(PRESET_PARAM);
 export const getUrlClipId = () => param(CLIP_PARAM);
 
-// the url of the page with a preset and a clip (null: none), no other params (legacy snapshot ones)
-const pageUrl = (preset: string | null, clip: string | null) => {
-  const url = new URL(window.location.pathname, window.location.origin);
+// the url of a page (this one) with a preset and a clip (null: none), no other params (legacy snapshot ones,
+// those a link brought)
+const pageUrl = (preset: string | null, clip: string | null, page: URL | Location = window.location) => {
+  const url = new URL(page.pathname, page.origin);
   if (preset !== null) url.searchParams.set(PRESET_PARAM, preset);
   if (clip !== null) url.searchParams.set(CLIP_PARAM, clip);
   return url.toString();
+};
+
+// `href` with its preset and its clip alone (throws where it is no url)
+export const publicUrl = (href: string) => {
+  const page = new URL(href);
+  return pageUrl(page.searchParams.get(PRESET_PARAM), page.searchParams.get(CLIP_PARAM), page);
 };
 
 export const presetUrl = (id: string) => pageUrl(id, null);

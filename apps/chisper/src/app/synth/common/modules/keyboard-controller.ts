@@ -4,6 +4,7 @@ import { Note } from '@chisper/ui-kit';
 import { number } from '@chisper/math';
 import { AppModule } from '../../../app/modules';
 import { readStored, writeStored } from '../../../common/services';
+import { featureUsed } from '../../../common/services/analytics';
 import { pianoStarts } from '../piano-octaves';
 import { InputControllerModule } from './input-controller';
 
@@ -138,7 +139,9 @@ export const keyboardController = ({
             const note: Note = [$octave.value + octave, name];
             const pressed = isHeld(note);
             held.set(e.code, note);
-            if (!pressed) onPress(note);
+            if (pressed) return;
+            featureUsed('input', 'qwerty');
+            onPress(note);
           }),
         // a step a press (not its auto-repeat), the page doesn't scroll
         $windowKeyDown
