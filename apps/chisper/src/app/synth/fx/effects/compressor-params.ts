@@ -47,7 +47,7 @@ export const compressorMeterReader = () => {
 };
 
 // the laws of the knobs, as measured: the threshold of the one band circuit (dB of a peak at the output of the
-// synth; -120 dB at the top of the knob), the makeup gain (1..32) and the level (0..4, 1 at the middle)
+// synth; -120 dB at the top of the knob) and the makeup gain (1..32); the level: levelGain of level.ts
 const THRESHOLD_FLOOR = -120;
 // the effects of the Audio Unit work this much (dB) under its output
 const THRESHOLD_SCALE = 1.397;
@@ -62,4 +62,3 @@ export const bandThresholdsDb = (knob: number): [number, number, number] => {
   return [low * squared + THRESHOLD_SCALE, mid * squared + THRESHOLD_SCALE, high * squared + THRESHOLD_SCALE];
 };
 export const makeupGain = (knob: number) => 1 + 31 * knob;
-export const levelGain = (knob: number) => 4 * knob * knob;

@@ -1,5 +1,4 @@
 import React from 'react';
-import { styled } from 'styled-components';
 import hexToRgba from 'hex-to-rgba';
 import {
   Deactivated,
@@ -34,11 +33,10 @@ import {
   xDepth,
   xMs,
 } from './chorus-screen-geometry';
-import { ScreenCanvas, ScreenGrip, ScreenLayer, ScreenPlot } from './screen-grip';
+import { FRAME_SIZE, ScreenCanvas, ScreenFrame, ScreenGrip, ScreenLabels, ScreenPlot } from './screen-grip';
 
-// css px of the screen (narrower on phones, never wider than the display of the compressor)
-export const CHORUS_SCREEN_SIZE: Size = [240, 80];
-const MAX_WIDTH = 348;
+// css px of the screen
+export const CHORUS_SCREEN_SIZE: Size = FRAME_SIZE;
 // the channels: the left one, the right one (their bars, their handles, the glow and the repeats of their taps)
 export const CHANNEL_COLORS = [theme.colors.accent, theme.colors.secondAccent];
 const channelColor = (tap: number) => CHANNEL_COLORS[tapChannel(tap)];
@@ -65,28 +63,10 @@ const STALE_MS = 500;
 const { params: defs } = chorus;
 type ScreenParam = 'd1' | 'd2' | 'depth';
 
-const Root = styled.div`
-  position: relative;
-  width: var(--fx-chart-width, ${CHORUS_SCREEN_SIZE[0]}px);
-  max-width: ${MAX_WIDTH}px;
-  min-width: 96px;
-  height: ${CHORUS_SCREEN_SIZE[1]}px;
-  overflow: hidden;
-  border-radius: 3px;
-  background: ${theme.colors.primaryDark};
-`;
-
+const Root = ScreenFrame;
 const Plot = ScreenPlot;
 
-const Layer = styled(ScreenLayer)`
-  text {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    fill: ${theme.colors.primaryDarkHighContrast};
-    user-select: none;
-  }
-`;
+const Layer = ScreenLabels;
 
 // what moves: the glow of the filter under everything, the taps over their bars and the handles of them
 const Canvas = ScreenCanvas;

@@ -78,6 +78,12 @@ const WASM_CORES = [
     create: 'createChorusWasm',
   },
   {
+    core: 'eq',
+    within: 'chain',
+    facade: 'src/app/synth/fx/effects/eq-wasm',
+    create: 'createEqWasm',
+  },
+  {
     core: 'wavetable-osc',
     facade: 'src/app/synth/common/wavetable/wavetable-osc-wasm',
     create: 'createOscScope, createTableStoreWasm, createVoiceSharedWasm, createVoiceWasm',
@@ -628,7 +634,12 @@ const createCases = (dsp) => {
   };
   // a chain with `kinds` playing (the knobs of the heavy patch), `moved`: by the LFOs
   const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
-  const CHAIN_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+  // the slots by kind (a tree before the EQ reads the first five: its slot is never in its order), the effects of
+  // the cases of every effect (the same in a tree before the EQ: its own cases compare it)
+  const SLOT_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
+  const CHAIN_KINDS = SLOT_KINDS.slice(0, 5);
+  // the EQ of the cases: a peak of band 1 and a high shelf of band 2 (both bands render)
+  const EQ = { t1: 1, f1: 400, q1: 50, g1: 6, t2: 0, f2: 6000, q2: 60, g2: -4, level: 0.5 };
   // the state of a chain of `kinds` in this order, `moved`: its knobs by LFOs
   const chainStateOf = (kinds, moved = false) => {
     const neutral = {
@@ -640,10 +651,11 @@ const createCases = (dsp) => {
         ...{ below: 0, low: 0, mid: 0, high: 0, level: 0.5, mix: 1 },
       },
       reverb: { ...REVERB, decay: 3 },
+      eq: EQ,
     };
-    const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3 };
+    const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3, eq: 1 };
     const target = (kind, key) =>
-      CHAIN_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
+      SLOT_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
     const lfo = {
       mode: 1,
       delay: 0,
@@ -652,33 +664,87 @@ const createCases = (dsp) => {
       phase: 0,
       anchor: { time: 0, phase: 0, period: 0.31 },
     };
+    // `moved` as a list: the routes of its rows [effect, knob, source, amount, min, max, scale] and no more
+    const listed = Array.isArray(moved)
+      ? moved.map(([kind, key, source, amount, min, max, scale]) => ({
+          target: target(kind, key),
+          source,
+          amount,
+          min,
+          max,
+          ...(scale && { scale }),
+        }))
+      : [];
     return {
       slots: Object.fromEntries(
-        CHAIN_KINDS.map((kind) => [
+        SLOT_KINDS.map((kind) => [
           kind,
           { params: neutral[kind], mix: mixes[kind], active: kinds.includes(kind) },
         ])
       ),
-      order: kinds.map((kind) => CHAIN_KINDS.indexOf(kind)),
+      order: kinds.map((kind) => SLOT_KINDS.indexOf(kind)),
       masterGain: 1,
       muted: false,
-      routes: moved
-        ? [
-            { target: target('distortion', 'level'), source: 4, amount: -6, min: -24, max: 12 },
-            { target: target('compressor', 'thresh'), source: 5, amount: 0.3, min: 0, max: 1 },
-            { target: target('delay', 'time'), source: 6, amount: 0.01, min: 0.01, max: 1 },
-            { target: target('reverb', 'mix'), source: 7, amount: 0.4, min: 0, max: 1 },
-          ]
-        : [],
+      routes:
+        moved === true
+          ? [
+              { target: target('distortion', 'level'), source: 4, amount: -6, min: -24, max: 12 },
+              { target: target('compressor', 'thresh'), source: 5, amount: 0.3, min: 0, max: 1 },
+              { target: target('delay', 'time'), source: 6, amount: 0.01, min: 0.01, max: 1 },
+              { target: target('reverb', 'mix'), source: 7, amount: 0.4, min: 0, max: 1 },
+              // (the lines of the EQ: its bands designed every 32 samples)
+              ...(kinds.includes('eq')
+                ? [
+                    {
+                      target: target('eq', 'f1'),
+                      source: 4,
+                      amount: 1.5,
+                      min: 21.53,
+                      max: 20000,
+                      scale: 'log',
+                    },
+                    { target: target('eq', 'g2'), source: 5, amount: 12, min: -24, max: 24 },
+                  ]
+                : []),
+            ]
+          : listed,
       note: null,
       lfos: moved ? { at: 0, instantly: true, lfos: [lfo, lfo, lfo, lfo] } : null,
       meters: [],
     };
   };
+  // the routes of the cases of one effect with LFOs: [effect, knob, source (4, 5: LFO 1, 2), amount, min, max,
+  // scale]; the knobs that are lines of the core (the delay, the EQ) and those it takes a value a block
+  const OWN_ROUTES = {
+    distortion: [
+      ['distortion', 'drive', 4, 4, 0, 12],
+      ['distortion', 'level', 5, -6, -24, 12],
+    ],
+    chorus: [
+      ['chorus', 'depth', 4, 10, 0, 26],
+      ['chorus', 'd1', 5, 8, 0, 20],
+    ],
+    delay: [
+      ['delay', 'time', 4, 0.01, 0.01, 1],
+      ['delay', 'fb', 5, 0.3, 0, 0.9],
+    ],
+    compressor: [
+      ['compressor', 'thresh', 4, 0.3, 0, 1],
+      ['compressor', 'ratio', 5, 10, 1, 30],
+    ],
+    reverb: [
+      ['reverb', 'decay', 4, 2, 0.1, 20],
+      ['reverb', 'size', 5, 0.3, 0, 1],
+    ],
+    eq: [
+      ['eq', 'f1', 4, 1.5, 21.53, 20000, 'log'],
+      ['eq', 'g2', 5, 12, -24, 24],
+    ],
+  };
   const chainOf =
-    (kinds, source, moved = false) =>
+    (kinds, source, moved = false, limited = true) =>
     () => {
-      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds, moved));
+      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds, moved), { limited });
       let at = 0;
       let frame = 0;
       const inL = new Float32Array(BLOCK);
@@ -940,6 +1006,23 @@ const createCases = (dsp) => {
         ((source) => effect(() => dsp.createLimiterWasm(dsp.wasm.limiter, RATE).process, source)),
       dsp.createLimiterDsp && ((source) => effect(() => dsp.createLimiterDsp(RATE).process, source))
     ),
+    // the EQ alone: both bands (a peak and a shelf), at rest (its shelves at 0 dB: nothing rendered); in a chain,
+    // its bands moved by LFOs (designed every 32 samples, their coefficients lines)
+    ...(dsp.wasm.eq && {
+      eq: effect(() => dsp.createEqWasm(dsp.wasm.eq, RATE, { params: EQ }).process, input),
+      'eq neutral': effect(
+        () =>
+          dsp.createEqWasm(dsp.wasm.eq, RATE, {
+            params: { ...EQ, t1: 0, f1: 210, q1: 60, g1: 0, f2: 2040, g2: 0 },
+          }).process,
+        input
+      ),
+    }),
+    ...(dsp.wasm.eq &&
+      dsp.wasm.chain && {
+        'chain eq': chainOf(['eq'], input),
+        'chain eq, lfos': chainOf(['eq'], input, true),
+      }),
     // the delay of the chain core alone: its echoes held (a copy and a pass of lanes), then its Time on the way
     ...(dsp.wasm.delay && {
       delay: effect(() => dsp.createDelayWasm(dsp.wasm.delay, RATE, DELAY).process, input),
@@ -958,6 +1041,17 @@ const createCases = (dsp) => {
       'chain every effect, lfos': chainOf(CHAIN_KINDS, input, true),
       'chain no effect': chainOf([], input),
       'chain at rest': chainOf(CHAIN_KINDS, new Float32Array(RATE)),
+      // each effect alone in the chain, without its limiter (what it costs follows the level it is given): at rest,
+      // with two routes on its own knobs (`OWN_ROUTES`) and with one on its mix (a line a sample of its slot): the
+      // cost of one against the others, and what LFOs add to it
+      'fx none': chainOf([], input, false, false),
+      ...Object.fromEntries(
+        SLOT_KINDS.filter((kind) => kind !== 'eq' || dsp.wasm.eq).flatMap((kind) => [
+          [`fx ${kind}`, chainOf([kind], input, false, false)],
+          [`fx ${kind}, lfos`, chainOf([kind], input, OWN_ROUTES[kind], false)],
+          [`fx ${kind}, lfo mix`, chainOf([kind], input, [[kind, 'mix', 4, 0.4, 0, 1]], false)],
+        ])
+      ),
     }),
     ...(dsp.createEngineWasm &&
       oscScope && {

@@ -24,6 +24,7 @@ use dsp_core::io::StereoIo;
 
 pub mod chain;
 pub mod delay;
+pub mod eq;
 pub mod modulation;
 pub mod units;
 
@@ -382,6 +383,7 @@ pub extern "C" fn chain_layout() -> usize {
         units::DELAY,
         units::COMPRESSOR,
         units::REVERB,
+        units::EQ,
     ] {
         values.push(kind as f64);
         values.push(units::key_names(kind).1 as f64);
@@ -410,4 +412,22 @@ pub extern "C" fn chain_key(kind: u32, key: usize) -> usize {
     }
     // SAFETY: one thread, a name is under COMMAND_LENGTH characters
     unsafe { report(&codes[..name.len().min(COMMAND_LENGTH)]) }
+}
+
+/// the design of band `band` of the EQ (`eq::design`: g, k and the shares of the input, the band and the low) into
+/// the command buffer, as eqDesign of the app works it out (the specs: only the perf build has it). How many
+/// values it wrote
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub extern "C" fn chain_eq_design(
+    band: usize,
+    ty: f64,
+    freq: f64,
+    reso: f64,
+    gain: f64,
+    sample_rate: f64,
+) -> usize {
+    let values = eq::design(band, eq::type_of(ty), freq, reso, gain, sample_rate);
+    // SAFETY: one thread, under COMMAND_LENGTH values
+    unsafe { report(&values) }
 }

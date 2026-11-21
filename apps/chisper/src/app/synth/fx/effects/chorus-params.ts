@@ -51,11 +51,10 @@ export const chorusMeterReader = () => {
 };
 
 // the laws of the knobs, as measured (dsp/chorus/src/lib.rs has them too): the ms the depth moves a tap by at the
-// top of its LFO, the level (0..4, 1 at the middle)
+// top of its LFO (the level: levelGain of level.ts)
 const DEPTH_TOP = 26;
 const TRAVEL_MS = 62.5;
 export const depthMs = (depth: number) => (depth / DEPTH_TOP) * TRAVEL_MS;
-export const levelGain = (knob: number) => 4 * knob * knob;
 
 // Where the LFO has the taps (`targets` of the core, in ms past the latency of a tap): L first, L second, R first,
 // R second; the first tap of a channel on Delay 2, the second on Delay 1, the taps of a channel half a cycle

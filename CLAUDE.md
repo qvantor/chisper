@@ -100,10 +100,13 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   What stays in doubles and why: recursive filters at low frequencies (DC blocker, lowcut; the filter of a voice
   is a state variable filter, which holds a low cutoff in f32), the gain path of the limiter, the delays of the
   reverb lines, the filter of the chorus and the delays of its taps, the bandpass and the times of the delay, the
-  phase a voice keeps between spans (a whole number of 2^-52 of a cycle). A pass that reorders
+  bands of the EQ (state variable filters, both channels in lanes of doubles), the phase a voice keeps between spans
+  (a whole number of 2^-52 of a cycle). A pass that reorders
   a loop (the chunks of the reverb, the voices filtered in pairs, the segments of the delay, the blocks a silent
   chain skips) gives the bits of the plain order: its cargo test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
-  flush-to-zero). Nothing is worked out of a denormal: the audio thread of Chromium and Firefox takes them as 0, Node
+  flush-to-zero); a state in doubles that a channel silent alone leaves to decay while the other plays (the bands of
+  the EQ, the bandpass of the delay) under `TINY_F64` at the end of a segment (`F64x2::flush`); a sample in doubles
+  that goes out as f32 under `TINY` (`F64x2::flush_under`: the out of the EQ). Nothing is worked out of a denormal: the audio thread of Chromium and Firefox takes them as 0, Node
   and WebKit don't (the mean square of a band of the compressor and its peak held are flushed at every sample; its cargo
   tests run the tail with the CPU flushing them). Any change of the bits is an explicit golden update, checked by the quality specs with their
   tolerances as they are and by `node scripts/null-test/run.mjs --against=<ref>` (the difference from a commit, dB
@@ -122,8 +125,10 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   and missing keys mean defaults. A new field changes every preset hash: DB presets get it by
   `scripts/presets/rehash.mjs --apply` on production before the deploy, not legacy code, then `netlify api purgeCache`
   after it (the CDN holds the presets of before).
-- **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), the knob
-  ids of `targets.rs` / `VOICE_MODULES` (a new module goes last; `voice-modules.spec` holds them).
+- **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), `EQ_TYPES`
+  (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
+  a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
+  `voice-modules.spec` holds them).
 - **Netlify**: function specs live in `netlify/tests/`, never in `netlify/functions/` (every file there is
   deployed). Functions import `libs/preset-schema` by relative path (esbuild doesn't know the tsconfig aliases).
   Netlify doesn't typecheck functions: `npm run typecheck` does. `GET /api/presets/:id` is kept a day (and a minute
@@ -207,7 +212,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `processorOptions`); `chain-wasm.ts` is its facade (`takeChainMessage` of `engine-messages.ts`: a message as the
   worklet and a render take it). In the core (`chain.rs`): events queued by frame (one without a time is never
   taken before one with a time sent before it), a slot per effect in the order
-  (`Law`: equal power, linear for the distortion, inside for the chorus and the compressor; the dry signal late by
+  (`Law`: equal power, linear for the distortion and the EQ, inside for the chorus and the compressor; the dry signal late by
   the latency of the effect; gains glide 10 ms; a slot that is off is a wire and its effect forgotten once faded;
   a slot whose effect is late crosses between its input as it is and the late one as it starts and stops; one that
   sounds and leaves the order fades out where it is, the new order waits for it), the mute (with a time: its fade
@@ -229,11 +234,13 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `libs/preset-schema`; a definition gives its params as the core takes them (`core()`: a knob in BPM at the tempo,
   the era of the reverb as the values of its stage; `CHAIN_KEYS` of `chain-params.ts` is their order in the crate).
   `createFxSlot` is what the fx model tells the chain of an effect (params, mix, whether it plays). Default order
-  `FX_TYPES` (distortion, chorus, delay, compressor, reverb), `FX_KINDS` of `chain-params.ts` mirrors it (it can't
+  `FX_TYPES` (distortion, chorus, delay, compressor, reverb, eq), `FX_KINDS` of `chain-params.ts` mirrors it (it can't
   import the schema). A new effect type = a registry entry + its preset schema + a `Unit` of `dsp/chain/src/units.rs`
-  (no crate, bundle, facade or processor of its own). Reverb (16-line FDN), distortion (4× oversampled in two
-  stages, the hard clip antialiased on top: `scripts/distortion-adaa/` holds the measurements and the tables),
-  chorus, compressor and delay are units of the chain core.
+  (no crate, bundle, facade or processor of its own), its kind last (`LIMITER` = `SLOTS` after it; a chain of
+  another count of kinds is another ABI: the null test renders the scenes of the chain of a reference with its own
+  facades). Reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip antialiased on top:
+  `scripts/distortion-adaa/` holds the measurements and the tables), chorus, compressor, delay and EQ are units of
+  the chain core.
 - Delay (`dsp/chain/src/delay.rs`, held to renders of the native nodes it replaced: `scripts/delay-native/`,
   `dsp/measurements/delay.json`, `delay-measured.spec.ts`): a line a channel read as a `DelayNode` reads it (linear,
   times in f32), a bandpass in the form of a `BiquadFilterNode` inside the feedback (its coefficients once a block),
@@ -261,12 +268,22 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   the taps as it has them (its meter, posted as the one of the compressor is, only while watched:
   `meter-report.ts` in the worklet, `createFxMeter` on the main thread), between two posts the main thread moves
   the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
+- EQ (`dsp/chain/src/eq.rs`, measured: `dsp/measurements/eq.json`, `eq-measured.spec.ts`; the laws found by
+  `scripts/eq-fit/fit.mjs`): the one of the Audio Unit, two bands of the Audio EQ Cookbook (band 1 a low shelf, a peak
+  or a highpass, band 2 a high shelf, a peak or a lowpass) as state variable filters in lanes of doubles. Its design
+  is `eqDesign` of `libs/math/src/filter/eq.ts` too, the same operations (`eq-design.spec` holds them bit for bit
+  through `chain_eq_design` of the perf build; the screen draws it). The frequency, resonance and gain are lines of the
+  routes (the frequency in octaves: in Hz a jump of the knob took the band under 0 Hz): a band moving is designed every
+  32 samples, its coefficients lines between; a band that renders nothing (a shelf or a peak at 0 dB, the gain of a
+  pass) is not rendered. Its screen (`eq-screen.tsx`) draws on a canvas (`useLiveDraw`). Deliberate differences: its
+  Mix (the reference has none), its knobs glide.
 - Without AudioWorklet or wasm SIMD, or when the module of the engine fails, no effect and no sound; until `ready`
   nothing plays. One effect failing in the core leaves the others playing.
 - Knob modulation of the effects is in the core (`dsp/chain/src/modulation.rs`; the envelopes and the LFOs of the
   last note, `dsp-core/src/{envelope,lfo}.rs` as the voices run them, worked out once for the chain and only while
-  a route moves a knob of an effect that plays): a knob of a unit one value a block, the knobs of the delay and the
-  mix of a slot as lines, an offset a sample added to the knob as it glides. The fx model sends the routes of the
+  a route moves a knob of an effect that plays): a knob of a unit one value a block, the knobs of the delay, the
+  frequencies, resonances and gains of the EQ and the mix of a slot as lines, an offset a sample added to the knob as
+  it glides (of a frequency of the EQ in octaves). The fx model sends the routes of the
   effects that play as targets of the core (`chainRoutes`), the note and the LFO states only while a route reads
   them; `fx-modulation.ts` keeps the same sums on the main thread for the marks of the knobs and the charts.
 
@@ -292,7 +309,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
   tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub, filter types; `compressor` and `chorus` for the effects).
+  frames, frame fades, envelopes, aliasing, noise, sub, filter types; `compressor`, `chorus` and `eq` for the
+  effects).
   Aliasing −70 dB, spurs −80 dB.
 - The filter of a voice (`filter.rs`): the types of a BiquadFilterNode (a TPT SVF, bit for bit as before) and the
   model types of the AU (`dsp-core/src/filter_model.rs`, measured: `filter-types.json`, `filter-types-measured.spec.ts`;
@@ -377,7 +395,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 
 - One cdylib with a C ABI (no wasm-bindgen, no SharedArrayBuffer): `engine`, whose rlibs are `wavetable-osc` (the
   voices and the store, `osc_*`) and `chain` (`chain_*`, `unit_*`; the effects `limiter`, `reverb`, `distortion`,
-  `compressor`, `chorus` are its rlibs, the delay, the slots and the modulation its modules); `engine_*` is the block
+  `compressor`, `chorus` are its rlibs, the delay, the EQ, the slots and the modulation its modules); `engine_*` is the block
   of both. Shared crates `dsp-core` (biquads, the oversampling chain, true peak, delay blocks, lanes, the envelopes
   and the LFOs), `jsmath`, `wasm-rt` (no_std on wasm32, panic traps, dlmalloc). Toolchain pinned in
   `dsp/rust-toolchain.toml`, `+simd128`, 64 KiB stack, `panic = "abort"`, fat LTO.

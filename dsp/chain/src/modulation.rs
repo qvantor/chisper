@@ -3,12 +3,12 @@
 //! of the knobs; the LFOs run without a note too, on their clocks). Worked out once for the chain, only while a
 //! route moves a knob of an effect that plays.
 //!
-//! A knob of a unit takes one value a block (`set`: the unit glides to it). The knobs of the delay and the mix
-//! of a slot are lines: the offset the routes move the knob by, a value a sample (worked out at points every 32
-//! samples of a block and its last sample, linear between them), added to the knob as it glides. A change of a
-//! line (a route, a knob, a new note) glides from where the line was in GLIDE: no step; a line gone (its
-//! routes, or its slot stops playing) goes to 0 so, and the chain adds a line for as long as there is one: a slot
-//! that fades out takes its offset down with it.
+//! A knob of a unit takes one value a block (`set`: the unit glides to it). The knobs of the delay, the bands of
+//! the EQ and the mix of a slot are lines: the offset the routes move the knob by, a value a sample (worked out
+//! at points every 32 samples of a block and its last sample, linear between them; of the frequency of a band of
+//! the EQ in octaves), added to the knob as it glides. A change of a line (a route, a knob, a new note) glides
+//! from where the line was in GLIDE: no step; a line gone (its routes, or its slot stops playing) goes to 0 so,
+//! and the chain adds a line for as long as there is one: a slot that fades out takes its offset down with it.
 
 use alloc::{vec, vec::Vec};
 
@@ -16,11 +16,12 @@ use dsp_core::envelope::{envelope_value, EnvelopeParams};
 use dsp_core::finite;
 use dsp_core::glided::glide_length;
 use dsp_core::lfo::{frac, Anchor, LfoBlock, LfoGlobal, LfoState, KNOBS, LFOS, PHASE, RATE, TABLE};
-use jsmath::{max, min, pow, sqrt};
+use jsmath::{log2, max, min, pow, sqrt};
 
 use crate::chain::equal_power;
 use crate::delay;
-use crate::units::{law, Law, DELAY as DELAY_SLOT, MAX_PARAMS, SLOTS};
+use crate::eq;
+use crate::units::{law, Law, DELAY as DELAY_SLOT, EQ as EQ_SLOT, MAX_PARAMS, SLOTS};
 
 /// the sources: ENV 1–3, VELO, LFO 1–4 (MOD_SOURCES of the app)
 pub const ENVELOPES: usize = 3;
@@ -39,14 +40,40 @@ pub const NOTE: usize = 7 + ENVELOPES * 8;
 /// the values of a state of an LFO: mode, delay, rise, smooth, phase, the anchor (time, phase, period), a new table
 pub const LFO_STATE: usize = 9;
 
-/// the lines: the knobs of the delay, then the dry and the wet gain of each slot
+/// the lines: the knobs of the units that are lines (`KNOB_LINES`: of the delay, the frequency, the resonance and
+/// the gain of each band of the EQ), then the dry and the wet gain of each slot
 pub const LINE_TIME: usize = 0;
 pub const LINE_FB: usize = 1;
 pub const LINE_PAN: usize = 2;
 pub const LINE_FREQ: usize = 4;
 pub const LINE_Q: usize = 5;
-pub const LINE_MIX: usize = 6;
+pub const LINE_EQ: usize = 6;
+pub const LINE_MIX: usize = KNOB_LINES.len();
 pub const LINES: usize = LINE_MIX + 2 * SLOTS;
+// (`LINE_EQ` is the row of the frequency of band 1: a line added before the rows of the EQ would shift them)
+const _: () = assert!(KNOB_LINES[LINE_EQ].0 == EQ_SLOT && KNOB_LINES[LINE_EQ].1 == eq::F1);
+
+/// the knobs of the units that are lines, a line each in this order (the pan of the delay two: the offset of each
+/// channel): the slot, the key, how a knob maps to its line. The lines of a slot are its `Moves` (those of the EQ
+/// by band: the frequency in octaves, the resonance, the gain)
+const KNOB_LINES: [(u32, usize, Map); 12] = [
+    (DELAY_SLOT, delay::TIME, Map::Linear),
+    (DELAY_SLOT, delay::FB, Map::Linear),
+    (DELAY_SLOT, delay::PAN, Map::PanLeft),
+    (DELAY_SLOT, delay::PAN, Map::PanRight),
+    (DELAY_SLOT, delay::FREQ, Map::Linear),
+    (DELAY_SLOT, delay::Q, Map::Linear),
+    (EQ_SLOT, eq::F1, Map::Octaves),
+    (EQ_SLOT, eq::Q1, Map::Linear),
+    (EQ_SLOT, eq::G1, Map::Linear),
+    (EQ_SLOT, eq::F2, Map::Octaves),
+    (EQ_SLOT, eq::Q2, Map::Linear),
+    (EQ_SLOT, eq::G2, Map::Linear),
+];
+
+/// the switches of the units with lines, no knob a route moves (the app routes no switch): set at every block, the
+/// mode of the delay would change and a type of the EQ start its fade again and again
+const SWITCHES: [(u32, usize); 3] = [(DELAY_SLOT, delay::MODE), (EQ_SLOT, eq::T1), (EQ_SLOT, eq::T2)];
 
 const SEGMENT: usize = 32;
 const LOG: u32 = 1;
@@ -83,10 +110,13 @@ struct Group {
     count: usize,
 }
 
-// how a knob maps to what its line is added to: as it is, the offset of a channel of a pan, a gain of a mix
+// how a knob maps to what its line is added to: as it is, the octaves of a frequency of the EQ (its knob glides in
+// octaves: an offset in Hz of the new knob over the knob on its way there went under 0 Hz), the offset of a channel
+// of a pan, a gain of a mix
 #[derive(Clone, Copy, PartialEq)]
 enum Map {
     Linear,
+    Octaves,
     PanLeft,
     PanRight,
     Dry,
@@ -97,6 +127,8 @@ enum Map {
 fn mapped(map: Map, value: f64) -> f64 {
     match map {
         Map::Linear => value,
+        // (within the knob, as the band takes it)
+        Map::Octaves => log2(min(max(value, eq::MIN_FREQ), eq::MAX_FREQ)),
         Map::PanLeft => max(0.0, value),
         Map::PanRight => max(0.0, -value),
         Map::Dry => equal_power(value).0,
@@ -200,7 +232,7 @@ impl Modulation {
             lines: core::array::from_fn(|index| Line {
                 group: None,
                 slot: if index < LINE_MIX {
-                    DELAY_SLOT as usize
+                    KNOB_LINES[index].0 as usize
                 } else {
                     (index - LINE_MIX) / 2
                 },
@@ -322,25 +354,23 @@ impl Modulation {
                     line(LINE_MIX + 2 * slot + 1, Map::Wet);
                 }
             }
-        } else if slot == DELAY_SLOT as usize {
-            match key {
-                delay::TIME => line(LINE_TIME, Map::Linear),
-                delay::FB => line(LINE_FB, Map::Linear),
-                delay::PAN => {
-                    line(LINE_PAN, Map::PanLeft);
-                    line(LINE_PAN + 1, Map::PanRight);
+        } else {
+            // a knob that is a line, or a knob the unit takes once a block (no switch)
+            let mut lined = false;
+            for (index, &(of, knob, map)) in KNOB_LINES.iter().enumerate() {
+                if (of as usize, knob) == (slot, key) {
+                    line(index, map);
+                    lined = true;
                 }
-                delay::FREQ => line(LINE_FREQ, Map::Linear),
-                delay::Q => line(LINE_Q, Map::Linear),
-                _ => {}
             }
-        } else if key < MAX_PARAMS {
-            self.moved.push(Moved {
-                slot,
-                key,
-                group,
-                last: f64::NAN,
-            });
+            if !lined && key < MAX_PARAMS && !SWITCHES.contains(&(slot as u32, key)) {
+                self.moved.push(Moved {
+                    slot,
+                    key,
+                    group,
+                    last: f64::NAN,
+                });
+            }
         }
     }
 
@@ -558,14 +588,9 @@ impl Modulation {
 
     // the knob a line follows
     fn base_of(index: usize, bases: &Bases) -> f64 {
-        let delay = &bases.params[DELAY_SLOT as usize];
-        match index {
-            LINE_TIME => delay[delay::TIME],
-            LINE_FB => delay[delay::FB],
-            LINE_FREQ => delay[delay::FREQ],
-            LINE_Q => delay[delay::Q],
-            index if index < LINE_MIX => delay[delay::PAN],
-            index => bases.mix[(index - LINE_MIX) / 2],
+        match KNOB_LINES.get(index) {
+            Some(&(slot, key, _)) => bases.params[slot as usize][key],
+            None => bases.mix[(index - LINE_MIX) / 2],
         }
     }
 

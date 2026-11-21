@@ -12,3 +12,6 @@ export const formatMillis = (value: number) => {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
   return value < 10 ? `${value.toFixed(1)}ms` : `${Math.round(value)}ms`;
 };
+
+// a knob in % as it is (0..100)
+export const formatPercent = (value: number) => `${Math.round(value)}%`;

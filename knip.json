@@ -17,6 +17,7 @@
     "scripts/null-test/run.mjs",
     "scripts/distortion-adaa/run.mjs",
     "scripts/distortion-adaa/tables.mjs",
+    "scripts/eq-fit/fit.mjs",
     "scripts/wasm-browsers/run.mjs",
     "scripts/wasm-browsers/app.mjs",
     "scripts/renders/run.mjs",

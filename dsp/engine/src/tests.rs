@@ -8,7 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::*;
 use chain::chain::{Event, IN_PROCESS, LIMITER_STAGE, OUTSIDE, SET_ACTIVE, SET_MIX, SET_ORDER};
-use chain::units::{CHORUS, COMPRESSOR, DELAY, DISTORTION, MAX_PARAMS, REVERB, SLOTS};
+use chain::units::{CHORUS, COMPRESSOR, DELAY, DISTORTION, EQ, MAX_PARAMS, REVERB, SLOTS};
 use dsp_core::biquad::FilterType;
 use wavetable_osc::envelope::EnvelopeParams;
 use wavetable_osc::filter::{FilterOptions, Kind};
@@ -61,6 +61,7 @@ fn params() -> [[f64; MAX_PARAMS]; SLOTS] {
     all[REVERB as usize][..12].copy_from_slice(&[
         20.0, 0.02, 0.5, 2.0, 6000.0, 1.0, 0.2, 1.0, 0.5, 0.0, 24000.0, 0.0,
     ]);
+    all[EQ as usize][..9].copy_from_slice(&[1.0, 300.0, 50.0, 6.0, 2.0, 8000.0, 40.0, 0.0, 0.6]);
     all
 }
 
@@ -225,7 +226,7 @@ fn trapped(call: impl FnOnce() -> u32) -> bool {
     catch_unwind(AssertUnwindSafe(call)).is_err()
 }
 
-const ALL: [u32; 5] = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB];
+const ALL: [u32; 6] = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ];
 
 #[test]
 fn a_block_is_the_voices_then_the_chain_on_their_sum() {

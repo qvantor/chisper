@@ -4,9 +4,9 @@
 use alloc::{vec, vec::Vec};
 
 use crate::chain::*;
-use crate::delay;
-use crate::modulation::{KEYS, LFO_SOURCE, LFO_STATE, MIX_KEY, NOTE};
+use crate::modulation::{Bases, Modulation, KEYS, LFO_SOURCE, LFO_STATE, LINE_EQ, MIX_KEY, NOTE};
 use crate::units::*;
+use crate::{delay, eq};
 
 const BLOCK: usize = 128;
 
@@ -21,11 +21,12 @@ fn params() -> [[f64; MAX_PARAMS]; SLOTS] {
     all[REVERB as usize][..12].copy_from_slice(&[
         20.0, 0.02, 0.5, 2.0, 6000.0, 1.0, 0.2, 1.0, 0.5, 0.0, 24000.0, 0.0,
     ]);
+    all[EQ as usize][..9].copy_from_slice(&[1.0, 300.0, 50.0, 6.0, 2.0, 8000.0, 40.0, 0.0, 0.6]);
     all
 }
 
 // a seeded noise in [-1, 1)
-fn noise(seed: u32) -> impl FnMut() -> f32 {
+pub(crate) fn noise(seed: u32) -> impl FnMut() -> f32 {
     let mut state = seed;
     move || {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -116,7 +117,7 @@ fn unit_of(kind: u32, rate: f64, mix: f64) -> Unit {
     Unit::new(kind, rate, &params).unwrap()
 }
 
-fn bits(data: &[f32]) -> Vec<u32> {
+pub(crate) fn bits(data: &[f32]) -> Vec<u32> {
     data.iter().map(|value| value.to_bits()).collect()
 }
 
@@ -148,13 +149,13 @@ fn a_slot_alone_is_its_unit() {
     }
 }
 
-// after a clear a slot is where its knobs have it at once: all wet, the distortion, the delay and the reverb are
-// their units from the first block
+// after a clear a slot is where its knobs have it at once: all wet, the distortion, the delay, the reverb and the
+// EQ are their units from the first block
 #[test]
 fn a_slot_all_wet_after_a_clear_is_its_unit() {
     let rate = 48000.0;
     let input = signal(2, 30 * BLOCK, 0.4);
-    for kind in [DISTORTION, DELAY, REVERB] {
+    for kind in [DISTORTION, DELAY, REVERB, EQ] {
         let mut chain = chain_of(rate, &[kind], 1.0, false);
         chain.push(event(CLEAR, 0.0, 0.0, &[]));
         let out = render(&mut chain, &input, |_, _| {});
@@ -389,7 +390,7 @@ fn a_rest_is_the_blocks_it_skipped() {
     for channel in input.iter_mut() {
         channel[20 * BLOCK..600 * BLOCK].fill(0.0);
     }
-    let kinds = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB];
+    let kinds = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ];
     let run = |restless: bool| {
         let mut chain = chain_of(rate, &kinds, 0.5, true);
         chain.restless = restless;
@@ -969,6 +970,58 @@ fn a_route_moves_a_knob_of_a_unit_once_a_block() {
     same(&after, &through(&mut unit, &input), "the level back");
 }
 
+// a switch of a unit with lines (the mode of the delay, the types of the bands of the EQ) is no knob a route moves:
+// set at every block it would change the mode, or start a fade of the type, again and again; the level of the EQ is
+#[test]
+fn a_route_moves_no_switch() {
+    let mut modulation = Modulation::new(48000.0);
+    let mut routes = Vec::new();
+    let knobs = [(DELAY, delay::MODE), (EQ, eq::T1), (EQ, eq::T2), (EQ, eq::LEVEL)];
+    for (slot, key) in knobs {
+        route(&mut routes, slot as usize * KEYS + key, 0, 1.0, 0.0, 2.0);
+    }
+    modulation.set_routes(&routes);
+    let moved = knobs.map(|(slot, key)| modulation.moves(slot as usize, key));
+    assert_eq!(moved, [false, false, false, true]);
+}
+
+// the line of the frequency of a band is in octaves: a route of the log scale moves any knob by the same, so a
+// jump of the knob leaves it where it is and the band glides to it in octaves (in Hz the offset of the new knob
+// came in 10 ms, the knob on its way there in octaves: the band under 0 Hz, at its bottom, ~20 ms)
+#[test]
+fn a_jump_of_the_frequency_of_a_band_keeps_its_route_in_octaves() {
+    let mut modulation = Modulation::new(48000.0);
+    modulation.grow(BLOCK);
+    let mut routes = Vec::new();
+    // the velocity, an octave down
+    route(&mut routes, EQ as usize * KEYS + eq::F1, 3, -1.0, 20.0, 20000.0);
+    routes[5] = 1.0;
+    modulation.set_routes(&routes);
+    modulation.set_note(true, &note(0.0, 0.01, 1.0));
+    let mut params = params();
+    let mix = [1.0; SLOTS];
+    let (on, mixes) = ([true; SLOTS], [true; SLOTS]);
+    for block in 0..16 {
+        params[EQ as usize][eq::F1] = if block < 8 { 100.0 } else { 10000.0 };
+        let bases = Bases {
+            params: &params,
+            mix: &mix,
+            on: &on,
+            mixes: &mixes,
+        };
+        modulation.block((block * BLOCK) as f64, BLOCK, &bases, &mut |_, _, _| {});
+        // (from the 5th block on: the route came in from 0 in 10 ms)
+        if block >= 4 {
+            let line = modulation.line(LINE_EQ, BLOCK).unwrap();
+            let worst = line
+                .iter()
+                .map(|value| (value + 1.0).abs())
+                .fold(0.0, jsmath::max);
+            assert!(worst < 1e-12, "block {block}: {worst}");
+        }
+    }
+}
+
 // an LFO on the mix of a slot: its gains move with it, a line a sample; the knobs of the delay too
 #[test]
 fn an_lfo_moves_the_lines_of_the_mix_and_of_the_delay() {
@@ -1156,7 +1209,12 @@ fn a_slot_that_waits_for_the_order_starts_the_lines_of_its_mix_in_it() {
 fn the_chain_renders_at_the_rates_of_an_export() {
     for &rate in &[22050.0, 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0] {
         let input = signal(13, 300 * BLOCK, 0.4);
-        let mut chain = chain_of(rate, &[DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB], 0.5, true);
+        let mut chain = chain_of(
+            rate,
+            &[DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ],
+            0.5,
+            true,
+        );
         let out = render(&mut chain, &input, |_, _| {});
         assert!(
             out[0].iter().chain(&out[1]).all(|value| value.is_finite()),

@@ -11,6 +11,22 @@ export const SCREEN_COLOR = theme.colors.accent;
 const KEY_STEP = 0.02;
 const KEY_DIRECTIONS: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 };
 
+// a value of a param within its range at its precision
+export const withinDef = ({ min, max, precision = 1 }: FxParamDef, value: number) =>
+  number.thresholds(number.round(value, precision), min, max);
+
+// the value a key moves a param from `value` to: a step along the travel of its knob (`direction` 1 or -1)
+export const keyStep = ({ min, max, mode = 'linear' }: FxParamDef, value: number, direction: number) => {
+  const scale = valueScale(mode).domain([min, max]).range([0, 1]);
+  return scale.invert(number.thresholds(scale(value) + direction * KEY_STEP, 0, 1));
+};
+
+// px of the viewport a px of the screen a grip is on: the screen may be scaled (the mini view of a phone)
+export const pointerScale = (grip: HTMLElement) => {
+  const plot = grip.parentElement;
+  return (plot?.offsetWidth && plot.getBoundingClientRect().width / plot.offsetWidth) || 1;
+};
+
 // the layers of a screen: the plot its size is read from, what stands still (an svg), what moves (a canvas)
 export const ScreenPlot = styled.div`
   position: absolute;
@@ -28,6 +44,30 @@ export const ScreenLayer = styled.svg`
 `;
 export const ScreenCanvas = styled.canvas`
   ${layer}
+`;
+
+// a screen of a group of its own (the chorus, the EQ): css px of it (narrower on phones, never wider than the
+// display of the compressor), its frame, the layer of its labels
+export const FRAME_SIZE = [240, 80] as const;
+const FRAME_MAX_WIDTH = 348;
+export const ScreenFrame = styled.div`
+  position: relative;
+  width: var(--fx-chart-width, ${FRAME_SIZE[0]}px);
+  max-width: ${FRAME_MAX_WIDTH}px;
+  min-width: 96px;
+  height: ${FRAME_SIZE[1]}px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: ${theme.colors.primaryDark};
+`;
+export const ScreenLabels = styled(ScreenLayer)`
+  text {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    fill: ${theme.colors.primaryDarkHighContrast};
+    user-select: none;
+  }
 `;
 
 // what is dragged on the screen of an effect, by its shape: `y` a line across it dragged up and down (a grip at
@@ -160,14 +200,14 @@ export interface ScreenGripProps<Param extends string = string> {
 const Grip = (props: ScreenGripProps) => {
   const { param, def, value, x, y, axis, shape, color, valueAt, setParam, onHold, disabled, limit, twin } =
     props;
-  const { name, label, min, max, precision = 1, mode = 'linear', formatValue } = def;
+  const { name, label, min, max, formatValue } = def;
   const [active, setActive] = React.useState(false);
   const [trackPointer] = React.useState(singlePointerTracker);
   const last = React.useRef(value);
   const text = formatValue?.(value);
 
   const emit = (next: number) => {
-    const within = number.thresholds(number.round(next, precision), min, max);
+    const within = withinDef(def, next);
     const rounded = limit ? limit(param, within) : within;
     if (rounded === last.current) return;
     last.current = rounded;
@@ -181,9 +221,7 @@ const Grip = (props: ScreenGripProps) => {
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     last.current = value;
-    // the px of the pointer are those of the viewport: the screen may be scaled (the mini view of a phone)
-    const plot = e.currentTarget.parentElement;
-    const scale = (plot?.offsetWidth && plot.getBoundingClientRect().width / plot.offsetWidth) || 1;
+    const scale = pointerScale(e.currentTarget);
     const along = (pointer: { clientX: number; clientY: number }) =>
       axis === 'x' ? pointer.clientX : pointer.clientY;
     const from = along(e);
@@ -205,8 +243,7 @@ const Grip = (props: ScreenGripProps) => {
     const direction = KEY_DIRECTIONS[e.key];
     if (!direction) return;
     e.preventDefault();
-    const scale = valueScale(mode).domain([min, max]).range([0, 1]);
-    emitFromNow(scale.invert(number.thresholds(scale(value) + direction * KEY_STEP, 0, 1)));
+    emitFromNow(keyStep(def, value, direction));
   };
 
   const place = { left: x, top: y, ...(color && { '--grip-color': color }) } as React.CSSProperties;

@@ -3,7 +3,8 @@
 
 use alloc::boxed::Box;
 
-use crate::delay::{Delay, Moves};
+use crate::delay::Delay;
+use crate::eq::Eq;
 use chorus::Chorus;
 use compressor::Compressor;
 use distortion::Distortion;
@@ -17,14 +18,29 @@ pub const CHORUS: u32 = 1;
 pub const DELAY: u32 = 2;
 pub const COMPRESSOR: u32 = 3;
 pub const REVERB: u32 = 4;
-pub const LIMITER: u32 = 5;
+pub const EQ: u32 = 5;
+pub const LIMITER: u32 = 6;
+
+/// what the routes move in a block, as offsets from the knobs (seconds, gains, Hz), a value a sample: the lines of
+/// `modulation`. Of the delay `time` on both lines, `fb` on the gains of the mode, `pan` on the offset of each
+/// channel, the filter once a block; of the EQ (`eq::Eq`) the frequency (in octaves), the resonance and the gain
+/// of each band
+#[derive(Default, Clone, Copy)]
+pub struct Moves<'a> {
+    pub time: Option<&'a [f64]>,
+    pub fb: Option<&'a [f64]>,
+    pub pan: [Option<&'a [f64]>; 2],
+    pub freq: f64,
+    pub q: f64,
+    pub eq: [Option<&'a [f64]>; 6],
+}
 
 /// the slots of the chain: one of each effect, a slot by its kind
-pub const SLOTS: usize = 5;
+pub const SLOTS: usize = 6;
 
 /// how a slot mixes its effect in: the dry and the wet gain by equal power (the wet signal unrelated to the dry
-/// one: echoes, a reverb), linear (in time with it: the distortion), or the effect mixes inside (the param of
-/// its mix: the slot passes it alone)
+/// one: echoes, a reverb), linear (in time with it: the distortion, the EQ), or the effect mixes inside (the param
+/// of its mix: the slot passes it alone)
 #[derive(Clone, Copy, PartialEq)]
 pub enum Law {
     EqualPower,
@@ -34,7 +50,7 @@ pub enum Law {
 
 pub fn law(kind: u32) -> Law {
     match kind {
-        DISTORTION => Law::Linear,
+        DISTORTION | EQ => Law::Linear,
         CHORUS => Law::Inside(chorus::MIX),
         COMPRESSOR => Law::Inside(compressor::MIX),
         _ => Law::EqualPower,
@@ -113,6 +129,18 @@ pub fn key_names(kind: u32) -> ([&'static str; MAX_PARAMS], usize) {
             name(reverb::BODY, "body");
             reverb::PARAMS
         }
+        EQ => {
+            name(crate::eq::T1, "t1");
+            name(crate::eq::F1, "f1");
+            name(crate::eq::Q1, "q1");
+            name(crate::eq::G1, "g1");
+            name(crate::eq::T2, "t2");
+            name(crate::eq::F2, "f2");
+            name(crate::eq::Q2, "q2");
+            name(crate::eq::G2, "g2");
+            name(crate::eq::LEVEL, "level");
+            crate::eq::PARAMS
+        }
         _ => 0,
     };
     (names, count)
@@ -124,6 +152,7 @@ pub enum Unit {
     Delay(Box<Delay>),
     Compressor(Box<Compressor>),
     Reverb(Box<Reverb>),
+    Eq(Box<Eq>),
     Limiter(Box<Limiter>),
 }
 
@@ -140,6 +169,7 @@ impl Unit {
             DELAY => Unit::Delay(Box::new(Delay::new(sample_rate, &head(params)))),
             COMPRESSOR => Unit::Compressor(Box::new(Compressor::new(sample_rate, &head(params)))),
             REVERB => Unit::Reverb(Box::new(Reverb::new(sample_rate, &head(params)))),
+            EQ => Unit::Eq(Box::new(Eq::new(sample_rate, &head(params)))),
             LIMITER => Unit::Limiter(Box::new(Limiter::new(sample_rate))),
             _ => return None,
         })
@@ -164,6 +194,7 @@ impl Unit {
                 }
                 unit.set(&changes[..count], routed);
             }
+            Unit::Eq(unit) => unit.set(present, &head(values)),
             Unit::Limiter(_) => {}
         }
     }
@@ -187,7 +218,7 @@ impl Unit {
         }
     }
 
-    /// a block of the delay with what the routes move in it
+    /// a block of the delay or the EQ with what the routes move in it
     #[inline]
     pub fn process_moved(
         &mut self,
@@ -199,6 +230,7 @@ impl Unit {
     ) {
         match self {
             Unit::Delay(unit) => unit.process(in_l, in_r, out_l, out_r, moves),
+            Unit::Eq(unit) => unit.process(in_l, in_r, out_l, out_r, moves),
             _ => self.process(in_l, in_r, out_l, out_r),
         }
     }
@@ -211,6 +243,7 @@ impl Unit {
             Unit::Delay(unit) => unit.process(in_l, in_r, out_l, out_r, &Moves::default()),
             Unit::Compressor(unit) => unit.process(in_l, in_r, out_l, out_r),
             Unit::Reverb(unit) => unit.process(in_l, in_r, out_l, out_r),
+            Unit::Eq(unit) => unit.process(in_l, in_r, out_l, out_r, &Moves::default()),
             Unit::Limiter(unit) => unit.process(in_l, in_r, out_l, out_r),
         }
     }
@@ -223,6 +256,7 @@ impl Unit {
             Unit::Delay(unit) => unit.forget(),
             Unit::Compressor(unit) => unit.forget(),
             Unit::Reverb(unit) => unit.forget(),
+            Unit::Eq(unit) => unit.forget(),
             Unit::Limiter(unit) => unit.forget(),
         }
     }
@@ -235,6 +269,7 @@ impl Unit {
             Unit::Delay(unit) => unit.idle(),
             Unit::Compressor(unit) => unit.idle(),
             Unit::Reverb(unit) => unit.idle(),
+            Unit::Eq(unit) => unit.idle(),
             Unit::Limiter(unit) => unit.idle(),
         }
     }

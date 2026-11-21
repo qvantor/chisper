@@ -8,4 +8,5 @@ export const FX_COLORS: Record<FxType, string> = {
   delay: theme.colors.secondAccent,
   compressor: theme.colors.thirdAccent,
   reverb: theme.colors.accent,
+  eq: theme.colors.fifthAccent,
 };

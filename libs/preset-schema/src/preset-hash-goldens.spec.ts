@@ -100,8 +100,22 @@ const FULL = {
   },
   v: { leg: true, port: 0.12, max: 1, bd: 12, bu: 0 },
   fx: {
-    o: ['reverb', 'compressor', 'chorus', 'distortion'],
+    o: ['reverb', 'compressor', 'chorus', 'distortion', 'eq'],
     distortion: { a: true, on: false, mix: 0.6, mode: 1, drive: 4, tone: 8000, level: -6 },
+    eq: {
+      a: true,
+      on: true,
+      mix: 0.9,
+      t1: 2,
+      f1: 85.5,
+      q1: 42,
+      g1: 0,
+      t2: 1,
+      f2: 6300,
+      q2: 77.5,
+      g2: -4.5,
+      level: 0.6,
+    },
     chorus: {
       a: true,
       on: true,
@@ -201,14 +215,14 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: '35b8b0f5ca6a937ddd6b7f2cbfa5d17e14fad5d0ab5ef156966320524740e03f',
-  full: 'c28fb499dcb2183666b4154b24b986abeee2e99e689ffa5740ad86aaa5e73a8a',
-  legacy: 'f2a097f4512fe6494c30b1f15db32102ba648e35671636435b6c27e5b1e29267',
-  partial: '0b05a78f33a7791dc9c682d6fbcc9fc1d269a17db6996664048ae267069df87e',
-  'fx order without a type': 'cd9067fcd8e6399111ac6024ead9570e852b0429762843621d9c25e5d209f04a',
-  'a model filter': 'acadc4d022e1188b04ab88db01bab2ebab2e3e7b07487e06099359ef83f3005e',
-  'an unknown filter type': '81f92aac53fe29af896cb26e4e43831f3f8fa1489f19cb136d37d021b96867c3',
-  'its default type': '81f92aac53fe29af896cb26e4e43831f3f8fa1489f19cb136d37d021b96867c3',
+  empty: '111cf48e2af8aee4a6bf4ec649055e0f543360ad215fc55b667b84a1b15bf4fa',
+  full: 'db84066953cde16ce70380ea37ce78638d552dc4816858bc2a22d92c747d1e00',
+  legacy: '16eeb1526d8d1379316255a011bdba0df864664be8e6060c5a55510d46fe0fb9',
+  partial: '1917be9e53ebb34e98b3f16bf2d07c2ca76ee85e7fab0cc486d69b9e5dc32990',
+  'fx order without a type': 'caf31e412e94c5138e96f9796d0ce705202bcf95b34462d46de7dbced4862735',
+  'a model filter': '4e4b696fbd3183bbd2f603a552f7794210f0f49f5423400eb2fe723a1c1fb8c8',
+  'an unknown filter type': '3c757c5688fab9eedc20e1986f334f87bdafac7415646563076ef6f901604a2d',
+  'its default type': '3c757c5688fab9eedc20e1986f334f87bdafac7415646563076ef6f901604a2d',
 };
 
 // not presets: the schema rejects them
@@ -250,6 +264,7 @@ const INVALID: Record<string, unknown> = {
     },
   },
   'an fx order that is not a list': { fx: { o: 'reverb' } },
+  'an EQ type that is none': { fx: { eq: { t1: 3 } } },
 };
 
 // the url snapshot of the fx: never fails, invalid values fall back to the defaults
@@ -260,9 +275,9 @@ const FX_SNAPS: Record<string, unknown> = {
 };
 
 const FX_SNAP_HASHES: Record<string, string> = {
-  null: '3efdcdea164f4693316d0c640c2febe1b3028a40495ef1b43f18e98719fdd4c6',
-  garbage: '96f796247c27ac9bf0505cf74b680bf6b3112a171274aff504f203986bcd79f4',
-  full: '41d735751f9421ce37de6a17d58d983d27217a4c3ab6b61834ebc210571df060',
+  null: '86be5d469158d242c547b4be48ad0bf3c5af162ed3a5ad75292cf36d1a03942a',
+  garbage: 'a475dacb3581f11e3a5b5d9b3d89165c1fd887cf41402d7a5ab51ea442316fe6',
+  full: 'fefe4741f3993e95cf7747c0aa2f4fb9d0efbd20b1b3b851841dc51d2fbfe291',
 };
 
 // key order aside: the values of the output

@@ -13,9 +13,9 @@ import { ChainExports, createChainWasm } from './chain-wasm';
 // The functions of a core compile lazily, on their first call: as its module loads, the worklet renders with a
 // chain of its own what the first node would compile in its first blocks, and frees it. Every effect on over an
 // impulse above the ceiling of the limiter; then what a preset with routes runs: an envelope and the LFOs (one
-// with a shape) on a knob of every effect, on the lines of the delay and of the mixes and on the rate of an LFO;
-// the slots faded out and in again under them in another order (the gains that glide, a unit at rest, a slot that
-// leaves the order), the delay in ping-pong and the compressor in three bands
+// with a shape) on a knob of every effect, on the lines of the delay, of the EQ and of the mixes and on the rate of
+// an LFO; the slots faded out and in again under them in another order (the gains that glide, a unit at rest, a
+// slot that leaves the order), the delay in ping-pong, the compressor in three bands and the EQ of other types
 
 const BLOCK = 128;
 const ENVELOPE = { attack: 0.002, hold: 0, decay: 0.004, sustain: 0.5, release: 0.004 };
@@ -30,6 +30,9 @@ const KNOBS: [FxKind, string, number, number, number][] = [
   ['delay', 'q', 1, 0.01, 10],
   ['compressor', 'thresh', 0.2, 0, 1],
   ['reverb', 'size', 0.2, 0, 1],
+  ['eq', 'f1', 400, 20, 20000],
+  ['eq', 'g2', 6, -24, 24],
+  ['eq', 'level', 0.1, 0, 1],
 ];
 
 // the routes of the warm-up: ENV 1 and LFO 1 in turn on the knobs, ENV 2 and LFO 2 on the mixes, VELO on the rate
@@ -52,9 +55,11 @@ export const warmRoutes = (): ChainRoute[] => [
   { target: LFO_TARGET, source: 3, amount: 1, min: 0.01, max: 100, scale: 'log' },
 ];
 
-// the chain of a warm-up: every effect on at half its mix, in the order of the slots
+// the chain of a warm-up: every effect on at half its mix, in the order of the slots (the bands of the EQ not at
+// 0 dB: they render)
 export const warmState = () => {
   const state = neutralState();
+  state.slots.eq.params = { ...state.slots.eq.params, t1: 1, g1: 6, g2: -6 };
   FX_KINDS.forEach((kind, slot) => {
     state.slots[kind].active = true;
     state.slots[kind].mix = 0.5;
@@ -114,6 +119,7 @@ export const prewarmChain = (core: ChainExports, sampleRate: number) => {
   });
   chain.setParams(FX_KINDS.indexOf('delay'), { mode: 1 });
   chain.setParams(FX_KINDS.indexOf('compressor'), { multi: 1 });
+  chain.setParams(FX_KINDS.indexOf('eq'), { t1: 2, t2: 1 });
   chain.setOrder(state.order.slice().reverse());
   render(8);
   const failed = chain.reports();

@@ -685,7 +685,7 @@ describe('createChain', () => {
       expect(chain.status(LIMITER_STAGE).value).toBe('failed');
       expect(FX_KINDS.map((_, slot) => chain.status(slot).value)).toEqual(FX_KINDS.map(() => 'ready'));
       chainReports(node, { failed: [DISTORTION, DELAY] });
-      expect(stages()).toEqual(['failed', 'ready', 'failed', 'ready', 'ready', 'failed']);
+      expect(stages()).toEqual(['failed', 'ready', 'failed', 'ready', 'ready', 'ready', 'failed']);
     });
 
     it('retryStage has its unit made again: loading until the node tells it is, the other failed ones stay', async () => {
@@ -694,9 +694,9 @@ describe('createChain', () => {
       chainReports(node, { failed: [REVERB, LIMITER_STAGE] });
       chain.retryStage(REVERB);
       expect(posts()).toEqual([{ retry: REVERB }]);
-      expect(stages()).toEqual(['ready', 'ready', 'ready', 'ready', 'loading', 'failed']);
+      expect(stages()).toEqual(['ready', 'ready', 'ready', 'ready', 'loading', 'ready', 'failed']);
       chainReports(node, { remade: REVERB });
-      expect(stages()).toEqual(['ready', 'ready', 'ready', 'ready', 'ready', 'failed']);
+      expect(stages()).toEqual(['ready', 'ready', 'ready', 'ready', 'ready', 'ready', 'failed']);
       chain.retryStage(LIMITER_STAGE);
       expect(posts()).toEqual([{ retry: REVERB }, { retry: LIMITER_STAGE }]);
       chainReports(node, { remade: LIMITER_STAGE });

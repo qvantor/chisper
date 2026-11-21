@@ -303,6 +303,14 @@ const FX_MATRIX = {
     knobs: ['lowcut', 'pre', 'size', 'decay', 'damp', 'bass', 'depth', 'sep', 'er', 'mix'],
     values: { decay: 3, size: 0.5, mix: 0.3 },
   },
+  eq: {
+    rest: [
+      { t1: 1, f1: 400, q1: 50, g1: 6 },
+      { t1: 2, f1: 120, q1: 42, t2: 1, f2: 5000, q2: 70, g2: -9 },
+    ],
+    knobs: ['f1', 'q1', 'g1', 'f2', 'q2', 'g2', 'level', 'mix'],
+    values: { t1: 1, f1: 400, q1: 50, g1: 6, t2: 0, f2: 6000, g2: -4 },
+  },
 };
 const fxCases = () =>
   Object.entries(FX_MATRIX).flatMap(([type, { rest, knobs, values }]) => [

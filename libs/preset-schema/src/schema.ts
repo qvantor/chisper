@@ -68,7 +68,7 @@ export const isFilterType = (type: unknown): type is FilterType =>
   (FILTER_TYPES as readonly unknown[]).includes(type);
 
 // effects of the fx rack, the order is the default chain order
-export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'] as const;
+export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'] as const;
 export type FxType = (typeof FX_TYPES)[number];
 
 // known types only, no duplicates (presets from a newer client may contain effect types this one doesn't
@@ -95,14 +95,15 @@ export interface ParamRange {
 // numeric fx params: knob ranges in the app, validation and defaults of presets
 // the dry/wet mix of an effect (0: dry, 1: wet); delay and reverb are mixed into the dry sound
 export const FX_MIX_PARAM: ParamRange = { min: 0, max: 1, default: 0.3 };
-// the mix of each effect, the default is the one of a freshly added effect: the distortion and the compressor
-// replace the dry sound, the chorus is half of it (its own law: wet sin²(π mix / 2), dry 1 - wet²)
+// the mix of each effect, the default is the one of a freshly added effect: the distortion, the compressor and the
+// EQ replace the dry sound, the chorus is half of it (its own law: wet sin²(π mix / 2), dry 1 - wet²)
 export const FX_MIX_PARAMS: Record<FxType, ParamRange> = {
   distortion: { ...FX_MIX_PARAM, default: 1 },
   chorus: { ...FX_MIX_PARAM, default: 0.5 },
   delay: FX_MIX_PARAM,
   compressor: { ...FX_MIX_PARAM, default: 1 },
   reverb: FX_MIX_PARAM,
+  eq: { ...FX_MIX_PARAM, default: 1 },
 };
 export const FX_PARAMS = {
   // waveshaper, 4× oversampled
@@ -208,6 +209,26 @@ export const FX_PARAMS = {
     er: { min: 0, max: 1, default: 0.5 },
     // vintage color of the input stage: 0 now (clean), 1 80s, 2 70s (tube drive, narrower bandwidth, more body)
     era: { min: 0, max: 2, default: 1, int: true },
+  },
+  // two bands of the Audio EQ Cookbook, the knobs and their laws as measured on the Audio Unit
+  // (dsp/measurements/eq.json); the defaults are its own: shelves at 0 dB (the sound as it is)
+  eq: {
+    // the type of band 1, an index into EQ_TYPES of the app (0: low shelf, 1: peak, 2: highpass); new types are
+    // appended only
+    t1: { min: 0, max: 2, default: 0, int: true },
+    // Hz (the lowest of the reference: 21.53)
+    f1: { min: 21.53, max: 20000, default: 210 },
+    // the resonance, %: a Q of 0.4 + 1.7416 x³ of a shelf, of 0.1 + 18.9 x⁴ of a peak and a pass
+    q1: { min: 0, max: 100, default: 60 },
+    // dB (none on a pass)
+    g1: { min: -24, max: 24, default: 0 },
+    // band 2: 0 high shelf, 1 peak, 2 lowpass
+    t2: { min: 0, max: 2, default: 0, int: true },
+    f2: { min: 21.53, max: 20000, default: 2040 },
+    q2: { min: 0, max: 100, default: 60 },
+    g2: { min: -24, max: 24, default: 0 },
+    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
+    level: { min: 0, max: 1, default: 0.5 },
   },
 };
 
@@ -696,6 +717,11 @@ const fxSchema = z
         )
       )
       .prefault({}),
+    eq: z
+      .object(
+        fxEffectShape(FX_PARAMS.eq, FX_MIX_PARAMS.eq, paramRange, (value) => z.boolean().default(value))
+      )
+      .prefault({}),
   })
   .prefault({});
 
@@ -715,6 +741,7 @@ export const fxSnapSchema = z.preprocess(
     delay: lenientFxEffect(FX_PARAMS.delay, FX_MIX_PARAMS.delay),
     compressor: lenientFxEffect(FX_PARAMS.compressor, FX_MIX_PARAMS.compressor),
     reverb: lenientFxEffect(FX_PARAMS.reverb, FX_MIX_PARAMS.reverb),
+    eq: lenientFxEffect(FX_PARAMS.eq, FX_MIX_PARAMS.eq),
   })
 );
 

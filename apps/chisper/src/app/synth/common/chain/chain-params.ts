@@ -7,12 +7,12 @@ import type { LfosState } from '../lfo/lfo-curve';
 
 // the kinds of the effects: the slot of each by its index (FX_TYPES of the preset schema, not imported: it would
 // bundle zod; a spec holds them equal), then the stage of the limiter
-export const FX_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'] as const;
+export const FX_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'] as const;
 export type FxKind = (typeof FX_KINDS)[number];
 export const LIMITER_STAGE = FX_KINDS.length;
 
-// the params of each kind in the order of its crate (dsp/<kind>/src/lib.rs, dsp/chain/src/delay.rs): the index of
-// a key is its key in the core
+// the params of each kind in the order of its crate (dsp/<kind>/src/lib.rs, dsp/chain/src/delay.rs, eq.rs): the
+// index of a key is its key in the core
 export const CHAIN_KEYS: Record<FxKind, readonly string[]> = {
   distortion: ['mode', 'drive', 'tone', 'level'],
   chorus: ['rate', 'd1', 'd2', 'depth', 'fb', 'cut', 'hpf', 'level', 'mix'],
@@ -47,6 +47,7 @@ export const CHAIN_KEYS: Record<FxKind, readonly string[]> = {
     'bandwidth',
     'body',
   ],
+  eq: ['t1', 'f1', 'q1', 'g1', 't2', 'f2', 'q2', 'g2', 'level'],
 };
 // the most params a kind has in the core (units.rs)
 export const MAX_PARAMS = 16;
@@ -94,6 +95,7 @@ export const NEUTRAL_PARAMS: Record<FxKind, Record<string, number>> = {
     bandwidth: 10000,
     body: 1,
   },
+  eq: { t1: 0, f1: 210, q1: 60, g1: 0, t2: 0, f2: 2040, q2: 60, g2: 0, level: 0.5 },
 };
 
 // the events of the core (chain.rs)

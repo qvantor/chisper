@@ -14,6 +14,7 @@
     "paths": {
       "@chisper/math": ["./libs/math/src/index.ts"],
       "@chisper/math/biquad": ["./libs/math/src/filter/biquad.ts"],
+      "@chisper/math/eq": ["./libs/math/src/filter/eq.ts"],
       "@chisper/preset-schema": ["./libs/preset-schema/src/index.ts"],
       "@chisper/rxjs-react": ["./libs/rxjs-react/src/index.ts"],
       "@chisper/ui-kit": ["./libs/ui-kit/src/index.ts"],

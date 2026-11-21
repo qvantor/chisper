@@ -103,17 +103,22 @@ const ROUTES: ChainRoute[] = [
   { target: target('compressor', 'thresh'), source: LFO_SOURCE + 3, amount: 0.3, min: 0, max: 1 },
   { target: target('reverb', 'mix'), source: LFO_SOURCE + 1, amount: 0.5, min: 0, max: 1 },
   { target: target('reverb', 'size'), source: 2, amount: 0.3, min: 0, max: 1 },
+  { target: target('eq', 'f1'), source: LFO_SOURCE + 2, amount: 1.5, min: 20, max: 20000, scale: 'log' },
+  { target: target('eq', 'g2'), source: 1, amount: -12, min: -24, max: 24 },
+  { target: target('eq', 'level'), source: LFO_SOURCE, amount: 0.1, min: 0, max: 1, bipolar: true },
   // the note to the rate and the phase of LFO 1
   { target: LFO_TARGET, source: 0, amount: 1, min: 0.01, max: 100, scale: 'log' },
   { target: LFO_TARGET + 4, source: 3, amount: 0.25, min: 0, max: 1 },
 ];
-const ALL: FxKind[] = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+const ALL: FxKind[] = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
 const MIXES = {
   distortion: { mix: 0.7 },
   chorus: { mix: 0.5 },
   delay: { mix: 0.3, params: { time: 0.031 } },
   compressor: { mix: 1 },
   reverb: { mix: 0.3 },
+  // (a peak and a lowpass: the bands render)
+  eq: { mix: 1, params: { t1: 1, f1: 400, g1: 6, t2: 2, f2: 9000 } },
 };
 
 const GOLDEN: [string, Scenario][] = [
