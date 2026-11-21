@@ -14,6 +14,7 @@ import { createDistortionWasm } from '../../fx/effects/distortion-wasm';
 import { createChorusWasm } from '../../fx/effects/chorus-wasm';
 import { createCompressorWasm } from '../../fx/effects/compressor-wasm';
 import { createReverbWasm } from '../../fx/effects/reverb-wasm';
+import { createEqWasm } from '../../fx/effects/eq-wasm';
 import { createLimiterWasm } from '../limiter/limiter-wasm';
 import { CEILING } from '../limiter/limiter-params';
 import type { LfosState } from '../lfo/lfo-curve';
@@ -100,6 +101,34 @@ describe('the chain core', () => {
       input
     );
     reverb.left.forEach((value, i) => expect(Math.abs(value - alone.left[i])).toBeLessThan(1e-6));
+  });
+
+  it('mixes the EQ linearly (the wet signal in time with the dry one), its bands moved by the routes as lines', () => {
+    const input = noise(FRAMES);
+    const params = { t1: 1, f1: 700, q1: 70, g1: 12, t2: 2, f2: 5000, q2: 50 };
+    const unit = renderStereo<Record<string, number>>(
+      createEqWasm(chainCore(), RATE, { params: { ...NEUTRAL_PARAMS.eq, ...params } as never }),
+      input
+    );
+    const eq = (mix: number, rest = {}) =>
+      renderChain(makeChain(chainState(['eq'], mix, { eq: { params } }, rest)), input);
+    // all wet: its unit to the bit
+    same('the EQ all wet', eq(1), unit);
+    // a mix of 0.4: 0.6 of the input and 0.4 of the EQ
+    const mixed = eq(0.4);
+    mixed.left.forEach((value, i) =>
+      expect(
+        Math.abs(value - (Math.fround(0.6 * input[0][i]) + Math.fround(0.4 * unit.left[i])))
+      ).toBeLessThan(1e-6)
+    );
+    // an LFO on the frequency of band 1: a line of it, the band moves
+    const f1 = slotOf('eq') * TARGET_KEYS + CHAIN_KEYS.eq.indexOf('f1');
+    const moved = eq(1, {
+      routes: [{ target: f1, source: LFO_SOURCE, amount: 2, min: 21.53, max: 20000, scale: 'log' }],
+      lfos: lfos(),
+    });
+    expect(moved.left.every(Number.isFinite)).toBe(true);
+    expect(moved.left.subarray(20 * 128)).not.toEqual(unit.left.subarray(20 * 128));
   });
 
   it('ends in the limiter: the output under its ceiling, late by its lookahead', () => {

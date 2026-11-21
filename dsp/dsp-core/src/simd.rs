@@ -56,6 +56,20 @@ mod lanes {
         pub fn max(self, other: F64x2) -> F64x2 {
             F64x2(f64x2_max(self.0, other.0))
         }
+        /// the lanes under TINY_F64 as +0 (a NaN stays): a state in doubles that one channel leaves to decay while
+        /// the other plays would come to the denormals, which wasm can't flush and a CPU works out many times
+        /// slower
+        #[inline(always)]
+        pub fn flush(self) -> F64x2 {
+            self.flush_under(super::TINY_F64)
+        }
+        /// the lanes under `tiny` as +0 (a NaN stays): of samples in doubles that go out as f32, TINY (a state
+        /// far over the denormals of doubles comes out in those of f32)
+        #[inline(always)]
+        pub fn flush_under(self, tiny: f64) -> F64x2 {
+            let small = f64x2_lt(f64x2_abs(self.0), f64x2_splat(tiny));
+            F64x2(v128_andnot(self.0, small))
+        }
     }
 }
 
@@ -112,6 +126,14 @@ mod lanes {
                 jsmath::max(self.0[0], other.0[0]),
                 jsmath::max(self.0[1], other.0[1]),
             ])
+        }
+        #[inline(always)]
+        pub fn flush(self) -> F64x2 {
+            self.flush_under(super::TINY_F64)
+        }
+        #[inline(always)]
+        pub fn flush_under(self, tiny: f64) -> F64x2 {
+            F64x2(self.0.map(|x| if x.abs() < tiny { 0.0 } else { x }))
         }
     }
 }
@@ -553,6 +575,11 @@ pub use lanes4::{F32x4, U32x4};
 /// what F32x4::flush takes as 0: far under what sounds (-500 dB), far over the denormals of f32 (1.2e-38)
 pub const TINY: f32 = 1e-25;
 
+/// what F64x2::flush takes as 0: far under what a sample of f32 (1.4e-45 the smallest) through a filter leaves in
+/// its state, so a value under it changes no bit of a sum with one; far over the denormals of f64 (2.2e-308): a
+/// lane flushed once a segment decays 200 decades before it would reach them
+pub const TINY_F64: f64 = 1e-100;
+
 macro_rules! lane_op {
     ($trait:ident, $method:ident, $op:literal) => {
         impl core::ops::$trait for F64x2 {
@@ -617,6 +644,22 @@ mod tests {
         let floor = F64x2::new(-0.0, f64::NAN).floor();
         assert!(floor.lo().is_sign_negative() && floor.lo() == 0.0);
         assert!(floor.hi().is_nan());
+    }
+
+    #[test]
+    fn a_flush_takes_the_tiny_lanes_as_zero() {
+        let lanes = |x: F64x2| [x.lo().to_bits(), x.hi().to_bits()];
+        let denormal = f64::MIN_POSITIVE / 4.0;
+        assert_eq!(lanes(F64x2::new(9e-101, -denormal).flush()), [0, 0]);
+        assert_eq!(lanes(F64x2::new(-0.0, 0.0).flush()), [0, 0]);
+        assert_eq!(
+            lanes(F64x2::new(1e-99, -0.5).flush()),
+            lanes(F64x2::new(1e-99, -0.5))
+        );
+        let mixed = F64x2::new(f64::NAN, -1e-200).flush();
+        assert!(mixed.lo().is_nan());
+        assert_eq!(mixed.hi().to_bits(), 0);
+        assert_eq!(lanes(F64x2::new(-1e-150, 3.0).flush()), [0, 3.0f64.to_bits()]);
     }
 
     #[test]

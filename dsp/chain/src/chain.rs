@@ -22,9 +22,10 @@ use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::simd::F32x4;
 use jsmath::{cos, max, sin, PI};
 
-use crate::delay::Moves;
-use crate::modulation::{Bases, Modulation, LINE_FB, LINE_FREQ, LINE_MIX, LINE_PAN, LINE_Q, LINE_TIME};
-use crate::units::{law, Law, Unit, DELAY, LIMITER, MAX_METER, MAX_PARAMS, SLOTS};
+use crate::modulation::{
+    Bases, Modulation, LINE_EQ, LINE_FB, LINE_FREQ, LINE_MIX, LINE_PAN, LINE_Q, LINE_TIME,
+};
+use crate::units::{law, Law, Moves, Unit, DELAY, EQ, LIMITER, MAX_METER, MAX_PARAMS, SLOTS};
 
 /// the events: the params of a slot (a: the slot, b: the bits of the keys, the values by key), its mix (a, b),
 /// whether it plays (a, b: not 0), the order (a: how many slots, the values: which), the master gain (a), the
@@ -788,6 +789,12 @@ impl Chain {
                 pan: [line(LINE_PAN), line(LINE_PAN + 1)],
                 freq: line(LINE_FREQ).map_or(0.0, |offsets| offsets[0]),
                 q: line(LINE_Q).map_or(0.0, |offsets| offsets[0]),
+                ..Moves::default()
+            }
+        } else if kind == EQ as usize {
+            Moves {
+                eq: core::array::from_fn(|knob| line(LINE_EQ + knob)),
+                ..Moves::default()
             }
         } else {
             Moves::default()

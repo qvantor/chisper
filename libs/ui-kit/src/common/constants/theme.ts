@@ -13,6 +13,7 @@ const colors = {
   secondAccent: '#3498db',
   thirdAccent: '#f1c40f',
   fourthAccent: '#9b59b6',
+  fifthAccent: '#e67e22',
 
   red: '#e74c3c',
 };

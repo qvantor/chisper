@@ -69,6 +69,15 @@ const ChorusIcon = () => (
   </Icon>
 );
 
+// the response of an EQ over the line of the sound as it is (faint): the lows cut, a peak up in the mids, the
+// highs as they are
+const EqIcon = () => (
+  <Icon>
+    <path d='M-1 15 H25' opacity='0.35' />
+    <path d='M-1 24 C3 24 4 15 7.5 15 C10.5 15 10.5 5 13.5 5 C16.5 5 16.5 15 19.5 15 H25' />
+  </Icon>
+);
+
 // shown in the effects list
 export const FX_ICONS: Record<FxType, React.ComponentType> = {
   distortion: DistortionIcon,
@@ -76,4 +85,5 @@ export const FX_ICONS: Record<FxType, React.ComponentType> = {
   delay: DelayIcon,
   compressor: CompressorIcon,
   reverb: ReverbIcon,
+  eq: EqIcon,
 };

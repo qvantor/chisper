@@ -11,7 +11,8 @@
 //! The lines and the echoes are f32 (a DelayNode's), the filter doubles, both channels in its lanes. A segment of
 //! 32 samples reads its lines, filters, then writes them: no sample of it is read before it is written (the
 //! quantum). While nothing moves a segment is a copy out of each ring and one pass of lanes; a Time or a Pan
-//! that moves reads sample by sample. A value written is flushed to 0 under 1e-25 (wasm has no flush-to-zero)
+//! that moves reads sample by sample. A value written is flushed to 0 under 1e-25 (wasm has no flush-to-zero), the
+//! outputs the bandpass keeps under TINY_F64 at the end of a segment (a line emptied while the other one plays)
 
 use alloc::{vec, vec::Vec};
 
@@ -20,6 +21,8 @@ use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::power_of_two_above;
 use dsp_core::simd::{F32x4, F64x2};
 use jsmath::{ceil, exp, max, min};
+
+use crate::units::Moves;
 
 /// the params: the seconds of the echoes (in BPM: of the division, worked out on the main thread), the feedback,
 /// the mode (0 normal, 1 ping-pong), the seconds a channel comes late by (under 0 the right one), the bandpass
@@ -44,18 +47,6 @@ const GLIDE: f64 = 0.01;
 const TIME_GLIDE: f64 = 0.1;
 const SILENCE: f32 = 1e-10;
 const SEGMENT: usize = 32;
-
-/// what the routes move in a block, as offsets from the knobs (seconds, gains, Hz), a value a sample: the lines of
-/// `modulation`. `time` on both lines, `fb` on the gains of the mode, `pan` on the offset of each channel, the
-/// filter once a block
-#[derive(Default, Clone, Copy)]
-pub struct Moves<'a> {
-    pub time: Option<&'a [f64]>,
-    pub fb: Option<&'a [f64]>,
-    pub pan: [Option<&'a [f64]>; 2],
-    pub freq: f64,
-    pub q: f64,
-}
 
 // a ring of a power of two; `at` is where the next sample goes
 struct Ring {
@@ -194,7 +185,7 @@ impl Bandpass {
             y1 = out;
             *y = out;
         }
-        (self.x1, self.x2, self.y1, self.y2) = (x1, x2, y1, y2);
+        (self.x1, self.x2, self.y1, self.y2) = (x1, x2, y1.flush(), y2.flush());
     }
 
     fn clear(&mut self) {
@@ -669,6 +660,45 @@ mod tests {
         let reference = render(&mut slow, &input, &mut cut, change);
         assert_eq!(bits(&rendered[0]), bits(&reference[0]));
         assert_eq!(bits(&rendered[1]), bits(&reference[1]));
+    }
+
+    // a channel silent alone while the other plays on keeps the delay awake: once its line has emptied, the
+    // bandpass of its lane comes to 0 at the end of a segment before it rings down into the denormals (it stood
+    // there, a few of their steps over the smallest)
+    #[test]
+    fn the_bandpass_of_a_channel_silent_alone_never_comes_near_a_denormal() {
+        let frames = 16 * 48000;
+        let mut source = noise(11);
+        let mut left: Vec<f32> = (0..frames).map(|_| source() * 0.5).collect();
+        left[48000..].fill(0.0);
+        let right: Vec<f32> = (0..frames).map(|_| source() * 0.5).collect();
+        let input = [left, right];
+        let denormal = |x: f64| x != 0.0 && x.abs() < f64::MIN_POSITIVE;
+        let mut worst = [0usize; 3];
+        for (case, q) in [0.01, 1.0, 5.0].into_iter().enumerate() {
+            let mut delay = Delay::new(48000.0, &[0.0123, 0.3, 0.0, 0.0, 1000.0, q]);
+            let mut quantum = || 128usize;
+            render(&mut delay, &input, &mut quantum, |delay, _| {
+                let Bandpass { y1, y2, .. } = delay.filter;
+                worst[case] += [y1.lo(), y1.hi(), y2.lo(), y2.hi()]
+                    .into_iter()
+                    .filter(|x| denormal(*x))
+                    .count();
+            });
+            if worst[case] > 0 {
+                continue;
+            }
+            assert!(!delay.idle(), "Q {q}");
+            let Bandpass { y1, y2, .. } = delay.filter;
+            assert_eq!(
+                [y1.lo().to_bits(), y2.lo().to_bits()],
+                [0, 0],
+                "Q {q}: the left lane rests at +0"
+            );
+            assert!(y1.hi() != 0.0 && y2.hi() != 0.0, "Q {q}: the right one plays");
+        }
+        // (the values of the bandpass in the denormals at the ends of the blocks, of each Q)
+        assert_eq!(worst, [0; 3]);
     }
 
     // a click comes back after Time, then every Time and a quantum

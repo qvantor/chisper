@@ -120,13 +120,15 @@ const run = (name: string, { rate, state, limited = true, blocks, events, seed =
 
 const RATE = 48000;
 const blocksOf = (seconds: number, rate = RATE) => Math.ceil((seconds * rate) / BLOCK);
-const ALL: FxKind[] = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+const ALL: FxKind[] = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
 const MIXES = {
   distortion: { mix: 0.7 },
   chorus: { mix: 0.5 },
   delay: { mix: 0.3, params: { time: 0.031 } },
   compressor: { mix: 1 },
   reverb: { mix: 0.3 },
+  // (a peak and a lowpass: the bands render)
+  eq: { mix: 1, params: { t1: 1, f1: 400, g1: 6, t2: 2, f2: 9000 } },
 };
 const target = chainTarget;
 const ROUTES: ChainRoute[] = [

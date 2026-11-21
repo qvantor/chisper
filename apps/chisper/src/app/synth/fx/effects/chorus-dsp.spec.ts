@@ -11,7 +11,8 @@ import {
   tapsOf,
 } from '../../../../test-utils/chorus-render';
 import { dB, toneOf } from '../../../../test-utils/measures';
-import { chorusTaps, depthMs, levelGain, MAX_TAP_MS, TAP_FOLLOW_MS } from './chorus-params';
+import { chorusTaps, depthMs, MAX_TAP_MS, TAP_FOLLOW_MS } from './chorus-params';
+import { levelGain } from './level';
 import { createChorusWasm } from './chorus-wasm';
 
 // the Rust core of the chorus (dsp/chorus) through its facade: its taps, its LFO, its feedback, its filter, its

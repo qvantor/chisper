@@ -10,9 +10,10 @@ import {
 import { number } from '@chisper/math';
 import { FxDefinition } from './types';
 import { OFF_ON, tempoSync } from './tempo-sync';
-import { depthMs, levelGain } from './chorus-params';
+import { depthMs } from './chorus-params';
 import { ChorusParam, CHORUS_PRESETS } from './chorus-presets';
-import { formatDb, formatHz, formatMillis } from './format';
+import { formatHz, formatMillis } from './format';
+import { levelParam } from './level';
 
 const { rate, sync, div, trip, dot, d1, d2, depth, fb, cut, hpf, level } = FX_PARAMS.chorus;
 
@@ -89,14 +90,7 @@ export const chorus: FxDefinition<ChorusParam> = {
         { id: 'hpf', label: 'High pass' },
       ],
     },
-    level: {
-      ...level,
-      label: 'Level',
-      name: 'Output level',
-      precision: 1000,
-      fillFrom: level.default,
-      formatValue: (value) => (value <= 0 ? '-∞dB' : formatDb(20 * Math.log10(levelGain(value)))),
-    },
+    level: levelParam(level),
   },
   presets: CHORUS_PRESETS,
   paramChange: chorusParamChange,

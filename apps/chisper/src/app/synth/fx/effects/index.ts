@@ -7,10 +7,19 @@ import { chorus } from './chorus';
 import { compressor } from './compressor';
 import { delay } from './delay';
 import { reverb } from './reverb';
+import { eq } from './eq';
 
-export const FX_REGISTRY: Record<FxType, FxDefinition> = { distortion, chorus, delay, compressor, reverb };
+export const FX_REGISTRY: Record<FxType, FxDefinition> = {
+  distortion,
+  chorus,
+  delay,
+  compressor,
+  reverb,
+  eq,
+};
 
-// the mix of each effect, applied by createFxSlot: the same knob, the default of the effect (the distortion and the compressor all wet)
+// the mix of each effect, applied by createFxSlot: the same knob, the default of the effect (the distortion, the
+// compressor and the EQ all wet)
 export const MIX_PARAMS: Record<FxType, FxParamDef> = mapValues(FX_MIX_PARAMS, (mix) => ({
   ...mix,
   label: 'Mix',

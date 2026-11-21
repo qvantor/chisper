@@ -4,7 +4,8 @@ import { COMPRESSOR_DEFAULTS as DEFAULTS } from '../../../../test-utils/compress
 import { CHAIN_KEYS, NEUTRAL_PARAMS } from '../../common/chain/chain-params';
 import { compressor, formatBandThresholds } from './compressor';
 import { COMPRESSOR_MODES } from './compressor-modes';
-import { bandThresholdsDb, levelGain, makeupGain, thresholdDb } from './compressor-params';
+import { bandThresholdsDb, makeupGain, thresholdDb } from './compressor-params';
+import { levelGain } from './level';
 import { COMPRESSOR_PRESETS } from './compressor-presets';
 import { COMPRESSOR_KEYS } from './compressor-wasm';
 

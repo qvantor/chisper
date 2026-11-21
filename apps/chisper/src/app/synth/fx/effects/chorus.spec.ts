@@ -11,7 +11,8 @@ import {
   chorusRateBounds,
   chorusStepsOf,
 } from './chorus';
-import { depthMs, levelGain } from './chorus-params';
+import { depthMs } from './chorus-params';
+import { levelGain } from './level';
 import { CHORUS_PRESETS } from './chorus-presets';
 import { CHORUS_KEYS } from './chorus-wasm';
 

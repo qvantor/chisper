@@ -90,8 +90,10 @@ const chainRoute = ({ param, ...route }: FxRoute, type?: FxType): ChainRoute[] =
 };
 
 // what the chain follows: the routes to the knobs of the effects that play (`active`: in the chain, on and ready:
-// a source is computed only for an effect that sounds), in the units of their knobs at the tempo; with a route of
-// an LFO those of the note to the knobs of the LFOs too (within `lfoRanges` in BPM). None: nothing is computed
+// a source is computed only for an effect that sounds) but those its params leave unheard (`unheard` of its
+// definition: the gain of a pass of the EQ; one that comes back glides in), in the units of their knobs at the
+// tempo; with a route of an LFO those of the note to the knobs of the LFOs too (within `lfoRanges` in BPM). None:
+// nothing is computed
 export const chainRoutes = (
   routes: ModRoute[],
   effects: Record<FxType, FxState>,
@@ -99,13 +101,18 @@ export const chainRoutes = (
   lfoRanges: LfoRanges,
   bpm: number
 ): ChainRoute[] => {
-  const own = FX_TYPES.flatMap((type) =>
-    active[type]
-      ? fxRoutes(routes, type, fxBounds(type, effects[type].params, bpm)).flatMap((route) =>
-          chainRoute(route, type)
-        )
-      : []
-  );
+  const own = FX_TYPES.flatMap((type) => {
+    if (!active[type]) return [];
+    const { params } = effects[type];
+    const routed = fxRoutes(routes, type, fxBounds(type, params, bpm));
+    const unheard = FX_REGISTRY[type].unheard?.(
+      params,
+      routed.map(({ param }) => param)
+    );
+    return routed
+      .filter(({ param }) => !unheard?.includes(param))
+      .flatMap((route) => chainRoute(route, type));
+  });
   return own.some(({ source }) => isLfoSource(source))
     ? [...own, ...lfoKnobRoutes(routes, lfoRanges).flatMap((route) => chainRoute(route))]
     : own;

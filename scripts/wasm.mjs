@@ -21,8 +21,9 @@ const CORES = [
   // (the effects, their slots and their modulation, the delay, the master and the limiter). The runtime once,
   // where the two modules had it twice: 167.2 KB, they were 74.0 and 110.1; 178.2 KB with the spans of the filter of
   // a voice as lines (their coefficients a step on at every refresh in each of its loops, the lines taken); 182.5 KB
-  // with the loops of a filter at rest apart from those of its lines (in one, a chord at rest was 3 % slower)
-  { crate: 'engine', name: 'engine', budget: 183500 },
+  // with the loops of a filter at rest apart from those of its lines (in one, a chord at rest was 3 % slower);
+  // 187.0 KB with the EQ (a sixth slot, its unit and the lines of its bands)
+  { crate: 'engine', name: 'engine', budget: 187500 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];

@@ -2,8 +2,9 @@
 // Node by the cores of this tree (tmp/wasm) and by those of a reference (--against=<ref>: its worktree and cores as
 // bench-perf makes them), the difference of the two against the signal, in dB: over the whole band, under 16 kHz and
 // over it. A change of the DSP that is meant to keep the sound shows here how much of it it moved. A scene of a core
-// the reference doesn't have (the chain: its effects were cores of their own before it) is compared with the scene
-// of the same name of the reference, rendered by its own scenes.mjs: its facades, its cores.
+// the reference doesn't have (the chain: its effects were cores of their own before it), or of its chain with other
+// kinds (an effect added: the ABI of the slots differs), is compared with the scene of the same name of the
+// reference, rendered by its own scenes.mjs: its facades, its cores.
 //   node scripts/null-test/run.mjs --against=main [--only=reverb] [--limit=-90]
 // With --limit a scene whose difference is over it (dB) fails the run
 import fs from 'node:fs';
@@ -86,6 +87,17 @@ const reference = await prepareReference(args.against, { build: false });
 const theirs = path.relative(root, path.join(reference.dir, 'tmp/wasm'));
 const scenes = SCENES.filter((scene) => !args.only || scene.name.includes(args.only));
 
+// the kinds of the chain of a tree (FX_KINDS of its chain-params.ts): a chain of other kinds is another ABI
+// (the params of its slots in the buffer of chain_new), its scenes of the chain are its own
+const kindsOf = (dir) =>
+  fs
+    .readFileSync(path.join(dir, 'apps/chisper/src/app/synth/common/chain/chain-params.ts'), 'utf8')
+    .match(/FX_KINDS = \[([^\]]*)\]/)?.[1]
+    .split(',')
+    .map((kind) => kind.trim().replace(/'/g, ''))
+    .filter(Boolean) ?? [];
+const sameChain = JSON.stringify(kindsOf(reference.dir)) === JSON.stringify(kindsOf(root));
+
 // the scenes of the reference as it renders them itself (null: it has none)
 let own;
 const ownScenes = async () => {
@@ -96,20 +108,26 @@ const ownScenes = async () => {
   return own;
 };
 // a scene by the cores of this tree and by those of the reference; of a core the reference doesn't have: its own
-// scene of that name and of the same input, against ours without what it had not (`alone` of the scene). null:
-// nothing to compare with
+// scene of that name and of the same input, against ours without what it had not (`alone` of the scene); of its
+// chain of other kinds: its own scene as it is (the limiter after both). null: nothing to compare with
 const renders = async (scene) => {
-  if (!scene.module || hasCore(scene.module, theirs))
+  const chained = scene.module === 'chain' || scene.module === 'engine';
+  const theirCore = scene.module && hasCore(scene.module, theirs);
+  if (!scene.module || (theirCore && (sameChain || !chained)))
     return [await seeded(() => nodeRender(scene)), await seeded(() => nodeRender(scene, theirs))];
   const module = await ownScenes();
   const same = module?.SCENES.find(({ name, rate }) => name === scene.name && rate === scene.rate);
   if (!same || (same.module && !module.hasCore?.(same.module))) return null;
-  const ours = await seeded(() => nodeRender({ ...scene, create: scene.alone ?? scene.create }));
+  const create = theirCore ? scene.create : (scene.alone ?? scene.create);
+  const ours = await seeded(() => nodeRender({ ...scene, create }));
   const base = await seeded(() => module.nodeRender(same));
-  const alike = base.input.every(
-    (channel, c) =>
-      channel.length === ours.input[c].length && channel.every((value, n) => value === ours.input[c][n])
-  );
+  // (the voices of a scene of the engine are its input: of the same scenes of the oscillator, seeded alike)
+  const alike =
+    !base.input ||
+    base.input.every(
+      (channel, c) =>
+        channel.length === ours.input[c].length && channel.every((value, n) => value === ours.input[c][n])
+    );
   return alike ? [ours, base] : null;
 };
 

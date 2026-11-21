@@ -2,9 +2,10 @@ import { FX_PARAMS } from '@chisper/preset-schema';
 import { number } from '@chisper/math';
 import { FxDefinition } from './types';
 import { COMPRESSOR_MODES } from './compressor-modes';
-import { bandThresholdsDb, levelGain, makeupGain, thresholdDb } from './compressor-params';
+import { bandThresholdsDb, makeupGain, thresholdDb } from './compressor-params';
 import { CompressorParam, COMPRESSOR_PRESETS } from './compressor-presets';
 import { formatDb, formatHz, formatMillis } from './format';
+import { levelParam } from './level';
 
 const { multi, thresh, ratio, attack, release, gain, xlow, xhigh, below, low, mid, high, level } =
   FX_PARAMS.compressor;
@@ -88,14 +89,7 @@ export const compressor: FxDefinition<CompressorParam> = {
     low: { ...low, ...band, label: 'L', name: 'Low band gain' },
     mid: { ...mid, ...band, label: 'M', name: 'Mid band gain' },
     high: { ...high, ...band, label: 'H', name: 'High band gain' },
-    level: {
-      ...level,
-      label: 'Level',
-      name: 'Output level',
-      precision: 1000,
-      fillFrom: level.default,
-      formatValue: (value) => (value <= 0 ? '-∞dB' : formatGain(levelGain(value))),
-    },
+    level: levelParam(level),
   },
   presets: COMPRESSOR_PRESETS,
   // (the mix of its slot is the mix inside the core)

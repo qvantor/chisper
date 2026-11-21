@@ -121,9 +121,12 @@ reference may have no setting. A baseline of before it was taken at normal (256 
 - **The DSP** (Node): voices (held, a moving position on 16 frames and on 256, a chord of 12 notes × 2 × u8 struck every 40 blocks:
   its attack, the direct path and the mix builds under the budget), table building, the effects and the limiter
   each alone (units of the chain, a half of the engine core; in a tree before them their own cores, under the same
-  names), the whole chain (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), the
-  whole node (`engine chord S5`, `engine chord, no effect`: the chord of `scope chord attack` into the chain in
-  one block of the core), ns per sample divided by the ns of a
+  names; the EQ: `eq` both bands, `eq neutral` its shelves at 0 dB, `chain eq` and `chain eq, lfos` its bands moved
+  as lines), the whole chain (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), each
+  effect alone in the chain without its limiter, whose cost follows the level it is given (`fx <effect>`: at rest;
+  `, lfos`: two routes on its own knobs; `, lfo mix`: one on its mix, a line a sample of its slot; `fx none` the
+  bare chain, what the others are read over), the whole node (`engine chord S5`, `engine chord, no effect`: the
+  chord of `scope chord attack` into the chain in one block of the core), ns per sample divided by the ns of a
   fixed multiply-add of the same run (the speed of the machine out), 7 samples each. V8, not JSC: it catches
   algorithmic regressions (a hot loop that boxes doubles) the operation counts of the specs can't. A module with
   a Rust core (`dsp/`, `tmp/wasm` of the tree) runs it under the names of its cases; a tree of before stage 5 of

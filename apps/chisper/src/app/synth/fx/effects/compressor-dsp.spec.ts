@@ -5,13 +5,8 @@ import {
   renderCompressor,
 } from '../../../../test-utils/compressor-render';
 import { dB, toneOf } from '../../../../test-utils/measures';
-import {
-  bandThresholdsDb,
-  CompressorDspParams,
-  levelGain,
-  makeupGain,
-  thresholdDb,
-} from './compressor-params';
+import { bandThresholdsDb, CompressorDspParams, makeupGain, thresholdDb } from './compressor-params';
+import { levelGain } from './level';
 
 // the Rust core of the compressor (dsp/compressor) through its facade: what each knob does (the measurements of
 // the Audio Unit are held by compressor-measured.spec.ts)

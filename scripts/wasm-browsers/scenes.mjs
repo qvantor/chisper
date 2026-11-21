@@ -375,13 +375,17 @@ const CHORUS = { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf
 // the knobs of a fresh distortion and of a fresh delay (FX_PARAMS, the time of the delay in seconds)
 const DISTORTION = { mode: 0, drive: 8, tone: 20000, level: 0 };
 const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
-const KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb'];
+// the knobs of a fresh EQ (FX_PARAMS.eq: its shelves at 0 dB)
+const EQ = { t1: 0, f1: 210, q1: 60, g1: 0, t2: 0, f2: 2040, q2: 60, g2: 0, level: 0.5 };
+// the kinds of the chain by slot (FX_KINDS of chain-params.ts)
+const KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
 const NEUTRAL = {
   distortion: DISTORTION,
   chorus: CHORUS,
   delay: DELAY,
   compressor: COMPRESSOR,
   reverb: REVERB,
+  eq: EQ,
 };
 
 // the state a chain is made with (ChainState of chain-params.ts): `kinds` in the chain in this order, each playing
@@ -476,6 +480,11 @@ const ENGINE_SCENES = [
     OSC_SCENES[0]
   ),
   engineScene('engine: voices into the limiter alone', [], OSC_SCENES[1]),
+  engineScene(
+    'engine: a chord through every effect and the EQ',
+    ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+    OSC_SCENES[0]
+  ),
 ];
 
 export const SCENES = [
@@ -548,8 +557,32 @@ export const SCENES = [
           { target: target('reverb', 'mix'), source: 5, amount: 0.5, min: 0, max: 1 },
           { target: target('chorus', 'mix'), source: 1, amount: 0.4, min: 0, max: 1 },
           { target: target('compressor', 'thresh'), source: 4, amount: 0.3, min: 0, max: 1, bipolar: true },
-          // (the note to the rate of LFO 2: 160 + lfo · 8 + the knob)
-          { target: 160 + 8, source: 0, amount: 1, min: 0.01, max: 100, scale: 'log' },
+          // (the note to the rate of LFO 2: the slots · 32 + lfo · 8 + the knob)
+          { target: KINDS.length * 32 + 8, source: 0, amount: 1, min: 0.01, max: 100, scale: 'log' },
+        ],
+      }
+    ),
+    { frames: 2 * RATE, input: () => notesAndSilences(2 * RATE) }
+  ),
+  // the EQ: a peak and a lowpass (its bands at rest), then a resonant highpass and a high shelf moved by a note and
+  // an LFO (its bands designed every 32 samples, their coefficients lines): notes and silences (it rests and wakes)
+  chainScene(
+    'eq, a peak and a lowpass',
+    chainState(['eq'], { eq: { params: { t1: 1, f1: 400, q1: 70, g1: 9, t2: 2, f2: 5000, q2: 50 } } }),
+    { frames: 2 * RATE, input: () => notesAndSilences(2 * RATE) }
+  ),
+  chainScene(
+    'eq, its bands moved by a note',
+    chainState(
+      ['eq'],
+      { eq: { params: { t1: 2, f1: 150, q1: 85, t2: 0, f2: 4000, q2: 60, g2: 6, level: 0.4 } } },
+      {
+        lfos: LFOS,
+        note: { envelopes: [HELD, HELD, HELD], start: 0.1, release: 1.2, velo: 0.8 },
+        routes: [
+          { target: target('eq', 'f1'), source: 4, amount: 2, min: 21.53, max: 20000, scale: 'log' },
+          { target: target('eq', 'g2'), source: 0, amount: -18, min: -24, max: 24 },
+          { target: target('eq', 'q2'), source: 5, amount: 40, min: 0, max: 100, bipolar: true },
         ],
       }
     ),

@@ -50,6 +50,9 @@ export interface FxDefinition<K extends string = string> {
   // the bounds of the routes to its knobs at a tempo, by param (Time of the delay in BPM: within its divisions);
   // absent or none for a param: the range of its knob
   bounds?: (params: Record<string, number>, bpm: number) => Partial<Record<string, [number, number]>>;
+  // the params a route moves nothing it plays of at these params (`routed`: the params routes move), left out of
+  // what the chain computes (the gain of a pass of the EQ); absent: none
+  unheard?: (params: Record<string, number>, routed: string[]) => string[];
   // its params as the core of the chain takes them (CHAIN_KEYS of its kind) at a tempo (BPM) and a rate: a knob in
   // BPM as what its division is there, an era as the values of its stage. The mix is of its slot
   core: (params: Record<K, number>, bpm: number, sampleRate: number) => Record<string, number>;

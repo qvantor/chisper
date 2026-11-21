@@ -34,13 +34,16 @@
 // - chorus.json: the chorus of its effect rack on clicks and noise of ours: the delays of its four taps by its
 //   knobs, how its LFO moves them (trains of clicks: where each comes out), the feedback, the filter, the laws of
 //   the mix and the level, the level of the mono sum
+// - eq.json: the EQ of its effect rack on an impulse of ours: the response of each band by its type, frequency,
+//   resonance and gain (a grid, a sweep of the resonance), its defaults, the law of the level, its knobs out of
+//   their ranges, at another rate
 // - filter-types.json: Filter 1 of a voice, the types of Normal and the EQ ones of Misc: the response of each by
 //   the cutoff and the resonance (a multisine of our table through it), the EQ ones by DB +/-, the law and the
 //   saturation of Drive, FAT and the saturation of a resonance on sines at the cutoff
 // - filter-resonance.json: the resonance of MG Low 12 and 24, Low and Band 12 at Res 0.9 and 1 by the cutoff: a quiet
 //   sine around the cutoff (its peak, its width), a sine at it by its amplitude (the saturation)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,filter-types,filter-resonance`
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,eq,filter-types,filter-resonance`
 // renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -1751,9 +1754,10 @@ if (runs('sub')) {
 // --- the effect rack ---
 // a stand of an effect of the rack: samples of ours (44.1 kHz: the noise oscillator plays them as they are, no
 // resampling, one-shot, osc A off) through the rack with the effect `fx` ({ module, type, params, kept } of
-// state.mjs; null: an empty rack, the dry signal)
+// state.mjs; null: an empty rack, the dry signal), rendered at `rate` (another one than that of the samples: the
+// noise oscillator resamples them, alike in a render with the effect and in the dry one)
 const RACK_RATE = 44100;
-const rackStand = (tag) => {
+const rackStand = (tag, rate = RACK_RATE) => {
   const R = RACK_RATE;
   const samples = [];
   const NOISE = { 'A Enable': 0, 'Noise Enable': 1, 'Noise Level': 1, 'Env 1 Attack': 0, 'Env 1 Sustain': 1 };
@@ -1789,7 +1793,7 @@ const rackStand = (tag) => {
     const seconds = sample.frames / R + 0.3;
     const once = (attempt) =>
       hostRender(`${name}-${attempt}`, {
-        rate: R,
+        rate,
         seconds,
         state,
         params: NOISE,
@@ -2424,6 +2428,184 @@ if (runs('chorus')) {
     console.log('dsp/measurements: chorus', JSON.stringify({ fresh: result.fresh, mono: result.mono }));
   } finally {
     stand.remove();
+  }
+}
+
+// --- eq ---
+if (runs('eq')) {
+  const R = RACK_RATE;
+  const round = (v, digits = 3) => +v.toFixed(digits);
+  // an impulse after a quiet tone (the rack awake), the FFT of N samples from it (at 25 Hz and Q 19 a peak rings
+  // out in a quarter of them)
+  const N = 1 << 16;
+  const click = new Float64Array(Math.round(0.4 * R) + N + 1000);
+  for (let i = 0; i < Math.round(0.35 * R); i++)
+    click[i] = 1e-3 * Math.sin((2 * Math.PI * 1000 * i) / R) * Math.min(1, (Math.round(0.35 * R) - i) / 2000);
+  click[Math.round(0.4 * R)] = 0.5;
+  // a stand rendering at `rate` (the noise oscillator plays the sample of 44.1 kHz resampled alike in a render
+  // with the eq and in the dry one): the response [dB, degrees] of an eq of the plain params `eq` at `frequencies`
+  // (the left channel: the noise oscillator plays both alike)
+  const standAt = (rate) => {
+    const stand = rackStand(`eq${rate}`, rate);
+    const impulse = stand.sampleOf('impulse', [click]);
+    const transform = (x, peak) => {
+      const fft = new FFT(N);
+      const bins = fft.createComplexArray();
+      fft.realTransform(
+        bins,
+        Array.from({ length: N }, (_, i) => x[peak - 64 + i])
+      );
+      return bins;
+    };
+    const base = stand.play(impulse, null).then(([dry]) => {
+      let peak = 0;
+      for (let i = 0; i < dry.length; i++) if (Math.abs(dry[i]) > Math.abs(dry[peak])) peak = i;
+      return { peak, bins: transform(dry, peak) };
+    });
+    const response = async (eq, frequencies) => {
+      const { peak, bins: dry } = await base;
+      const bins = transform((await stand.play(impulse, { module: 'FXEQ', type: 7, params: eq }))[0], peak);
+      return frequencies.map((hz) => {
+        const k = Math.round((hz * N) / rate);
+        const power = dry[2 * k] ** 2 + dry[2 * k + 1] ** 2;
+        const re = (bins[2 * k] * dry[2 * k] + bins[2 * k + 1] * dry[2 * k + 1]) / power;
+        const im = (bins[2 * k + 1] * dry[2 * k] - bins[2 * k] * dry[2 * k + 1]) / power;
+        return [round(dB(Math.hypot(re, im)), 3), round((Math.atan2(im, re) * 180) / Math.PI, 2)];
+      });
+    };
+    return { stand, response };
+  };
+  // the frequencies of a response, each that of a bin of the FFT at its rate (a narrow peak read where it is): 64
+  // from 20 Hz to 21 kHz; of the sweep of the resonance 241 around 1 kHz
+  const binsOf = (list, rate) => list.map((hz) => round((Math.round((hz * N) / rate) * rate) / N, 4));
+  const SPREAD = Array.from({ length: 64 }, (_, i) => 20 * 1050 ** (i / 63));
+  const FREQUENCIES = binsOf(SPREAD, R);
+  const Q_FREQUENCIES = binsOf(
+    Array.from({ length: 241 }, (_, i) => 400 * 6.25 ** (i / 240)),
+    R
+  );
+  // the plain params of a band: type 0 a shelf (low of band 1, high of band 2), 1 a peak, 2 a pass (high of band
+  // 1, low of band 2)
+  const bandOf = (band, type, freq, reso, gain) => ({
+    [`kParamType${band}`]: type,
+    [`kParamFreq${band}`]: freq,
+    [`kParamReso${band}`]: reso,
+    [`kParamGain${band}`]: gain,
+  });
+  const GRID_FREQS = [25, 60, 150, 400, 1000, 2500, 6000, 12000, 16000, 19000];
+  const GRID_RESOS = [0, 15, 30, 50, 70, 85, 100];
+  const GRID_GAINS = [-24, -12, -3, 3, 12, 24];
+  const grid = [
+    ...[1, 2].flatMap((band) =>
+      GRID_FREQS.flatMap((freq) =>
+        GRID_RESOS.flatMap((reso) => GRID_GAINS.map((gain) => [band, 0, freq, reso, gain]))
+      )
+    ),
+    ...GRID_FREQS.flatMap((freq) =>
+      GRID_RESOS.flatMap((reso) => GRID_GAINS.map((gain) => [1, 1, freq, reso, gain]))
+    ),
+    ...GRID_FREQS.flatMap((freq) =>
+      [15, 50, 85].flatMap((reso) => [-12, 12].map((gain) => [2, 1, freq, reso, gain]))
+    ),
+    ...[1, 2].flatMap((band) =>
+      GRID_FREQS.flatMap((freq) => GRID_RESOS.map((reso) => [band, 2, freq, reso, 0]))
+    ),
+  ];
+  const RATE_ROWS = [
+    [1, 1, 16000, 50, 12],
+    [1, 1, 8000, 80, -12],
+    [2, 0, 10000, 70, 12],
+    [2, 2, 15000, 60, 0],
+    [1, 2, 100, 50, 0],
+    [1, 0, 100, 50, 12],
+    [2, 2, 20000, 100, 0],
+    // (the lowest frequency: 21.53 Hz at 44.1 kHz)
+    [1, 1, 5, 50, 12],
+    [1, 1, 30, 50, 12],
+  ];
+  const stands = [];
+  try {
+    const at = standAt(R);
+    stands.push(at.stand);
+    const respond = (eq, frequencies = FREQUENCIES) => at.response(eq, frequencies);
+    const magnitudes = async (eq, frequencies) => (await respond(eq, frequencies)).map(([gain]) => gain);
+    const rowsOf = (list) => Promise.all(list.map(async (row) => [...row, await magnitudes(bandOf(...row))]));
+    const fresh = respond({});
+    const defaults = Promise.all(
+      [1, 2].flatMap((band) =>
+        [-12, 12].map(async (gain) => [band, gain, await magnitudes({ [`kParamGain${band}`]: gain })])
+      )
+    );
+    const level = Promise.all(
+      [0.1, 0.25, 0.5, 0.75, 0.9, 1].map(async (v) => [v, (await respond({ kParamLevelOut: v }))[20][0]])
+    );
+    // knobs out of their ranges and at their ends: alike
+    const clamps = rowsOf([
+      [1, 1, 5, 50, 12],
+      [1, 1, 20, 50, 12],
+      [1, 1, 25000, 50, 12],
+      [1, 1, 20000, 50, 12],
+      [1, 1, 1000, -10, 12],
+      [1, 1, 1000, 0, 12],
+      [1, 1, 1000, 150, 12],
+      [1, 1, 1000, 100, 12],
+      [1, 1, 1000, 50, 40],
+      [1, 1, 1000, 50, 24],
+      [1, 1, 1000, 50, -40],
+      [1, 1, 1000, 50, -24],
+      [1, 5, 1000, 50, 12],
+      [2, 5, 1000, 50, 12],
+      [1, 2, 1000, 50, 12],
+      [2, 2, 1000, 50, -12],
+    ]);
+    const phase = Promise.all(
+      [
+        [1, 0, 150, 70, 12],
+        [2, 0, 6000, 50, -12],
+        [1, 1, 1000, 85, 12],
+        [1, 1, 400, 30, -24],
+        [1, 2, 60, 70, 0],
+        [2, 2, 12000, 30, 0],
+      ].map(async (row) => [...row, await respond(bandOf(...row))])
+    );
+    const RESOS = Array.from({ length: 21 }, (_, i) => i * 5);
+    const q = Promise.all(
+      [0, 1, 2].flatMap((type) =>
+        RESOS.map(async (reso) => [
+          type,
+          reso,
+          await magnitudes(bandOf(1, type, 1000, reso, 12), Q_FREQUENCIES),
+        ])
+      )
+    );
+    const result = {
+      about:
+        'The EQ of the effect rack of the Audio Unit (alone in the rack; osc A off, the noise oscillator plays an impulse of ours one-shot at 44.1 kHz after a quiet tone of 1 kHz that keeps the rack awake; a response is the FFT of 2^16 samples from the impulse through the EQ over the one of the dry render, the rack empty, dB, at `frequencies`). Its plain params: kParamType1/2 (0 a shelf: low of band 1, high of band 2; 1 a peak; 2 a pass: high of band 1, low of band 2; more is 2), kParamFreq1/2 (Hz), kParamReso1/2 (%), kParamGain1/2 (dB, none on a pass), kParamLevelOut (a knob). `fresh` [dB, degrees] of a fresh EQ; `defaults` [band, gain, dB] a fresh EQ with the gain of one band set; `level` [knob, dB]; `clamps` [band, type, Hz, reso, gain, dB] knobs out of their ranges and at their ends; `phase` [band, type, Hz, reso, gain, [dB, degrees]]; `q` [type, reso, dB at `qFrequencies`] band 1 at 1 kHz, gain 12 dB; `grid` [band, type, Hz, reso, gain, dB]; `rates` by rate the `rows` rendered at it, at its `frequencies` (the sample resampled alike with and without the EQ); scripts/renders/run.mjs --only=eq',
+      rate: R,
+      frequencies: FREQUENCIES,
+      qFrequencies: Q_FREQUENCIES,
+      fresh: await fresh,
+      level: await level,
+      defaults: await defaults,
+      clamps: await clamps,
+      phase: await phase,
+      q: await q,
+      grid: await rowsOf(grid),
+    };
+    const at96 = standAt(96000);
+    stands.push(at96.stand);
+    const frequencies96 = binsOf(SPREAD, 96000);
+    const rows96 = await Promise.all(
+      RATE_ROWS.map(async (row) => [
+        ...row,
+        (await at96.response(bandOf(...row), frequencies96)).map(([g]) => g),
+      ])
+    );
+    result.rates = { 96000: { frequencies: frequencies96, rows: rows96 } };
+    writeRows(join(out, 'eq.json'), result);
+    console.log('dsp/measurements: eq', JSON.stringify({ level: result.level }));
+  } finally {
+    stands.forEach((stand) => stand.remove());
   }
 }
 
