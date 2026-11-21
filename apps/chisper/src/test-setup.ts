@@ -12,6 +12,7 @@ import {
   WaveShaperNode as WaveShaperNodeMock,
 } from 'standardized-audio-context-mock';
 import { installCanvasStub } from '@chisper/ui-kit/test-utils';
+import { resetAnalytics } from './app/common/services/analytics';
 import { stopModels } from './test-utils/model-registry';
 import { restoreStorage } from './test-utils/storage';
 import { WorkerStub } from './test-utils/worker-stub';
@@ -161,6 +162,8 @@ Object.defineProperty(globalThis.crypto, 'randomUUID', {
 });
 
 afterEach(() => {
+  // (the session of the analytics: no recorder, nothing used)
+  resetAnalytics();
   restoreStorage();
   stopModels();
   Reflect.deleteProperty(document, 'visibilityState');

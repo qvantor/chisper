@@ -38,8 +38,9 @@ Dev and build:
 - `npm start` — `netlify dev --filter chisper` (functions, :8888) + Nx dev server (:4200, proxies `/.netlify/*`,
   `/api/*` and `/files/*`). Needs `npm run certs` once (mkcert into `.certs/`; `mkcert -install` trusts the CA).
 - `npm run client:start` — frontend only (lists of tables/noises and presets fail).
-- `npm run build` — production build into `dist/apps/chisper` (wasm, minified worklets, then the site merged in and
-  the lastmods of the sitemap dated against the live site: needs the network).
+- `npm run build` — production build into `dist/apps/chisper` (wasm, minified worklets, the source maps of the
+  bundles to PostHog in Netlify's production and removed everywhere: `scripts/analytics/sourcemaps.mjs`, then the
+  site merged in and the lastmods of the sitemap dated against the live site: needs the network).
 - `npm run build:perf` — build with the test hook `window.__chisperPerf` into `dist/apps/chisper-perf`.
 - `npm run wasm` — the Rust core → `tmp/wasm/` (prod) and `tmp/wasm-perf/` (cargo feature `perf`, used by specs and
   `build:perf`); a `.wasm` there that is no core any more is removed. Flags: `--only=prod|perf`, `--watch`,
@@ -84,8 +85,10 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
   `tmp/noises/`. `upload.mjs` writes to the production bucket: dry run unless `--apply`, only when the user asks.
 
-Env vars: `.env.example` (R2 buckets of tables and noises, `DATABASE_URL`, Turnstile, score thresholds). The client
-gets only `NX_PUBLIC_*` vars (inlined at build time).
+Env vars: `.env.example` (R2 buckets of tables and noises, `DATABASE_URL`, Turnstile, score thresholds, the
+analytics: `NX_PUBLIC_ANALYTICS_KEY`, `NX_PUBLIC_RELEASE` from `COMMIT_REF` by `webpack.config.js`, the secrets of the
+source maps `POSTHOG_CLI_API_KEY`/`POSTHOG_CLI_PROJECT_ID`). The client gets only `NX_PUBLIC_*` vars (inlined at build
+time).
 
 ## Rules that are easy to break
 
@@ -129,6 +132,17 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
   a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
   `voice-modules.spec` holds them).
+- **Analytics** (`common/services/analytics.ts`: PostHog Cloud EU, its slim SDK bundled, through `ANALYTICS_PATH`
+  rewritten by `netlify.toml`): `feature_used` only from what a user does (a handler of the UI or an action it calls,
+  never a state set by `applySnap`, a preset, an undo or a restore: `analytics-features.spec`); a failure the user
+  sees goes through `captureError` (a fingerprint of its own where its cause is of a closed list; a query names its
+  load in `meta.load`: `app/query-client.ts` reports it once, after its retries, and so an answer of the API of a
+  query: `queryGet` of `presets/services/api.ts`); `session_end` at every hide of the page, what came since the one
+  before (a session's numbers are sums); nothing a user writes is sent (names of presets and files, searches, the
+  messages of the API), nor where a link came from (`before_send` keeps of the URL its path, `preset` and `clip`, of
+  the referrer its domain). Main thread only: a worklet module or a worker never imports it (a node tells what
+  failed in its report: `EngineFaultReport`). Off without its key, in the perf build and the specs, out of
+  production, on `*.netlify.app` and localhost.
 - **Netlify**: function specs live in `netlify/tests/`, never in `netlify/functions/` (every file there is
   deployed). Functions import `libs/preset-schema` by relative path (esbuild doesn't know the tsconfig aliases).
   Netlify doesn't typecheck functions: `npm run typecheck` does. `GET /api/presets/:id` is kept a day (and a minute
@@ -151,6 +165,8 @@ gets only `NX_PUBLIC_*` vars (inlined at build time).
   `ResizeObserver` is stubbed.
 - Count `addModule` calls with `workletLoads` (the synth core adds `engine` itself, once).
 - Presets specs without the synth pass `immediateSoundSwitch` of test-utils.
+- What the app reports: `recordAnalytics()` (`test-utils/analytics.ts`: its events, its errors, `features()`); the
+  SDK is mapped to `test-utils/posthog-mock.ts` (`analytics-sdk.spec` loads the real one by its file).
 - Server specs: the DB is the fake `sql` tag of `netlify/tests/fake-sql.ts` (records queries, answers by regex).
 - DSP specs: `<module>-dsp.spec.ts` (the core through its facade), `<module>-goldens.spec.ts` (golden scenarios and
   fuzzing, `test-utils/fuzz-signals.ts`; `engine-goldens`: the whole node); the crates have `cargo test` (lanes run

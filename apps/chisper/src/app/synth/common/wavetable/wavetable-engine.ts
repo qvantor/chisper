@@ -1,4 +1,5 @@
 import { BehaviorSubject } from 'rxjs';
+import { errorMessage } from '../../../common/services/analytics';
 import { workletUrl } from '../../fx/effects/load-worklet';
 import type { EngineHost } from '../engine/engine-host';
 import type { EngineReport } from '../engine/engine-params';
@@ -264,12 +265,15 @@ export const createWavetableEngine = (
     // an error of the worker itself (its script) fails the engine; a version that failed to build only its
     // table: it plays the version before, the engine stays ready
     created.onerror = (event) => {
-      if (worker === created) engine.fail(event);
+      if (worker !== created) return;
+      engine.report.worker(event, WAVETABLE_WORKER);
+      engine.fail(event);
     };
     created.onmessage = ({ data }: MessageEvent<BuilderStatsMessage | BuilderFailedMessage>) => {
       if (worker !== created) return;
       if ('failed' in data) {
         console.error(`The version ${data.version} of the table ${data.failed} failed to build`, data.reason);
+        engine.report.failure('table', 'build', { cause: errorMessage(data.reason) });
         answer(data.failed, data.version, 'failed');
         return;
       }

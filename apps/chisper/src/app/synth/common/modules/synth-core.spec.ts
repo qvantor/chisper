@@ -1,4 +1,5 @@
 import { registrar } from 'standardized-audio-context-mock';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createSynthCore, stopModels } from '../../../../test-utils/models';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { setChromium, setPlaybackStats } from '../../../../test-utils/user-agent';
@@ -68,6 +69,51 @@ describe('synthCore', () => {
     expect((node()?.connect as jest.Mock).mock.calls).toEqual([[output, 0]]);
     // the analysers tap what is played: the output of the engine, after its limiter
     expect((output.connect as jest.Mock).mock.calls[0]).toEqual([audioCtx.destination]);
+  });
+
+  it('tells the analytics the first status of its engine after loading: what the context found', async () => {
+    const { named } = recordAnalytics();
+    const { model } = setup();
+    expect(named('engine_status')).toEqual([]);
+    await flush();
+    expect(named('engine_status')).toEqual([
+      {
+        status: 'ready',
+        ms: expect.any(Number),
+        reason: null,
+        secure: null,
+        sampleRate: model.audioCtx.sampleRate,
+        baseLatency: expect.anything(),
+        outputLatency: null,
+      },
+    ]);
+    // (once a session)
+    model.engine.fail(new Error('gone'));
+    expect(named('engine_status')).toHaveLength(1);
+  });
+
+  it.each([
+    // (each gives back what it took: test-setup restores the AudioWorklet and the Worker)
+    ['no AudioWorklet', 'audio-worklet', () => withoutAudioWorklet()],
+    [
+      'no wasm SIMD',
+      'wasm-simd',
+      () => {
+        const validate = jest.spyOn(WebAssembly, 'validate').mockReturnValue(false);
+        return () => validate.mockRestore();
+      },
+    ],
+    ['no Worker', 'worker', () => void Object.assign(globalThis, { Worker: undefined })],
+  ])('unsupported (%s): why, of a closed list', async (_, reason, without: () => (() => void) | void) => {
+    const restore = without();
+    try {
+      const { named } = recordAnalytics();
+      setup();
+      await flush();
+      expect(named('engine_status')).toEqual([expect.objectContaining({ status: 'unsupported', reason })]);
+    } finally {
+      restore?.();
+    }
   });
 
   it('is silent until the engine is ready: no node before its module has loaded', async () => {

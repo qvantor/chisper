@@ -1,4 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { jsonResponse, queryWrapper } from '../../../../test-utils/query-client';
 import { useWavetables, wavetablesToOptions } from './use-wavetables';
 
@@ -61,11 +62,13 @@ describe('useWavetables', () => {
   it.each([
     ['a function that threw', 502, { errorType: 'Error', errorMessage: 'No bucket' }],
     ['an ok answer that is no list', 200, { error: 'Internal error' }],
-  ])('has no options after %s, and renders its error', async (_, status, body) => {
+  ])('has no options after %s, and renders its error (reported)', async (_, status, body) => {
+    const { fingerprints } = recordAnalytics();
     fetchMock.mockResolvedValueOnce(jsonResponse(status, body));
     const { client, wrapper } = queryWrapper();
     const { result } = renderHook(useWavetables, { wrapper });
     await waitFor(() => expect(client.getQueryState(['wavetables'])?.status).toBe('error'));
     expect(result.current).toEqual({ options: [], status: 'error' });
+    expect(fingerprints()).toEqual(['load:wavetable_list:Error']);
   });
 });

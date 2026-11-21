@@ -3,6 +3,10 @@ const { join } = require('path');
 const { NxAppWebpackPlugin } = require('@nx/webpack/app-plugin');
 const { NxReactWebpackPlugin } = require('@nx/react/webpack-plugin');
 const { DefinePlugin } = require('webpack');
+const { releaseOf } = require('./release.cjs');
+
+// the release of the analytics (common/services/analytics.ts), inlined as every NX_PUBLIC_* variable is
+process.env.NX_PUBLIC_RELEASE = releaseOf(process.env);
 
 // robots.txt at the root (the promo pages of apps/site join the folder after the build: scripts/site/merge.mjs);
 // the worklet bundles of a configuration (`npm run worklets`). The core of the engine a render of the track runs on
@@ -12,6 +16,8 @@ const assetsOf = (worklets) => [
   './src/robots.txt',
   './src/assets',
   { input: worklets, glob: '*.js', output: 'assets/worklets' },
+  // their source maps (scripts/analytics/sourcemaps.mjs uploads them to PostHog, then removes them)
+  { input: worklets, glob: '*.js.map', output: 'assets/worklets' },
 ];
 
 // the configurations of the build and the serve targets (project.json; the inferred tasks of @nx/webpack/plugin
@@ -32,7 +38,9 @@ const build = {
   production: {
     optimization: true,
     outputHashing: 'all',
-    sourceMap: false,
+    // maps with no link to them in the bundles: scripts/analytics/sourcemaps.mjs uploads them to PostHog (its
+    // stacks of the errors unfolded) and removes them before the deploy
+    sourceMap: 'hidden-source-map',
     namedChunks: false,
     extractLicenses: true,
     vendorChunk: false,

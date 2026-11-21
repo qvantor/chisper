@@ -1,6 +1,6 @@
 import { registrar } from 'standardized-audio-context-mock';
 import { ChainMessage, ChainReport } from '../app/synth/common/chain/chain-params';
-import { ENGINE_PROCESSOR, EngineOptions } from '../app/synth/common/engine/engine-params';
+import { ENGINE_PROCESSOR, EngineFaultReport, EngineOptions } from '../app/synth/common/engine/engine-params';
 
 // the node of the engine as the chain sees it (the stub of test-setup makes it): its name, the options it was made
 // with, a port that records what it is posted
@@ -36,5 +36,5 @@ export const chainPosts = (node: ChainNodeStub): ChainMessage[] =>
     .filter((message) => !('events' in message || 'port' in message || 'stats' in message));
 
 // a message of the worklet to the main thread
-export const chainReports = (node: ChainNodeStub, data: ChainReport) =>
+export const chainReports = (node: ChainNodeStub, data: ChainReport & EngineFaultReport) =>
   node.port.onmessage?.({ data } as MessageEvent);

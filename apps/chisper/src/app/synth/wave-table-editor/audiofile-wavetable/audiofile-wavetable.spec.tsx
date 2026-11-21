@@ -2,6 +2,7 @@ import React from 'react';
 import toast from 'react-hot-toast';
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createOscillator } from '../../../../test-utils/models';
 import { ascii, chunk, data, fmt, riff } from '../../../../test-utils/wav-file';
 import { OscillatorContext } from '../../oscillator/hooks';
@@ -84,11 +85,14 @@ describe('the Audio file tab of the wavetable editor', () => {
 
   it('cuts an audio file into waves, and goes back to the drop screen for another one', async () => {
     const { onWavetable, user } = setup();
+    const { features } = recordAnalytics();
 
     await choose(user, fileOf('voice.wav', wav(new Float32Array(44100).fill(0.5))));
 
     expect(await screen.findByText('W Count')).toBeInTheDocument();
     expect(onWavetable).not.toHaveBeenCalled();
+    // an audio file imported: a use of the editor
+    expect(features()).toEqual(['wavetable_editor:audio_import']);
 
     await user.click(screen.getByRole('button', { name: 'Another file' }));
     expect(screen.getByRole('button', { name: 'Choose a file' })).toBeInTheDocument();
@@ -96,6 +100,7 @@ describe('the Audio file tab of the wavetable editor', () => {
 
   it('tells why a file is not taken: too long, not audio, not decodable', async () => {
     const { user, onWavetable } = setup();
+    const { features } = recordAnalytics();
 
     await choose(user, fileOf('long.wav', wav(new Float32Array(8000 * 13), { sampleRate: 8000 })));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('long.wav is longer than 12 seconds'));
@@ -105,5 +110,7 @@ describe('the Audio file tab of the wavetable editor', () => {
 
     expect(onWavetable).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Choose a file' })).toBeInTheDocument();
+    // (a file not taken is no use)
+    expect(features()).toEqual([]);
   });
 });

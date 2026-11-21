@@ -69,6 +69,9 @@ Built with TypeScript, Rust (WebAssembly), RxJS and the Web Audio API. Nothing t
 ### 🔒 Privacy
 
 - No accounts. IP addresses are stored only as salted hashes, for rate limits and to count unique listeners.
+- Anonymous usage and error reports (PostHog Cloud EU, through this site): which features a page load used, the
+  downloads of WAV and MIDI, what failed. No cookies or storage, no IP addresses, no persistent ID, nothing you type
+  (preset names, searches, file names).
 
 ## Browser support
 

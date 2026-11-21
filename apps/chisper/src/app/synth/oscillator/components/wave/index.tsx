@@ -3,6 +3,7 @@ import { EditFilled } from '@ant-design/icons';
 import { styled } from 'styled-components';
 import { theme, Modal, Deactivated, HandleModulation } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { featureUsed } from '../../../../common/services/analytics';
 import WaveTableEditor from '../../../wave-table-editor';
 import { useCompact, useHeld, useOscillatorContext } from '../../hooks';
 import { OscillatorStatus } from '../oscillator-status';
@@ -61,7 +62,10 @@ export const Wave = ({ modulations, target, unison, onUnisonActiveChange }: Prop
   const [editorOpen, setEditorOpen] = React.useState(false);
   // Phase and Phase rand held under the wave (both at once with two fingers): the chart shows them
   const [$phaseHeld, holdPhase] = useHeld();
-  const toggleEditorOpen = () => setEditorOpen(!editorOpen);
+  const toggleEditorOpen = () => {
+    if (!editorOpen) featureUsed('wavetable_editor', 'open');
+    setEditorOpen(!editorOpen);
+  };
   const active = useBehaviorSubject($active);
   // narrow: the values of both strips smaller (they are as wide as the block)
   const [ref, compact] = useCompact<HTMLDivElement>();

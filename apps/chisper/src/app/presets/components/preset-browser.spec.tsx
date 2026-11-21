@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { PresetListItem } from '@chisper/preset-schema';
 import { theme } from '@chisper/ui-kit';
 import { cssColor } from '@chisper/ui-kit/test-utils';
+import { recordAnalytics } from '../../../test-utils/analytics';
 import { fakePreset } from '../../../test-utils/presets-fixtures';
 import { renderWithPresets } from '../../../test-utils/presets-wrapper';
 import { getPreset, getTopPresets, listPresets, reportPreset, sharePreset } from '../services';
@@ -83,11 +84,14 @@ describe('PresetBrowser', () => {
 
   it('loads the selected preset and uses the list for ◀ ▶', async () => {
     const { user, presets } = setup();
+    const { features } = recordAnalytics();
     await user.click(await screen.findByText('Top two'));
 
     await waitFor(() => expect(presets[0].$current.value).toEqual({ id: 't2', name: 'Preset t2' }));
     expect(getPresetMock).toHaveBeenCalledWith('t2');
     expect(presets[0].$list.value).toEqual(top);
+    // opened from the list by the user
+    expect(features()).toEqual(['preset:open']);
   });
 
   it('lists all presets sorted by the chosen order', async () => {

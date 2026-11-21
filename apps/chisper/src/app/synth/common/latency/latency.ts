@@ -1,4 +1,5 @@
 import { canStore, readStored, writeStored } from '../../../common/services';
+import { featureUsed } from '../../../common/services/analytics';
 import { canCountDropouts } from './dropouts';
 
 // the latency of the output, chosen when the AudioContext is created (its latencyHint), so a change applies on
@@ -46,8 +47,10 @@ export const canKeepLatency = () => canStore('localStorage');
 // auto keeps normal from the next start on (dropouts at low)
 export const keepNormalLatency = () => writeStored('localStorage', AUTO_KEY, 'normal');
 
-// auto chosen again forgets what it learnt: it tries low again
+// auto chosen again forgets what it learnt: it tries low again (a choice of the user: the page reloads after it,
+// the SDK sends what it holds as the page goes)
 export const setLatencyMode = (mode: LatencyMode) => {
+  featureUsed('latency', mode);
   writeStored('localStorage', MODE_KEY, mode);
   if (mode === 'auto') writeStored('localStorage', AUTO_KEY, null);
 };
@@ -70,6 +73,7 @@ export const reloadPage = () => navigation.reload();
 
 // dropouts at low: normal from now on (auto keeps it already, a low chosen by hand becomes normal)
 export const switchToNormalLatency = () => {
+  featureUsed('latency', 'normal');
   if (readLatencyMode() === 'low') setLatencyMode('normal');
   reloadPage();
 };

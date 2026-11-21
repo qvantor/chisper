@@ -7,6 +7,7 @@ import { FilterType, isFilterType, isWebFilterType } from '@chisper/preset-schem
 import type { SoundCoreModule } from '../../common/modules/synth-core';
 import type { VoiceFilterOptions } from '../../common/wavetable/voice-options';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import {
   defaultFilterRanges,
   filterDefaultsOf,
@@ -79,11 +80,15 @@ export const filter = ({ synthCore: [{ clock }] }: Dependencies) =>
     };
   })
     .actions(({ $active, $filter, $filterType, $ranges, $variationKind, $resonanceType, $changingType }) => ({
-      toggleActive: () => $active.next(!$active.value),
+      toggleActive: () => {
+        if (!$active.value) featureUsed('filter', $filterType.value);
+        $active.next(!$active.value);
+      },
 
       // a type that uses Res, of the other kind than the last one that did (of a BiquadFilterNode, a model one): Res
       // where its knob was; Var of the other meaning (Comp, the Gain of the band of an EQ type): its default
       setType: (type: FilterType) => {
+        featureUsed('filter', type);
         let values = $filter.value;
         const to = resonanceTravelOf(type);
         if (!to.disabled) {

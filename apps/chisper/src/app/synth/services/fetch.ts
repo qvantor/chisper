@@ -1,3 +1,4 @@
+import { trackOnce } from '../../common/services/analytics';
 import { bucketUrl } from './buckets';
 
 const checkOk = (url: string, res: Response) => {
@@ -146,6 +147,11 @@ export const bucketLoader = (origin: string, proxy: string) => {
       if (signal?.aborted) throw error;
       console.warn(`${key} didn't load from ${first}, trying ${second}`, error);
       const result = parse(await downloadWithin(bucketUrl(second, key), SECOND_LIMITS, signal, onProgress));
+      // (the bucket by the path of its proxy: /files/<bucket>)
+      if (second === proxy) {
+        const bucket = proxy.split('/').pop() ?? proxy;
+        trackOnce(`bucket:${bucket}`, 'bucket_fallback', { bucket });
+      }
       routes = [second, first];
       return result;
     }

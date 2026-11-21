@@ -44,7 +44,7 @@ export const Button = styled.button`
 `;
 
 interface Props {
-  onLoad: (buffer: ArrayBuffer, name: string) => Promise<void>;
+  onLoad: (buffer: ArrayBuffer, name: string) => Promise<unknown>;
 }
 
 const exampleFile = async (name: string): Promise<ArrayBuffer> => {

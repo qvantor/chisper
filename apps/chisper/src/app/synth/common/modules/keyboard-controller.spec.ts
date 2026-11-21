@@ -1,4 +1,5 @@
 import { appModel } from '../../../app/modules/app-module';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createSpiedInputController, initModel, stopModels } from '../../../../test-utils/models';
 import { keyboardController } from './keyboard-controller';
 
@@ -42,6 +43,7 @@ describe('keyboardController', () => {
 
   it('presses and releases notes on keydown/keyup', () => {
     const { onPress, onRelease } = setup();
+    const { features } = recordAnalytics();
 
     const down = key('keydown', 'KeyQ');
     expect(onPress).toHaveBeenCalledWith([4, 'C']);
@@ -49,6 +51,9 @@ describe('keyboardController', () => {
 
     key('keyup', 'KeyQ');
     expect(onRelease).toHaveBeenCalledWith([4, 'C']);
+    // (its input used: told apart from the piano on the screen, whose source is 'keys' too)
+    key('keydown', 'KeyW');
+    expect(features()).toEqual(['input:qwerty']);
   });
 
   it('ignores keys without a note', () => {

@@ -30,6 +30,7 @@ import {
   TIME_DIVISIONS,
 } from '@chisper/preset-schema';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import {
   createLfoGlobal,
   frac,
@@ -224,20 +225,24 @@ export const lfos = ({ synthCore: [{ clock, wavetables }], transport: [transport
     return { $lfos, $selected, globals, $ranges };
   })
     .actions(({ $lfos, $selected }) => {
-      const update = (id: LfoId, change: Partial<LfoParams>) =>
-        $lfos.next({ ...$lfos.value, [id]: { ...$lfos.value[id], ...change } });
+      // an edit of an LFO by the user (every action but select)
+      const put = (id: LfoId, lfo: Lfos[LfoId]) => {
+        featureUsed('lfo', id);
+        $lfos.next({ ...$lfos.value, [id]: lfo });
+      };
+      const update = (id: LfoId, change: Partial<LfoParams>) => put(id, { ...$lfos.value[id], ...change });
       return {
         setLfoValue: (id: LfoId, key: LfoKnob, value: number) => update(id, { [key]: value }),
         // a shape chosen replaces points of its own
         setShape: (id: LfoId, shape: LfoShape) => {
           const { points: _, ...lfo } = $lfos.value[id];
-          $lfos.next({ ...$lfos.value, [id]: { ...lfo, shape } });
+          put(id, { ...lfo, shape });
         },
         // a shape of its own (none: its shape again)
         setPoints: (id: LfoId, points: LfoPoint[] | undefined) => {
           const { points: _, ...lfo } = $lfos.value[id];
           const valid = pointsFrom(points);
-          $lfos.next({ ...$lfos.value, [id]: valid ? { ...lfo, points: valid } : lfo });
+          put(id, valid ? { ...lfo, points: valid } : lfo);
         },
         setMode: (id: LfoId, mode: LfoMode) => update(id, { mode }),
         // BPM: each knob of a time takes the division nearest to its seconds at the tempo (Rate of its steps

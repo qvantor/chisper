@@ -1,3 +1,4 @@
+import { recordAnalytics } from '../../../test-utils/analytics';
 import {
   ApiRequestError,
   getPreset,
@@ -73,6 +74,35 @@ describe('api', () => {
     const error = await getTopPresets().catch((e) => e);
     expect(error).toBeInstanceOf(ApiRequestError);
     expect(error).toMatchObject({ status: 429, message: 'Too many requests' });
+  });
+
+  it('reports an answer with an error: its route without the id, its method and status (not its message)', async () => {
+    const { errors, fingerprints } = recordAnalytics();
+    fetchMock.mockResolvedValue(response(409, { error: 'This sound is already saved as “Mine”' }));
+    await updatePreset('abc', { editToken: 't' } as never).catch(() => undefined);
+    fetchMock.mockResolvedValue(response(200, { id: '1' }));
+    await getPreset('abc');
+    expect(fingerprints()).toEqual(['load:api:PUT /api/presets/:id:409']);
+    expect(JSON.stringify(errors)).not.toContain('Mine');
+  });
+
+  it('leaves an answer with an error of a query (it retries) to the query cache: the request on the error', async () => {
+    const { errors } = recordAnalytics();
+    fetchMock.mockResolvedValue(response(500));
+    const list = await listPresets({ sort: 'new', q: 'my pad' }).catch((e) => e);
+    const name = await isNameAvailable('Mine').catch((e) => e);
+    expect(errors).toEqual([]);
+    expect(list).toMatchObject({
+      status: 500,
+      unreported: { path: '/api/presets?sort=new&q=my+pad', method: 'GET' },
+    });
+    expect(name).toMatchObject({
+      status: 500,
+      unreported: { path: '/api/presets/name-available?name=Mine', method: 'GET' },
+    });
+    const reported = await getPreset('abc').catch((e) => e);
+    expect(reported).toMatchObject({ status: 500, unreported: null });
+    expect(errors).toHaveLength(1);
   });
 
   it('throws a fallback message when the error body is not JSON', async () => {

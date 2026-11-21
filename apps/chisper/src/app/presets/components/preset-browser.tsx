@@ -8,6 +8,7 @@ import { keepFocus, SwitchKey, SwitchKeys, textBold12, theme } from '@chisper/ui
 import { useBehaviorSubject } from '@chisper/rxjs-react';
 import { PresetListItem, PresetSort } from '@chisper/preset-schema';
 import { Bar, Dialog, DialogScreen, DirtyDot, Key, ScreenHead, Spacer } from '../../common/components';
+import { featureUsed } from '../../common/services/analytics';
 import { INIT_NAME, usePresets } from '../modules/presets';
 import { useDebounced } from '../hooks/use-debounced';
 import { listPresets } from '../services';
@@ -180,7 +181,9 @@ export const PresetBrowser = ({ open, onClose }: Props) => {
   const allItems = React.useMemo(() => all.data?.pages.flatMap((page) => page.items) ?? [], [all.data]);
 
   // the preset is applied right away, the modal stays open to compare sounds
+  // (loadById opens the preset of a link too: the use is the click's)
   const select = (items: PresetListItem[]) => (item: PresetListItem) => {
+    featureUsed('preset', 'open');
     setList(items);
     loadById(item.id);
   };

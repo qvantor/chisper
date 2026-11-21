@@ -21,6 +21,7 @@ import {
 } from '@chisper/preset-schema';
 import { getFq, noteToString } from '../../services';
 import { urlSnapshotPlugin } from '../../../app';
+import { featureUsed } from '../../../common/services/analytics';
 import type {
   KnobsModule,
   VoiceFilterOptions,
@@ -1311,9 +1312,18 @@ export const synth = ({
     };
   })
     .actions(({ $maxVoices, $portamento, $legato, $bendDown, $bendUp, $voicesCount, voicing }) => ({
-      setMaxVoices: (value: number) => $maxVoices.next(value),
-      setPortamento: (value: number) => $portamento.next(value),
-      setLegato: (value: boolean) => $legato.next(value),
+      setMaxVoices: (value: number) => {
+        if (value === 1) featureUsed('voicing', 'mono');
+        $maxVoices.next(value);
+      },
+      setPortamento: (value: number) => {
+        if (value > 0) featureUsed('voicing', 'portamento');
+        $portamento.next(value);
+      },
+      setLegato: (value: boolean) => {
+        if (value) featureUsed('voicing', 'legato');
+        $legato.next(value);
+      },
       setBendDown: (value: number) => $bendDown.next(value),
       setBendUp: (value: number) => $bendUp.next(value),
       setVoicesCount: (value: number) => $voicesCount.next(value),

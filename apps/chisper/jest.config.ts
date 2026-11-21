@@ -16,10 +16,14 @@ module.exports = {
       },
     ],
   },
-  // d3 and its deps, pretty-bytes and @noble/hashes are published as ESM only
-  transformIgnorePatterns: ['/node_modules/(?!(d3-[^/]+|internmap|pretty-bytes|@noble)/)'],
+  // d3 and its deps, pretty-bytes and @noble/hashes are published as ESM only; so are the bundles of posthog-js (the
+  // real SDK of analytics-sdk.spec.ts)
+  transformIgnorePatterns: ['/node_modules/(?!(d3-[^/]+|internmap|pretty-bytes|@noble|posthog-js)/)'],
   moduleNameMapper: {
     '^@marsidev/react-turnstile$': '<rootDir>/src/test-utils/turnstile-mock.tsx',
+    // the SDK of the analytics (common/services/analytics.ts): a recorder, no requests
+    '^posthog-js/dist/(module\\.slim\\.no-external|extension-bundles)$':
+      '<rootDir>/src/test-utils/posthog-mock.ts',
     // the CommonJS build of @ant-design/icons requires an ES module of @ant-design/colors: its CommonJS one
     '^@ant-design/colors/es/(.*)$': '@ant-design/colors/lib/$1',
   },

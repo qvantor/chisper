@@ -5,11 +5,13 @@ import hexToRgba from 'hex-to-rgba';
 import { Dropdown, Tooltip } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import { AiOutlineClose, AiOutlineDown, AiOutlineLink, AiOutlineSave } from 'react-icons/ai';
-import { CLIP_NAME_MAX_LENGTH } from '@chisper/preset-schema';
+import { CLIP_BAR, CLIP_NAME_MAX_LENGTH, type Clip } from '@chisper/preset-schema';
 import { theme } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
+import { number } from '@chisper/math';
 import { Bar, BarTitle, DirtyDot, Key, Spacer } from '../../../common/components';
 import { saveFile } from '../../../common/services';
+import { countBucket, featureUsed, track } from '../../../common/services/analytics';
 import { useTrack } from '../modules/track';
 import { midiFileName, writeMidiFile } from '../midi-file';
 import { ExportWav } from './export-wav-dialog';
@@ -110,6 +112,17 @@ const TipKey = ({ tip, ...props }: React.ComponentProps<typeof Key> & { tip: str
 export const readMidiFile = (file: File, importMidi: (bytes: ArrayBuffer) => boolean) =>
   file.arrayBuffer().then(importMidi);
 
+// the notes of the clip saved as a .mid
+const exportMidi = (clip: Clip) => {
+  saveFile(new Blob([writeMidiFile(clip)], { type: 'audio/midi' }), midiFileName(clip));
+  track('midi_export', {
+    notes: countBucket(clip.notes.length),
+    bars: number.round(clip.length / CLIP_BAR, 100),
+    bpm: Math.round(clip.bpm),
+  });
+  featureUsed('export', 'midi');
+};
+
 interface Props {
   editor: RollEditor;
   onSave: (kind: SaveKind) => void;
@@ -182,9 +195,7 @@ export const RollHeader = ({ editor, onSave, saving, onClose, compact = false }:
           <TipKey
             aria-label='Export MIDI'
             tip='Download the notes of the clip as a .mid'
-            onClick={() =>
-              saveFile(new Blob([writeMidiFile(clip)], { type: 'audio/midi' }), midiFileName(clip))
-            }
+            onClick={() => exportMidi(clip)}
           >
             <DownloadIcon />
             <Ext>.mid</Ext>

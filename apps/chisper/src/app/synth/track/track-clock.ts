@@ -1,3 +1,4 @@
+import { captureWorkerError } from '../../common/services/analytics';
 import { workletUrl } from '../fx/effects/load-worklet';
 
 // the name of the bundle of the clock worker (`npm run worklets`)
@@ -37,7 +38,8 @@ export const createTrackClock = (
       worker = createWorker(workletUrl(TRACK_CLOCK_WORKER));
       worker.onmessage = () => onTick();
       // its script failed: the timer of the page from then on
-      worker.onerror = () => {
+      worker.onerror = (event) => {
+        captureWorkerError(event, TRACK_CLOCK_WORKER);
         worker?.terminate();
         worker = null;
         createWorker = null;

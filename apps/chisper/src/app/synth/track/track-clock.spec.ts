@@ -1,3 +1,4 @@
+import { recordAnalytics } from '../../../test-utils/analytics';
 import { createTrackClock, TICK_MS } from './track-clock';
 
 // a worker of the clock: the messages the page posted to it, `tick` answers as it would
@@ -5,7 +6,7 @@ const workerStub = () => {
   const worker = {
     posted: [] as unknown[],
     onmessage: null as (() => void) | null,
-    onerror: null as (() => void) | null,
+    onerror: null as ((event: Event) => void) | null,
     postMessage: (message: unknown) => worker.posted.push(message),
     terminate: jest.fn(),
     tick: () => worker.onmessage?.(),
@@ -49,9 +50,15 @@ describe('createTrackClock', () => {
     const worker = workerStub();
     const failing = createTrackClock(onTick, () => worker as unknown as Worker);
     failing.start();
-    worker.onerror?.();
+    const { errors } = recordAnalytics();
+    worker.onerror?.(
+      new ErrorEvent('error', { message: 'Uncaught SyntaxError', filename: 'track-clock.js' })
+    );
     jest.advanceTimersByTime(TICK_MS);
     expect(onTick).toHaveBeenCalledTimes(4);
     failing.destroy();
+    // (the failure of its script is reported, as a worker's)
+    expect(errors.map(({ properties }) => properties)).toEqual([{ source: 'worker', worker: 'track-clock' }]);
+    expect(errors[0].error).toMatchObject({ name: 'WorkerError', message: 'Uncaught SyntaxError' });
   });
 });

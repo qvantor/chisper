@@ -6,6 +6,7 @@ import { CLIP_BAR, CLIP_PPQ } from '@chisper/preset-schema';
 import { getSnapshot } from '../../../app';
 import { UPDATED } from '../../../common/services';
 import { PresetsContext } from '../../../presets';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createSynth, createTrack, stopModels } from '../../../../test-utils/models';
 import { InputControllerContext } from '../../common/modules/input-controller';
 import { NoiseContext } from '../../common/modules/noise';
@@ -363,6 +364,7 @@ describe('Export WAV', () => {
     act(() => modules.synthCore[1].setMasterGain(0.5));
     const download = withDownload();
     const render = pending();
+    const { named, features } = recordAnalytics();
     fireEvent.click(key());
     expect(screen.getByRole('dialog')).toBeTruthy();
     choose('Format', 'pcm16');
@@ -387,10 +389,20 @@ describe('Export WAV', () => {
     expect(screen.getByRole('progressbar', { name: 'Rendering' }).getAttribute('aria-valuenow')).toBe('50');
     expect(screen.getByText('50%')).toBeTruthy();
     expect(exportKey().disabled).toBe(true);
+    // (nothing reported while it renders: the file is what counts)
+    expect(named('wav_export')).toEqual([]);
     render.resolve(new Blob(['RIFF']));
     await flush();
     expect(download.createObjectURL).toHaveBeenCalled();
     expect(download.name()).toBe('Riff 120 BPM.wav');
+    // the file saved, reported once: its options, its length (no preset: the sound is Init)
+    const seconds = Math.round(
+      (track[0].$clip.value.length / CLIP_PPQ) * (60 / modules.transport[0].$bpm.value)
+    );
+    expect(named('wav_export')).toEqual([
+      { format: 'pcm16', sampleRate: 44100, span: 'loop', level: 'headroom', seconds, preset: null },
+    ]);
+    expect(features()).toEqual(['export:wav']);
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.queryByText('50%')).toBeNull();
   });
@@ -463,6 +475,7 @@ describe('Export WAV', () => {
     const download = withDownload();
     const error = jest.spyOn(toast, 'error');
     const render = pending();
+    const { events, errors } = recordAnalytics();
     fireEvent.click(key());
     fireEvent.click(exportKey());
     await flush();
@@ -473,6 +486,9 @@ describe('Export WAV', () => {
     await flush();
     expect(download.createObjectURL).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
+    // (nothing reported: no file, no failure)
+    expect(events).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   it('Cancel frees the dialog at once: opened again it exports anew, the render cancelled tells nothing of its end', async () => {
@@ -536,12 +552,26 @@ describe('Export WAV', () => {
     const download = withDownload();
     const error = jest.spyOn(toast, 'error').mockImplementation(() => '');
     const render = pending();
+    const { named, errors } = recordAnalytics();
     fireEvent.click(key());
     fireEvent.click(exportKey());
     await flush();
-    render.reject(new Error('Reverb failed in the render'));
+    const failure = new Error('Reverb failed in the render');
+    render.reject(failure);
     await flush();
     expect(error).toHaveBeenCalledWith('Reverb failed in the render');
+    // no file reported, the failure of the render once
+    expect(named('wav_export')).toEqual([]);
+    expect(errors).toEqual([
+      {
+        error: failure,
+        properties: {
+          source: 'engine',
+          kind: 'render',
+          $exception_fingerprint: 'engine:render:Reverb failed in the render',
+        },
+      },
+    ]);
     expect(download.createObjectURL).not.toHaveBeenCalled();
     expect(exportKey().disabled).toBe(false);
   });
@@ -554,10 +584,13 @@ describe('Export WAV', () => {
         name: 'ChunkLoadError',
       })
     );
+    const { errors } = recordAnalytics();
     fireEvent.click(key());
     fireEvent.click(exportKey());
     await flush();
     expect(error).toHaveBeenCalledWith(UPDATED);
+    // (a page of before a deploy: no failure of ours)
+    expect(errors).toEqual([]);
   });
 
   it('a sound still loading is not rendered', async () => {

@@ -1,4 +1,5 @@
 import { registrar } from 'standardized-audio-context-mock';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import { eventsOf, voicesNodes } from '../../../../test-utils/voice-events';
@@ -263,9 +264,20 @@ describe('wavetable engine', () => {
     await flush();
     const first = worker();
     const stub = node();
-    const event = new Event('error');
+    const { errors } = recordAnalytics();
+    const event = new ErrorEvent('error', {
+      message: 'Uncaught RangeError',
+      filename: 'w.js',
+      lineno: 1,
+      colno: 9,
+    });
     first?.onerror?.(event);
     expect(statuses.at(-1)).toBe('failed');
+    // reported once, as the worker's: its message and its place
+    expect(errors.map(({ properties }) => properties)).toEqual([
+      { source: 'worker', worker: 'wavetable-worker' },
+    ]);
+    expect((errors[0].error as Error).stack).toBe('WorkerError: Uncaught RangeError\n    at w.js:1:9');
     expect(first?.terminate).toHaveBeenCalled();
     // the whole node: its processor stopped, the chain with it
     expect(core.$status.value).toBe('failed');
@@ -291,8 +303,11 @@ describe('wavetable engine', () => {
     engine.setTable('osc1', [saw]);
     engine.setTable('osc2', [sine]);
     await flush();
+    const { errors, fingerprints } = recordAnalytics();
     worker()?.onmessage?.({ data: { failed: 'osc1', version: 1, reason: 'RangeError' } } as MessageEvent);
     expect(error).toHaveBeenCalled();
+    expect(fingerprints()).toEqual(['engine:table:build']);
+    expect(errors[0].properties).toMatchObject({ cause: 'RangeError' });
     expect(statuses).toEqual(['loading', 'ready']);
     expect(worker()?.terminate).not.toHaveBeenCalled();
     expect(

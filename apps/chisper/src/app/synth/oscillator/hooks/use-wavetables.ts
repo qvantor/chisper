@@ -32,6 +32,8 @@ export const useWavetables = () => {
   const { data, status } = useQuery<Element[]>({
     queryKey: ['wavetables'],
     queryFn: () => fetchList<Element>('/.netlify/functions/get-wavetables-list'),
+    // (its failure reported: app/query-client.ts)
+    meta: { load: 'wavetable_list' },
     staleTime: 24 * 60 * 60 * 1000,
   });
   const options = React.useMemo(() => wavetablesToOptions(data ?? []), [data]);

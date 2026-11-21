@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CLIP_PPQ } from '@chisper/preset-schema';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { createSynth, createTrack, stopModels } from '../../../../test-utils/models';
 import { TrackContext } from '../modules/track';
 import { RollHeader } from './roll-header';
@@ -67,9 +68,17 @@ describe('the header of the roll', () => {
     const createObjectURL = jest.fn((_: Blob) => 'blob:x');
     Object.assign(URL, { createObjectURL, revokeObjectURL: jest.fn() });
     const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { named, features } = recordAnalytics();
     fireEvent.click(key);
     expect(createObjectURL.mock.calls[0][0].type).toBe('audio/midi');
     expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe('clip.mid');
+    // reported: how many notes, how long, the tempo (not its name)
+    fireEvent.click(key);
+    expect(named('midi_export')).toEqual([
+      { notes: '1-9', bars: 4, bpm: 120 },
+      { notes: '1-9', bars: 4, bpm: 120 },
+    ]);
+    expect(features()).toEqual(['export:midi']);
   });
 
   it('the keys of the sections do what they did: a new clip, Save, a new link, Share, Close', async () => {

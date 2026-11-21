@@ -5,6 +5,7 @@ import {
   chainReports,
   flushChain as flush,
 } from '../../../../test-utils/chain-node';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
 import { workletLoads } from '../../../../test-utils/worklet-loads';
 import type { FxStatus } from '../../fx/effects/types';
@@ -678,6 +679,21 @@ describe('createChain', () => {
       expect(node.disconnect).not.toHaveBeenCalled();
     });
 
+    it('is reported by its effect (the limiter), with the trap that failed it', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { errors, fingerprints } = recordAnalytics();
+      const { node } = await ready();
+      chainReports(node, { failed: [REVERB, LIMITER_STAGE], trap: 'unreachable' });
+      // (a retry that failed again: no trap told)
+      chainReports(node, { failed: [DELAY] });
+      expect(fingerprints()).toEqual(['engine:stage:reverb', 'engine:stage:limiter', 'engine:stage:delay']);
+      expect(errors.map(({ properties }) => properties['trap'] ?? null)).toEqual([
+        'unreachable',
+        'unreachable',
+        null,
+      ]);
+    });
+
     it('the limiter is a stage of its own, several may fail', async () => {
       jest.spyOn(console, 'error').mockImplementation(() => undefined);
       const { chain, node, stages } = await ready();
@@ -763,6 +779,9 @@ describe('createChain', () => {
       expect(posts()).toEqual([0, 1, 2, 3].map(() => ({ retry: DELAY })));
       expect(chain.status(DELAY).value).toBe('failed');
       expect(error).toHaveBeenLastCalledWith(expect.stringContaining('not made again'));
+      const { fingerprints } = recordAnalytics();
+      chain.retryStage(DELAY);
+      expect(fingerprints()).toEqual(['engine:spent:delay']);
       chainReports(node, { failed: [REVERB] });
       chain.retryStage(REVERB);
       expect(posts()).toHaveLength(5);

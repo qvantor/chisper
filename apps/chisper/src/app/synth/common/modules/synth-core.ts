@@ -1,5 +1,8 @@
 import { fromEvent, merge } from 'rxjs';
 import { PrimitiveBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
+import { number } from '@chisper/math';
+import { setEngineStatus } from '../../../common/services/analytics';
+import { unsupportedReason } from '../../fx/effects/load-worklet';
 import { underrunEvents, watchDropouts } from '../latency/dropouts';
 import { keepNormalLatency, LATENCY_HINTS, readLatencyMode, resolveLatency } from '../latency/latency';
 import { createChain } from '../chain/chain';
@@ -32,6 +35,10 @@ const resumeOnGesture = (audioCtx: AudioContext) =>
 interface Dependencies {
   wavetables?: WavetableEngineDependencies;
 }
+
+// seconds of a latency of the context as ms to a tenth (none: null)
+const roundMs = (seconds: number | undefined) =>
+  typeof seconds === 'number' ? number.round(seconds * 1000, 10) : null;
 
 export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = {}) =>
   rxModel(() => {
@@ -98,8 +105,19 @@ export const synthCore = ({ wavetables: wavetableDependencies }: Dependencies = 
         },
       };
     })
-    .subscriptions(({ $masterGain, $dropouts, $dropoutWarning, $muted, audioCtx, chain }) => [
+    .subscriptions(({ $masterGain, $dropouts, $dropoutWarning, $muted, audioCtx, chain, wavetables }) => [
       resumeOnGesture(audioCtx),
+      // the status of the engine for the analytics (the oscillators': unsupported without a Worker too), what its
+      // first one after loading found
+      wavetables.$status.subscribe((status) =>
+        setEngineStatus(status, () => ({
+          reason: status === 'unsupported' ? unsupportedReason(audioCtx) : null,
+          secure: window.isSecureContext ?? null,
+          sampleRate: audioCtx.sampleRate,
+          baseLatency: roundMs(audioCtx.baseLatency),
+          outputLatency: roundMs(audioCtx.outputLatency),
+        }))
+      ),
       $masterGain.subscribe((value) => chain.setMasterGain(value)),
       // too many dropouts at low: auto keeps normal from the next start on (those of a preset switch aren't
       // counted)

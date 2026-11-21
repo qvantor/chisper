@@ -76,7 +76,17 @@ export const isStoreMessage = (
 ): message is BuilderPortMessage | StatsRequest | StoreTableMessage =>
   'port' in message || 'stats' in message || 'table' in message;
 
+// what failed in the core, told for the reports of the main thread (analytics.ts): the message of the first trap
+// since the last report (`RuntimeError.message`: unreachable, out of bounds…) with the stages that failed or the
+// node broken, alone a voice or a message that trapped; the failure of the warm-up of the module, in the first
+// report of its first node
+export interface EngineFaultReport {
+  trap?: string;
+  prewarm?: string;
+}
+
 // the node → main thread: the voices that started and ended, what the chain tells, the answers of the store
 export type EngineReport = VoicesReportMessage &
   ChainReport &
+  EngineFaultReport &
   Partial<StoreStoredMessage & StoreRefusedMessage & StoreFreedBytesMessage & StoreStatsMessage>;

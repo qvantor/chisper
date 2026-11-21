@@ -9,6 +9,7 @@ import {
   provideMidiAccess,
   removeMidiAccess,
 } from '../../../../test-utils/midi';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import {
   createSpiedInputController,
   createTransport,
@@ -74,9 +75,11 @@ describe('midiController', () => {
   it('plays note on and note off messages of the selected input', async () => {
     const input = createInput('a');
     const { onPress, onRelease } = await setup(createAccess([input]));
+    const { features } = recordAnalytics();
 
     message(input, 144, 60, 100);
     expect(onPress).toHaveBeenCalledWith([4, 'C'], 100, MIDI);
+    expect(features()).toEqual(['input:midi']);
 
     message(input, 128, 60, 0);
     expect(onRelease).toHaveBeenCalledWith([4, 'C'], MIDI);
@@ -600,9 +603,12 @@ describe('midiController channel', () => {
     it('a clock of the input leads the tempo of the transport', async () => {
       const input = createInput('a');
       const { transport } = await setup(createAccess([input]));
+      const { features } = recordAnalytics();
       clocks(input, 128, NOW, 3 * PPQN);
       expect(transport[0].$source.value).toBe('midi');
       expect(transport[0].$tempo.value).toBeCloseTo(128, 6);
+      // (a clock leading the tempo: one use, whatever its count of clocks)
+      expect(features()).toEqual(['midi_clock']);
       // not kept: the field keeps its own
       expect(transport[0].$bpm.value).toBe(120);
     });

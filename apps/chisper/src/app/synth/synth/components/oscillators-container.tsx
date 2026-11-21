@@ -2,6 +2,7 @@ import React from 'react';
 import { Section } from '@chisper/ui-kit';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
 import { Oscillator } from '../../oscillator';
+import { featureUsed } from '../../../common/services/analytics';
 import { useOscillator1, useOscillator2 } from '../../common/modules';
 
 interface OscillatorComponentParams {
@@ -18,8 +19,13 @@ const OscillatorComponentFactory =
     const [model, actions] = useOscillator();
     // eslint-disable-next-line react-hooks/rules-of-hooks
     const active = useBehaviorSubject(model.$active);
+    // (OSC 2 on: a use; the model can't tell one oscillator from the other)
+    const toggle = () => {
+      if (target === 'osc2' && !active) featureUsed('osc2');
+      actions.toggleActive();
+    };
     return (
-      <Section name={name} active={active} onClick={actions.toggleActive}>
+      <Section name={name} active={active} onClick={toggle}>
         <Oscillator {...model} {...actions} useOscillator={useOscillator} target={target} />
       </Section>
     );

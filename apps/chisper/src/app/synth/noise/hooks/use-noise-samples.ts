@@ -30,6 +30,8 @@ export const useNoiseSamples = () => {
   const { data, status } = useQuery<Element[]>({
     queryKey: ['noises'],
     queryFn: () => fetchList<Element>('/.netlify/functions/get-noises-list'),
+    // (its failure reported: app/query-client.ts)
+    meta: { load: 'noise_list' },
     staleTime: 24 * 60 * 60 * 1000,
   });
   const options = React.useMemo(() => samplesToOptions(data ?? []), [data]);

@@ -24,7 +24,7 @@ interface TierProps {
 
 // the keys of a tier: as wide and as high as its place
 export const TierKeys = ({ octave, octavesCount }: TierProps) => {
-  const [{ $pressed }, { onPress, onRelease }] = useInputController();
+  const [{ $pressed }, { onScreenPress, onRelease }] = useInputController();
   const pressed = useBehaviorSubject($pressed);
   const [keysRef, [width, height]] = useElementSize<HTMLDivElement>();
   return (
@@ -37,7 +37,7 @@ export const TierKeys = ({ octave, octavesCount }: TierProps) => {
             keyWidth={width / (7 * octavesCount)}
             keyHeight={height}
             pressed={pressed}
-            onPress={onPress}
+            onPress={onScreenPress}
             onRelease={onRelease}
           />
         )}
