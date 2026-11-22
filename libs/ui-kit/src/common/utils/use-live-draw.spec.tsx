@@ -70,6 +70,28 @@ describe('useLiveDraw', () => {
     expect(drawings.at(-1)).toEqual([0.5, 3]);
   });
 
+  it('draws a smoothed knob where a one-pole of its routes is, frame by frame, until it is there', () => {
+    level = 0;
+    render(<Chart knobs={[{ ...knob(0.5), smoothing: 0.0113 }]} />);
+    expect(drawings).toEqual([[0.5]]);
+    // the routes to 1 at once: 1 - e^(-16 / 11.3) of the way in a frame of 16 ms, in steps of the travel
+    level = 1;
+    tick(16);
+    expect(drawings.at(-1)?.[0]).toBeCloseTo(0.5 + 0.5 * (1 - Math.exp(-16 / 11.3)), 3);
+    tick(16);
+    expect(drawings.at(-1)?.[0]).toBeCloseTo(0.5 + 0.5 * (1 - Math.exp(-32 / 11.3)), 3);
+    for (let i = 0; i < 10; i++) tick(16);
+    expect(drawings.at(-1)).toEqual([1]);
+    // there: nothing more to draw
+    const count = drawings.length;
+    tick(16);
+    expect(drawings).toHaveLength(count);
+    // back to the knob (no level) the same way
+    level = null;
+    tick(16);
+    expect(drawings.at(-1)?.[0]).toBeCloseTo(1 - 0.5 * (1 - Math.exp(-16 / 11.3)), 3);
+  });
+
   it('a log knob is moved in its scale, clamped to its travel', () => {
     const { rerender } = render(
       <Chart knobs={[{ value: 100, min: 10, max: 1000, mode: 'log', modulations: [route(0.25)] }]} />

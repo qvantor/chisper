@@ -3,7 +3,7 @@ title: 'Wavetable erstellen: WAV importieren, aus Audio machen, zeichnen'
 h1: 'Wavetables: importieren, aus Audio erstellen, zeichnen'
 description: 'Wavetables in Chisper: Frames mit 2048 Samples, bis zu 256, der clm-Marker. WAV-Wavetables importieren, Wavetable aus einer Audiodatei erstellen oder zeichnen.'
 nav: 'Wavetables'
-updated: 2026-11-12
+updated: 2026-11-21
 preset: ufo-drone
 image: editor-audio
 ---
@@ -31,7 +31,7 @@ von einem sauberen Ton zu einem Growl, und der Oszillator spielt den Zyklus an d
 - **Keine Klicks:** Wenn sich **Wave** bewegt, blendet eine Stimme über einen Zyklus ihrer Note (höchstens 5 ms) in
   den neuen Frame über.
 
-<Figure name='oscillator' alt='Osc 1 von Chisper auf der Tabelle Spectral Gyro bei Frame 33 von 256: der Tabellenname mit seinen Pfeilen, Oct, Semi und Fine, die Welle dieses Frames, Wave 33/256, Phase, Phase rand, Unison 3 und die Regler Gain, Wave, Detune und Blend' narrow>
+<Figure name='oscillator' alt='Osc 1 von Chisper auf der Tabelle Spectral Gyro bei Frame 33 von 256: der Tabellenname mit seinen Pfeilen, Oct, Semi und Fine über der Welle dieses Frames, Wave 33/256, Phase, Phase rand und Unison 3 darunter und die Regler Gain, Wave, Warp (grau) mit der Taste Off des Warp-Modus rechts davon, Detune und Blend' narrow>
 
 Ein Oszillator: oben die Tabelle, in der Mitte der Frame, der gerade spielt, darunter **Wave**.
 
@@ -39,6 +39,27 @@ Ein Oszillator: oben die Tabelle, in der Mitte der Frame, der gerade spielt, dar
 
 Wie aus einer Tabelle ein Klang wird und wie man durch sie fährt, steht auf
 [Was ist Wavetable-Synthese?](/de/lernen/was-ist-wavetable-synthese/)
+
+## Warp: den Frame biegen und stauchen
+
+**Warp** formt den Frame um, während er spielt: Der Oszillator läuft durch manche Teile des Zyklus schneller und
+durch andere langsamer, so bekommt dieselbe Tabelle eine neue Klangfarbe. Wähl den Modus mit der Taste rechts vom
+Regler **Warp** neben **Wave** (ein Klick öffnet das Menü der Modi, jeder mit seiner Kurve) und stell mit dem Regler
+ein, wie stark. Das geht mit jeder Tabelle, und die Welle in der Mitte des Oszillators zeigt den Frame so, wie du ihn
+hörst.
+
+- **Off**: der Frame, wie er ist. Der Regler **Warp** ist grau.
+- **Bend +** staucht die Mitte des Frames und dehnt seinen Anfang und sein Ende.
+- **Bend -** macht es umgekehrt: Es staucht Anfang und Ende und dehnt die Mitte.
+- **Bend +/-** spielt den Frame bei 50 % so, wie er ist; darunter biegt es wie **Bend +**, darüber wie **Bend -**,
+  je weiter von 50 %, desto stärker.
+- **PWM** staucht den ganzen Frame nach links, wie ein Puls, der schmaler wird: Der Rest des Zyklus hält den ersten
+  Wert des Frames. Bei 100 % bleibt kein Ton übrig, nur dieser gehaltene Wert: Stille, wenn der Frame bei null
+  beginnt. Auf einem Rechteck, das oben oder unten beginnt, ist das der klassische Sweep der Pulsbreite; auf einem,
+  das mit einem Sprung beginnt, und auf jeder anderen Tabelle ein Sweep ganz eigener Art.
+
+Der Regler nimmt Hüllkurven und LFOs wie jeder andere: Ein LFO auf **Warp** ergibt einen lebendigen, fast
+sprechenden Sweep. Wechselst du den Modus, während eine Note klingt, blendet sie in den neuen über, ohne Sprung.
 
 ## Die Bibliothek
 

@@ -291,6 +291,13 @@ export const withLegacyPhase = <T extends { ph?: unknown; pr?: unknown }>(osc: T
 export const SEMI_MAX = 24;
 export const FINE_MAX = 100;
 
+// the modes of the Warp of an oscillator, by their index in a preset (the mode of the core, warp.rs): a new one goes
+// last. The bends map the phase each half by a Möbius map (Bend + squeezes the middle of the frame, Bend - its ends,
+// Bend +/- one or the other of its knob, as it is at the middle), PWM squeezes the frame to the left, its first
+// sample held over the rest (dsp/measurements/warp.json)
+export const WARP_MODES = ['off', 'bend+', 'bend-', 'bend+-', 'pwm'] as const;
+export type WarpMode = (typeof WARP_MODES)[number];
+
 const oscillatorSchema = (active: boolean) =>
   z
     .preprocess(
@@ -319,6 +326,9 @@ const oscillatorSchema = (active: boolean) =>
           pr: range(0, 1).default(1),
           r: range(0, LEGACY_RAND_PHASE_MAX).optional(),
           g: range(0, 1).default(0.5),
+          // the Warp: its mode (an index of WARP_MODES, Off first) and its knob
+          wm: intRange(0, WARP_MODES.length - 1).default(0),
+          wa: range(0, 1).default(0),
         })
         .transform((osc) => {
           const result: Omit<typeof osc, 'r'> & { r?: number } = { ...osc };

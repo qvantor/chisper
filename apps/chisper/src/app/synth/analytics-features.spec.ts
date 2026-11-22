@@ -23,8 +23,8 @@ const setup = async () => {
 };
 type Models = Awaited<ReturnType<typeof setup>>;
 
-// everything a user may turn on: OSC 2, a table, noise, sub, unison, a filter type, effects, ENV 2, an LFO, a
-// route, the voicing
+// everything a user may turn on: OSC 2, a table, noise, sub, unison, a warp mode, a filter type, effects, ENV 2, an
+// LFO, a route, the voicing
 const turnEverythingOn = ({
   osc1,
   osc2,
@@ -40,6 +40,7 @@ const turnEverythingOn = ({
   osc2[1].toggleActive();
   osc1[1].setWaveTablePath(['other']);
   osc1[1].setOscValue('unison', 4);
+  osc1[1].setWarpMode(4);
   noise[1].toggleActive();
   sub[1].toggleActive();
   filter[1].toggleActive();
@@ -63,8 +64,9 @@ describe('feature_used', () => {
     const { features } = recordAnalytics();
     turnEverythingOn(models);
     const { osc1, noise, filter, fx, envelopes, synth, transport, track } = models;
-    // what is not a use: off, ENV 1 (every patch's), one voice of unison, legato off, no glide
+    // what is not a use: off, ENV 1 (every patch's), one voice of unison, the warp Off, legato off, no glide
     noise[1].toggleActive();
+    osc1[1].setWarpMode(0);
     fx[1].setAdded('eq', false);
     fx[1].setOn('distortion', false);
     envelopes[1].setEnvelopeValue('env1', 'attack', 0.2);
@@ -83,6 +85,7 @@ describe('feature_used', () => {
     expect(features()).toEqual([
       'wavetable',
       'unison',
+      'warp:pwm',
       'noise',
       'sub',
       'filter:lowpass',
@@ -121,6 +124,7 @@ describe('feature_used', () => {
     applySnapshot(sound);
     await flush();
     expect(models.osc2[0].$active.value).toBe(true);
+    expect(models.osc1[0].$warpMode.value).toBe(4);
     expect(models.noise[0].$active.value).toBe(true);
     expect(models.fx[0].$effects.value.reverb.added).toBe(true);
     expect(models.filter[0].$filterType.value).toBe('highpass');

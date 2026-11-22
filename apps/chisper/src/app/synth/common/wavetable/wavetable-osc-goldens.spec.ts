@@ -32,6 +32,7 @@ import {
   VoiceSubKnobs,
   VoiceSubOptions,
   VoiceVelocity,
+  VoiceWarpKnobs,
 } from './voice-options';
 import { HELD_AGAIN_GATE, RELEASE_GATE, VoiceParam } from './wavetable-osc-params';
 import {
@@ -69,6 +70,8 @@ interface ScenarioVoice {
   velocities?: Record<number, VoiceVelocity>;
   noises?: Record<number, VoiceNoiseKnobs>;
   subs?: Record<number, VoiceSubKnobs>;
+  // the Warp of both oscillators (a mode and a knob each) before a block
+  warps?: Record<number, VoiceWarpKnobs>;
 }
 
 interface Scenario {
@@ -250,6 +253,8 @@ const run = (name: string, scenario: Scenario) => {
       if (noise) wasm.setKnobs('noise', noise);
       const sub = voice.subs?.[block];
       if (sub) wasm.setKnobs('sub', sub);
+      const warp = voice.warps?.[block];
+      if (warp) wasm.setKnobs('warp', warp);
       const [outL, outR] = [new Float32Array(n), new Float32Array(n)];
       // (the bend on the detunes, and as it is for the noise of Pitch Track)
       const row = typeof bendOfBlock === 'number' ? Float32Array.of(bendOfBlock) : bendOfBlock;
@@ -305,6 +310,8 @@ const runScope = (name: string, scenario: Scenario, trap?: { block: number; voic
       if (noise) node.setKnobs(id, 'noise', noise);
       const sub = voice.subs?.[block];
       if (sub) node.setKnobs(id, 'sub', sub);
+      const warp = voice.warps?.[block];
+      if (warp) node.setKnobs(id, 'warp', warp);
       const params = blockParams(voice, frame, n);
       if (trap?.block !== block || trap.voice !== id) node.params(id, params, n);
       else {
@@ -1343,9 +1350,22 @@ const subShapes = (...shapes: Exclude<SubShape, 'sine'>[]): Record<string, numbe
 // the shapes of the sub a scenario may play
 const SUB_TABLES = subShapes('saw', 'pulse', 'triangle');
 
+// the Warp of an oscillator now and then (a mode, Off too, and a knob), of the stream of the warp
+const randomWarp = (random: Random) =>
+  random() < 0.4
+    ? { warpMode: Math.floor(random() * 5), warp: random() < 0.1 ? pick(random, [0, 0.5, 1]) : random() }
+    : {};
+const randomWarpKnobs = (random: Random): VoiceWarpKnobs => ({
+  mode1: Math.floor(random() * 5),
+  warp1: random(),
+  mode2: Math.floor(random() * 5),
+  warp2: random(),
+});
+
 const randomScenario = (random: Random, seed: number): Scenario => {
-  // (the subs from a stream of their own: the scenarios of before draw as they did)
+  // (the subs and the warp from streams of their own: the scenarios of before draw as they did)
   const subRandom = seeded(seed * 6151 + 1);
+  const warpRandom = seeded(seed * 7919 + 3);
   const rate = pick(random, [44100, 48000, 48000, 96000]);
   const blocks = Array.from({ length: 8 + Math.floor(random() * 40) }, () =>
     random() < 0.95 ? 128 : pick(random, [64, 256, 512])
@@ -1408,17 +1428,33 @@ const randomScenario = (random: Random, seed: number): Scenario => {
     const sub = subRandom() < 0.4 ? randomSub(subRandom) : null;
     const subs: Record<number, VoiceSubKnobs> = {};
     if (sub && subRandom() < 0.4) subs[at + Math.floor(subRandom() * 10)] = randomSubKnobs(subRandom);
+    const oscs = [oscOf(), oscOf()].map((osc) => osc && { ...osc, ...randomWarp(warpRandom) });
+    const warps: Record<number, VoiceWarpKnobs> = {};
+    if (warpRandom() < 0.3) warps[at + Math.floor(warpRandom() * 10)] = randomWarpKnobs(warpRandom);
+    const warpRoutes = (['warp1', 'warp2'] as const).flatMap((param) =>
+      warpRandom() < 0.3
+        ? [
+            {
+              source: Math.floor(warpRandom() * 8),
+              param,
+              amount: between(warpRandom, -1, 1),
+              min: 0,
+              max: 1,
+            },
+          ]
+        : []
+    );
     return {
       at,
       options: {
-        osc: [oscOf(), oscOf()],
+        osc: oscs,
         noise,
         sub: sub?.sub ?? null,
         start,
         envelopes: [randomEnvelope(random), randomEnvelope(random), randomEnvelope(random)],
         envStart: legato ? Math.max(0, start - random() * 0.05) : start,
         phrase: legato ? 0 : index,
-        routes: [...routes, ...(sub?.routes ?? [])],
+        routes: [...routes, ...(sub?.routes ?? []), ...warpRoutes],
         filter: randomFilter(random),
         ...(velocity && { velocity }),
       },
@@ -1441,6 +1477,7 @@ const randomScenario = (random: Random, seed: number): Scenario => {
       velocities,
       noises,
       subs,
+      warps,
     };
   });
   return {
@@ -1730,15 +1767,113 @@ const SUB_GOLDEN: [string, Scenario][] = [
   ],
 ];
 
+// --- the warp (warp.rs) ---
+
+// the modes of the core (WARP_MODES of the presets but Off)
+const WARPS: [number, string][] = [
+  [1, 'Bend +'],
+  [2, 'Bend -'],
+  [3, 'Bend +/-'],
+  [4, 'PWM'],
+];
+const WARP_GOLDEN: [string, Scenario][] = [
+  ...WARPS.map(([mode, label]): [string, Scenario] => [
+    `warp: ${label} on a saw, a note gliding up two octaves, its knob moved by an event`,
+    {
+      rate: RATE,
+      blocks: quanta(0.2),
+      tables: { a: [SAW] },
+      voices: [
+        {
+          at: 0,
+          options: note({ osc: [osc({ warpMode: mode, warp: 0.35 }), null] }),
+          params: { frequency: perSample((f) => 110 * 2 ** ((2 * f) / (0.2 * RATE))) },
+          warps: { 30: { mode1: mode, warp1: 0.9, mode2: 0, warp2: 0 } },
+        },
+      ],
+      seed: 1,
+    },
+  ]),
+  ...WARPS.map(([mode, label]): [string, Scenario] => [
+    `warp: ${label} moved by LFO 1 over a unison of 4, its position moving`,
+    {
+      rate: RATE,
+      blocks: quanta(0.15),
+      tables: { a: [SINE, SAW, SQUARE, SAW.map((v) => -v)] },
+      voices: [
+        {
+          at: 0,
+          options: note({
+            osc: [osc({ unison: 4, warpMode: mode, warp: 0.5 }), null],
+            routes: [lfoRoute(4, 'warp1', 0.5, { bipolar: true })],
+          }),
+          params: {
+            frequency: constant(220),
+            spread1: constant(20),
+            position1: perSample((f) => 0.5 + 0.5 * Math.sin(f / 2000)),
+          },
+        },
+      ],
+      lfos: { 0: lfosAtOnce([{ anchor: { time: 0, phase: 0, period: 0.05 } }]) },
+      seed: 2,
+    },
+  ]),
+  [
+    'warp: a new mode on a playing note crossfades, a new version of its table meanwhile, both oscillators',
+    {
+      rate: RATE,
+      blocks: quanta(0.2),
+      tables: { a: [SAW], b: [SQUARE] },
+      versions: { 24: [['a', [SAW.map((v) => 0.5 * v)]]] },
+      voices: [
+        {
+          at: 0,
+          options: note({
+            osc: [osc({ warpMode: 1, warp: 0.7 }), osc({ table: 'b', unison: 3, warpMode: 4, warp: 0.4 })],
+          }),
+          params: { frequency: constant(330), spread2: constant(15), detune2: constant(-1200) },
+          warps: {
+            20: { mode1: 4, warp1: 0.7, mode2: 3, warp2: 0.1 },
+            26: { mode1: 2, warp1: 0.7, mode2: 3, warp2: 0.1 },
+          },
+        },
+      ],
+      seed: 3,
+    },
+  ],
+  [
+    'warp: the ends of its knobs (PWM at 1, Bend +/- at 0.5: none) and high notes it reads the top level of',
+    {
+      rate: RATE,
+      blocks: quanta(0.1),
+      tables: { a: [SAW] },
+      voices: [
+        { mode: 4, warp: 1, frequency: 220 },
+        { mode: 3, warp: 0.5, frequency: 220 },
+        { mode: 2, warp: 1, frequency: 3500 },
+        { mode: 4, warp: 0.95, frequency: 9000 },
+      ].map(({ mode, warp, frequency }) => ({
+        at: 0,
+        options: note({ osc: [osc({ unison: 2, warpMode: mode, warp }), null] }),
+        params: { frequency: constant(frequency), spread1: constant(10) },
+      })),
+      seed: 4,
+    },
+  ],
+];
+
 describe('wavetable oscillator wasm core', () => {
-  it.each([...GOLDEN, ...LFO_GOLDEN, ...NOISE_GOLDEN, ...SUB_GOLDEN])('%s: its golden', (name, scenario) => {
-    const golden = run(name, scenario);
-    goldens.check(name, golden);
-    // the voices of one node: the same bits, and the golden of their sum
-    const { voices, sum } = runScope(name, scenario);
-    expect(voices.sha256).toBe(golden.sha256);
-    goldens.check(`${name}: the sum of one node`, sum);
-  });
+  it.each([...GOLDEN, ...LFO_GOLDEN, ...NOISE_GOLDEN, ...SUB_GOLDEN, ...WARP_GOLDEN])(
+    '%s: its golden',
+    (name, scenario) => {
+      const golden = run(name, scenario);
+      goldens.check(name, golden);
+      // the voices of one node: the same bits, and the golden of their sum
+      const { voices, sum } = runScope(name, scenario);
+      expect(voices.sha256).toBe(golden.sha256);
+      goldens.check(`${name}: the sum of one node`, sum);
+    }
+  );
 
   const traps = 50 * FUZZ_SCALE;
   it(`renders ${traps} random scopes whose voices trap: each ends alone, the others play on`, () => {

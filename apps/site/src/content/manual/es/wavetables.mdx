@@ -3,7 +3,7 @@ title: 'Wavetables: importar tablas WAV, crear una desde audio y dibujar'
 h1: 'Wavetables: importar, crear desde audio, dibujar'
 description: 'Cómo funcionan las wavetables en Chisper: frames de 2048 muestras, hasta 256, la marca clm. Importa una wavetable WAV, créala desde audio o dibuja una onda.'
 nav: 'Wavetables'
-updated: 2026-11-12
+updated: 2026-11-21
 preset: ufo-drone
 image: editor-audio
 ---
@@ -31,7 +31,7 @@ oscilador toca el que está en la posición de **Wave**.
 - **Sin clics:** cuando **Wave** se mueve, cada voz pasa al nuevo frame con un fundido de un ciclo de su nota (5 ms
   como mucho).
 
-<Figure name='oscillator' alt='Osc 1 de Chisper en la tabla Spectral Gyro, en el frame 33 de 256: el nombre de la tabla con sus flechas, Oct, Semi y Fine, la onda de ese frame, Wave 33/256, Phase, Phase rand, Unison 3 y las perillas Gain, Wave, Detune y Blend' narrow>
+<Figure name='oscillator' alt='Osc 1 de Chisper en la tabla Spectral Gyro, en el frame 33 de 256: el nombre de la tabla con sus flechas, Oct, Semi y Fine sobre la onda de ese frame, Wave 33/256, Phase, Phase rand y Unison 3 debajo, y las perillas Gain, Wave, Warp (gris) con el botón Off del modo de Warp a su derecha, Detune y Blend' narrow>
 
 Un oscilador: la tabla arriba, el frame que suena en el centro y **Wave** debajo.
 
@@ -39,6 +39,26 @@ Un oscilador: la tabla arriba, el frame que suena en el centro y **Wave** debajo
 
 Cómo una tabla se convierte en sonido, y cómo recorrerla, se cuenta en
 [¿Qué es la síntesis wavetable?](/es/aprende/que-es-la-sintesis-wavetable/)
+
+## Warp: doblar y comprimir el frame
+
+**Warp** cambia la forma del frame mientras suena: el oscilador recorre algunas partes del ciclo más deprisa y otras
+más despacio, así que la misma tabla da un timbre nuevo. Elige el modo en el botón a la derecha de la perilla
+**Warp**, junto a **Wave** (un clic abre el menú de los modos, cada uno con su curva), y cuánto con la perilla.
+Funciona con cualquier tabla, y la onda del centro del oscilador muestra el frame tal como lo oyes.
+
+- **Off**: el frame tal cual. La perilla **Warp** queda gris.
+- **Bend +** comprime el centro del frame y estira su principio y su final.
+- **Bend -** hace lo contrario: comprime el principio y el final, estira el centro.
+- **Bend +/-** toca el frame tal cual al 50 %; por debajo dobla como **Bend +**, por encima como **Bend -**, más
+  cuanto más lejos del 50 %.
+- **PWM** comprime todo el frame hacia la izquierda, como un pulso que se estrecha: el resto del ciclo mantiene el
+  primer valor del frame. Al 100 % no queda tono, solo ese valor mantenido: silencio si el frame empieza en cero. En
+  una cuadrada que empieza arriba o abajo es el barrido clásico del ancho de pulso; en una que empieza en un salto,
+  y en cualquier otra tabla, un barrido propio.
+
+La perilla acepta envolventes y LFO como cualquier otra: un LFO en **Warp** da un barrido vivo, casi vocal. Si
+cambias el modo mientras suena una nota, esta pasa al nuevo con un fundido cruzado, sin saltos.
 
 ## La biblioteca
 

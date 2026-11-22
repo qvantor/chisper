@@ -88,12 +88,25 @@ const serve = {
 
 const configuration = process.env.NX_TASK_TARGET_CONFIGURATION || 'default';
 
+// the source maps of posthog-js name the files of its own build it doesn't ship (no sources in them): the rule of
+// source-map-loader NxAppWebpackPlugin gives every .js while sourceMap is on leaves them out (a warning a file of
+// them; its code maps to itself)
+const UNREADABLE_MAPS = /[\\/]node_modules[\\/]posthog-js[\\/]/;
+const skipUnreadableMaps = {
+  apply: (compiler) => {
+    for (const rule of compiler.options.module.rules)
+      if (rule && String(rule.loader).includes('source-map-loader')) rule.exclude = UNREADABLE_MAPS;
+  },
+};
+
 module.exports = {
   // the build of before goes (the executor of Nx deleted it): Netlify publishes the folder
   output: { clean: true },
   devServer: { ...serve.default, ...serve[configuration] },
   plugins: [
     new NxAppWebpackPlugin({ ...build.default, ...build[configuration] }),
+    // after it: its rules are there
+    skipUnreadableMaps,
     new NxReactWebpackPlugin(),
     // __PERF__ (src/globals.d.ts): true in the perf configuration only, so the code of the perf suite is dead in
     // every other build and the minifier drops it

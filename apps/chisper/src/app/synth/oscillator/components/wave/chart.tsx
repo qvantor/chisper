@@ -2,6 +2,7 @@ import React from 'react';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { HandleModulation, LineChart, LiveKnob, theme, useLiveDraw, useLiveLine } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
+import { warp as warpMap } from '@chisper/math';
 import {
   crossfadeFrames,
   morphedFrame,
@@ -38,34 +39,41 @@ interface LineProps {
   wave: number[];
   table: Table;
   morph: boolean;
-  // the Wave knob (the position in frames)
+  // the mode of the Warp (an index of WARP_MODES)
+  mode: number;
+  // the Wave knob (the position in frames), the Warp knob
   knobs: LiveKnob[];
   active: boolean;
   // the wave drawn: the phase overlay follows it
   $drawn: BehaviorSubject<DrawnWave | null>;
 }
 
-// the wave at the position on a canvas over the chart, also where the routes of the knob move it (the frame worked
-// out every frame, without a render: useLiveDraw; drawn again only once the frame played changes)
-const WaveLine = ({ wave, table, morph, knobs, active, $drawn }: LineProps) => {
+// the wave at the position on a canvas over the chart, read through the Warp as the voices read it, also where the
+// routes of the knobs move them (the frame worked out every frame, without a render: useLiveDraw; drawn again only
+// once the frame played or the warp changes)
+const WaveLine = ({ wave, table, morph, mode, knobs, active, $drawn }: LineProps) => {
   const [canvas, drawLine] = useLiveLine(LINE, 'wave-line');
   const line = usePeriodLine();
   const crossfade = React.useRef(new Float64Array(0));
+  const warped = React.useRef(new Float64Array(0));
   const base = knobs[0].value;
   const draw = React.useMemo(() => {
-    // the frame drawn (-1: the wave at the knob): a move of the routes within a frame draws nothing
-    let drawnFrame = NaN;
-    return ([position]: number[]) => {
+    // the frame drawn (-1: the wave at the knob) and the warp it was drawn at: a move of the routes within a frame
+    // and at the same warp draws nothing
+    let [drawnFrame, drawnWarp] = [NaN, NaN];
+    return ([position, knob]: number[]) => {
       const frames = playedFrames(table.length, morph);
       const frame = position === base ? -1 : playedFrame(frames > 1 ? position / (frames - 1) : 0, frames);
-      if (frame === drawnFrame) return;
-      drawnFrame = frame;
-      const drawn = frame === -1 ? wave : playedAt(table, morph, frame, crossfade);
+      if (frame === drawnFrame && knob === drawnWarp) return;
+      [drawnFrame, drawnWarp] = [frame, knob];
+      const played = frame === -1 ? wave : playedAt(table, morph, frame, crossfade);
+      if (warped.current.length !== played.length) warped.current = new Float64Array(played.length);
+      const drawn = warpMap.warpFrame(played, mode, knob, warped.current);
       const count = line.points(drawn);
       drawLine(count, line.xs, line.ys, line.x, line.y);
       $drawn.next({ wave: drawn, line, count });
     };
-  }, [base, wave, table, morph, line, drawLine, $drawn]);
+  }, [base, wave, table, morph, mode, line, drawLine, $drawn]);
   useLiveDraw(knobs, draw, active);
   return canvas;
 };
@@ -76,16 +84,24 @@ const NO_UNISON: UnisonView = { $visible: HIDDEN };
 interface Props {
   // Phase or Phase rand is dragged: show them over the wave
   $phaseVisible?: Observable<boolean>;
-  // the routes of the Wave knob
+  // the routes of the Wave knob and of the Warp knob
   modulations?: HandleModulation[];
+  warpModulations?: HandleModulation[];
   // Detune or Blend is turned: the voices of the unison over the wave, where the routes of those knobs move them
   unison?: UnisonView;
 }
 
-// the wave the position plays (one frame of those played); while the routes of the Wave knob sound, the
-// wave where they move it
-export const Chart = ({ $phaseVisible = HIDDEN, modulations, unison = NO_UNISON }: Props) => {
-  const [{ $playedWave, $waveTable, $morph, $position, $active }] = useOscillatorContext();
+// the wave the position plays (one frame of those played) through the Warp; while the routes of the Wave or the
+// Warp knob sound, the wave where they move them
+export const Chart = ({
+  $phaseVisible = HIDDEN,
+  modulations,
+  warpModulations,
+  unison = NO_UNISON,
+}: Props) => {
+  const [{ $playedWave, $waveTable, $morph, $position, $active, $warpMode, $warp }] = useOscillatorContext();
+  const mode = useBehaviorSubject($warpMode);
+  const warp = useBehaviorSubject($warp);
   const wave = useObservable($playedWave, []);
   const table = useBehaviorSubject($waveTable);
   const morph = useBehaviorSubject($morph);
@@ -93,7 +109,17 @@ export const Chart = ({ $phaseVisible = HIDDEN, modulations, unison = NO_UNISON 
   const position = useBehaviorSubject($position);
   const active = useBehaviorSubject($active);
   const $drawn = React.useMemo(() => new BehaviorSubject<DrawnWave | null>(null), []);
-  const knobs = [{ value: position, min: 0, max: Math.max(0, frames - 1), modulations }];
+  const knobs = [
+    { value: position, min: 0, max: Math.max(0, frames - 1), modulations },
+    // (Off: no routes, it draws the frame as it is; the routes through the one-pole the voices read them through)
+    {
+      value: warp,
+      min: 0,
+      max: 1,
+      modulations: mode === 0 ? undefined : warpModulations,
+      smoothing: warpMap.WARP_SMOOTHING,
+    },
+  ];
   return (
     <LineChart
       padding={PADDING}
@@ -101,7 +127,15 @@ export const Chart = ({ $phaseVisible = HIDDEN, modulations, unison = NO_UNISON 
       domainY={DOMAIN_Y}
       overlay={
         <>
-          <WaveLine wave={wave} table={table} morph={morph} knobs={knobs} active={active} $drawn={$drawn} />
+          <WaveLine
+            wave={wave}
+            table={table}
+            morph={morph}
+            mode={mode}
+            knobs={knobs}
+            active={active}
+            $drawn={$drawn}
+          />
           <PhaseOverlay length={wave.length} $drawn={$drawn} $visible={$phaseVisible} />
           <UnisonOverlay {...unison} />
         </>

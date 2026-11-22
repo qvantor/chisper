@@ -43,6 +43,7 @@ export type Feature =
   | 'noise'
   | 'sub'
   | 'unison'
+  | 'warp'
   | 'filter'
   | 'fx'
   | 'env'

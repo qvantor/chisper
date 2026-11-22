@@ -15,6 +15,12 @@ export const tracesDir = path.join(out, 'traces');
 export const appDir = (tree) =>
   fs.existsSync(path.join(tree, 'apps/chisper')) ? 'apps/chisper' : 'apps/waveform';
 export const perfBuildDir = (tree) => path.join(tree, 'dist', `${appDir(tree)}-perf`);
+// whether the options of an oscillator of a tree have its warp (`warpMode?: number` of its voice-options.ts): a tree
+// before it writes two values less of each oscillator (writeOsc) and its core reads two less (read_osc)
+export const hasOscWarp = (tree) => {
+  const file = path.join(tree, appDir(tree), 'src/app/synth/common/wavetable/voice-options.ts');
+  return fs.existsSync(file) && /warpMode\?: number/.test(fs.readFileSync(file, 'utf8'));
+};
 export const siteDir = perfBuildDir(root);
 export const here = path.join(root, 'scripts/bench-perf');
 

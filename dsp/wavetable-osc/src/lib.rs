@@ -29,6 +29,7 @@ pub mod targets;
 pub mod timeline;
 pub mod velocity;
 pub mod voice;
+pub mod warp;
 
 use alloc::{boxed::Box, vec::Vec};
 use envelope::EnvelopeParams;
@@ -173,7 +174,7 @@ fn read_sub(reader: &mut Reader) -> Option<SubOptions> {
 }
 
 // an oscillator of a note: present, table, unison, phase, phaseRand and its 8 random shares, its UnisonShape (width,
-// stack, detune, position spread and the 8 random shares of a random detune)
+// stack, detune, position spread and the 8 random shares of a random detune), its warp (mode, knob)
 fn read_osc(reader: &mut Reader) -> Option<OscOptions> {
     let present = reader.next() != 0.0;
     let table = reader.next() as u32;
@@ -188,6 +189,7 @@ fn read_osc(reader: &mut Reader) -> Option<OscOptions> {
         position_spread: reader.next(),
         detune_random: core::array::from_fn(|_| reader.next()),
     };
+    let (warp_mode, warp) = (reader.next() as u32, reader.next());
     present.then_some(OscOptions {
         table,
         unison,
@@ -195,6 +197,8 @@ fn read_osc(reader: &mut Reader) -> Option<OscOptions> {
         phase_rand,
         random,
         shape,
+        warp_mode,
+        warp,
     })
 }
 
@@ -531,6 +535,25 @@ pub extern "C" fn osc_model_design(
         design.fat,
     ]);
     1
+}
+
+/// the warp of `mode` at `knob` (warp.rs) on the `count` phases (0.32) of the command buffer, in place (a mode that
+/// maps none or a neutral knob: as they are), then its param, the levels it moves a pitch up by and the seconds of the
+/// one-pole of its knob (the perf build: the chart of the app holds its map to it bit for bit)
+#[cfg(feature = "perf")]
+#[no_mangle]
+pub extern "C" fn osc_warp(mode: u32, knob: f64, count: usize) {
+    let count = count.min(COMMAND_SIZE - 3);
+    let param = warp::param(mode, knob);
+    let command = command();
+    if !warp::neutral(mode, param) {
+        for phase in command[..count].iter_mut() {
+            *phase = warp::warp_sample(warp::bends(mode), param as f32, *phase as u32) as f64;
+        }
+    }
+    command[count] = param;
+    command[count + 1] = warp::wrap_levels(mode, param);
+    command[count + 2] = warp::SMOOTHING;
 }
 
 /// the voices of the scope and the events their timelines hold, into the command buffer

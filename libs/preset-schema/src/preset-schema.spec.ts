@@ -16,6 +16,7 @@ import {
   savedPresetInfoSchema,
   savePresetRequestSchema,
   SUB_DEFAULTS,
+  WARP_MODES,
   SUB_SHAPES,
   updatePresetRequestSchema,
   usageRequestSchema,
@@ -224,7 +225,23 @@ describe('normalizePreset', () => {
       's',
       'u',
       'w',
+      'wa',
+      'wm',
     ]);
+  });
+
+  it('gives an oscillator its Warp Off at 0, keeps a mode of WARP_MODES and a knob of 0..1', () => {
+    expect(PRESET_DEFAULTS.osc1).toMatchObject({ wm: 0, wa: 0 });
+    expect(WARP_MODES[0]).toBe('off');
+    const { osc1, osc2 } = normalizePreset({ osc1: { wm: 3, wa: 0.25 }, osc2: { wm: 0, wa: 0 } });
+    expect(osc1).toMatchObject({ wm: 3, wa: 0.25 });
+    expect(osc2).toMatchObject({ wm: 0, wa: 0 });
+    expect(normalizePreset({ osc1: { wm: WARP_MODES.length - 1, wa: 1 } }).osc1).toMatchObject({
+      wm: 4,
+      wa: 1,
+    });
+    expect(() => normalizePreset({ osc1: { wm: WARP_MODES.length } })).toThrow();
+    expect(() => normalizePreset({ osc1: { wa: -0.1 } })).toThrow();
   });
 
   it('fills each envelope with its own defaults, takes stages up to 32 s and drops the old adsr', () => {

@@ -5,11 +5,21 @@
 // algorithms (a hot loop that boxes doubles), not of the engines
 import fs from 'node:fs';
 import path from 'node:path';
-import { appDir, loadApp, median, root } from './util.mjs';
+import { appDir, hasOscWarp, loadApp, median, root } from './util.mjs';
 
 const BLOCK = 128;
 const RATE = 48000;
 const SAMPLES = 7;
+// the warp cases of the oscillators: the modes (`warpMode` of the options: its index in WARP_MODES), the knobs of the
+// static ones, the speeds of the LFO 1 that moves the knob (Hz: a slow sweep, a vibrato, a tremolo, the top of the knob)
+const WARP_BENCH_MODES = [
+  ['bend+', 1],
+  ['bend-', 2],
+  ['bend+/-', 3],
+  ['pwm', 4],
+];
+const WARP_BENCH_KNOBS = [0.2, 0.5, 0.9];
+const WARP_BENCH_HZ = [0.5, 8, 32, 100];
 
 // the paths of the modules below are from the folder of the app of each tree (appDir)
 const ENTRY = "export { buildLevels } from './src/app/synth/common/wavetable/wavetable-mipmap';\n";
@@ -148,7 +158,9 @@ export const loadDsp = async (source = root, name) => {
     return instances.get(file);
   };
   const wasm = Object.fromEntries(cores.map(({ core, file }) => [core, instance(file)]));
-  return { ...dsp, wasm, modelFilters: dsp.VOICE_FILTER_TYPES?.includes('ladder24') ?? false };
+  // (the warp of the oscillators: a tree whose options of an oscillator have it)
+  const warp = hasOscWarp(source);
+  return { ...dsp, wasm, modelFilters: dsp.VOICE_FILTER_TYPES?.includes('ladder24') ?? false, warp };
 };
 
 // a table of 256 frames of 2048 samples as the store takes it (its layout is not read) and a chunk of it (1 MB)
@@ -293,11 +305,19 @@ const createCases = (dsp) => {
       dsp.createVoiceWasm(oscScope, RATE, options, wasmStore, Math.random, shared),
   };
   // (a unison shape: a tree before it plays the unison plain; a velocity: a tree before it plays at the amp 1)
-  const voiceOf = (core, unisonShape, velocity) => (oscs, params, table) => () => {
+  // (`warp`: the warp of the oscillators, { warpMode, warp })
+  const voiceOf = (core, unisonShape, velocity, warp) => (oscs, params, table) => () => {
     const options = {
       osc: oscs.map((unison) =>
         unison
-          ? { table: table ?? 'a', unison, phase: 0, phaseRand: 1, ...(unisonShape && { unisonShape }) }
+          ? {
+              table: table ?? 'a',
+              unison,
+              phase: 0,
+              phaseRand: 1,
+              ...(unisonShape && { unisonShape }),
+              ...warp,
+            }
           : null
       ),
       start: 0,
@@ -400,24 +420,28 @@ const createCases = (dsp) => {
     routes: [],
     filter: null,
   };
-  const scopeNotes = (voices) =>
+  const scopeNotes = (voices, options = scopeOptions) =>
     voices.apply(
       chord.map((params, voice) => ({
         kind: 'on',
         voice,
-        options: scopeOptions,
+        options,
         params: Object.fromEntries(Object.entries(params).map(([k, [v]]) => [k, v])),
       }))
     );
-  const scopeChord = () => {
+  // (`warp`: both oscillators warped, { warpMode, warp })
+  const scopeChordOf = (warp) => () => {
     const shared = createShared.wasm();
+    const options = warp
+      ? { ...scopeOptions, osc: scopeOptions.osc.map((osc) => ({ ...osc, ...warp })) }
+      : scopeOptions;
     let voices = null;
     let block = 0;
     return () => {
       if (block % ATTACK === 0) {
         voices?.free();
         voices = dsp.createVoiceScopeWasm(oscScope, RATE, wasmStore, shared);
-        scopeNotes(voices);
+        scopeNotes(voices, options);
       }
       voices.process(block * BLOCK, outL, outR);
       voices.reports();
@@ -458,14 +482,14 @@ const createCases = (dsp) => {
   // gain: the gain per sample, the voice on its mix tables; a vibrato of 5 Hz on its Fine: the pitch moves all
   // along, at 220 Hz over the flat of a level, `crossfade` over the middle of a crossfade)
   const lfoVoiceOf =
-    (param, amount, route = { min: 0, max: 1 }, period = 0.5, values = held) =>
+    (param, amount, route = { min: 0, max: 1 }, period = 0.5, values = held, osc = {}) =>
     () => {
       const flat = { attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 };
       const shared = createShared.wasm();
       shared.setLfos(lfoState(period));
       const voiceDsp = createVoice.wasm(
         {
-          osc: [{ table: 'a', unison: 8, phase: 0, phaseRand: 1 }, null],
+          osc: [{ table: 'a', unison: 8, phase: 0, phaseRand: 1, ...osc }, null],
           start: 0,
           envelopes: [flat, flat, flat],
           envStart: 0,
@@ -871,13 +895,77 @@ const createCases = (dsp) => {
       oscScope && (() => chordOf('wasm')),
       store && (() => chordOf('ts'))
     ),
-    ...(dsp.createVoiceScopeWasm && { 'scope chord attack': scopeChord }),
+    ...(dsp.createVoiceScopeWasm && { 'scope chord attack': scopeChordOf() }),
+    // the warp of the oscillators (warp.rs: a pass of the phases of a span through its map, the loops read them; a
+    // tree before it: none): Bend + at 0.6 (no levels up), PWM at 0.5 (its slope 2: three levels up), Bend - at 0.8
+    // and Bend +/- at 0.9 (their levels by the slope of each sample; still: a warped mix of each voice), Bend + and PWM
+    // moved by LFO 1 (its param a line in each segment, the voice directly), the chord with both oscillators bent
+    ...(oscScope &&
+      dsp.warp && {
+        'voice u8 warp bend': voiceOf('wasm', undefined, undefined, { warpMode: 1, warp: 0.6 })(
+          [8, null],
+          held
+        ),
+        'voice u8 warp pwm': voiceOf('wasm', undefined, undefined, { warpMode: 4, warp: 0.5 })(
+          [8, null],
+          held
+        ),
+        'voice u8 warp bend-': voiceOf('wasm', undefined, undefined, { warpMode: 2, warp: 0.8 })(
+          [8, null],
+          held
+        ),
+        'voice u8 warp bend+-': voiceOf('wasm', undefined, undefined, { warpMode: 3, warp: 0.9 })(
+          [8, null],
+          held
+        ),
+        // every mode at a low, a middle and a high knob (PWM reads its levels up by the slope, a bend of a < 0 by each
+        // sample)
+        ...Object.fromEntries(
+          WARP_BENCH_MODES.flatMap(([label, warpMode]) =>
+            WARP_BENCH_KNOBS.map((warp) => [
+              `voice u8 warp ${label} k${warp}`,
+              voiceOf('wasm', undefined, undefined, { warpMode, warp })([8, null], held),
+            ])
+          )
+        ),
+        ...(dsp.createVoiceScopeWasm && {
+          'scope chord warp bend': scopeChordOf({ warpMode: 1, warp: 0.6 }),
+          ...Object.fromEntries(
+            WARP_BENCH_MODES.filter(([, warpMode]) => warpMode > 1).map(([label, warpMode]) => [
+              `scope chord warp ${label}`,
+              scopeChordOf({ warpMode, warp: 0.6 }),
+            ])
+          ),
+        }),
+      }),
     // (a tree before the pitch bend: none)
     ...(oscScope?.exports.osc_scope_bend && { 'scope chord bend': scopeChordBend }),
     // (a tree before the LFOs: none; before the pitch as a target: no vibrato)
     ...(oscScope?.exports.osc_shared_lfos &&
       dsp.lfoTable && {
         'voice u8 lfo wave': lfoVoiceOf('position1', 1),
+        ...(dsp.warp && {
+          'voice u8 warp lfo': lfoVoiceOf('warp1', 0.4, { min: 0, max: 1, bipolar: true }, 0.5, held, {
+            warpMode: 1,
+            warp: 0.5,
+          }),
+          'voice u8 warp pwm lfo': lfoVoiceOf('warp1', 0.4, { min: 0, max: 1, bipolar: true }, 0.5, held, {
+            warpMode: 4,
+            warp: 0.5,
+          }),
+          // every mode under the LFO at four speeds, the knob 0.1 … 0.9 (a sine of 1 / Hz seconds)
+          ...Object.fromEntries(
+            WARP_BENCH_MODES.flatMap(([label, warpMode]) =>
+              WARP_BENCH_HZ.map((hz) => [
+                `voice u8 warp ${label} lfo ${hz} Hz`,
+                lfoVoiceOf('warp1', 0.4, { min: 0, max: 1, bipolar: true }, 1 / hz, held, {
+                  warpMode,
+                  warp: 0.5,
+                }),
+              ])
+            )
+          ),
+        }),
         'voice u8 lfo gain': lfoVoiceOf('gain1', -0.5),
         // (the centre voices apart from the others, each group × its gain per sample: on their mix tables)
         ...(dsp.VOICE_PARAM_ORDER?.includes('blend1') && {

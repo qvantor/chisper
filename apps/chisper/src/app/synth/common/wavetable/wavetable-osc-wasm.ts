@@ -443,7 +443,8 @@ const writeEnvelopes = (command: Float64Array, at: number, envelopes: EnvelopePa
 
 // an oscillator of a voice (read_osc of the core): on, its table, unison, phase, phaseRand, the 8 start phases of
 // its unison voices, then its UnisonShape and the 8 random shares of a random detune (drawn after the phases, only
-// for a random detune: the phases of a linear one stay those of before); a block of 0 when it is off
+// for a random detune: the phases of a linear one stay those of before), its warp (mode, knob); a block of 0 when it
+// is off
 const writeOsc = (
   scope: OscScope,
   command: Float64Array,
@@ -464,6 +465,8 @@ const writeOsc = (
   const randomDetune = osc !== null && shape.detune === 'random';
   command[at++] = shape.positionSpread;
   for (let v = 0; v < MAX_UNISON; v++) command[at++] = randomDetune ? random() : 0;
+  command[at++] = osc?.warpMode ?? 0;
+  command[at++] = osc?.warp ?? 0;
   return at;
 };
 

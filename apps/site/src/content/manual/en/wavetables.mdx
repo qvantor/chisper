@@ -3,7 +3,7 @@ title: 'Wavetables: Import WAV Tables, Make One from Audio, Draw'
 h1: 'Wavetables: import, make from audio, draw'
 description: 'How wavetables work in Chisper: 2048-sample frames, up to 256 of them, the clm marker. Import a WAV wavetable, make one from an audio file or draw a wave.'
 nav: 'Wavetables'
-updated: 2026-11-12
+updated: 2026-11-21
 preset: ufo-drone
 image: editor-audio
 ---
@@ -29,7 +29,7 @@ one at the position of **Wave**.
   (below), and every table made from an audio file is one.
 - **No clicks:** when **Wave** moves, a voice fades into the new frame over one cycle of its note (5 ms at most).
 
-<Figure name='oscillator' alt='Osc 1 of Chisper on the table Spectral Gyro at frame 33 of 256: the table name with its arrows, Oct, Semi and Fine, the wave of that frame, Wave 33/256, Phase, Phase rand, Unison 3, and the Gain, Wave, Detune and Blend knobs' narrow>
+<Figure name='oscillator' alt='Osc 1 of Chisper on the table Spectral Gyro at frame 33 of 256: the table name with its arrows, Oct, Semi and Fine over the wave of that frame, Wave 33/256, Phase, Phase rand and Unison 3 under it, and the Gain, Wave, Warp (grey) knobs with the Off button of the Warp mode right of it, Detune and Blend' narrow>
 
 An oscillator: the table on top, the frame that plays in the middle, **Wave** under it.
 
@@ -37,6 +37,26 @@ An oscillator: the table on top, the frame that plays in the middle, **Wave** un
 
 How a table becomes a sound, and how to move through it, is told on
 [What is wavetable synthesis?](/learn/what-is-wavetable-synthesis/)
+
+## Warp: bend and squeeze the frame
+
+**Warp** reshapes the frame as it plays: the oscillator runs through some parts of the cycle faster and through
+others slower, so the same table gets a new tone. Pick the mode on the button right of the **Warp** knob, next to
+**Wave** (a click opens the menu of the modes, each with its curve), and set how much with the knob. It works on
+every table, and the wave in the middle of the oscillator shows the frame as you hear it.
+
+- **Off**: the frame as it is. The **Warp** knob is grey.
+- **Bend +** squeezes the middle of the frame and stretches its start and its end.
+- **Bend -** does the opposite: it squeezes the start and the end, stretches the middle.
+- **Bend +/-** plays the frame as it is at 50%; below that it bends as **Bend +**, above it as **Bend -**, the
+  further from 50% the more.
+- **PWM** squeezes the whole frame to the left, as a pulse gets narrower: the rest of the cycle holds the frame's
+  first value. At 100% no tone is left, only that value held: silence when the frame starts at zero. On a square
+  that starts at its top or its bottom this is the classic pulse-width sweep; on one that starts at a jump, and on
+  any other table, a sweep of its own.
+
+The knob takes envelopes and LFOs like any other: an LFO on **Warp** is a moving, vocal sweep. A note that plays when
+you change the mode crossfades into the new one, so the change is smooth.
 
 ## The library
 

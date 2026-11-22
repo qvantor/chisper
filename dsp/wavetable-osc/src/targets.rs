@@ -17,6 +17,8 @@ pub const LFO_KNOBS: usize = 3;
 pub const SUB: usize = 4;
 /// the knobs of the filter added after the others: Drive, Var (of its model types)
 pub const FILTER_EXTRA: usize = 5;
+/// the warp of the oscillators (warp.rs), added after the others: its knob
+pub const WARP: usize = 6;
 
 /// the knobs of an oscillator
 pub const POSITION: usize = 0;
@@ -40,9 +42,19 @@ pub const COARSE: usize = 2;
 /// the knobs of FILTER_EXTRA (k of VoiceFilter::base: 3 + these)
 pub const DRIVE: usize = 0;
 pub const VARIATION: usize = 1;
+/// the knob of WARP (of each oscillator)
+pub const WARP_KNOB: usize = 0;
 
 /// (instances, knobs) of each module, in the order of their ids
-pub const MODULES: [(usize, usize); 6] = [(2, OSC_KNOBS), (1, 3), (1, 4), (LFOS, KNOBS), (1, 3), (1, 2)];
+pub const MODULES: [(usize, usize); 7] = [
+    (2, OSC_KNOBS),
+    (1, 3),
+    (1, 4),
+    (LFOS, KNOBS),
+    (1, 3),
+    (1, 2),
+    (2, 1),
+];
 
 /// the id of the first knob of `module` of `modules`
 pub const fn first_in(modules: &[(usize, usize)], module: usize) -> usize {
@@ -108,7 +120,9 @@ mod tests {
         assert_eq!(target(SUB, 0, COARSE), 41);
         assert_eq!(target(FILTER_EXTRA, 0, DRIVE), 42);
         assert_eq!(target(FILTER_EXTRA, 0, VARIATION), 43);
-        assert_eq!(TARGETS, 44);
+        assert_eq!(target(WARP, 0, WARP_KNOB), 44);
+        assert_eq!(target(WARP, 1, WARP_KNOB), 45);
+        assert_eq!(TARGETS, 46);
     }
 
     #[test]

@@ -181,6 +181,17 @@ describe('oscillator', () => {
     expect(model.$waveTablePath.value).toEqual(['a', 'b']);
   });
 
+  it('has its Warp Off at 0 until set, no param of the voices', () => {
+    const [model, actions] = createOscillator();
+    expect(model.$warpMode.value).toBe(0);
+    expect(model.$warp.value).toBe(0);
+    actions.setWarpMode(3);
+    actions.setWarp(0.4);
+    expect(model.$warpMode.value).toBe(3);
+    expect(model.$warp.value).toBe(0.4);
+    expect(model.$params.value).toEqual({ position: 0, detune: 0, spread: 5, gain: 0.5, blend: 0.75 });
+  });
+
   it('gives every oscillator its own id', () => {
     const synthCore = createSynthCore();
     const [first] = createOscillator(synthCore, 'osc1');
@@ -512,6 +523,8 @@ describe('oscillator', () => {
       actions.setGain(0.7);
       actions.setPosition(3);
       actions.setWaveTablePath(['a', 1]);
+      actions.setWarpMode(4);
+      actions.setWarp(0.35);
 
       expect(getSnapshot()['osc1']).toEqual({
         a: true,
@@ -526,6 +539,8 @@ describe('oscillator', () => {
         ph: 0.25,
         pr: 0.5,
         g: 0.7,
+        wm: 4,
+        wa: 0.35,
       });
     });
 
@@ -547,8 +562,14 @@ describe('oscillator', () => {
       actions.setOscValue('phaseRand', 0.5);
       actions.setOscValue('semi', 5);
       actions.setOscValue('fine', 5);
-      applySnapshot({ osc1: { a: false, w: 0, g: 0, o: 0, s: 0, f: 0, d: 0, b: 0, u: 1, ph: 0, pr: 0 } });
+      actions.setWarpMode(2);
+      actions.setWarp(0.6);
+      applySnapshot({
+        osc1: { a: false, w: 0, g: 0, o: 0, s: 0, f: 0, d: 0, b: 0, u: 1, ph: 0, pr: 0, wm: 0, wa: 0 },
+      });
 
+      expect(model.$warpMode.value).toBe(0);
+      expect(model.$warp.value).toBe(0);
       expect(model.$active.value).toBe(false);
       expect(model.$position.value).toBe(0);
       expect(model.$gain.value).toBe(0);
@@ -572,8 +593,14 @@ describe('oscillator', () => {
       actions.setOscValue('fine', -7);
       actions.setOscValue('phase', 0.25);
       actions.setGain(0.9);
+      actions.setWarpMode(3);
+      actions.setWarp(0.2);
 
       applySnapshot({});
+
+      // the Warp Off at 0
+      expect(model.$warpMode.value).toBe(0);
+      expect(model.$warp.value).toBe(0);
 
       expect(model.$osc.value).toEqual({
         octave: 0,

@@ -42,8 +42,12 @@
 //   saturation of Drive, FAT and the saturation of a resonance on sines at the cutoff
 // - filter-resonance.json: the resonance of MG Low 12 and 24, Low and Band 12 at Res 0.9 and 1 by the cutoff: a quiet
 //   sine around the cutoff (its peak, its width), a sine at it by its amplitude (the saturation)
+// - warp.json: the warp of osc A (A Warp Mode, A Warp) on tables of ours: the map of the phase of Bend +, Bend -,
+//   Bend +/- and PWM by the knob (a sine and a cosine: the warped phase of each sample), the harmonics of a saw and a
+//   sine by it, the aliasing of a saw at C6 and C7, the knob automated every sample (how it follows), the harmonics of
+//   Bend - and Bend +/- at D2 and D4 to 16 kHz (how bright a frame squeezed at its wrap stays)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,eq,filter-types,filter-resonance`
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,eq,filter-types,filter-resonance,warp`
 // renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -201,6 +205,27 @@ const writeRows = (file, result) => {
   writeFileSync(file, `{\n${lines.join(',\n')}\n}\n`);
 };
 const dB = (v) => +(20 * Math.log10(v)).toFixed(3);
+// the frequency of a note the AU plays: the one within ±1 cent (by 0.05) its fundamental is loudest at over the last
+// SIZE samples (the bands of the benchmark's analysis are ±14 bins wide: a harmonic 400 of 55 Hz 0.025 cent off is
+// within 0.3 Hz)
+const loudestFundamental = (x, rate, note) => {
+  const nominal = 440 * 2 ** ((note - 69) / 12);
+  const from = x.length - SIZE;
+  let best = { frequency: nominal, amplitude: -1 };
+  for (let c = -20; c <= 20; c++) {
+    const frequency = nominal * 2 ** (c / 24000);
+    const w = (2 * Math.PI * frequency) / rate;
+    let a = 0;
+    let b = 0;
+    for (let n = from; n < x.length; n++) {
+      a += x[n] * Math.cos(w * n);
+      b += x[n] * Math.sin(w * n);
+    }
+    const amplitude = Math.hypot(a, b);
+    if (amplitude > best.amplitude) best = { frequency, amplitude };
+  }
+  return best.frequency;
+};
 // the shares of the harmonics 1..count of f0 in x over 0.15..0.45 s (their amplitudes, summing to 1)
 const harmonicShares = (x, f0, count) => {
   const amplitudes = Array.from(
@@ -1173,24 +1198,7 @@ if (runs('aliasing')) {
   // AU plays: the one within ±1 cent (by 0.05) the fundamental is loudest at (the bands of the analysis are ±14
   // bins wide: a harmonic 400 of 55 Hz 0.025 cent off is within 0.3 Hz)
   const noteOf = (pitch) => Math.round(69 + 12 * Math.log2(pitch / 440));
-  const fundamental = (x, rate, note) => {
-    const nominal = 440 * 2 ** ((note - 69) / 12);
-    const from = x.length - SIZE;
-    let best = { frequency: nominal, amplitude: -1 };
-    for (let c = -20; c <= 20; c++) {
-      const frequency = nominal * 2 ** (c / 24000);
-      const w = (2 * Math.PI * frequency) / rate;
-      let a = 0;
-      let b = 0;
-      for (let n = from; n < x.length; n++) {
-        a += x[n] * Math.cos(w * n);
-        b += x[n] * Math.sin(w * n);
-      }
-      const amplitude = Math.hypot(a, b);
-      if (amplitude > best.amplitude) best = { frequency, amplitude };
-    }
-    return best.frequency;
-  };
+  const fundamental = loudestFundamental;
   const round = (value) => Number(value.toFixed(1));
   try {
     const results = {};
@@ -2977,4 +2985,238 @@ if (runs('filter-resonance')) {
   } finally {
     removeTables();
   }
+}
+
+// --- warp ---
+// the warp of osc A (A Warp Mode, A Warp) on tables of ours, one voice, Rand Phase 0: its map of the phase w(φ) at
+// C0 (a sine and a cosine: w = atan2(sin, cos) / 2π, whatever level of the table is read), the harmonics and the
+// mean of a saw, a sine and a cosine by the warp at C0, the aliasing of the saw at C6 and C7, the knob moved every sample (the map read
+// back sample by sample), the harmonics to 16 kHz of Bend - and Bend +/- at D2 and D4.
+// `--parts=curves,spectra,aliasing,moving,notes` renders some of them
+if (runs('warp')) {
+  const parts = process.argv
+    .find((arg) => arg.startsWith('--parts='))
+    ?.slice(8)
+    .split(',') ?? ['curves', 'spectra', 'aliasing', 'moving', 'notes'];
+  const file = join(out, 'warp.json');
+  const before = parts.length < 5 ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  // the modes of the menu of A Warp Mode measured here (70 of them: the index floor(70 v))
+  const MODES = { 'bend+': 2, 'bend-': 3, 'bend+-': 4, pwm: 5 };
+  const modeValue = (index) => (index + 0.5) / 70;
+  const WARPS = Array.from({ length: 21 }, (_, i) => i / 20);
+  const C0 = 12;
+  const f0 = 440 * 2 ** ((C0 - 69) / 12);
+  const period = RATE / f0;
+  const frac = (x) => x - Math.floor(x);
+  const cosine = Array.from({ length: 2048 }, (_, i) => Math.cos((2 * Math.PI * i) / 2048));
+  const play = (name, state, params, { note = C0, seconds = 0.5, automation, step } = {}) =>
+    hostRender(`warp-${name}`, {
+      seconds,
+      state,
+      params: { ...FLAT, 'A Unison': 0, ...params },
+      automation,
+      step,
+      notes: [{ note, on: 0, off: seconds }],
+    }).then(([left]) => left);
+  const warpParams = (mode, warp) => ({ 'A Warp Mode': modeValue(mode ? MODES[mode] : 0), 'A Warp': warp });
+  // the warped phase of each sample of a sine and a cosine render
+  const phases = (sin, cos) => Float64Array.from(sin, (v, i) => frac(Math.atan2(v, cos[i]) / (2 * Math.PI)));
+  const result = { ...before };
+  try {
+    const states = {
+      sin: tableState('warp-sin', [sine()]),
+      cos: tableState('warp-cos', [cosine]),
+      saw: tableState('warp-saw', [sawFrame()]),
+      // the saw from 0 up, its jump in the middle (frame 0 of Basic Shapes, of Default Shapes of the Audio Unit)
+      ramp: tableState('warp-ramp', [sawFrame().map((_, i, saw) => -saw[(i + saw.length / 2) % saw.length])]),
+    };
+    // the phase of sample i of a note of C0 unwarped: frac(i / period + offset) (the circular mean over 6000..18000)
+    const pair = (name, params, options) =>
+      Promise.all([
+        play(`sin-${name}`, states.sin, params, options),
+        play(`cos-${name}`, states.cos, params, options),
+      ]);
+    const [offSin, offCos] = await pair('off', warpParams(null, 0));
+    const unwarped = phases(offSin, offCos);
+    let [re, im] = [0, 0];
+    for (let i = 6000; i < 18000; i++) {
+      re += Math.cos(2 * Math.PI * (unwarped[i] - i / period));
+      im += Math.sin(2 * Math.PI * (unwarped[i] - i / period));
+    }
+    const offset = frac(Math.atan2(im, re) / (2 * Math.PI));
+    const phaseAt = (i) => frac(i / period + offset);
+    const round6 = (x) => Number(x.toFixed(6));
+
+    if (parts.includes('curves')) {
+      // 64 points of the third cycle of each mode and warp: [φ, w] at the samples nearest to φ = j / 64
+      const first = Math.ceil((3 - offset) * period);
+      result.curves = [];
+      await Promise.all(
+        Object.keys(MODES).flatMap((mode) =>
+          WARPS.map(async (warp) => {
+            const w = phases(...(await pair(`${mode}-${warp}`, warpParams(mode, warp))));
+            const points = Array.from({ length: 64 }, (_, j) => {
+              const i = first + Math.round(((j / 64 - phaseAt(first) + 1) % 1) * period);
+              return [round6(phaseAt(i)), round6(w[i])];
+            });
+            result.curves.push({ mode, warp, points });
+          })
+        )
+      );
+      const order = Object.keys(MODES);
+      result.curves.sort((a, b) => order.indexOf(a.mode) - order.indexOf(b.mode) || a.warp - b.warp);
+    }
+
+    if (parts.includes('spectra')) {
+      // the harmonics 1..40 of the saw, the sine and the cosine at C0 (dB against the fundamental unwarped, Hann over
+      // 0.3 s) and their mean over 4 cycles from sample 6000 against it (the cosine starts at 1: what PWM holds over
+      // the rest of a cycle tells itself there, none of a table that starts at 0)
+      const harmonics = (x) =>
+        Array.from({ length: 40 }, (_, j) => tone(x, f0 * (j + 1), 6000, 14400).amplitude);
+      const cycles = Math.round(4 * period);
+      const mean = (x) => {
+        let sum = 0;
+        for (let i = 6000; i < 6000 + cycles; i++) sum += x[i];
+        return sum / cycles;
+      };
+      const tables = { saw: states.saw, sine: states.sin, cos: states.cos };
+      result.spectra = [];
+      for (const [table, state] of Object.entries(tables)) {
+        const [unwarped] = harmonics(await play(`${table}-spectrum-off`, state, warpParams(null, 0)));
+        await Promise.all(
+          Object.keys(MODES).flatMap((mode) =>
+            WARPS.filter((_, i) => i % 2 === 0).map(async (warp) => {
+              const x = await play(`${table}-spectrum-${mode}-${warp}`, state, warpParams(mode, warp));
+              const levels = harmonics(x).map((a) => (a > 1e-7 ? dB(a / unwarped) : null));
+              const dc = Number((mean(x) / unwarped).toFixed(4));
+              result.spectra.push({ table, mode, warp, harmonics: levels, dc });
+            })
+          )
+        );
+      }
+      result.spectra.sort(
+        (a, b) => a.table.localeCompare(b.table) || a.mode.localeCompare(b.mode) || a.warp - b.warp
+      );
+    }
+
+    if (parts.includes('aliasing')) {
+      // the saw at C6 and C7 at 48 kHz, analyze of the oscillator benchmark (as aliasing.json) over the last SIZE
+      // samples, at the frequency of the note the fundamental is loudest at within ±1 cent
+      const saw = sawFrame();
+      const seconds = SIZE / RATE + 0.25;
+      result.aliasing = [];
+      const cases = [
+        [null, 0],
+        ...Object.keys(MODES).flatMap((mode) => [
+          [mode, 0.5],
+          [mode, 1],
+        ]),
+      ];
+      await Promise.all(
+        [84, 96].flatMap((note) =>
+          cases.map(async ([mode, warp]) => {
+            const x = await play(`alias-${note}-${mode}-${warp}`, states.saw, warpParams(mode, warp), {
+              note,
+              seconds,
+            });
+            const frequency = loudestFundamental(x, RATE, note);
+            const { aliasing, spur } = analyze(x, frequency, RATE, saw);
+            result.aliasing.push({
+              note,
+              mode: mode ?? 'off',
+              warp,
+              aliasing: +aliasing.toFixed(1),
+              spur: +spur.toFixed(1),
+            });
+          })
+        )
+      );
+      result.aliasing.sort((a, b) => a.note - b.note || a.mode.localeCompare(b.mode) || a.warp - b.warp);
+    }
+
+    if (parts.includes('moving')) {
+      // Bend + at C0, A Warp automated from 0 to 1 over 0.1..0.4 s, set every sample (step 1): the knob each sample
+      // plays, read back from its map (where |2φ - 1| is in 0.2..0.9: the map tells the knob there)
+      const automation = [
+        {
+          name: 'A Warp',
+          points: [
+            [0.1, 0],
+            [0.4, 1],
+          ],
+        },
+      ];
+      const [sin, cos] = await pair('moving', warpParams('bend+', 0), { automation, step: 1 });
+      const w = phases(sin, cos);
+      const knob = [];
+      for (let i = Math.round(0.08 * RATE); i < Math.round(0.42 * RATE); i++) {
+        const d = 2 * phaseAt(i) - 1;
+        if (Math.abs(d) < 0.2 || Math.abs(d) > 0.9) continue;
+        const q = w[i] - 0.5;
+        const a = (0.5 * d - q) / (2 * q * Math.abs(d) - q - 0.5 * d);
+        knob.push([i, round6(a / 0.8)]);
+      }
+      // the one-pole (a time constant in ms, by 0.1) the knob follows the automation through, best by squares
+      const automated = (i) => Math.min(1, Math.max(0, (i / RATE - 0.1) / 0.3));
+      const fit = (tau) => {
+        const pole = Math.exp(-1 / (tau * 1e-3 * RATE));
+        let [y, error, next] = [0, 0, 0];
+        for (let i = 0; i <= knob.at(-1)[0]; i++) {
+          y = automated(i) + (y - automated(i)) * pole;
+          if (knob[next]?.[0] === i) error += (knob[next++][1] - y) ** 2;
+        }
+        return error;
+      };
+      let tau = 1;
+      for (let t = 1; t <= 50; t += 0.1) if (fit(t) < fit(tau)) tau = t;
+      result.moving = { tau: +tau.toFixed(1), knob: knob.filter(([i]) => i % 16 === 0) };
+    }
+
+    if (parts.includes('notes')) {
+      // Bend - and Bend +/- (a < 0 over 0.5: the wrap of the frame squeezed, its middle stretched) at D2 and D4: the
+      // harmonics of the saw and the ramp to 16 kHz, dB against the fundamental of the note unwarped (Hann as spectra)
+      const NOTES = [38, 62];
+      const harmonics = (x, f) =>
+        Array.from({ length: Math.floor(16000 / f) }, (_, j) => tone(x, f * (j + 1), 6000, 14400).amplitude);
+      result.notes = [];
+      await Promise.all(
+        ['saw', 'ramp'].flatMap((table) =>
+          NOTES.map(async (note) => {
+            const f = 440 * 2 ** ((note - 69) / 12);
+            const options = { note };
+            const off = await play(`notes-${table}-${note}-off`, states[table], warpParams(null, 0), options);
+            const [unwarped] = harmonics(off, f);
+            await Promise.all(
+              ['bend-', 'bend+-'].flatMap((mode) =>
+                [0.1, 0.5, 0.9, 1].map(async (warp) => {
+                  const x = await play(
+                    `notes-${table}-${note}-${mode}-${warp}`,
+                    states[table],
+                    warpParams(mode, warp),
+                    options
+                  );
+                  const levels = harmonics(x, f).map((a) => (a > 1e-7 ? dB(a / unwarped) : null));
+                  result.notes.push({ table, note, mode, warp, harmonics: levels });
+                })
+              )
+            );
+          })
+        )
+      );
+      result.notes.sort(
+        (a, b) =>
+          a.table.localeCompare(b.table) || a.note - b.note || a.mode.localeCompare(b.mode) || a.warp - b.warp
+      );
+    }
+  } finally {
+    removeTables();
+  }
+  writeRows(file, {
+    about:
+      'Osc A of the Audio Unit at one voice, Rand Phase 0, on tables of ours, A Warp Mode (its index floor(70 v): Bend + 2, Bend - 3, Bend +/- 4, PWM 5) and A Warp. curves: {mode, warp, points: [φ, w]} the warped phase w of 64 samples of a cycle of C0 at the phase φ of the unwarped note (w = atan2 of a sine and a cosine render / 2π). spectra: {table, mode, warp, harmonics, dc} the harmonics 1..40 of the saw (scripts/bench-osc/sound.mjs), the sine and the cosine at C0, dB against the fundamental unwarped (null: under -140 dB), dc the mean of 4 cycles from sample 6000 against that fundamental. aliasing: {note, mode, warp, aliasing, spur} the saw at C6 and C7 at 48 kHz, analyze of the oscillator benchmark (as aliasing.json). moving: Bend + at C0 with A Warp automated from 0 at 0.1 s to 1 at 0.4 s, set every sample: `knob` [sample, knob] the knob the map of a sample tells (every 16th, where |2φ - 1| is within 0.2..0.9: it moves every sample), `tau` the time constant (ms) of the one-pole it follows the automation through (the one-pole of the knob and its routes in the core, warp::SMOOTHING, is 11.3 ms: an LFO on the knob, 0.5 to 100 Hz at D2 and D4, follows one of 11.3 ms and no delay in every mode, its renders against those of the core at 11.3 and 10.5 ms). notes: {table, note, mode, warp, harmonics} the saw and the ramp (the saw from 0 up, its jump in the middle: frame 0 of Default Shapes) at D2 and D4 by Bend - and Bend +/-, the harmonics to 16 kHz as spectra, dB against the fundamental of the note unwarped. scripts/renders/run.mjs --only=warp [--parts=curves,spectra,aliasing,moving,notes]',
+    ...Object.fromEntries(
+      ['curves', 'spectra', 'aliasing', 'moving', 'notes'].map((key) => [key, result[key]])
+    ),
+  });
+  console.log('dsp/measurements: warp', parts.join(', '));
 }

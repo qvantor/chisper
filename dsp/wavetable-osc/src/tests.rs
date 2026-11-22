@@ -93,6 +93,24 @@ fn a_version_stays_until_no_one_holds_it() {
 }
 
 #[test]
+fn a_version_has_a_serial_no_other_ever_has() {
+    // (the cycle a warped mix was built of is kept by it: a version in the slot and the buffer of one freed is
+    // another table)
+    let mut store = Store::default();
+    let slot = version(&mut store, 1, 1.0, 8, 0.5);
+    assert!(store.commit(slot));
+    let first = store.latest(1).expect("the latest version");
+    let (serial, data) = (store.serial(first), store.levels(first).data.as_ptr());
+    assert_ne!(serial, store.serial(EntryRef::Sine));
+    store.remove(1);
+    let slot = version(&mut store, 1, 1.0, 8, 0.25);
+    assert!(store.commit(slot));
+    let second = store.latest(1).expect("the latest version");
+    assert_eq!((second, store.levels(second).data.as_ptr()), (first, data));
+    assert_ne!(store.serial(second), serial);
+}
+
+#[test]
 fn a_freed_buffer_is_reused_by_a_table_it_holds() {
     let mut store = Store::default();
     let slot = store.begin(1, 1.0, 1, layout(), 8, 0.0).expect("a slot");
@@ -690,6 +708,8 @@ fn play(
         phase_rand: 0.0,
         random: [0.0; 8],
         shape,
+        warp_mode: 0,
+        warp: 0.0,
     };
     let mut voice = Voice::new(
         RATE,
@@ -1150,6 +1170,8 @@ fn the_gain_of_a_voice_follows_an_lfo_of_the_shared_from_its_note_on() {
         phase_rand: 0.0,
         random: [0.0; 8],
         shape: UnisonShape::default(),
+        warp_mode: 0,
+        warp: 0.0,
     };
     let route = VoiceRoute {
         source: 4.0,
@@ -1307,6 +1329,8 @@ fn the_routes_on_the_pitch_add_their_offsets_to_the_detune_within_their_bounds()
             phase_rand: 0.0,
             random: [0.0; 8],
             shape: UnisonShape::default(),
+            warp_mode: 0,
+            warp: 0.0,
         };
         let mut voice = Voice::new(
             RATE,
@@ -1385,6 +1409,8 @@ fn play_blend(
         phase_rand: 0.0,
         random: [0.0; 8],
         shape,
+        warp_mode: 0,
+        warp: 0.0,
     };
     let mut voice = Voice::new(
         RATE,
@@ -1511,5 +1537,811 @@ fn a_unison_of_one_or_two_is_all_centre_whatever_its_blend() {
     for unison in [1.0, 2.0] {
         let moving = play_blend(unison, UnisonShape::default(), 512, |i| (i as f64 / 512.0) as f32);
         assert_eq!(moving, play_blend(unison, UnisonShape::default(), 512, |_| 0.5));
+    }
+}
+
+// --- the warp (warp.rs) ---
+
+mod warped {
+    use super::*;
+    use crate::shared::CycleKey;
+    use crate::store::MAX_LEVEL_LENGTH;
+    use crate::targets::WARP;
+    use crate::warp::{self, BEND_BOTH, BEND_DOWN, BEND_UP, OFF, PWM};
+    use jsmath::exp;
+
+    // a version of table 1 of one frame on the levels of two_level_frames (255 and 127 harmonics: pitch_x): a saw of
+    // each, its guards around it
+    fn saw_levels(store: &mut Store) {
+        let (lengths, harmonics) = ([1024usize, 512], [255, 127]);
+        let sizes = lengths.map(|length| length + FRAME_GUARD);
+        let offsets = vec![0, sizes[0] as i32, (sizes[0] + sizes[1]) as i32];
+        let layout = [vec![255, 127, 0], vec![1024, 512, 1], offsets.clone()];
+        let length = sizes[0] + sizes[1] + 1 + FRAME_GUARD;
+        let slot = store.begin(1, 1.0, 1, layout, length, 0.0).expect("a slot");
+        let data = store.chunk(slot, 0, length).expect("its room");
+        for l in 0..2 {
+            let len = lengths[l];
+            for i in 0..sizes[l] {
+                let k = (i + len - 1) % len;
+                let x = 2.0 * core::f64::consts::PI * k as f64 / len as f64;
+                let value: f64 = (1..=harmonics[l])
+                    .map(|h| jsmath::sin(h as f64 * x) / h as f64)
+                    .sum();
+                data[offsets[l] as usize + i] = (0.5 * value) as f32;
+            }
+        }
+        assert!(store.commit(slot));
+    }
+
+    // a version of table 1 of one frame laid out as the store lays out a saw of `harmonics` (wavetable-levels.ts:
+    // levels a third of an octave apart from the power of two over them, 32 samples a harmonic within 512..4096, the
+    // silent one last), each level a saw of its harmonics (summed by the recurrence of the sines: in doubles)
+    fn saw_table(store: &mut Store, harmonics: i32) {
+        saw_frames(store, harmonics, 1);
+    }
+
+    // saw_table of `frames` frames: the saw, then its odd harmonics alone (a square), and so on
+    fn saw_frames(store: &mut Store, harmonics: i32, frames: usize) {
+        let base = crate::voice::level_base(harmonics);
+        let mut counts = Vec::new();
+        for r in 0.. {
+            let count = floor(base * pow(2.0, -(r as f64) / 3.0) + 1e-9) as i32;
+            if count < 1 {
+                break;
+            }
+            counts.push(count.min(harmonics));
+        }
+        counts.push(0);
+        let lengths: Vec<i32> = counts
+            .iter()
+            .map(|&h| {
+                if h == 0 {
+                    1
+                } else {
+                    ((32 * h) as u32).next_power_of_two().clamp(512, 4096) as i32
+                }
+            })
+            .collect();
+        let mut offsets = Vec::new();
+        let mut size = 0;
+        for &length in &lengths {
+            offsets.push(size as i32);
+            size += frames * (length as usize + FRAME_GUARD);
+        }
+        let layout = [counts.clone(), lengths.clone(), offsets.clone()];
+        let slot = store
+            .begin(1, 1.0, frames as i32, layout, size, 0.0)
+            .expect("a slot");
+        let data = store.chunk(slot, 0, size).expect("its room");
+        for l in 0..counts.len() {
+            let len = lengths[l] as usize;
+            for frame in 0..frames {
+                let start = offsets[l] as usize + frame * (len + FRAME_GUARD);
+                for i in 0..len + FRAME_GUARD {
+                    let k = (i + len - 1) % len;
+                    let x = 2.0 * core::f64::consts::PI * k as f64 / len as f64;
+                    let (c, mut before, mut now, mut value) =
+                        (2.0 * jsmath::cos(x), 0.0, jsmath::sin(x), 0.0);
+                    for h in 1..=counts[l] {
+                        if frame % 2 == 0 || h % 2 == 1 {
+                            value += now / h as f64;
+                        }
+                        (before, now) = (now, c * now - before);
+                    }
+                    data[start + i] = (0.5 * value) as f32;
+                }
+            }
+        }
+        assert!(store.commit(slot));
+    }
+
+    // the frequency of the pitch at x = 1 + 3·log2(base · f / nyquist) on a table of `harmonics` (saw_table)
+    fn frequency_at(harmonics: i32, x: f64) -> f32 {
+        let base = crate::voice::level_base(harmonics);
+        (RATE / 2.0 / base * pow(2.0, (x - 1.0) / 3.0)) as f32
+    }
+
+    // a voice of osc 1 (unison `unison`) on the saw at `frequency`, its warp (mode, knob) at the start; `frames`
+    // rendered in blocks of `size`, `before` called before each one (a knobs event); its left channel
+    fn play(
+        warp: (u32, f64),
+        unison: f64,
+        frequency: impl Fn(usize) -> f32,
+        frames: usize,
+        size: usize,
+        mut before: impl FnMut(usize, &mut Voice),
+    ) -> Vec<f32> {
+        render(
+            saw_levels,
+            warp,
+            unison,
+            frequency,
+            frames,
+            size,
+            |frame, voice, _| {
+                before(frame, voice);
+                true
+            },
+        )
+    }
+
+    // play on the table `table` lays out, `before` given the shared too (its refusals of the builds) and telling
+    // whether the block has memory (else no allocation succeeds in it)
+    fn render(
+        table: impl FnOnce(&mut Store),
+        warp: (u32, f64),
+        unison: f64,
+        frequency: impl Fn(usize) -> f32,
+        frames: usize,
+        size: usize,
+        before: impl FnMut(usize, &mut Voice, &mut Shared) -> bool,
+    ) -> Vec<f32> {
+        render_at(table, warp, unison, frequency, None, frames, size, before)
+    }
+
+    // render at the `position` of each sample (None: still at 0, a param of one value)
+    #[allow(clippy::too_many_arguments)]
+    fn render_at(
+        table: impl FnOnce(&mut Store),
+        warp: (u32, f64),
+        unison: f64,
+        frequency: impl Fn(usize) -> f32,
+        position: Option<&dyn Fn(usize) -> f32>,
+        frames: usize,
+        size: usize,
+        mut before: impl FnMut(usize, &mut Voice, &mut Shared) -> bool,
+    ) -> Vec<f32> {
+        let mut store = Store::default();
+        table(&mut store);
+        let mut shared = Shared::default();
+        let osc = OscOptions {
+            table: 1,
+            unison,
+            phase: 0.0,
+            phase_rand: 0.3,
+            random: [0.0, 0.11, 0.42, 0.73, 0.19, 0.58, 0.27, 0.86],
+            shape: UnisonShape::default(),
+            warp_mode: warp.0,
+            warp: warp.1,
+        };
+        let mut voice = Voice::new(
+            RATE,
+            VoiceOptions {
+                osc: [Some(osc), None],
+                ..note()
+            },
+            &mut shared,
+        );
+        voice.attach(&mut store, &mut shared);
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        for frame in (0..frames).step_by(size) {
+            let memory = before(frame, &mut voice, &mut shared);
+            let f: Vec<f32> = (0..size).map(|i| frequency(frame + i)).collect();
+            let q: Vec<f32> = match position {
+                Some(position) => (0..size).map(|i| position(frame + i)).collect(),
+                None => vec![0.0],
+            };
+            let params = [
+                f.as_slice(),
+                &[1.0],
+                q.as_slice(),
+                &[0.0],
+                &[30.0],
+                &[1.0],
+                &[0.5],
+                &[0.0],
+                &[0.0],
+                &[0.0],
+                &[1.0],
+                &[0.5],
+            ];
+            let end = (frame + size).min(frames);
+            let mut process = || {
+                voice.process(
+                    frame as f64,
+                    &params,
+                    &[0.0],
+                    &mut left[frame..end],
+                    &mut right[frame..end],
+                    &mut store,
+                    &mut shared,
+                )
+            };
+            if memory {
+                process();
+            } else {
+                without_memory(process);
+            }
+        }
+        voice.end(&mut store, &mut shared);
+        left
+    }
+
+    // a pitch on the flat of level 0 (no mix to build), and one gliding over both levels and their crossfade
+    fn still(_: usize) -> f32 {
+        pitch_x(0.5).0
+    }
+    fn gliding(i: usize) -> f32 {
+        pitch_x(0.3 + 1.4 * (i as f64 / 2048.0)).0
+    }
+
+    #[test]
+    fn a_neutral_warp_plays_the_bits_of_no_warp() {
+        for frequency in [still as fn(usize) -> f32, gliding] {
+            let plain = play((OFF, 0.7), 3.0, frequency, 2048, 128, |_, _| ());
+            for warp in [(BEND_UP, 0.0), (BEND_DOWN, 0.0), (BEND_BOTH, 0.5), (PWM, 0.0)] {
+                assert_eq!(
+                    play(warp, 3.0, frequency, 2048, 128, |_, _| ()),
+                    plain,
+                    "{warp:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_warp_changes_the_sound() {
+        let plain = play((OFF, 0.0), 1.0, still, 1024, 128, |_, _| ());
+        for warp in [(BEND_UP, 0.6), (BEND_DOWN, 0.6), (BEND_BOTH, 0.1), (PWM, 0.5)] {
+            let warped = play(warp, 1.0, still, 1024, 128, |_, _| ());
+            assert!(
+                warped.iter().zip(&plain).any(|(a, b)| (a - b).abs() > 0.05),
+                "{warp:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_warped_block_cut_into_other_spans_plays_the_same_bits() {
+        for warp in [(BEND_UP, 0.7), (PWM, 0.5)] {
+            let whole = play(warp, 4.0, still, 2048, 128, |_, _| ());
+            assert_eq!(play(warp, 4.0, still, 2048, 64, |_, _| ()), whole, "{warp:?}");
+        }
+        // a bend of a < 0 whose knob moves (from 0 at 128, through the one-pole: 0.4 within 1e-7 after 8700 samples;
+        // its levels sample by sample, no warped mix): the same bits; still, the block it builds its warped mix in is
+        // another (the first steady one): within 61.2 dB of its peak (a_warped_mix_plays_as_the_voice_read_directly)
+        let moved = |frame: usize, voice: &mut Voice| {
+            if frame == 128 {
+                voice.set_knobs(WARP, &[BEND_DOWN as f64, 0.4, 0.0, 0.0]);
+            }
+        };
+        let whole = play((BEND_DOWN, 0.0), 4.0, still, 2048, 128, moved);
+        assert_eq!(play((BEND_DOWN, 0.0), 4.0, still, 2048, 64, moved), whole);
+        let bend = (BEND_DOWN, 0.4);
+        let table = |size: usize| render_saw(255, bend, 4.0, 7.69, 2048, size, |_, _, _| true);
+        let (whole, cut) = (table(128), table(64));
+        assert!(whole[64..128] != cut[64..128]);
+        let (peak, difference) = peak_and_difference(&whole, &cut);
+        assert!(difference < 1e-3 * peak, "{difference} of {peak}");
+    }
+
+    #[test]
+    fn a_voice_warped_and_back_plays_as_one_never_warped() {
+        // the phase a voice keeps is never warped: once its knob is back at 0 (the one-pole there, within WARP_THERE)
+        // it plays the bits of a voice that never warped
+        let back = |frame: usize, voice: &mut Voice| {
+            if frame == 0 {
+                voice.set_knobs(WARP, &[BEND_DOWN as f64, 0.8, 0.0, 0.0]);
+            } else if frame == 4096 {
+                voice.set_knobs(WARP, &[BEND_DOWN as f64, 0.0, 0.0, 0.0]);
+            }
+        };
+        let warped = play((BEND_DOWN, 0.0), 2.0, gliding, 16384, 128, back);
+        let plain = play((BEND_DOWN, 0.0), 2.0, gliding, 16384, 128, |_, _| ());
+        assert!(warped[..4096]
+            .iter()
+            .zip(&plain)
+            .any(|(a, b)| (a - b).abs() > 0.05));
+        // (0.8 to 1e-7 in 16 time constants: 8700 samples, then a block)
+        assert_eq!(warped[13056..], plain[13056..]);
+    }
+
+    #[test]
+    fn a_new_mode_crossfades_into_the_sound_of_that_mode() {
+        let switch = |frame: usize, voice: &mut Voice| {
+            if frame == 512 {
+                voice.set_knobs(WARP, &[PWM as f64, 0.6, 0.0, 0.0]);
+            }
+        };
+        let switched = play((BEND_UP, 0.6), 1.0, still, 2048, 128, switch);
+        let (from, to) = (
+            play((BEND_UP, 0.6), 1.0, still, 2048, 128, |_, _| ()),
+            play((PWM, 0.6), 1.0, still, 2048, 128, |_, _| ()),
+        );
+        // the old mode until the block of the event, a crossfade of 10 ms (480 samples) from it, the new one after
+        assert_eq!(switched[..512], from[..512]);
+        for i in 512..992 {
+            let share = (i - 512) as f64 / 480.0;
+            let expected = from[i] as f64 + (to[i] as f64 - from[i] as f64) * share;
+            assert!(
+                (switched[i] as f64 - expected).abs() < 1e-5,
+                "{i}: {} against {expected}",
+                switched[i]
+            );
+        }
+        assert_eq!(switched[1024..], to[1024..]);
+    }
+
+    // the runs of level_cut over xs[from..=end]: (a, b, level, w at a, w at b)
+    fn cuts(xs: &[f64], from: usize) -> Vec<(usize, usize, f64, f64, f64)> {
+        let (end, mut a, mut runs) = (xs.len() - 1, from, Vec::new());
+        while a < end {
+            let (b, level, w0, w1) = crate::voice::level_cut(xs, a, end);
+            runs.push((a, b, level, w0, w1));
+            a = b;
+        }
+        runs
+    }
+
+    #[test]
+    fn a_segment_within_one_crossfade_is_one_run_of_its_weights() {
+        let xs: Vec<f64> = (0..=32).map(|i| 3.2 + 0.7 * i as f64 / 32.0).collect();
+        let runs = cuts(&xs, 0);
+        assert_eq!(runs.len(), 1);
+        let (_, b, level, w0, w1) = runs[0];
+        assert_eq!((b, level), (32, 3.0));
+        assert!((w0 - 0.2).abs() < 1e-12 && (w1 - 0.9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_levels_of_a_warp_that_jump_are_cut_where_they_leave_a_crossfade() {
+        // rising most at the start (PWM near its top: the levels of 1 / (1 - k) a line), then falling: the runs
+        // cover the segment one after another, each one sample or within a level and the next with the weights of
+        // its ends, the next one from where it ended
+        let rising: Vec<f64> = (0..=32)
+            .map(|i| 2.0 + 3.0 * log2(1.0 + 600.0 * i as f64 / 32.0))
+            .collect();
+        let falling: Vec<f64> = rising.iter().rev().copied().collect();
+        for (xs, from) in [(&rising, 0), (&falling, 0), (&rising, 5)] {
+            let runs = cuts(xs, from);
+            assert_eq!(runs[0].0, from);
+            assert_eq!(runs.last().unwrap().1, 32);
+            assert!(runs.len() > 3, "{runs:?}");
+            for pair in runs.windows(2) {
+                assert_eq!(pair[0].1, pair[1].0);
+            }
+            for &(a, b, level, w0, w1) in &runs {
+                assert!(b > a);
+                assert_eq!(w0, (xs[a] - level).clamp(0.0, 1.0));
+                assert_eq!(w1, (xs[b] - level).clamp(0.0, 1.0));
+                if b > a + 1 {
+                    assert!(
+                        xs[a..=b].iter().all(|x| *x >= level && *x <= level + 1.0),
+                        "{a}..{b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_frame_that_fades_under_levels_that_jump_is_cut_as_each_frame_alone() {
+        // PWM from near its top down (the levels of its pitch fall by 9 in the first 32 samples of the one-pole, by
+        // more than one in each for 5 segments) at the block the position goes to the other frame: a fade of 5 ms
+        // (83 Hz) over them. A fade is linear in its frames: it is the voice still on each, cut where the levels
+        // leave a crossfade, by its share (one crossfade over a segment of the fade read levels richer than the pitch)
+        let f = frequency_at(255, 0.5);
+        let voice = |position: &dyn Fn(usize) -> f32| {
+            render_at(
+                |store| saw_frames(store, 255, 2),
+                (PWM, 0.995),
+                1.0,
+                |_| f,
+                Some(position),
+                1024,
+                128,
+                |frame, voice, _| {
+                    if frame == 512 {
+                        voice.set_knobs(WARP, &[PWM as f64, 0.3, 0.0, 0.0]);
+                    }
+                    true
+                },
+            )
+        };
+        let (first, second) = (voice(&|_| 0.0), voice(&|_| 1.0));
+        let faded = voice(&|i| if i < 512 { 0.0 } else { 1.0 });
+        let (_, apart) = peak_and_difference(&first[512..752], &second[512..752]);
+        assert!(apart > 0.1, "{apart}");
+        for i in 0..1024 {
+            let m = ((i as f64 - 512.0) / 240.0).clamp(0.0, 1.0);
+            let expected = first[i] as f64 + (second[i] as f64 - first[i] as f64) * m;
+            assert!(
+                (faded[i] as f64 - expected).abs() < 1e-5,
+                "sample {i}: {}, not {expected}",
+                faded[i]
+            );
+        }
+    }
+
+    #[test]
+    fn a_voice_that_glides_from_its_mix_under_levels_that_jump_is_cut_too() {
+        // PWM at 0.98 (its pitch 16.9 levels up: in the crossfade of levels 20 and 21, a mix of them), then at 512,
+        // where its frame wraps (a period of 256 samples), its knob to 0 (the levels of its pitch fall by 5.8 in the
+        // first 32 samples of the one-pole) and its pitch a little up, within the reach of the mix: the voice glides
+        // from the mix to the levels of its pitch in that segment. It is the voice that never had a mix (its builds
+        // refused: read directly, cut where the levels leave a crossfade); one crossfade over the segment read from
+        // level 16 down, far richer than its pitch through a slope of 50: 0.21 of its peak off
+        let (from, to) = (frequency_at(255, 4.0), frequency_at(255, 4.02));
+        let voice = |refuse: bool| {
+            render(
+                |store| saw_table(store, 255),
+                (PWM, 0.98),
+                1.0,
+                |i| if i < 512 { from } else { to },
+                1024,
+                128,
+                |frame, voice, shared| {
+                    shared.refuse_builds = refuse;
+                    if frame == 512 {
+                        voice.set_knobs(WARP, &[PWM as f64, 0.0, 0.0, 0.0]);
+                    }
+                    true
+                },
+            )
+        };
+        let (mixed, direct) = (voice(false), voice(true));
+        let (peak, difference) = peak_and_difference(&direct[512..], &mixed[512..]);
+        assert!(difference < 1e-3 * peak, "{difference} of {peak}");
+    }
+
+    #[test]
+    fn the_room_of_the_kept_cycles_comes_with_the_buffers_of_the_block() {
+        // (a block of the scope grows the shared: the first warped mix of a note allocates no cycle)
+        let mut shared = Shared::default();
+        shared.grow(128);
+        let key = |serial: u64| CycleKey {
+            serial,
+            data: 0,
+            a: 0,
+            length: MAX_LEVEL_LENGTH,
+            first: (0, MAX_LEVEL_LENGTH),
+            second: None,
+        };
+        let taken = without_memory(|| [shared.cycle(key(1)), shared.cycle(key(2))]);
+        assert_eq!(taken, [Some((0, false)), Some((1, false))]);
+    }
+
+    #[test]
+    fn a_run_holds_its_crossfade_where_the_x_turns_back_within_it() {
+        // the pitch up while the warp goes down: an x that turns within one crossfade is one run, one that leaves it
+        // in the middle is cut there
+        let within = [4.1, 4.5, 4.8, 4.6, 4.3];
+        let runs = cuts(&within, 0);
+        assert_eq!(runs.len(), 1);
+        assert_eq!((runs[0].0, runs[0].1, runs[0].2), (0, 4, 4.0));
+        // (4.1 to 4.9 a run; then the samples that cross 5, one each; back within 4..5 from 4.6)
+        let leaving = [4.1, 4.9, 5.3, 4.6, 4.3];
+        let bounds: Vec<(usize, usize)> = cuts(&leaving, 0).iter().map(|r| (r.0, r.1)).collect();
+        assert_eq!(bounds, vec![(0, 1), (1, 2), (2, 3), (3, 4)]);
+    }
+
+    #[test]
+    fn a_new_mode_keeps_the_mixes_of_the_oscillator() {
+        // a pitch on the crossfade of the levels (its mix built), Off to Bend + (no levels up either): after the
+        // crossfade (512..992) the mix it had is still there, never built again
+        let (mut before, mut after) = (None, None);
+        let switch = |frame: usize, voice: &mut Voice| {
+            if frame == 512 {
+                before = voice.kept_mix(0, 0);
+                voice.set_knobs(WARP, &[BEND_UP as f64, 0.6, 0.0, 0.0]);
+            } else if frame == 1024 {
+                after = voice.kept_mix(0, 0);
+            }
+        };
+        play((OFF, 0.0), 1.0, |_| pitch_x(0.9).0, 2048, 128, switch);
+        assert!(
+            before.is_some_and(|(_, _, w, warp)| w > 0.0 && warp.is_none()),
+            "{before:?}"
+        );
+        assert_eq!(after, before);
+    }
+
+    // play on saw_table of `harmonics` at x (frequency_at), still
+    fn render_saw(
+        harmonics: i32,
+        warp: (u32, f64),
+        unison: f64,
+        x: f64,
+        frames: usize,
+        size: usize,
+        before: impl FnMut(usize, &mut Voice, &mut Shared) -> bool,
+    ) -> Vec<f32> {
+        let f = frequency_at(harmonics, x);
+        render(
+            |store| saw_table(store, harmonics),
+            warp,
+            unison,
+            |_| f,
+            frames,
+            size,
+            before,
+        )
+    }
+
+    // the peak of `a` and the largest difference of `b` from it
+    fn peak_and_difference(a: &[f32], b: &[f32]) -> (f64, f64) {
+        let peak = a.iter().fold(0.0, |m, v| max(m, (*v as f64).abs()));
+        let difference = a
+            .iter()
+            .zip(b)
+            .fold(0.0, |m, (x, y)| max(m, (*x as f64 - *y as f64).abs()));
+        (peak, difference)
+    }
+
+    // the voice and the same refused every build (read directly: the reference); refuse_builds set before its first block
+    fn with_and_without_builds(
+        harmonics: i32,
+        warp: (u32, f64),
+        unison: f64,
+        x: f64,
+        frames: usize,
+        mut before: impl FnMut(usize, &mut Voice),
+    ) -> (Vec<f32>, Vec<f32>) {
+        let mut run = |refuse: bool| {
+            render_saw(harmonics, warp, unison, x, frames, 128, |frame, voice, shared| {
+                shared.refuse_builds = refuse;
+                before(frame, voice);
+                true
+            })
+        };
+        (run(false), run(true))
+    }
+
+    #[test]
+    fn a_still_bend_under_0_reads_a_warped_mix_of_its_own_from_its_first_steady_block() {
+        // a pitch on the crossfade of the levels, still: Bend + (no levels up) builds its mix, Bend - and Bend +/- over
+        // 0.5 a warped one in the first steady block (the second: the first has no block before it), of its mode, a
+        // and pitch
+        let kept = |warp: (u32, f64), at: usize| {
+            let mut mix = None;
+            play(
+                warp,
+                1.0,
+                |_| pitch_x(0.9).0,
+                2048,
+                128,
+                |frame, voice: &mut Voice| {
+                    if frame == at {
+                        mix = voice.kept_mix(0, 0);
+                    }
+                },
+            );
+            mix
+        };
+        assert!(kept((BEND_UP, 0.6), 1920).is_some_and(|(_, _, _, warp)| warp.is_none()));
+        for (mode, knob) in [(BEND_DOWN, 0.6), (BEND_BOTH, 0.8)] {
+            assert_eq!(kept((mode, knob), 128), None);
+            let mix = kept((mode, knob), 256);
+            let a = warp::param(mode, knob as f32 as f64);
+            assert!(
+                mix.is_some_and(|(frame, _, _, warp)| frame == 0
+                    && warp.is_some_and(|(m, at, x)| m == mode && at == a && x.is_finite())),
+                "{mode}: {mix:?}"
+            );
+            assert_eq!(kept((mode, knob), 1920), mix);
+        }
+    }
+
+    #[test]
+    fn the_voices_of_a_unison_take_their_warped_mixes_at_the_cost_of_a_cycle_kept() {
+        // a unison of 8 on a level of 4096 samples, in its first steady block the budget with room for one mix that
+        // fills its cycle and seven of it kept (8 + 7 · 1.5 multiply-adds a sample; at the cost of a fill each: two):
+        // all eight on their mixes from that block on
+        use crate::shared::MIX_BUDGET_WASM;
+        let mut kept = Vec::new();
+        render_saw(
+            255,
+            (BEND_DOWN, 0.6),
+            8.0,
+            3.0,
+            512,
+            128,
+            |frame, voice, shared| {
+                if frame == 128 {
+                    assert!(shared.take_build(128.0, MIX_BUDGET_WASM - 4096.0 * (8.0 + 7.0 * 1.5)));
+                }
+                if frame == 256 {
+                    kept = (0..8).map(|v| voice.kept_mix(0, v)).collect();
+                }
+                true
+            },
+        );
+        assert_eq!(kept.len(), 8);
+        assert!(
+            kept.iter()
+                .all(|mix| mix.is_some_and(|(_, _, _, warp)| warp.is_some())),
+            "{kept:?}"
+        );
+    }
+
+    // the difference of `b` from `a` in dB: its largest under the peak of `a`, its RMS under the RMS of `a`
+    fn difference_db(a: &[f32], b: &[f32]) -> (f64, f64) {
+        let db = |x: f64| 20.0 * log2(x) / log2(10.0);
+        let rms = |x: &mut dyn Iterator<Item = f64>| {
+            let (sum, n) = x.fold((0.0, 0.0), |(sum, n), v| (sum + v * v, n + 1.0));
+            (sum / n).sqrt()
+        };
+        let (peak, difference) = peak_and_difference(a, b);
+        let signal = rms(&mut a.iter().map(|v| *v as f64));
+        let residue = rms(&mut a.iter().zip(b).map(|(x, y)| *x as f64 - *y as f64));
+        (db(difference / peak), db(residue / signal))
+    }
+
+    #[test]
+    fn a_warped_mix_plays_as_the_voice_read_directly() {
+        // a still bend of a < 0 on a saw as the store lays it out (unison 3, each voice its own pitch), against the
+        // same refused every build: the bits of before until its first steady block, then its table, as long as the
+        // level of its pitch, read linearly between the samples of the voice read directly. The largest difference
+        // at the jump of the saw under its peak, its RMS under the RMS of the voice (dB): a middle pitch (2048 samples
+        // of 50 harmonics the level) 59.0 and 73.4, Bend +/- 61.3 and 73.7, Bend - at 0.2 60.5 and 75.6, at 1 (its wrap 9
+        // times as steep) 51.7 and 67.1, a high pitch 60.9 and 66.2, a higher one 83.1 and 87.9; its level of 4096
+        // samples (low notes: 149 Hz of 255 harmonics, 30 Hz of them, 55 Hz of 1023) 58.6 and 73.7, 32.4 and 53.8, 44.2
+        // and 62.6 (a droop over 15 kHz)
+        let cases = [
+            (255, (BEND_DOWN, 0.6), 7.69, -58.0, -72.0),
+            (255, (BEND_BOTH, 0.9), 7.69, -60.0, -72.0),
+            (255, (BEND_DOWN, 0.2), 7.69, -59.5, -74.0),
+            (255, (BEND_DOWN, 1.0), 7.69, -50.5, -66.0),
+            (255, (BEND_DOWN, 0.8), 12.4, -60.0, -65.0),
+            (255, (BEND_DOWN, 0.6), 18.0, -82.0, -86.0),
+            (255, (BEND_DOWN, 0.6), 3.0, -57.5, -72.5),
+            (255, (BEND_DOWN, 0.6), -3.9, -31.0, -52.5),
+            (1023, (BEND_DOWN, 0.6), 4.7, -43.0, -61.5),
+        ];
+        for (harmonics, warp, x, largest_db, rms_db) in cases {
+            let (table, direct) = with_and_without_builds(harmonics, warp, 3.0, x, 2048, |_, _| ());
+            assert_eq!(table[..128], direct[..128]);
+            assert!(table[128..] != direct[128..], "{warp:?} at {x}: no warped mix");
+            let (largest, rms) = difference_db(&direct, &table);
+            assert!(
+                largest < largest_db && rms < rms_db,
+                "{warp:?} at {x} of {harmonics}: {largest} dB, RMS {rms} dB"
+            );
+        }
+    }
+
+    #[test]
+    fn a_voice_goes_from_its_warped_mix_to_directly_and_back_without_a_step() {
+        // its warped mix from block 1, its knob moved at 1024 (directly while the one-pole moves it), on its warped
+        // mix of the new knob once there (0.6 to 0.7 within 1e-7 in 12.7 time constants: 6900 samples, from 8704):
+        // against the voice read directly all along within 57.0 dB of its peak (the linear read of a table), the
+        // difference at either change of what it reads stepping by 114 to 143 dB under it: no step
+        let knob = |frame: usize, voice: &mut Voice| {
+            if frame == 1024 {
+                voice.set_knobs(WARP, &[BEND_DOWN as f64, 0.7, 0.0, 0.0]);
+            }
+        };
+        let (table, direct) = with_and_without_builds(255, (BEND_DOWN, 0.6), 1.0, 7.69, 12288, knob);
+        let (peak, difference) = peak_and_difference(&direct, &table);
+        assert!(difference < 1.5e-3 * peak, "{difference} of {peak}");
+        // (the voice on its warped mix before 1024, directly after it, on its warped mix again by the end)
+        assert!(table[512..1024] != direct[512..1024]);
+        assert_eq!(table[1024..4096], direct[1024..4096]);
+        assert!(table[11264..] != direct[11264..]);
+        let d: Vec<f64> = table
+            .iter()
+            .zip(&direct)
+            .map(|(a, b)| *a as f64 - *b as f64)
+            .collect();
+        let back = (4096..12288)
+            .find(|&i| d[i] != 0.0)
+            .expect("its warped mix again");
+        assert_eq!(back % 128, 0);
+        for change in [128, 1024, back] {
+            let step = (d[change] - d[change - 1]).abs();
+            assert!(step < 1e-5 * peak, "{change}: {step} of {peak}");
+        }
+    }
+
+    #[test]
+    fn a_warped_mix_and_a_mix_of_no_warp_never_play_for_each_other() {
+        // a new mode on the same version keeps the mixes: from the first steady block after the crossfade (512..992:
+        // the block after it reads the levels of the new mode, 1152) the voice in the new mode plays the bits of one
+        // that played it from the start (its own table built again), never the table of the other
+        let switched = |from: (u32, f64), to: (u32, f64)| {
+            let mut kept = None;
+            let out = play(
+                from,
+                1.0,
+                |_| pitch_x(0.9).0,
+                2048,
+                128,
+                |frame, voice: &mut Voice| {
+                    if frame == 512 {
+                        voice.set_knobs(WARP, &[to.0 as f64, to.1, 0.0, 0.0]);
+                    } else if frame == 1920 {
+                        kept = voice.kept_mix(0, 0);
+                    }
+                },
+            );
+            (out, kept)
+        };
+        let (bend_up, bend_down) = ((BEND_UP, 0.6), (BEND_DOWN, 0.6));
+        for (from, to) in [(bend_up, bend_down), (bend_down, bend_up)] {
+            let (out, kept) = switched(from, to);
+            let alone = play(to, 1.0, |_| pitch_x(0.9).0, 2048, 128, |_, _| ());
+            assert_eq!(out[1152..], alone[1152..], "{from:?} to {to:?}");
+            assert_eq!(
+                kept.is_some_and(|(_, _, _, warp)| warp.is_some()),
+                to == bend_down
+            );
+        }
+    }
+
+    #[test]
+    fn a_warped_mix_without_memory_for_it_leaves_the_voice_read_directly() {
+        // (the first block allocates the buffers of the shared; no other block has memory)
+        let without = render_saw(255, (BEND_DOWN, 0.6), 3.0, 7.69, 2048, 128, |frame, _, _| {
+            frame == 0
+        });
+        let (_, direct) = with_and_without_builds(255, (BEND_DOWN, 0.6), 3.0, 7.69, 2048, |_, _| ());
+        assert_eq!(without, direct);
+    }
+
+    #[test]
+    fn a_knob_event_moves_the_warp_through_a_one_pole() {
+        // the knob at once, the warp the voices read after it through the one-pole of warp::SMOOTHING: at the start of
+        // each block where the one-pole of a still input is, still at its knob once there (then the bits of a voice
+        // that had that knob all along)
+        let tau = warp::SMOOTHING * RATE;
+        let mut seen = Vec::new();
+        let event = |frame: usize, voice: &mut Voice| {
+            if frame == 256 {
+                voice.set_knobs(WARP, &[BEND_UP as f64, 0.8, 0.0, 0.0]);
+            }
+            seen.push((frame, voice.warp_smoothed(0)));
+        };
+        let moved = play((BEND_UP, 0.2), 1.0, still, 12288, 128, event);
+        let (before, after) = (
+            play((BEND_UP, 0.2), 1.0, still, 12288, 128, |_, _| ()),
+            play((BEND_UP, 0.8), 1.0, still, 12288, 128, |_, _| ()),
+        );
+        assert_eq!(moved[..256], before[..256]);
+        // (the knobs as the voice has them: f32)
+        let (from, to) = (0.2f32 as f64, 0.8f32 as f64);
+        for (frame, smoothed) in seen.into_iter().skip(1) {
+            let expected = if frame <= 256 {
+                from
+            } else {
+                to - (to - from) * exp(-((frame - 256) as f64) / tau)
+            };
+            if (expected - to).abs() >= 1e-7 {
+                assert!(
+                    (smoothed - expected).abs() < 1e-12,
+                    "{frame}: {smoothed} against {expected}"
+                );
+            } else {
+                assert_eq!(smoothed, to, "{frame}");
+            }
+        }
+        assert!(moved[300..1200]
+            .iter()
+            .zip(&after[300..1200])
+            .any(|(a, b)| (a - b).abs() > 1e-4));
+        assert_eq!(moved[9216..], after[9216..]);
+    }
+
+    #[test]
+    fn a_note_starts_at_its_knob_and_off_forgets_the_one_pole() {
+        // the first block of a note at its knob (no glide from 0); a mode Off reads none: a mode after it starts at
+        // the knob it has then
+        let mut seen = Vec::new();
+        let event = |frame: usize, voice: &mut Voice| {
+            if frame == 512 {
+                voice.set_knobs(WARP, &[OFF as f64, 0.9, 0.0, 0.0]);
+            } else if frame == 1536 {
+                voice.set_knobs(WARP, &[PWM as f64, 0.9, 0.0, 0.0]);
+            }
+            seen.push((frame, voice.warp_smoothed(0)));
+        };
+        play((BEND_DOWN, 0.6), 1.0, still, 2048, 128, event);
+        // (before a block: 128 the first block's)
+        assert_eq!(seen[1], (128, 0.6f32 as f64));
+        // (Off from the block after the crossfade of 480 samples: none)
+        assert!(seen
+            .iter()
+            .any(|(frame, x)| *frame > 1024 && *frame <= 1536 && x.is_nan()));
+        assert_eq!(seen.last(), Some(&(1920, 0.9f32 as f64)));
     }
 }

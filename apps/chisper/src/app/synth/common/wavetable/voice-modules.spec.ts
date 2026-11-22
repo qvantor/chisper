@@ -77,8 +77,11 @@ describe('the modules of a voice', () => {
       'sub.crs': 41,
       drive: 42,
       variation: 43,
+      warp1: 44,
+      warp2: 45,
     });
     expect(routeParam('osc', 1, 'blend')).toBe('blend2');
+    expect(routeParam('warp', 1, 'warp')).toBe('warp2');
     expect(routeParam('filter', 0, 'cutoff')).toBe('cutoff');
     expect(routeParam('noise', 0, 'pan')).toBe('noise.pan');
     expect(routeParam('lfo', 3, 'phase')).toBe('lfo4.phase');

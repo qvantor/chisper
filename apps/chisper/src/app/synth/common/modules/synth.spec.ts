@@ -1906,6 +1906,110 @@ describe('synth', () => {
     });
   });
 
+  describe('warp', () => {
+    it('gives a note the Warp of each oscillator, none of one Off at 0', async () => {
+      const { onPress, voices, osc1, osc2 } = await setup();
+      osc2[1].toggleActive();
+      osc1[1].setWarpMode(1);
+      osc1[1].setWarp(0.6);
+      onPress([4, 'A']);
+      const [voice] = voices();
+      expect(voice.options.osc[0]).toMatchObject({ warpMode: 1, warp: 0.6 });
+      expect(voice.options.osc[1]).not.toHaveProperty('warpMode');
+      expect(voice.options.osc[1]).not.toHaveProperty('warp');
+    });
+
+    it('a note started Off keeps the knob turned: a mode switched on later warps from it, not from 0', async () => {
+      const { onPress, voices, osc2 } = await setup();
+      osc2[1].toggleActive();
+      osc2[1].setWarp(0.3);
+      onPress([4, 'A']);
+      expect(voices()[0].options.osc[1]).toMatchObject({ warpMode: 0, warp: 0.3 });
+      // (the knob the core has is the one the event takes: nothing glides)
+      osc2[1].setWarpMode(4);
+      expect(voices()[0].messages).toEqual([{ warp: { mode1: 0, warp1: 0, mode2: 4, warp2: 0.3 } }]);
+      // (Off at 0 again: a new note has none)
+      osc2[1].setWarpMode(0);
+      osc2[1].setWarp(0);
+      onPress([4, 'C']);
+      expect(voices()[1].options.osc[1]).not.toHaveProperty('warpMode');
+      expect(voices()[1].options.osc[1]).not.toHaveProperty('warp');
+    });
+
+    it('the playing notes follow the mode and the knob of both oscillators', async () => {
+      const { onPress, onRelease, voices, osc1, osc2 } = await setup();
+      onPress([4, 'A']);
+      onRelease([4, 'A']);
+      osc1[1].setWarpMode(4);
+      osc2[1].setWarp(0.5);
+      // (the same values again send nothing)
+      osc2[1].setWarp(0.5);
+      expect(voices()[0].messages).toEqual([
+        { warp: { mode1: 4, warp1: 0, mode2: 0, warp2: 0 } },
+        { warp: { mode1: 4, warp1: 0, mode2: 0, warp2: 0.5 } },
+      ]);
+    });
+
+    it('a mono voice is taken over whatever its warp (the voice follows it)', async () => {
+      const { onPress, voices, osc1, synthActions } = await setup();
+      synthActions.setMaxVoices(1);
+      onPress([4, 'A']);
+      osc1[1].setWarpMode(2);
+      osc1[1].setWarp(0.7);
+      onPress([4, 'B']);
+      expect(voices()).toHaveLength(1);
+    });
+
+    it('routes the Warp knob of each oscillator (warp1, warp2), within 0..1', async () => {
+      const { onPress, voices, modulation, osc1, osc2 } = await setup();
+      const [, { addRoute }] = modulation;
+      osc2[1].toggleActive();
+      osc1[1].setWarpMode(1);
+      osc2[1].setWarpMode(4);
+      addRoute('env2', 'osc1.warp', 0.5);
+      addRoute('env3', 'osc2.warp', -0.25);
+      onPress([4, 'A']);
+      expect(voices()[0].options.routes).toEqual([
+        { source: 1, param: 'warp1', amount: 0.5, min: 0, max: 1 },
+        { source: 2, param: 'warp2', amount: -0.25, min: 0, max: 1 },
+      ]);
+    });
+
+    it('leaves out the routes of a Warp that is Off (it reads none), sends them when it turns on', async () => {
+      const { onPress, voices, modulation, osc1, osc2 } = await setup();
+      const [, { addRoute }] = modulation;
+      osc2[1].toggleActive();
+      osc2[1].setWarpMode(4);
+      addRoute('env2', 'osc1.warp', 0.5);
+      addRoute('env3', 'osc2.warp', -0.25);
+      onPress([4, 'A']);
+      const [voice] = voices();
+      expect(voice.options.routes).toEqual([{ source: 2, param: 'warp2', amount: -0.25, min: 0, max: 1 }]);
+      // (another mode that is on: the same routes, nothing sent)
+      osc2[1].setWarpMode(2);
+      osc1[1].setWarpMode(3);
+      osc2[1].setWarpMode(0);
+      expect(voices()[0].messages.filter((message) => 'routes' in message)).toEqual([
+        {
+          routes: [
+            { source: 1, param: 'warp1', amount: 0.5, min: 0, max: 1 },
+            { source: 2, param: 'warp2', amount: -0.25, min: 0, max: 1 },
+          ],
+        },
+        { routes: [{ source: 1, param: 'warp1', amount: 0.5, min: 0, max: 1 }] },
+      ]);
+    });
+
+    it('a Warp on or Off sends nothing to the notes without a route on it', async () => {
+      const { onPress, voices, modulation, osc1 } = await setup();
+      modulation[1].addRoute('env2', 'osc2.warp', 0.5);
+      onPress([4, 'A']);
+      osc1[1].setWarpMode(1);
+      osc1[1].setWarpMode(0);
+      expect(voices()[0].messages.filter((message) => 'routes' in message)).toEqual([]);
+    });
+  });
+
   describe('playing notes follow the knobs', () => {
     it('gain, detune, blend and wave glide to the knob, the octave is set at once', async () => {
       const { onPress, voices, param, osc1, audioCtx } = await setup();

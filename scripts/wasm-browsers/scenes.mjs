@@ -349,6 +349,58 @@ const OSC_SCENES = [
       }),
     ],
   }),
+  // the warp (warp.rs: a division a sample in f32 lanes, the phases through it in 0.32): every mode, LFO 1 on a knob
+  // of Bend + (its param a line over a segment) and of PWM (its edge a line), PWM at a high note (its levels up to
+  // the top one), Bend - (its levels sample by sample) as LFO 2 moves its frames (they fade), LFO 3 on Bend +/-
+  // across 0.5 (a both ways); in every browser the bits of Node
+  oscScene('wavetable, the modes of the warp, LFO 1 on one', {
+    frames: OSC_RATE / 2,
+    tables: { a: [saw(2048, 200), saw(1024, 300, 0.7)] },
+    lfos: [lfo('sine'), lfo('triangle'), lfo('saw-up'), lfo('square')],
+    voices: [
+      ...[
+        [1, 0.7],
+        [2, 0.6],
+        [3, 0.15],
+        [4, 0.4],
+      ].map(([warpMode, warp], k) =>
+        note([{ table: 'a', unison: 2, phase: 0.1 * k, phaseRand: 0, warpMode, warp }, null], {
+          frequency: 110 * (k + 1),
+          spread1: 10,
+          position1: 0.5,
+        })
+      ),
+      note(
+        [{ table: 'a', unison: 3, phase: 0, phaseRand: 0, warpMode: 1, warp: 0.5 }, null],
+        { frequency: 220 },
+        [],
+        {
+          routes: [{ source: 4, param: 'warp1', amount: 0.4, min: 0, max: 1, bipolar: true }],
+        }
+      ),
+      note([{ table: 'a', unison: 1, phase: 0, phaseRand: 0, warpMode: 4, warp: 0.9 }, null], {
+        frequency: 3000,
+      }),
+      note(
+        [{ table: 'a', unison: 1, phase: 0, phaseRand: 0, warpMode: 4, warp: 0.5 }, null],
+        { frequency: 440 },
+        [],
+        { routes: [{ source: 4, param: 'warp1', amount: 0.4, min: 0, max: 1, bipolar: true }] }
+      ),
+      note(
+        [{ table: 'a', unison: 2, phase: 0, phaseRand: 0, warpMode: 2, warp: 0.6 }, null],
+        { frequency: 165, position1: 0.2 },
+        [],
+        { routes: [{ source: 5, param: 'position1', amount: 1, min: 0, max: 1 }] }
+      ),
+      note(
+        [{ table: 'a', unison: 1, phase: 0, phaseRand: 0, warpMode: 3, warp: 0.6 }, null],
+        { frequency: 330 },
+        [],
+        { routes: [{ source: 6, param: 'warp1', amount: 0.5, min: 0, max: 1, bipolar: true }] }
+      ),
+    ],
+  }),
 ];
 
 // the knobs of a fresh compressor (FX_PARAMS.compressor and its mix)

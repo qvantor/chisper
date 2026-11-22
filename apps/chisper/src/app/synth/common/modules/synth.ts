@@ -132,18 +132,39 @@ const setParam = (param: ParamAutomation, value: number, now: number) => {
   param.setValueAtTime(value, now);
 };
 
-type VoiceOscillator = Pick<OscillatorModel, 'id' | '$active' | '$osc' | '$unisonShape' | '$params'>;
+type VoiceOscillator = Pick<
+  OscillatorModel,
+  'id' | '$active' | '$osc' | '$unisonShape' | '$params' | '$warpMode' | '$warp'
+>;
 
 // the options of an oscillator its processor reads at the note on (null: off): the phases and the shape of the
-// unison are options, not params (an AudioParam costs every block, ~2% of a held note)
-const oscOptions = ({ id, $active, $osc, $unisonShape }: VoiceOscillator): VoiceOscOptions | null => {
+// unison are options, not params (an AudioParam costs every block, ~2% of a held note); its Warp unless it is Off
+// at 0 (a playing note follows it: a `knobs` event of the warp; a note Off keeps the knob, unread by the core, so a
+// mode switched on later warps from it, not from 0)
+const oscOptions = ({
+  id,
+  $active,
+  $osc,
+  $unisonShape,
+  $warpMode,
+  $warp,
+}: VoiceOscillator): VoiceOscOptions | null => {
   if (!$active.value) return null;
   const { unison, phase, phaseRand } = $osc.value;
-  return { table: id, unison, phase, phaseRand, unisonShape: $unisonShape.value };
+  return {
+    table: id,
+    unison,
+    phase,
+    phaseRand,
+    unisonShape: $unisonShape.value,
+    ...(($warpMode.value !== 0 || $warp.value !== 0) && { warpMode: $warpMode.value, warp: $warp.value }),
+  };
 };
 
-// the options of an oscillator but the phases: they only start a voice (taken over, it goes on with them)
-const withoutPhases = (options: VoiceOscOptions | null) => options && { ...options, phase: 0, phaseRand: 0 };
+// the options of an oscillator but the phases and the warp: the phases only start a voice (taken over, it goes on
+// with them), it follows the warp
+const withoutPhases = (options: VoiceOscOptions | null) =>
+  options && { ...options, phase: 0, phaseRand: 0, warpMode: 0, warp: 0 };
 
 // the noise of the notes (the noise model): its options at a note on (null: off), its knobs (Pitch and Fine bound
 // its routes), the sample new notes play (another one is another sound: mono starts a new voice)
@@ -174,6 +195,14 @@ const sourcePitches = ({ oscillators, noise: { $noise }, sub: { $sub } }: VoiceS
   noise: [{ semi: $noise.value.pitch, fine: $noise.value.fine }],
   sub: [{ semi: $sub.value.coarse, fine: 0 }],
 });
+// whether the Warp of each oscillator is on now (its mode not Off: Off reads no route on the knob)
+const warpsOn = (oscillators: VoiceOscillator[]) => oscillators.map(({ $warpMode }) => $warpMode.value !== 0);
+// a route (on) to the Warp knob of oscillator `osc`: it is sent only while that mode is on
+const routesWarp = (routes: ModRoute[], osc: number) =>
+  routes.some(({ target, off }) => {
+    const definition = MOD_TARGETS[target];
+    return !off && definition?.kind === 'osc' && definition.param === 'warp' && definition.osc === osc;
+  });
 // a route (on) moves the pitch of instance `instance` of a source: its bounds follow those knobs
 const movesPitch = (routes: ModRoute[], kind: SourceKind, instance = 0) =>
   routes.some(({ target, off }) => {
@@ -229,7 +258,7 @@ const voiceRoute = (
 
 // the routes of a note to the knobs of its voice (their names on the wire: `route` of the target): of its sources
 // on for it (`sources`, null: off; a pitch an offset of the detune within the range of its knob from its value now,
-// `pitches`), of the filter while it is on, in the range of its type (a knob its type doesn't use is left out), and
+// `pitches`; the Warp of an oscillator while its mode is on, `warps`), of the filter while it is on, in the range of its type (a knob its type doesn't use is left out), and
 // of the LFOs (Rate by its frequency; in BPM within their divisions at the tempo, `lfoRanges`); an amount of 0 and a
 // route switched off are left out (its source isn't rendered for it)
 const voiceRoutes = (
@@ -237,6 +266,7 @@ const voiceRoutes = (
   sources: NoteSources,
   filter: VoiceFilterOptions | null,
   pitches: SourcePitches,
+  warps: boolean[],
   lfoRanges: LfoRanges
 ): VoiceRoute[] =>
   routes.flatMap(({ source: id, target, amount, bipolar, off }) => {
@@ -257,7 +287,7 @@ const voiceRoutes = (
     }
     const instance = instanceOf(definition);
     const on = definition.kind === 'osc' ? sources.osc[instance] : sources[definition.kind];
-    if (!on) return [];
+    if (!on || (definition.kind === 'osc' && definition.param === 'warp' && !warps[instance])) return [];
     const route = voiceRoute(source, param, amount, definition.scale, definition.range, bipolar);
     if (!definition.knob) return [route];
     const cents = PITCH_KNOB_CENTS[definition.knob] * pitches[definition.kind][instance][definition.knob];
@@ -447,6 +477,7 @@ const createVoiceHandle = ({
     sources,
     filter,
     sourcePitches({ oscillators, noise: noiseSource, sub: subSource }),
+    warpsOn(oscillators),
     lfoRanges()
   );
   const handle = createVoice(
@@ -582,9 +613,9 @@ class Voice {
     return isEqual(this.keys, sourceKeys(this.config));
   }
 
-  // the source `kind` is on for it (it takes the knobs of that module)
+  // the source `kind` is on for it (it takes the knobs of that module; the warp: an oscillator)
   plays(kind: KnobsModule) {
-    return this.sources[kind] !== null;
+    return kind === 'warp' ? this.sources.osc.some(Boolean) : this.sources[kind] !== null;
   }
 
   // a note takes the voice over: it plays `note` (held under `key`) instead from `time` (seconds of the context), its
@@ -692,15 +723,16 @@ class Voice {
     return this.stopped === null && sustain === 0 && now - this.current.started >= attack + hold + decay;
   }
 
-  // the routes of the modulation, the type of the filter or a knob of the pitch changed: the routes of its params,
-  // null when its voice has them (a change of the routes of other knobs sends nothing); the voice glides into the
-  // new amounts, takes new bounds at once
+  // the routes of the modulation, the type of the filter, a knob of the pitch or a Warp on or Off changed: the routes
+  // of its params, null when its voice has them (a change of the routes of other knobs sends nothing); the voice
+  // glides into the new amounts, takes new bounds at once
   nextRoutes = (routes: ModRoute[], filter: VoiceFilterOptions | null) => {
     const next = voiceRoutes(
       routes,
       this.sources,
       filter,
       sourcePitches(this.config),
+      warpsOn(this.config.oscillators),
       this.config.lfoRanges()
     );
     const json = JSON.stringify(next);
@@ -1388,6 +1420,27 @@ export const synth = ({
               if (params[param] !== previous[param]) voicing.setParam(osc, param, params[param]);
             })
           )
+        ),
+        // the playing notes follow the Warp of both oscillators (a new mode crossfades, the knob glides)
+        combineLatest(oscillators.map(([{ $warpMode, $warp }]) => combineLatest([$warpMode, $warp])))
+          .pipe(
+            map(([[mode1, warp1], [mode2, warp2]]) => ({ mode1, warp1, mode2, warp2 })),
+            distinctUntilChanged(isEqual),
+            skip(1)
+          )
+          .subscribe((knobs) => voicing.setKnobs('warp', knobs)),
+        // the routes of the Warp of each oscillator while its mode is on: the notes with such routes take them when
+        // it turns on, leave them when it turns Off
+        ...oscillators.map(([{ $warpMode }], osc) =>
+          $warpMode
+            .pipe(
+              map((mode) => mode !== 0),
+              distinctUntilChanged(),
+              skip(1)
+            )
+            .subscribe(() => {
+              if (routesWarp($routes.value, osc)) voicing.setRoutes($routes.value, voiceFilter());
+            })
         ),
         // the bounds of the routes of Semi and Fine of each oscillator
         ...oscillators.map(([{ $osc }], osc) =>

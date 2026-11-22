@@ -396,27 +396,35 @@ const RouteRow = ({ route }: { route: HandleModulation }) => {
   );
 };
 
-// the menu of a control under it (over it where it doesn't fit), within the viewport: the routes on it, Default
-// and Clear modulation (with a route at least); closed by a press out of it, Escape, a scroll, a new size of the
-// window or its blur
-const ControlMenu = ({
+interface MenuPanelProps {
+  // the box of the control it belongs to
+  anchor: DOMRect;
+  onClose: () => void;
+  // the name of the control (screen readers too) and its value: the header
+  name?: string;
+  value: React.ReactNode;
+  // laid out again when it changes (a row removed: it gets lower; over the control it stays next to it)
+  layout?: unknown;
+  // a press on it doesn't close the menu (the control that opens and closes it)
+  keepOpenOn?: React.RefObject<HTMLElement | null>;
+  role?: string;
+}
+
+// a menu of a control under it (over it where it doesn't fit), within the viewport, in a portal, the name and the
+// value of the control on top; closed by a press out of it, Escape, a scroll, a new size of the window or its blur
+export const MenuPanel = ({
   anchor,
   onClose,
   name,
   value,
-  formatValue,
-  defaultValue,
-  min = -Infinity,
-  max = Infinity,
-  onChange,
-  modulations,
-  onClearModulations,
-}: ControlMenuProps & { anchor: DOMRect; onClose: () => void }) => {
+  layout,
+  keepOpenOn,
+  role = 'dialog',
+  children,
+}: React.PropsWithChildren<MenuPanelProps>) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const [place, setPlace] = React.useState<{ left: number; top: number } | null>(null);
 
-  // laid out again with every route removed (it gets lower; over the control it stays next to it)
-  const rows = modulations?.length;
   React.useLayoutEffect(() => {
     const panel = ref.current;
     if (!panel) return;
@@ -430,11 +438,12 @@ const ControlMenu = ({
     const below = anchor.bottom + GAP;
     const top = below + height <= clientHeight - EDGE ? below : Math.max(EDGE, anchor.top - GAP - height);
     setPlace((last) => (last?.left === left && last.top === top ? last : { left, top }));
-  }, [anchor, rows]);
+  }, [anchor, layout]);
 
   React.useEffect(() => {
     const outside = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (!ref.current?.contains(target) && !keepOpenOn?.current?.contains(target)) onClose();
     };
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -451,22 +460,46 @@ const ControlMenu = ({
       window.removeEventListener('resize', onClose);
       window.removeEventListener('blur', onClose);
     };
-  }, [onClose]);
+  }, [onClose, keepOpenOn]);
 
-  const format = (shown: number) => formatValue?.(shown) ?? shown;
-  const reset = defaultValue === undefined ? undefined : number.thresholds(defaultValue, min, max);
   return ReactDOM.createPortal(
     <Panel
       ref={ref}
-      role='dialog'
+      role={role}
       aria-label={name}
       style={place ?? { left: 0, top: 0, visibility: 'hidden' }}
       {...ISOLATED}
     >
       <Header>
         <Name>{name}</Name>
-        <HeaderValue>{format(value)}</HeaderValue>
+        <HeaderValue>{value}</HeaderValue>
       </Header>
+      {children}
+    </Panel>,
+    document.body
+  );
+};
+
+// the menu of a control: the routes on it, Default and Clear modulation (with a route at least)
+const ControlMenu = ({
+  anchor,
+  onClose,
+  name,
+  value,
+  formatValue,
+  defaultValue,
+  min = -Infinity,
+  max = Infinity,
+  onChange,
+  modulations,
+  onClearModulations,
+}: ControlMenuProps & { anchor: DOMRect; onClose: () => void }) => {
+  // laid out again with every route removed
+  const rows = modulations?.length;
+  const format = (shown: number) => formatValue?.(shown) ?? shown;
+  const reset = defaultValue === undefined ? undefined : number.thresholds(defaultValue, min, max);
+  return (
+    <MenuPanel anchor={anchor} onClose={onClose} name={name} value={format(value)} layout={rows}>
       {rows ? (
         <div>
           {modulations?.map((route) => (
@@ -502,8 +535,7 @@ const ControlMenu = ({
           Clear modulation
         </Action>
       ) : null}
-    </Panel>,
-    document.body
+    </MenuPanel>
   );
 };
 

@@ -18,7 +18,7 @@ describe('Wave', () => {
     const { features } = recordAnalytics();
     render(
       <OscillatorContext.Provider value={createOscillator()}>
-        <Wave target='osc1' onUnisonActiveChange={() => undefined} />
+        <Wave target='osc1' onUnisonActiveChange={() => undefined} compact={false} />
       </OscillatorContext.Provider>
     );
     fireEvent.click(screen.getByRole('img', { name: 'edit' }));

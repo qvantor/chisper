@@ -125,6 +125,8 @@ fn on(parts: &mut Parts, id: f64, frequency: f64) {
         phase_rand: 0.0,
         random: [0.0; 8],
         shape: UnisonShape::default(),
+        warp_mode: 0,
+        warp: 0.0,
     };
     let options = VoiceOptions {
         osc: [Some(osc), None],

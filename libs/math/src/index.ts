@@ -4,3 +4,4 @@ export * from './series';
 export * from './string';
 export * from './polyfill';
 export * from './filter';
+export * as warp from './oscillator';

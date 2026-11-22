@@ -12,7 +12,7 @@ use crate::noise::Noise;
 use crate::shared::Shared;
 use crate::store::Store;
 use crate::sub::Sub;
-use crate::targets::{LEVEL, NOISE, OSC, PAN, SUB};
+use crate::targets::{LEVEL, NOISE, OSC, PAN, SUB, WARP};
 use crate::voice::{Ctx, Osc, Params};
 use alloc::boxed::Box;
 
@@ -181,6 +181,11 @@ impl Slots {
                 .as_ref()
                 .map_or(ZERO, |noise| noise.base(knob, params, n)),
             SUB => self.sub.as_ref().map_or(ZERO, |sub| sub.base(knob, params, n)),
+            WARP => self
+                .oscs
+                .get(instance)
+                .and_then(Option::as_deref)
+                .map_or(ZERO, |osc| osc.warp_base()),
             _ => ZERO,
         }
     }
