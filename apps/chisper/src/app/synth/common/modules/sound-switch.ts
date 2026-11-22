@@ -43,7 +43,8 @@ const POLL = 10;
 // the progress of the tables of the oscillators on and of the sample of the noise on as it is applied
 // (load-share.ts; one played or failed counts whole), null once all of them ended, also after the output opened at
 // MAX_SILENCE. A source turned on after it, a load after the one of a source ended or replacing it (a table picked
-// meanwhile) aren't part of the switch
+// meanwhile) aren't part of the switch. `$switching` is on from a switch to the output opened (a switch that replaces
+// one keeps it on): the notes of a clip heard from the list of presets start there
 const createSoundSwitch = ({
   synthCore: [{ audioCtx, wavetables }, { mute, unmute }],
   synth: [{ voicing }, { pause, resume }],
@@ -60,6 +61,7 @@ const createSoundSwitch = ({
   let until = 0;
   let since = 0;
   const $progress = new BehaviorSubject<number | null>(null);
+  const $switching = new BehaviorSubject<boolean>(false);
   // the loads of the sound applied, followed until they all ended
   let loads: Subscription | undefined;
   // the sources of a sound: whether each is on, whether new notes play it, the progress of its load (the shape of
@@ -143,15 +145,18 @@ const createSoundSwitch = ({
       } else {
         unmute();
         resume();
+        $switching.next(false);
       }
     }
   };
 
   return {
     $progress,
+    $switching,
     switchSound: (next: () => void) => {
       loads?.unsubscribe();
       $progress.next(0);
+      if (!$switching.value) $switching.next(true);
       if (pending) pending = next;
       else if (timer !== undefined) apply(next);
       else {

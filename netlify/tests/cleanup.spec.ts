@@ -24,13 +24,13 @@ it('runs daily', () => {
   expect(config.schedule).toBe('@daily');
 });
 
-it('removes unqualified presets not saved, edited or opened by their author for 90 days, old listeners and reports', async () => {
+it('removes unqualified presets not saved, edited or opened by their author for 90 days (never featured or factory ones), old listeners and reports', async () => {
   await cleanup();
   const [presets, listens, reports] = mockSql.queries;
   expect(mockSql.queries).toHaveLength(4);
   expect(presets.text).toBe(
     'DELETE FROM presets WHERE GREATEST(created_at, updated_at, author_opened_at) ' +
-      "< now() - interval '90 days' AND qualified_at IS NULL AND NOT featured RETURNING id"
+      "< now() - interval '90 days' AND qualified_at IS NULL AND NOT featured AND NOT factory RETURNING id"
   );
   // stayed <= heard: the whole row is out of the 60 days of the scores
   expect(listens.text).toBe('DELETE FROM listens WHERE heard < current_date - 60');

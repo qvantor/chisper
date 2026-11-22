@@ -4,3 +4,5 @@ export * from './normalize';
 export * from './hash';
 export * from './profanity';
 export * from './clip';
+export * from './taxonomy';
+export * from './features';

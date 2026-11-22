@@ -1,6 +1,6 @@
 import { normalizePreset } from './normalize';
 import { presetHash } from './hash';
-import { isProfane } from './profanity';
+import { isProfane, profaneDescription, profaneWord } from './profanity';
 import { divisionIndex } from './tempo';
 import {
   ENVELOPE_CURVES,
@@ -13,6 +13,7 @@ import {
   presetIdSchema,
   presetOpenedRequestSchema,
   PRESET_DEFAULTS,
+  savedPresetInfoSchema,
   savePresetRequestSchema,
   SUB_DEFAULTS,
   SUB_SHAPES,
@@ -1108,8 +1109,62 @@ describe('isProfane', () => {
     'Худой бас',
     'Сукно',
     'Glass bells',
+    // words a part of which the English list refuses, of sounds and instruments
+    'Assorted percussion hits',
+    'An assortment',
+    'Assonance',
+    'Cockpit alarm',
+    'Shiitake',
+    'Fagott',
   ])('allows %s', (name) => {
     expect(isProfane(name)).toBe(false);
+  });
+
+  it('still refuses those words next to one it refuses', () => {
+    expect(isProfane('Assorted shit')).toBe(true);
+    expect(isProfane('cock in the cockpit')).toBe(true);
+  });
+});
+
+describe('profaneWord', () => {
+  it('is the first word refused, without the marks around it', () => {
+    expect(profaneWord('A warm pad, shit!')).toBe('shit');
+    expect(profaneWord('(fuck) and shit')).toBe('fuck');
+    expect(profaneWord('Злой бас, сука.')).toBe('сука');
+  });
+
+  it('is null without one', () => {
+    expect(profaneWord('Assorted percussion hits')).toBeNull();
+    expect(profaneWord('')).toBeNull();
+  });
+});
+
+describe('profaneDescription', () => {
+  it('names the word a description is refused for', () => {
+    expect(profaneDescription('A shitty lead')).toBe('Please leave “shitty” out of the description');
+  });
+
+  it('is null for a description it allows', () => {
+    expect(profaneDescription('Assorted hits from a cockpit')).toBeNull();
+  });
+});
+
+describe('savedPresetInfoSchema', () => {
+  it('refuses a profane description naming its word, on the description', () => {
+    const parsed = savedPresetInfoSchema.safeParse({ description: '  a  fucking bass ' });
+    expect(parsed.error?.issues).toEqual([
+      expect.objectContaining({
+        code: 'custom',
+        path: ['description'],
+        message: 'Please leave “fucking” out of the description',
+      }),
+    ]);
+  });
+
+  it('takes any other description, none and an empty one', () => {
+    expect(savedPresetInfoSchema.parse({ description: 'Assorted hits' }).description).toBe('Assorted hits');
+    expect(savedPresetInfoSchema.parse({}).description).toBeNull();
+    expect(savedPresetInfoSchema.parse({ description: '' }).description).toBeNull();
   });
 });
 

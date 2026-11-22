@@ -476,7 +476,9 @@ describe('analytics', () => {
         $exception_fingerprint: 'load:api:POST /api/presets/:id/opened:500',
       });
       expect(apiRoute('/api/presets?sort=top&q=my%20secret')).toBe('/api/presets');
-      expect(apiRoute('/api/presets/top')).toBe('/api/presets/top');
+      expect(apiRoute('/api/presets/top?category=fx')).toBe('/api/presets/top');
+      expect(apiRoute('/api/presets/counts')).toBe('/api/presets/counts');
+      expect(apiRoute('/api/presets/abc/info')).toBe('/api/presets/:id/info');
       expect(apiRoute('/api/presets/name-available?name=Mine')).toBe('/api/presets/name-available');
       expect(apiRoute('/api/clips/xyz')).toBe('/api/clips/:id');
       expect(apiRoute('/api/usage')).toBe('/api/usage');

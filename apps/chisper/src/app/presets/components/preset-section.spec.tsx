@@ -1,9 +1,9 @@
 import React from 'react';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, createEvent, fireEvent, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import toast from 'react-hot-toast';
 import type { Preset } from '@chisper/preset-schema';
-import { fakePreset } from '../../../test-utils/presets-fixtures';
+import { fakePreset, listItem } from '../../../test-utils/presets-fixtures';
 import { renderWithPresets } from '../../../test-utils/presets-wrapper';
 import { getPreset, getTopPresets, sharePreset } from '../services';
 import { PresetSection } from './preset-section';
@@ -19,11 +19,7 @@ jest.mock('../services', () => ({
 const getPresetMock = jest.mocked(getPreset);
 const getTopPresetsMock = jest.mocked(getTopPresets);
 
-const list = [
-  { id: 'a', name: 'A', uniqueUsers: 0 },
-  { id: 'b', name: 'B', uniqueUsers: 0 },
-  { id: 'c', name: 'C', uniqueUsers: 0 },
-];
+const list = [listItem('a', 'A'), listItem('b', 'B'), listItem('c', 'C')];
 
 beforeEach(() => {
   getPresetMock.mockImplementation(fakePreset);
@@ -155,6 +151,31 @@ describe('PresetSection', () => {
     expect(await screen.findByRole('dialog', { name: 'Save preset' })).toBeInTheDocument();
     // the browser's own "save page" is suppressed
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('leaves the keys of the browser to the save dialog opened over it by Cmd/Ctrl+S', async () => {
+    getTopPresetsMock.mockResolvedValueOnce(list);
+    const { user, name, presets } = setupSection();
+    await waitFor(() => expect(presets[0].$current.value?.id).toBe('a'));
+    await user.click(name);
+    await screen.findByRole('dialog', { name: 'Presets' });
+    getPresetMock.mockClear();
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyS', metaKey: true, bubbles: true }));
+    });
+    const field = await screen.findByPlaceholderText('Preset name');
+
+    // the arrows of its name open no other preset under it, Space presses a key of it
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    const space = createEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: ' ' });
+    fireEvent(screen.getByRole('button', { name: 'Cancel' }), space);
+    expect(space.defaultPrevented).toBe(false);
+    expect(getPresetMock).not.toHaveBeenCalled();
+
+    // closed: the keys are the browser's again
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' });
+    await waitFor(() => expect(getPresetMock).toHaveBeenCalledWith('b'));
   });
 
   it('does not open the save dialog for a plain S', async () => {

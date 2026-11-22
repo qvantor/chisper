@@ -103,7 +103,7 @@ const Segment = styled.div`
 
 // a key with its tooltip (as the keys of the strip: after a while)
 const TipKey = ({ tip, ...props }: React.ComponentProps<typeof Key> & { tip: string }) => (
-  <Tooltip title={tip} mouseEnterDelay={0.5}>
+  <Tooltip title={tip}>
     <Key {...props} />
   </Tooltip>
 );

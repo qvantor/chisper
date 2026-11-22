@@ -10,7 +10,7 @@ import {
   QuantizeIcon,
   SelectIcon,
   SnapIcon,
-  SWITCH_KEY_TIP_DELAY,
+  TIP_DELAY,
   SwitchKey,
   SwitchKeys,
   TripletIcon,
@@ -92,10 +92,10 @@ describe('SwitchKey', () => {
     render(<SwitchKey on={false} label='BPM' name='Tempo sync' hint='Time in note values' />);
     const key = screen.getByRole('button', { name: 'Tempo sync' });
     expect(key.hasAttribute('title')).toBe(false);
-    expect(SWITCH_KEY_TIP_DELAY).toBe(1200);
+    expect(TIP_DELAY).toBe(1200);
     fireEvent.mouseEnter(key.parentElement as HTMLElement);
     act(() => {
-      jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY - 1);
+      jest.advanceTimersByTime(TIP_DELAY - 1);
     });
     expect(screen.queryByRole('tooltip')).toBeNull();
     act(() => {
@@ -116,11 +116,11 @@ describe('SwitchKey', () => {
     const wrap = screen.getByRole('button', { name: 'Tempo sync' }).parentElement as HTMLElement;
     fireEvent.mouseEnter(wrap);
     act(() => {
-      jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY / 2);
+      jest.advanceTimersByTime(TIP_DELAY / 2);
     });
     fireEvent.mouseLeave(wrap);
     act(() => {
-      jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY * 2);
+      jest.advanceTimersByTime(TIP_DELAY * 2);
     });
     expect(screen.queryByRole('tooltip')).toBeNull();
   });

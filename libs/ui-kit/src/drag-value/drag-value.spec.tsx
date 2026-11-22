@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { drawn } from '../common/test-utils/canvas';
 import { withElementSize } from '../common/test-utils/element-size';
 import type { HandleModulation } from '../handle';
-import { SWITCH_KEY_TIP_DELAY } from '../switch-key';
+import { TIP_DELAY } from '../switch-key';
 import { DragValue } from './index';
 
 // jsdom has no PointerEvent: a mouse event with the pointer type name and a pointerId works for React and
@@ -91,7 +91,7 @@ describe('DragValue', () => {
   describe('with a hint', () => {
     beforeEach(() => jest.useFakeTimers());
     afterEach(() => jest.useRealTimers());
-    const hover = (element: HTMLElement, ms = SWITCH_KEY_TIP_DELAY) => {
+    const hover = (element: HTMLElement, ms = TIP_DELAY) => {
       fireEvent.mouseEnter(element);
       act(() => {
         jest.advanceTimersByTime(ms);
@@ -100,7 +100,7 @@ describe('DragValue', () => {
 
     it('hovered a while, a tooltip tells its name and what it changes; none before', () => {
       const { slider } = setup({ name: 'Randomness', hint: 'How far each note strays' });
-      hover(slider, SWITCH_KEY_TIP_DELAY - 100);
+      hover(slider, TIP_DELAY - 100);
       expect(screen.queryByRole('tooltip')).toBeNull();
       act(() => {
         jest.advanceTimersByTime(100);

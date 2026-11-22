@@ -3,7 +3,7 @@ title: 'How to Use Chisper: Getting Started with the Online Synth'
 h1: 'Getting started with Chisper'
 description: 'Play the free online synth with your computer keyboard, a MIDI keyboard or touch, open presets, learn the screen and save a sound to share, no account.'
 nav: 'Getting started'
-updated: 2026-11-17
+updated: 2026-11-23
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -64,7 +64,7 @@ Left of it is the pitch wheel. Drag it up or down to bend the notes; it springs 
 
 ## Step 3: pick a preset
 
-<Figure name='presets' alt='The Presets dialog of Chisper: the Popular tab, the search field and a list of presets, each with the number of its listeners' narrow>
+<Figure name='presets' alt='The Presets dialog of Chisper: its tabs, the categories, the search field and a list of presets, each with the icons of what it does and the number of its listeners' narrow>
 
 Click the name of the preset in the header to open the dialog. A click on a row plays that preset at once and the
 dialog stays open, so you can go through them one after another.
@@ -74,14 +74,48 @@ dialog stays open, so you can go through them one after another.
 - **Popular** lists the featured presets and the ones listeners stay with; the number beside a preset is how many
   listeners stayed with it.
 - **All** lists every preset, sorted by **New**, **A–Z** or **Popular**. Typing in *Search all presets* searches
-  them all by name.
-- **◀ ▶** beside the name in the header step through the list you were in (the popular presets, or your last
-  search), so you don't even need the dialog.
+  them all by name, description and tags.
+- The categories under the tabs (**Bass**, **Lead**, **Pad**, **Keys**, **Pluck**, **Brass & Chord**, **Drums**,
+  **FX**) narrow the list, each with the number of its presets. A category with types shows them in a second row:
+  **FX** has **Game**, **UI & Alert**, **Magic**, **Sci-Fi** and more. The **Popular** of a category starts with its
+  popular presets; the rest of it follows under the line *Others in …*.
+- The filter button beside the search opens the tags (**Dark**, **Warm**, **Wide**…), what a preset does (the icons
+  below) and **Factory** or **Community**: the presets made for Chisper, or the ones its users saved. The button shows
+  how many filters are on.
+- **Favorites** lists the presets you starred, **Recent** the ones you opened, **Mine** the ones saved from this
+  browser. The star on a row adds a preset to **Favorites** or takes it out. These lists stay in this browser.
+- A **FACTORY** badge after a name marks a preset made for Chisper.
+- The strip under the list tells about the preset you opened: its category and subcategory, its tags and the
+  description its author wrote. On a phone a row keeps only its number, its triangle and its name; the star, the link,
+  the report button and the pencil of the opened preset are in this strip.
+- **◀ ▶** beside the name in the header step through the list you were in (the popular presets, a category, or your
+  last search), so you don't even need the dialog.
 - The circular arrow, **Init preset**, loads *Init*: a plain sound of one oscillator with the rest switched off.
   Your own sounds start here.
 - A **\*** after the name means you have changed the sound since it was opened or saved.
 - Every preset has a link of its own (`chisper.qvantor.org/?preset=…`): the address bar shows it as soon as you
   pick one.
+
+The icons of a row tell what a preset does, always in the same order; hover one for its name:
+
+| Icon                         | Means                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| A triangle before the name   | **With clip**: the preset opens with a melody of its own                 |
+| A robot head                 | **AI generated**                                                         |
+| A metronome                  | **Tempo-sync**: an LFO, an envelope or an effect follows the tempo       |
+| **1**                        | **Mono**: one note at a time                                             |
+| A curve between two dots     | **Glide**: each note slides into the next                                |
+
+The triangle before a name is a button: click it to open the preset and hear its clip in a loop while the dialog stays
+open. The button turns into a square; click it again to stop. Another row's button switches to that preset and its
+clip; a click on a row or closing the dialog stops it too. The melody you had in the piano roll comes back as it was,
+with its tempo, once you stop. The button is off while **REC** records or a MIDI Clock leads the tempo.
+
+The keyboard works in the dialog too: <kbd>↓</kbd> and <kbd>↑</kbd> (or <kbd>→</kbd> and <kbd>←</kbd>) open the next
+preset of the list or the one before it, and <kbd>Space</kbd> plays or stops the clip of the selected preset; on a
+preset without a clip it plays the clip of the piano roll, if it has notes. While something plays, the arrows go on
+playing: a preset with a clip plays its own, one without it plays the clip of the piano roll. In the search field
+<kbd>Space</kbd> types a space, and <kbd>↓</kbd> <kbd>↑</kbd> still step through the list.
 
 ## What is on the screen?
 
@@ -180,7 +214,10 @@ note.
 
 1. Press **Save** (or <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
 2. Give it a name of up to 40 characters. Names are unique, capitals or not: a taken one says so as you type.
-3. Press **Save**. The dialog shows the link of your preset and **Copy link**.
+3. If you like, tell what it is: a category (Chisper picks one from the name and the sound until you choose), a type
+   in it, up to three tags and a description of up to 280 characters, without links. They help others find it in the
+   list; only the name is needed.
+4. Press **Save**. The dialog shows the link of your preset and **Copy link**.
 
 Whoever opens the link hears your sound: every knob, every modulation and every effect. **Share** in the header
 copies the link of the preset again later. It plays the sound as it was saved, so save again before you share a
@@ -188,7 +225,11 @@ change.
 
 There is no account: the browser you saved from keeps a key to the preset, and that browser can overwrite it later
 (**Save** then offers **Save** and **Save as new**). Another browser, another device or cleared site data can't
-overwrite it, only save a new one.
+overwrite it, only save a new one. In the list of presets that browser also shows a pencil, **Edit info**, on its
+presets: it changes their category, tags and description without saving the sound again.
+
+If the same sound is already saved, the dialog says so and gives its link: that preset keeps its name, its clip, its
+category and its tags.
 
 If the piano roll has notes, the dialog also offers **Default clip**: the preset then opens with that melody, and
 its link plays it too.

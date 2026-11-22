@@ -1,16 +1,23 @@
-import type {
-  ApiError,
-  NameAvailableResponse,
-  Preset,
-  PresetListItem,
-  PresetOpenedRequest,
-  PresetSort,
-  PresetsPage,
-  SavePresetRequest,
-  SavePresetResponse,
-  UpdatePresetRequest,
-  UpdatePresetResponse,
-  UsageRequest,
+import {
+  type ApiError,
+  type NameAvailableResponse,
+  type Preset,
+  type PresetCounts,
+  type PresetFilter,
+  presetFilterParams,
+  PRESET_IDS_MAX,
+  type PresetListItem,
+  type PresetOpenedRequest,
+  type PresetSort,
+  type PresetsPage,
+  type SavePresetRequest,
+  type SavePresetResponse,
+  type TopPresetItem,
+  type UpdatePresetInfoRequest,
+  type UpdatePresetInfoResponse,
+  type UpdatePresetRequest,
+  type UpdatePresetResponse,
+  type UsageRequest,
 } from '@chisper/preset-schema';
 import { captureApiError } from '../../common/services/analytics';
 
@@ -56,20 +63,47 @@ export const isNameAvailable = (name: string) =>
 
 export const getTopPresets = () => request<PresetListItem[]>('/api/presets/top');
 
+// the popular presets of a filter (those of it, the popular ones first, each saying whether it is), as a query of
+// the browser
+export const queryTopPresets = (filter: PresetFilter) =>
+  queryGet<TopPresetItem[]>(`/api/presets/top?${presetFilterParams(filter)}`);
+
 export const listPresets = ({
-  q,
   sort,
   cursor,
-}: {
-  q?: string;
+  ...filter
+}: PresetFilter & {
   sort: PresetSort;
   cursor?: string | null;
 }) => {
-  const params = new URLSearchParams({ sort });
-  if (q) params.set('q', q);
+  const params = presetFilterParams(filter);
+  params.set('sort', sort);
   if (cursor) params.set('cursor', cursor);
   return queryGet<PresetsPage>(`/api/presets?${params}`);
 };
+
+// the presets of a list of this browser (Favorites, Recent, Mine) still there, in its order, PRESET_IDS_MAX a request
+export const getPresetsByIds = async (ids: readonly string[]) => {
+  const chunks = Array.from({ length: Math.ceil(ids.length / PRESET_IDS_MAX) }, (_, i) =>
+    ids.slice(i * PRESET_IDS_MAX, (i + 1) * PRESET_IDS_MAX)
+  );
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      queryGet<PresetsPage>(`/api/presets?${new URLSearchParams({ ids: chunk.join(',') })}`)
+    )
+  );
+  return pages.flatMap(({ items }) => items);
+};
+
+// the presets of each category and subcategory
+export const getPresetCounts = () => queryGet<PresetCounts>('/api/presets/counts');
+
+// Edit info: the category, description and tags of an own preset
+export const updatePresetInfo = (id: string, body: UpdatePresetInfoRequest) =>
+  request<UpdatePresetInfoResponse>(`/api/presets/${encodeURIComponent(id)}/info`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 
 export const savePreset = (body: SavePresetRequest) =>
   request<SavePresetResponse>('/api/presets', { method: 'POST', body: JSON.stringify(body) });

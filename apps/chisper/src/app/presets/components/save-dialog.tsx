@@ -10,11 +10,18 @@ import { distinctUntilChanged, map } from 'rxjs';
 import { text12, textBold12, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import {
+  categoryPath,
   Clip,
+  guessPresetInfo,
   nameKey,
+  normalizePreset,
+  PRESET_DEFAULTS,
   PRESET_NAME_MAX_LENGTH,
+  PresetData,
+  PresetInfo,
   presetNameSchema,
   SavePresetRequest,
+  tagLabel,
   UpdatePresetRequest,
 } from '@chisper/preset-schema';
 import { getSnapshot } from '../../app';
@@ -27,6 +34,7 @@ import {
   ScreenHead,
   screenCheckStyle,
   Spacer,
+  TipWrap,
 } from '../../common/components';
 import { useTrack } from '../../synth/track/modules/track';
 import { usePersistClip } from '../../synth/track/components/use-clip-saving';
@@ -38,11 +46,12 @@ import {
   isNameAvailable,
   presetUrl,
   savePreset,
-  setEditToken,
   sharePreset,
   TURNSTILE_SITE_KEY,
   updatePreset,
 } from '../services';
+import { patchListedInfo } from './info-dialog';
+import { draftOf, EMPTY_DRAFT, InfoDraft, InfoFields, infoOfDraft } from './info-fields';
 
 const NAME_CHECK_DEBOUNCE_MS = 300;
 
@@ -97,11 +106,6 @@ const ErrorText = styled.div`
   color: ${colors.red};
 `;
 
-// a disabled key gets no mouse events: its tooltip is on this
-const TipWrap = styled.span`
-  display: flex;
-`;
-
 interface SavedResult {
   id: string;
   message: string;
@@ -111,13 +115,31 @@ interface SavedResult {
 const clipLabel = ({ notes, name }: Clip) =>
   notes.length === 0 ? null : name ? `“${name}”` : 'the clip of the track';
 
+// the sound of the synth as a preset (params out of the schema: the defaults, the guess goes by the name alone)
+const soundOf = (): PresetData => {
+  try {
+    return normalizePreset(getSnapshot());
+  } catch {
+    return PRESET_DEFAULTS;
+  }
+};
+
+// the category the dialog offers for a name and the sound (the user may take it off)
+const guessedCategory = (name: string, data: PresetData) => guessPresetInfo(name, data).category;
+
+// an info in a line: its category (and subcategory), its tags
+const infoSummary = ({ category, subcategory, tags }: PresetInfo) => {
+  const parts = [...(category ? [categoryPath(category, subcategory)] : []), ...tags.map(tagLabel)];
+  return parts.length ? parts.join(' · ') : 'none';
+};
+
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
 export const SaveDialog = ({ open, onClose }: Props) => {
-  const [{ $current }, { setSaved }] = usePresets();
+  const [{ $current, $currentInfo }, { setSaved }] = usePresets();
   const [{ $clip, $id: $clipId, $dirty: $clipDirty }] = useTrack();
   // (the dialog stays mounted while closed: not rendered again by every edit of the notes)
   const $clipLabel = React.useMemo(() => $clip.pipe(map(clipLabel), distinctUntilChanged()), [$clip]);
@@ -133,6 +155,14 @@ export const SaveDialog = ({ open, onClose }: Props) => {
   const [editable, setEditable] = React.useState<(CurrentPreset & { editToken: string }) | null>(null);
   // the preset is saved with the clip of the track: it opens with it
   const [withClip, setWithClip] = React.useState(false);
+  // its category, tags and description: of the current preset when they are known (an overwrite keeps them; the
+  // description only of a preset of this browser: another's is the words of its author), else none but a category
+  // guessed by its name and sound until one is chosen
+  const [draft, setDraft] = React.useState<InfoDraft>(EMPTY_DRAFT);
+  // (refs: the guess of the open runs with the info known in the same render)
+  const infoKnown = React.useRef(false);
+  const categoryChosen = React.useRef(false);
+  const sound = React.useRef<PresetData>(PRESET_DEFAULTS);
   const turnstile = React.useRef<TurnstileInstance | undefined>(undefined);
   const queryClient = useQueryClient();
 
@@ -140,13 +170,37 @@ export const SaveDialog = ({ open, onClose }: Props) => {
     if (!open) return;
     const current = $current.value;
     const editToken = current && getEditToken(current.id);
+    const known = $currentInfo.value;
     setName(current?.name ?? '');
     setSavedResult(null);
     setCaptchaError(null);
     setEditable(current && editToken ? { ...current, editToken } : null);
     // as the preset was: with a clip when it has one
     setWithClip(current?.clipId !== undefined);
-  }, [open, $current]);
+    sound.current = soundOf();
+    infoKnown.current = known !== null;
+    // (a category of the preset stays; none known or none at all: guessed)
+    const start = known ? { ...draftOf(known), ...(editToken ? {} : { description: '' }) } : EMPTY_DRAFT;
+    categoryChosen.current = start.category !== null;
+    setDraft(
+      start.category ? start : { ...start, category: guessedCategory(current?.name ?? '', sound.current) }
+    );
+  }, [open, $current, $currentInfo]);
+
+  // the guess follows the name until a category is chosen
+  React.useEffect(() => {
+    if (!open || categoryChosen.current) return;
+    const category = guessedCategory(name, sound.current);
+    setDraft((draft) => (draft.category === category ? draft : { ...draft, category, subcategory: null }));
+  }, [open, name]);
+
+  const changeDraft = (next: InfoDraft) => {
+    if (next.category !== draft.category || next.subcategory !== draft.subcategory)
+      categoryChosen.current = true;
+    setDraft(next);
+  };
+  // null: the description isn't one to send (a link): no save
+  const info = infoOfDraft(draft);
 
   const attach = withClip && label !== null;
 
@@ -173,13 +227,12 @@ export const SaveDialog = ({ open, onClose }: Props) => {
     // the body alone: the mutation function of react-query 5 gets its context too
     mutationFn: (body: SavePresetRequest) => savePreset(body),
     onSuccess: (result, body) => {
-      if (result.editToken) setEditToken(result.id, result.editToken);
-      // the sound saved before keeps its clip
+      // the sound saved before keeps its clip and its info
       const clipKept = body.clipId && result.clipId !== body.clipId ? ' Its clip is unchanged.' : '';
       setSavedResult({
         id: result.id,
         message: result.existed
-          ? `This sound is already saved as “${result.name}”.${clipKept}`
+          ? `This sound is already saved as “${result.name}”.${clipKept} Its category and tags stay as they were: ${infoSummary(result.info)}.`
           : `“${result.name}” has been saved.`,
       });
       setSaved(result);
@@ -193,18 +246,22 @@ export const SaveDialog = ({ open, onClose }: Props) => {
     },
   });
 
+  // `before`: the info it had (null: not known), the counts of the categories again where it moved
   const overwriteMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: UpdatePresetRequest }) => updatePreset(id, body),
-    onSuccess: (result) => {
+    mutationFn: ({ id, body }: { id: string; body: UpdatePresetRequest; before: PresetInfo | null }) =>
+      updatePreset(id, body),
+    onSuccess: (result, { before }) => {
       setSavedResult({ id: result.id, message: `“${result.name}” has been updated.` });
       setSaved(result);
+      // its rows in the lists of the browser: an Edit info of one starts from what it has now
+      patchListedInfo(queryClient, result.id, result.info, before);
     },
     onError: onSaveError,
   });
 
   const busy = isPending || overwriteMutation.isPending || clipSaving.busy;
-  const canSave = validName && !nameTaken && !isOwnName && token !== null;
-  const canOverwrite = validName && !nameTaken && editable !== null;
+  const canSave = validName && !nameTaken && !isOwnName && token !== null && info !== null;
+  const canOverwrite = validName && !nameTaken && editable !== null && info !== null;
   // the preset sent with the clip it opens with (null: none): the clip of the track, saved first unless it is so
   // already; its save failed (a toast told why): the preset isn't sent
   const withClipId = async (send: (presetClipId: string | null) => void) => {
@@ -215,14 +272,30 @@ export const SaveDialog = ({ open, onClose }: Props) => {
   const save = () => {
     if (!canSave || busy) return;
     withClipId((presetClipId) =>
-      mutate({ name, data: getSnapshot(), turnstileToken: token, clipId: presetClipId })
+      mutate({
+        name,
+        data: getSnapshot(),
+        turnstileToken: token,
+        clipId: presetClipId,
+        info: info ?? undefined,
+      })
     );
   };
+  // (an info not known, not changed: the one of the preset stays)
   const overwrite = () => {
     if (!canOverwrite || busy) return;
     const { id, editToken } = editable;
+    const sent =
+      infoKnown.current || categoryChosen.current || draft.tags.length > 0 || draft.description.trim()
+        ? info
+        : undefined;
+    const before = $currentInfo.value;
     withClipId((presetClipId) =>
-      overwriteMutation.mutate({ id, body: { name, data: getSnapshot(), editToken, clipId: presetClipId } })
+      overwriteMutation.mutate({
+        id,
+        body: { name, data: getSnapshot(), editToken, clipId: presetClipId, info: sent },
+        before,
+      })
     );
   };
   // the preset (of this browser) opens with a clip: what Save does to it
@@ -235,7 +308,7 @@ export const SaveDialog = ({ open, onClose }: Props) => {
   const newLoading = isPending || (!editable && clipSaving.busy);
 
   return (
-    <Dialog title='Save preset' open={open} onCancel={onClose} width={440} destroyOnHidden>
+    <Dialog title='Save preset' open={open} onCancel={onClose} width={520} destroyOnHidden>
       {saved ? (
         <>
           <DialogIntro>{saved.message}</DialogIntro>
@@ -286,6 +359,7 @@ export const SaveDialog = ({ open, onClose }: Props) => {
               </ClipRow>
             )}
             {label === null && hadClip && <Note>Save leaves the preset without a clip.</Note>}
+            <InfoFields draft={draft} onChange={changeDraft} />
           </DialogScreen>
           {nameTaken && <ErrorText>Name is already taken</ErrorText>}
           {captchaError && <ErrorText>{captchaError}</ErrorText>}

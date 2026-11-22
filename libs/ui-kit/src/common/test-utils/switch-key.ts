@@ -1,12 +1,12 @@
 import { jest } from '@jest/globals';
 import { act, fireEvent, screen } from '@testing-library/react';
-import { SWITCH_KEY_TIP_DELAY } from '../../switch-key';
+import { TIP_DELAY } from '../../switch-key';
 
 // hovers a SwitchKey (its wrapper: a disabled button takes no mouse events) as long as its tooltip waits; fake timers
 export const hoverSwitchKey = (key: HTMLElement) => {
   fireEvent.mouseEnter(key.parentElement as HTMLElement);
   act(() => {
-    jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY);
+    jest.advanceTimersByTime(TIP_DELAY);
   });
 };
 
@@ -18,7 +18,7 @@ export const switchKeyTip = (name: string) => {
   const tooltip = screen.getAllByRole('tooltip').find((tip) => tip.textContent?.startsWith(name));
   fireEvent.mouseLeave(key.parentElement as HTMLElement);
   act(() => {
-    jest.advanceTimersByTime(SWITCH_KEY_TIP_DELAY);
+    jest.advanceTimersByTime(TIP_DELAY);
   });
   return tooltip?.textContent;
 };

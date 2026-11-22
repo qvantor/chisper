@@ -3,7 +3,7 @@ title: 'Cómo usar Chisper: primeros pasos con el sintetizador online'
 h1: 'Primeros pasos con Chisper'
 description: 'Guía para principiantes: toca el sintetizador online con el teclado del ordenador, un teclado MIDI o la pantalla, abre presets y comparte tu sonido sin cuenta.'
 nav: 'Primeros pasos'
-updated: 2026-11-17
+updated: 2026-11-23
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -68,7 +68,7 @@ soltarla vuelve sola al centro. Los recuadros **Up** y **Down** que tiene al lad
 
 ## Paso 3: elige un preset
 
-<Figure name='presets' alt='La ventana Presets de Chisper: la pestaña Popular, el campo de búsqueda y una lista de presets, cada uno con su número de oyentes' narrow>
+<Figure name='presets' alt='La ventana Presets de Chisper: sus pestañas, las categorías, el campo de búsqueda y una lista de presets, cada uno con los iconos de lo que hace y su número de oyentes' narrow>
 
 Haz clic en el nombre del preset en la cabecera para abrir la ventana. Un clic en una fila toca ese preset al
 instante y la ventana sigue abierta, así que puedes probarlos uno detrás de otro.
@@ -78,14 +78,51 @@ instante y la ventana sigue abierta, así que puedes probarlos uno detrás de ot
 - **Popular** muestra los presets destacados y aquellos con los que se quedan los oyentes; el número junto a un
   preset es cuántos oyentes se quedaron con él.
 - **All** muestra todos los presets, ordenados por **New**, **A–Z** o **Popular**. Lo que escribes en *Search all
-  presets* se busca por nombre en todos ellos.
-- **◀ ▶** junto al nombre, en la cabecera, recorren la lista en la que estabas (los presets populares o tu última
-  búsqueda), así que ni siquiera necesitas abrir la ventana.
+  presets* se busca en todos ellos por nombre, descripción y etiquetas.
+- Las categorías bajo las pestañas (**Bass**, **Lead**, **Pad**, **Keys**, **Pluck**, **Brass & Chord**, **Drums**,
+  **FX**) acotan la lista, cada una con su número de presets. Una categoría con subcategorías las muestra en una
+  segunda fila: **FX** tiene **Game**, **UI & Alert**, **Magic**, **Sci-Fi** y más. El **Popular** de una categoría
+  empieza por sus presets populares; el resto de ella sigue bajo la línea *Others in …*.
+- El botón de filtro junto a la búsqueda abre las etiquetas (**Dark**, **Warm**, **Wide**…), lo que hace un preset
+  (los iconos de abajo) y **Factory** o **Community**: los presets hechos para Chisper o los que guardaron sus
+  usuarios. El botón muestra cuántos filtros están activos.
+- **Favorites** muestra los presets que marcaste con la estrella, **Recent** los que abriste y **Mine** los que se
+  guardaron desde este navegador. La estrella de una fila añade un preset a **Favorites** o lo quita. Estas listas se
+  quedan en este navegador.
+- Una etiqueta **FACTORY** tras un nombre marca un preset hecho para Chisper.
+- La franja bajo la lista habla del preset que abriste: su categoría y subcategoría, sus etiquetas y la descripción
+  que escribió su autor. En el móvil, una fila solo muestra su número, su triángulo y su nombre; la estrella, el
+  enlace, el botón para denunciarlo y el lápiz del preset abierto están en esta franja.
+- **◀ ▶** junto al nombre, en la cabecera, recorren la lista en la que estabas (los presets populares, una categoría
+  o tu última búsqueda), así que ni siquiera necesitas abrir la ventana.
 - La flecha circular, **Init preset**, carga *Init*: un sonido sencillo de un solo oscilador con todo lo demás
   apagado. Aquí empiezan tus propios sonidos.
 - Un **\*** detrás del nombre significa que has cambiado el sonido desde que se abrió o se guardó.
 - Cada preset tiene su propio enlace (`chisper.qvantor.org/?preset=…`): la barra de direcciones lo muestra en
   cuanto eliges uno.
+
+Los iconos de una fila dicen lo que hace un preset, siempre en el mismo orden; pasa el ratón por uno para ver su
+nombre:
+
+| Icono                        | Significa                                                                |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| Un triángulo ante el nombre  | **With clip**: el preset se abre con una melodía propia                  |
+| Una cabeza de robot          | **AI generated**                                                         |
+| Un metrónomo                 | **Tempo-sync**: un LFO, una envolvente o un efecto sigue el tempo        |
+| **1**                        | **Mono**: una nota cada vez                                              |
+| Una curva entre dos puntos   | **Glide**: cada nota se desliza hasta la siguiente                       |
+
+El triángulo ante un nombre es un botón: haz clic para abrir el preset y escuchar su clip en loop mientras la
+ventana sigue abierta. El botón se vuelve un cuadrado; vuelve a hacer clic para pararlo. El botón de otra fila cambia
+a ese preset y a su clip; un clic en una fila o cerrar la ventana también lo paran. La melodía que tenías en el piano
+roll vuelve tal como estaba, con su tempo, en cuanto paras. El botón está desactivado mientras **REC** graba o un
+MIDI Clock marca el tempo.
+
+El teclado también funciona en la ventana: <kbd>↓</kbd> y <kbd>↑</kbd> (o <kbd>→</kbd> y <kbd>←</kbd>) abren el preset
+siguiente de la lista o el anterior, y <kbd>Espacio</kbd> reproduce o para el clip del preset seleccionado; en un
+preset sin clip reproduce el clip del piano roll, si tiene notas. Mientras algo suena, las flechas siguen
+reproduciendo: un preset con clip toca el suyo, uno sin clip toca el del piano roll. En el campo de búsqueda,
+<kbd>Espacio</kbd> escribe un espacio y <kbd>↓</kbd> <kbd>↑</kbd> siguen recorriendo la lista.
 
 ## ¿Qué hay en la pantalla?
 
@@ -187,7 +224,10 @@ una envolvente que abre el filtro en cada nota.
 1. Pulsa **Save** (o <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
 2. Ponle un nombre de hasta 40 caracteres. Los nombres son únicos, con mayúsculas o sin ellas: si uno ya está en
    uso, te avisa mientras escribes.
-3. Pulsa **Save**. La ventana muestra el enlace de tu preset y **Copy link**.
+3. Si quieres, di qué es: una categoría (Chisper elige una por el nombre y el sonido hasta que eliges tú), una
+   subcategoría de ella, hasta tres etiquetas y una descripción de hasta 280 caracteres, sin enlaces. Ayudan a otros a
+   encontrarlo en la lista; solo el nombre es obligatorio.
+4. Pulsa **Save**. La ventana muestra el enlace de tu preset y **Copy link**.
 
 Quien abra el enlace oirá tu sonido: cada perilla, cada modulación y cada efecto. Más adelante, **Share** en la
 cabecera vuelve a copiar el enlace del preset. El enlace toca el sonido tal como se guardó, así que guarda otra vez
@@ -195,7 +235,12 @@ antes de compartir un cambio.
 
 No hay cuenta: el navegador desde el que guardaste conserva una clave del preset, y ese navegador puede
 sobrescribirlo después (**Save** ofrece entonces **Save** y **Save as new**). Otro navegador, otro dispositivo o
-unos datos del sitio borrados no pueden sobrescribirlo, solo guardar uno nuevo.
+unos datos del sitio borrados no pueden sobrescribirlo, solo guardar uno nuevo. En la lista de presets ese navegador
+también muestra un lápiz, **Edit info**, en sus presets: cambia su categoría, sus etiquetas y su descripción sin
+volver a guardar el sonido.
+
+Si el mismo sonido ya está guardado, la ventana lo dice y da su enlace: ese preset conserva su nombre, su clip, su
+categoría y sus etiquetas.
 
 Si el piano roll tiene notas, la ventana también ofrece **Default clip**: el preset se abre entonces con esa
 melodía, y su enlace también la toca.

@@ -2,14 +2,18 @@ import { recordAnalytics } from '../../../test-utils/analytics';
 import {
   ApiRequestError,
   getPreset,
+  getPresetCounts,
+  getPresetsByIds,
   getTopPresets,
   isNameAvailable,
   listPresets,
   markPresetOpened,
+  queryTopPresets,
   reportPreset,
   savePreset,
   sendUsage,
   updatePreset,
+  updatePresetInfo,
 } from './api';
 
 const response = (status: number, body?: unknown) =>
@@ -94,7 +98,7 @@ describe('api', () => {
     expect(errors).toEqual([]);
     expect(list).toMatchObject({
       status: 500,
-      unreported: { path: '/api/presets?sort=new&q=my+pad', method: 'GET' },
+      unreported: { path: '/api/presets?q=my+pad&sort=new', method: 'GET' },
     });
     expect(name).toMatchObject({
       status: 500,
@@ -119,12 +123,61 @@ describe('api', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/presets/name-available?name=My+bass+%26+lead');
   });
 
-  it('adds q and cursor to the list query only when set', async () => {
+  it('adds q, the filter and cursor to the list query only when set', async () => {
     fetchMock.mockResolvedValue(response(200, { items: [], nextCursor: null }));
     await listPresets({ sort: 'popular' });
     await listPresets({ sort: 'new', q: 'pad', cursor: 'c1' });
+    await listPresets({
+      sort: 'name',
+      category: 'fx',
+      subcategory: 'game',
+      tags: ['dark'],
+      features: ['clip'],
+    });
     expect(fetchMock.mock.calls[0][0]).toBe('/api/presets?sort=popular');
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/presets?sort=new&q=pad&cursor=c1');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/presets?q=pad&sort=new&cursor=c1');
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      '/api/presets?category=fx&subcategory=game&tags=dark&features=clip&sort=name'
+    );
+  });
+
+  it('asks the popular presets of a filter', async () => {
+    fetchMock.mockResolvedValue(response(200, []));
+    await getTopPresets();
+    await queryTopPresets({ category: 'pad', origin: 'community' });
+    await queryTopPresets({ tags: ['dark', 'warm'] });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/presets/top',
+      '/api/presets/top?category=pad&origin=community',
+      '/api/presets/top?tags=dark%2Cwarm',
+    ]);
+  });
+
+  it('asks the presets of a list of ids 100 at a time, in its order', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `id${i}`);
+    fetchMock.mockImplementation((path: string) => {
+      const asked = new URLSearchParams(path.split('?')[1]).get('ids')?.split(',') ?? [];
+      return Promise.resolve(response(200, { items: asked.map((id) => ({ id })), nextCursor: null }));
+    });
+    const items = await getPresetsByIds(ids);
+    expect(items.map(({ id }) => id)).toEqual(ids);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await getPresetsByIds([])).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks the counts and PUTs the info of a preset', async () => {
+    fetchMock.mockResolvedValue(response(200, { total: 0, categories: {} }));
+    await getPresetCounts();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/presets/counts');
+    const body = { editToken: 't', info: { category: 'pad' as const } };
+    fetchMock.mockResolvedValue(response(200, { id: 'a b', info: body.info }));
+    await updatePresetInfo('a b', body);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/presets/a%20b/info', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+    });
   });
 
   it('POSTs a listen or a stay with its captcha token and keepalive', async () => {

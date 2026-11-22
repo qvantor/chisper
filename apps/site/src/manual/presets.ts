@@ -1,6 +1,6 @@
 // The presets of the site the manual opens besides the ones of the clips of the landing (data/demos.ts): each where
-// what a text explains can be heard. Its name is the one the site shows, less the prefix of the featured presets
-// ([AI]); scripts/site/check-presets.mjs checks them against the site
+// what a text explains can be heard. Its name is the one the site shows; scripts/site/check-presets.mjs checks them
+// against the site
 export const MANUAL_PRESETS = [
   { slug: 'supersaw-lead', presetId: '8823127b-0f34-4b9d-b231-23eb194d9ee6', name: 'Supersaw Lead' },
   {

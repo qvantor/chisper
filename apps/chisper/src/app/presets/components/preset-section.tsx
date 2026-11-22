@@ -144,7 +144,7 @@ export const PresetSection = ({ actions, className }: SectionProps) => {
         </Tooltip>
         {actions}
       </Row>
-      <PresetBrowser open={browserOpen} onClose={() => setBrowserOpen(false)} />
+      <PresetBrowser open={browserOpen} covered={saveOpen} onClose={() => setBrowserOpen(false)} />
       <SaveDialog open={saveOpen} onClose={() => setSaveOpen(false)} />
       <UsageReporter />
     </Section>

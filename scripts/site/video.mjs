@@ -17,7 +17,7 @@ import { SITE, ffmpeg, openPreset, presetOf } from './common.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const URL_BASE = args.url ?? SITE;
-// [AI] FX UFO Drone: envelopes sweep both wave positions through two spectral tables and the cutoff, an LFO
+// UFO Drone: envelopes sweep both wave positions through two spectral tables and the cutoff, an LFO
 // (retriggered by every note, as they are: the loop closes on a chord) moves the cutoff
 const PRESET = args.preset ?? presetOf('ufo-drone');
 const VIEWPORT = { width: 1440, height: 900 };

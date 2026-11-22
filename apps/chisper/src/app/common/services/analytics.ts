@@ -227,7 +227,7 @@ export const captureLoadError = (error: unknown, what: string, file: string | nu
 };
 
 // the route of a path of the API: no query (a search), no id (`/api/presets/:id/opened`)
-const API_WORDS = ['top', 'name-available'];
+const API_WORDS = ['top', 'counts', 'name-available'];
 export const apiRoute = (path: string) =>
   path
     .split('?')[0]
