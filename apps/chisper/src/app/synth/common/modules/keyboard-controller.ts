@@ -72,7 +72,7 @@ const isShortcut = (e: KeyboardEvent) => e.metaKey || e.ctrlKey;
 
 // QWERTY input is suspended while typing into a text field (preset search, preset name, etc.);
 // a focused select still plays: preventDefault cancels its type-ahead, the arrows are no notes
-const isTextInput = (target: EventTarget | null) =>
+export const isTextInput = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ['INPUT', 'TEXTAREA'].includes(target.tagName));
 

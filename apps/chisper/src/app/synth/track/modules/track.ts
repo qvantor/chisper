@@ -106,6 +106,25 @@ const isTabState = (value: unknown): value is TabState => {
 export const dirtyOf = (clip: Clip, hash: string | null) =>
   hash === null ? clip.notes.length > 0 : clipHash(clip) !== hash;
 
+// a clip of the track as it is put in place: its notes, its link and hash, its undo, its origin (the clip of the
+// track waits so aside while the clip of a preset is heard from the list of presets: it comes back as it was)
+interface ClipState {
+  clip: Clip;
+  id: string | null;
+  hash: string | null;
+  history: ClipHistory;
+  byPreset: boolean;
+}
+
+// a saved clip (of a link, of a preset) as the server gave it, with its hash
+const savedOf = ({ id, clip }: PresetClip) => {
+  const normalized = normalizeClip(clip);
+  return { clip: normalized, id, hash: normalizedClipHash(normalized) };
+};
+
+// why the clip of a preset can't be heard from the list now: REC records, a MIDI Clock leads the tempo
+export type AuditionBlock = 'rec' | 'midi';
+
 const bodyOf = ({ length, notes }: Clip): ClipBody => ({ length, notes });
 
 interface Dependencies {
@@ -190,6 +209,20 @@ export const track = ({
     // where the clip came from: a preset opened it (the next preset may take its place while it is unchanged), a
     // clip of a link is loading (a preset meanwhile doesn't open its own)
     const origin = { byPreset: false, linkLoading: false };
+    // the clip of a preset is heard from the list of presets (its Play) in place of the clip of the track, which
+    // waits aside (null: the track was free, the clip of the preset stays after)
+    const $auditioning = new PrimitiveBS<boolean>(false);
+    const audition = { stash: null as ClipState | null };
+    // why none can be heard now (null: it can)
+    const $auditionBlocked = new PrimitiveBS<AuditionBlock | null>(null);
+    // the clip in place as `put` takes it
+    const clipState = (): ClipState => ({
+      clip: $clip.value,
+      id: $id.value,
+      hash: $savedHash.value,
+      history: $history.value,
+      byPreset: origin.byPreset,
+    });
     // ticks from beat 0 of the transport (over the loops) the output plays at `ms` of performance.now(), not before
     // the start of the play
     const tickAt = (ms = performance.now()) => beatAt(Math.max(contextTimeAt(ms), player.from)) * CLIP_PPQ;
@@ -217,10 +250,14 @@ export const track = ({
       $sounding,
       $recording,
       $recorded,
+      $auditioning,
+      $auditionBlocked,
       player,
       gesture,
       recorder,
       origin,
+      audition,
+      clipState,
       releaseHeld,
       tickAt,
       finish,
@@ -253,10 +290,14 @@ export const track = ({
         $midiImport,
         $recording,
         $recorded,
+        $auditioning,
+        $auditionBlocked,
         player,
         gesture,
         recorder,
         origin,
+        audition,
+        clipState,
       } = model;
       // (the notes as they play before the clip: its subscribers play them)
       const setClip = (clip: Clip) => {
@@ -275,22 +316,31 @@ export const track = ({
         $id.next(id);
         $savedHash.next(hash);
       };
-      // a clip opened: no undo across it (nor a recording: the notes held go into no clip)
-      const open = (clip: Clip, id: string | null, hash: string | null, byPreset = false) => {
+      // a clip in place of the one before with its undo and tempo (nor a recording: the notes held go into no clip)
+      const put = ({ clip, id, hash, byPreset, history }: ClipState) => {
         recorder.held.clear();
         recorder.pending = [];
         recorder.history = null;
         setClip(clip);
         setSavedAs(id, hash, byPreset);
-        $history.next(emptyHistory());
+        $history.next(history);
         takeTempo(clip.bpm);
+      };
+      // a clip opened: no undo across it, in the url
+      const open = (clip: Clip, id: string | null, hash: string | null, byPreset = false) => {
+        put({ clip, id, hash, byPreset, history: emptyHistory() });
         // (the url as it is when it has the clip: a start keeps what else it has)
         if (getUrlClipId() !== id) setUrlClipId(id);
       };
+      // none (no notes) or the one a preset opened, unchanged: the clip of a preset may take its place
+      const isFree = () => {
+        const current = $clip.value;
+        return current.notes.length === 0 || (origin.byPreset && !dirtyOf(current, $savedHash.value));
+      };
       // a saved clip (of a link, of a preset) opened as the server gave it
-      const openSaved = ({ id, clip }: PresetClip, byPreset = false) => {
-        const normalized = normalizeClip(clip);
-        open(normalized, id, normalizedClipHash(normalized), byPreset);
+      const openSaved = (saved: PresetClip, byPreset = false) => {
+        const { clip, id, hash } = savedOf(saved);
+        open(clip, id, hash, byPreset);
       };
       const playFrom = (beat: number) => {
         $armed.next(true);
@@ -402,6 +452,27 @@ export const track = ({
         $history.next(step.history);
         applyBody(step.body);
       };
+      const stopPlaying = () => {
+        stopRecording();
+        if (!$armed.value) return;
+        $armed.next(false);
+        if ($source.value !== 'midi') setPlaying(false);
+      };
+      // the clip of a preset heard no more: the track stops, the clip put aside is back as it was (its notes, link,
+      // undo and tempo); a track that was free keeps the clip of the preset
+      const endAudition = () => {
+        if (!$auditioning.value) return;
+        $auditioning.next(false);
+        stopPlaying();
+        const { stash } = audition;
+        audition.stash = null;
+        if (stash) put(stash);
+      };
+      // REC on, into the clip of the track: the one of a preset heard goes
+      const recordTrack = () => {
+        endAudition();
+        startRecording();
+      };
       return {
         // an edit of the notes (one step of the undo); the loop follows them (loopLength)
         setNotes: (notes: ClipNote[]) => {
@@ -495,13 +566,37 @@ export const track = ({
         restore: ({ clip, id, hash, byPreset }: TabState) => open(normalizeClip(clip), id, hash, byPreset),
         // the clip a preset opens with (as it is applied), its tempo taken; only in place of a clip that isn't the
         // user's: none (no notes) or the one a preset opened, unchanged. Not over a clip of a link still loading (the
-        // link wins), nor while REC records; the clip open already stays as it is (its edits too)
+        // link wins), nor while REC records, nor while a clip is heard (the track is its own until endAudition: a
+        // preset opened late would take the url and the undo of the clip aside); the clip open already stays as it is
+        // (its edits too)
         openPresetClip: (saved: PresetClip) => {
-          if ($id.value === saved.id || origin.linkLoading || $recording.value) return;
-          const current = $clip.value;
-          const free = current.notes.length === 0 || (origin.byPreset && !dirtyOf(current, $savedHash.value));
-          if (free) openSaved(saved, true);
+          if ($id.value === saved.id || origin.linkLoading || $recording.value || $auditioning.value) return;
+          if (isFree()) openSaved(saved, true);
         },
+        // the clip of a preset heard from the list of presets (its Play; false: not now, $auditionBlocked or a clip
+        // of a link loading), stopped, in place of the clip of the track while it is heard: a free track opens it as a preset
+        // does (it stays, in the url), a clip of the user waits aside, not in the url nor in the tab, until
+        // endAudition. Another one heard after it takes its place: opened as well over a track that was free, the
+        // clip aside stays
+        auditionClip: (saved: PresetClip) => {
+          if ($auditionBlocked.value !== null || origin.linkLoading) return false;
+          stopPlaying();
+          const free = $auditioning.value ? audition.stash === null : isFree();
+          if (free) openSaved(saved, true);
+          else {
+            if (!$auditioning.value) audition.stash = clipState();
+            put({ ...savedOf(saved), byPreset: true, history: emptyHistory() });
+          }
+          $auditioning.next(true);
+          return true;
+        },
+        // the clip heard plays from its start, in a loop
+        playAudition: () => {
+          if ($auditioning.value && !$armed.value) playFrom(0);
+        },
+        // the track stops for the clip of a preset to come (heard once its sound plays)
+        holdAudition: stopPlaying,
+        endAudition,
         // Play: from beat 0 TRACK_LEAD from now (the free LFOs of HOST with it); a MIDI Clock leads: armed, its Start
         // and Stop play it
         play: () => {
@@ -514,16 +609,12 @@ export const track = ({
           featureUsed('track', 'play');
           playFrom(beat);
         },
-        stop: () => {
-          stopRecording();
-          if (!$armed.value) return;
-          $armed.next(false);
-          if ($source.value !== 'midi') setPlaying(false);
-        },
-        record: startRecording,
+        // (the clip of a preset heard stops for good: the clip of the track is back)
+        stop: () => ($auditioning.value ? endAudition() : stopPlaying()),
+        record: recordTrack,
         // REC off: the notes held go into the loop up to now; the track plays on
         stopRecording,
-        toggleRecording: () => ($recording.value ? stopRecording() : startRecording()),
+        toggleRecording: () => ($recording.value ? stopRecording() : recordTrack()),
         addRecorded,
         commitHeld,
         extendLoop,
@@ -531,7 +622,8 @@ export const track = ({
         toggleRoll: () => setRollOpen(!$rollOpen.value),
       };
     })
-    .subscriptions((model, { restore, loadById, play, stop, addRecorded, commitHeld, extendLoop }) => {
+    .subscriptions((model, actions) => {
+      const { restore, loadById, play, stop, addRecorded, commitHeld, extendLoop, endAudition } = actions;
       const {
         $clip,
         $id,
@@ -542,9 +634,11 @@ export const track = ({
         $rollOpen,
         $sounding,
         $recording,
+        $auditionBlocked,
         player,
         recorder,
-        origin,
+        audition,
+        clipState,
         releaseHeld,
       } = model;
       const send = (event: TrackEvent) => {
@@ -610,16 +704,11 @@ export const track = ({
           player.held.delete(pitch);
         });
       };
-      // the tab keeps a clip with notes or an id
+      // the tab keeps a clip with notes or an id (of the user while the clip of a preset is heard)
       const saveTabState = () => {
-        const clip = $clip.value;
-        const kept = clip.notes.length > 0 || $id.value !== null;
-        const state: TabState = {
-          clip,
-          id: $id.value,
-          hash: $savedHash.value,
-          ...(origin.byPreset && { byPreset: true }),
-        };
+        const { clip, id, hash, byPreset } = audition.stash ?? clipState();
+        const kept = clip.notes.length > 0 || id !== null;
+        const state: TabState = { clip, id, hash, ...(byPreset && { byPreset: true }) };
         writeStored('sessionStorage', TAB_STATE_KEY, kept ? state : null);
       };
       return [
@@ -694,9 +783,19 @@ export const track = ({
             filter((e) => !e.repeat)
           )
           .subscribe(() => ($armed.value ? stop() : play())),
+        combineLatest([$recording, $source])
+          .pipe(
+            map(([recording, source]): AuditionBlock | null =>
+              recording ? 'rec' : source === 'midi' ? 'midi' : null
+            ),
+            distinctUntilChanged()
+          )
+          .subscribe($auditionBlocked),
         // the MIDI Clock is gone (or switched off) while Play is on and it stands: Play goes off
         $source.pipe(distinctUntilChanged(), skip(1)).subscribe((source) => {
           if (source === 'internal' && $armed.value && !$transportPlaying.value) stop();
+          // (a MIDI Clock leads: the clip of a preset is heard no more)
+          if (source === 'midi') endAudition();
         }),
         // REC: a note of an input pressed while the track plays is held from where the output plays (where it was
         // heard), it goes into the loop as it is released

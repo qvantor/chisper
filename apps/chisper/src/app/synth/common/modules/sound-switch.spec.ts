@@ -38,7 +38,7 @@ const setup = async ({ running = true } = {}) => {
     $tableProgress.next(null);
   });
   wavetables.$tables.next({ [osc1.id]: 'stored', [osc2.id]: 'stored' });
-  const [{ $progress }, { switchSound }] = initModel(
+  const [{ $progress, $switching }, { switchSound }] = initModel(
     soundSwitch({
       synthCore: modules.synthCore,
       synth: modules.synth,
@@ -67,6 +67,7 @@ const setup = async ({ running = true } = {}) => {
   return {
     switchSound,
     $progress,
+    $switching,
     onPress,
     voices,
     end,
@@ -162,6 +163,38 @@ describe('soundSwitch', () => {
     // over: the next preset fades out again
     switchSound(jest.fn());
     expect(mute).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells it switches from the switch to the output opened, a switch that replaces one keeping it on', async () => {
+    const { switchSound, $switching, osc1, render, opened } = await setup();
+    const states: boolean[] = [];
+    $switching.subscribe((switching) => states.push(switching));
+    expect($switching.value).toBe(false);
+
+    switchSound(jest.fn());
+    switchSound(jest.fn());
+    expect($switching.value).toBe(true);
+    render(1.02);
+    // a preset while silent: applied at once, the wait starts again
+    switchSound(() => osc1.$waveTableLoading.next(true));
+    render(1.03);
+    expect($switching.value).toBe(true);
+    osc1.$waveTableLoading.next(false);
+    render(1.04);
+
+    expect(opened()).toBe(true);
+    expect($switching.value).toBe(false);
+    expect(states).toEqual([false, true, false]);
+  });
+
+  it('tells the switch over when the output opens at MAX_SILENCE, a table still loading', async () => {
+    const { switchSound, $switching, osc1, render } = await setup();
+    switchSound(() => osc1.$waveTableLoading.next(true));
+    render(1.02);
+    render(2, 1980);
+    expect($switching.value).toBe(true);
+    render(2, 20);
+    expect($switching.value).toBe(false);
   });
 
   it('a preset chosen during the fade replaces the one waiting for it', async () => {
@@ -340,11 +373,12 @@ describe('soundSwitch', () => {
   });
 
   it('a context that does not run is not waited for: applied and opened at once', async () => {
-    const { switchSound, pause, resume, opened } = await setup({ running: false });
-    const apply = jest.fn();
+    const { switchSound, $switching, pause, resume, opened } = await setup({ running: false });
+    const apply = jest.fn(() => expect($switching.value).toBe(true));
     switchSound(apply);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(opened()).toBe(true);
+    expect($switching.value).toBe(false);
     expect(resume).toHaveBeenCalledTimes(1);
     // over: the next one pauses again
     switchSound(jest.fn());

@@ -20,7 +20,7 @@ import { synth } from '../app/synth/common/modules/synth';
 import { synthCore } from '../app/synth/common/modules/synth-core';
 import { transport } from '../app/synth/common/modules/transport';
 import { dirtyOf, track } from '../app/synth/track/modules/track';
-import type { TrackModule } from '../app/synth/track/modules/track';
+import type { AuditionBlock, TrackModule } from '../app/synth/track/modules/track';
 import type { CreateTrackClock } from '../app/synth/track/track-clock';
 import type { LoadNoiseSample, LoadWavetable } from '../app/synth/services';
 import { initModel } from './model-registry';
@@ -163,28 +163,74 @@ export const createTrack = (
   return { track: module, clock };
 };
 
-// a sound switch that applies a preset at once (no progress): the presets without the synth
+// a sound switch that applies a preset at once (no progress, never switching): the presets without the synth
 export const immediateSoundSwitch = () =>
   [
-    { $progress: new BehaviorSubject<number | null>(null) },
+    { $progress: new BehaviorSubject<number | null>(null), $switching: new BehaviorSubject<boolean>(false) },
     { switchSound: (apply: () => void) => apply() },
   ] as unknown as SoundSwitchModule;
 
 // a track for the presets without the synth: an empty clip not saved (a spec puts its clip in); a save of it takes
-// its id and hash and it tells a change as the track does, the clips of presets it is given are recorded
+// its id and hash and it tells a change as the track does, the clips of presets it is given are recorded. A clip
+// heard from the list (auditionClip) is taken unless the spec blocks it (`$auditionBlocked`: REC, a MIDI Clock),
+// `$auditioning` until endAudition
 export const fakeTrack = () => {
   const $clip = new BehaviorSubject<Clip>(emptyClip(TEMPO_DEFAULT));
   const $id = new PrimitiveBS<string | null>(null);
   const $savedHash = new PrimitiveBS<string | null>(null);
   const $dirty = new PrimitiveBS<boolean>(false);
+  const $auditioning = new PrimitiveBS<boolean>(false);
+  const $auditionBlocked = new PrimitiveBS<AuditionBlock | null>(null);
+  const $playing = new PrimitiveBS<boolean>(false);
+  // Play of the track (its loop, or the clip of a preset heard)
+  const $armed = new PrimitiveBS<boolean>(false);
   combineLatest([$clip, $savedHash]).subscribe(([clip, hash]) => $dirty.next(dirtyOf(clip, hash)));
   const setSaved = jest.fn((id: string, clip: Clip) => {
     $id.next(id);
     $savedHash.next(clipHash(clip));
   });
+  const auditionClip = jest.fn(() => {
+    if ($auditionBlocked.value !== null) return false;
+    $playing.next(false);
+    $auditioning.next(true);
+    return true;
+  });
+  const playAudition = jest.fn(() => {
+    if (!$auditioning.value) return;
+    $armed.next(true);
+    $playing.next(true);
+  });
+  const holdAudition = jest.fn(() => {
+    $armed.next(false);
+    $playing.next(false);
+  });
+  const endAudition = jest.fn(() => {
+    if (!$auditioning.value) return;
+    $auditioning.next(false);
+    $playing.next(false);
+    $armed.next(false);
+  });
+  const play = jest.fn(() => {
+    $armed.next(true);
+    $playing.next(true);
+  });
+  const stop = jest.fn(() => {
+    if ($auditioning.value) return endAudition();
+    $armed.next(false);
+    $playing.next(false);
+  });
   return [
-    { $clip, $id, $savedHash, $dirty },
-    { setSaved, openPresetClip: jest.fn() },
+    { $clip, $id, $savedHash, $dirty, $auditioning, $auditionBlocked, $playing, $armed },
+    {
+      setSaved,
+      openPresetClip: jest.fn(),
+      auditionClip,
+      playAudition,
+      holdAudition,
+      endAudition,
+      play,
+      stop,
+    },
   ] as unknown as TrackModule;
 };
 

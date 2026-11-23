@@ -16,7 +16,7 @@ import { MOD_TARGET_ATTR } from '../mod-drag';
 import { modDragHighlight } from '../mod-drag/highlight';
 import { StepArrows } from '../draggable-number/step-arrows';
 import { useControlMenu } from '../control-menu';
-import { keyTip, SWITCH_KEY_TIP_DELAY, TIP_STYLES } from '../switch-key';
+import { keyTip, TIP_DELAY, TIP_STYLES } from '../switch-key';
 
 interface DragValueProps {
   // shown before the value (none: '')
@@ -332,7 +332,7 @@ export const DragValue = ({
   if (!hint) return root;
   return (
     <Tooltip
-      mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000}
+      mouseEnterDelay={TIP_DELAY / 1000}
       styles={TIP_STYLES}
       title={tip}
       {...(active && { open: false })}

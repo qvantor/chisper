@@ -7,8 +7,8 @@
 //   node scripts/presets/rehash.mjs [--apply]
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { readEnv } from '../bench-common.mjs';
 import { loadApp } from '../bench-perf/util.mjs';
+import { withPresetsDb, writeChanges } from './db.mjs';
 
 // the changes of `rows` as a report and the rows to write (pure: the test of the script)
 export const plan = (rows, rehashPresets) => {
@@ -23,16 +23,11 @@ export const plan = (rows, rehashPresets) => {
 
 const main = async () => {
   const apply = process.argv.includes('--apply');
-  readEnv();
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL of .env: the database of the presets');
   const { rehashPresets } = await loadApp({
     contents: `export { rehashPresets } from './netlify/utils/rehash';`,
     name: 'rehash',
   });
-  // (ESM only: a require of it gives its namespace, not the function)
-  const { default: postgres } = await import('postgres');
-  const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1 });
-  try {
+  await withPresetsDb(async (sql) => {
     const rows = await sql`SELECT id, hash, data FROM presets ORDER BY created_at, id`;
     const { changes, lines, blocked } = plan(rows, rehashPresets);
     lines.forEach((line) => console.log(line));
@@ -45,14 +40,13 @@ const main = async () => {
       console.log('a dry run: --apply writes them');
       return;
     }
-    await sql.begin(async (transaction) => {
-      for (const { id, hash, data } of changes)
-        await transaction`UPDATE presets SET data = ${transaction.json(data)}, hash = ${hash} WHERE id = ${id}`;
-    });
-    console.log(`${changes.length} presets rewritten: netlify api purgeCache`);
-  } finally {
-    await sql.end();
-  }
+    await writeChanges(
+      sql,
+      changes,
+      (transaction, { id, hash, data }) =>
+        transaction`UPDATE presets SET data = ${transaction.json(data)}, hash = ${hash} WHERE id = ${id}`
+    );
+  });
 };
 
 // the module `url` is the script node was started with (import.meta.url is the real path as a URL: a space of the

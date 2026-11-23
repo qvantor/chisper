@@ -3,7 +3,7 @@ title: 'Chisper benutzen: Anleitung zum Online-Synthesizer für Anfänger'
 h1: 'Erste Schritte mit Chisper'
 description: 'Spiel den kostenlosen Online-Synthesizer mit Computertastatur, MIDI-Keyboard oder Touch, lade Presets, lerne die Oberfläche kennen, teile Sounds ohne Konto.'
 nav: 'Erste Schritte'
-updated: 2026-11-17
+updated: 2026-11-23
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -67,7 +67,7 @@ und das Preset speichert sie.
 
 ## Schritt 3: Ein Preset auswählen
 
-<Figure name='presets' alt='Der Dialog Presets von Chisper: der Tab Popular, das Suchfeld und eine Liste von Presets, jedes mit der Zahl seiner Zuhörer' narrow>
+<Figure name='presets' alt='Der Dialog Presets von Chisper: seine Tabs, die Kategorien, das Suchfeld und eine Liste von Presets, jedes mit den Icons dessen, was es tut, und der Zahl seiner Zuhörer' narrow>
 
 Klick in der Kopfzeile auf den Namen des Presets, um den Dialog zu öffnen. Ein Klick auf eine Zeile spielt dieses
 Preset sofort, und der Dialog bleibt offen: So hörst du dich eines nach dem anderen durch.
@@ -77,14 +77,51 @@ Preset sofort, und der Dialog bleibt offen: So hörst du dich eines nach dem and
 - **Popular** zeigt die empfohlenen Presets und die, bei denen Zuhörer bleiben; die Zahl neben einem Preset sagt,
   wie viele Zuhörer dabei geblieben sind.
 - **All** zeigt jedes Preset, sortiert nach **New**, **A–Z** oder **Popular**. Wenn du in *Search all presets*
-  tippst, durchsuchst du alle nach Namen.
-- **◀ ▶** neben dem Namen in der Kopfzeile blättern durch die Liste, in der du warst (die beliebten Presets oder
-  deine letzte Suche): Den Dialog brauchst du dafür nicht einmal.
+  tippst, durchsuchst du alle nach Namen, Beschreibung und Tags.
+- Die Kategorien unter den Tabs (**Bass**, **Lead**, **Pad**, **Keys**, **Pluck**, **Brass & Chord**, **Drums**,
+  **FX**) grenzen die Liste ein, jede mit der Zahl ihrer Presets. Eine Kategorie mit Unterkategorien zeigt sie in einer
+  zweiten Reihe: **FX** hat **Game**, **UI & Alert**, **Magic**, **Sci-Fi** und mehr. **Popular** einer Kategorie
+  beginnt mit ihren beliebten Presets; der Rest von ihr folgt unter der Linie *Others in …*.
+- Die Filter-Taste neben der Suche öffnet die Tags (**Dark**, **Warm**, **Wide**…), was ein Preset tut (die Icons
+  unten) und **Factory** oder **Community**: die Presets, die für Chisper gemacht sind, oder die, die seine Nutzer
+  gespeichert haben. Die Taste zeigt, wie viele Filter an sind.
+- **Favorites** zeigt die Presets mit deinem Stern, **Recent** die, die du geöffnet hast, und **Mine** die, die in
+  diesem Browser gespeichert wurden. Der Stern einer Zeile nimmt ein Preset in **Favorites** auf oder heraus. Diese
+  Listen bleiben in diesem Browser.
+- Ein **FACTORY** hinter einem Namen kennzeichnet ein Preset, das für Chisper gemacht ist.
+- Der Streifen unter der Liste zeigt, was das geöffnete Preset ist: seine Kategorie und Unterkategorie, seine Tags
+  und die Beschreibung, die sein Autor geschrieben hat. Auf dem Handy zeigt eine Zeile nur ihre Nummer, ihr Dreieck und
+  ihren Namen; der Stern, der Link, die Taste zum Melden und der Stift des geöffneten Presets sind in diesem Streifen.
+- **◀ ▶** neben dem Namen in der Kopfzeile blättern durch die Liste, in der du warst (die beliebten Presets, eine
+  Kategorie oder deine letzte Suche): Den Dialog brauchst du dafür nicht einmal.
 - Der Kreispfeil, **Init preset**, lädt *Init*: einen schlichten Sound aus einem Oszillator, alles andere
   ausgeschaltet. Hier beginnen deine eigenen Sounds.
 - Ein **\*** hinter dem Namen bedeutet, dass du den Sound verändert hast, seit er geöffnet oder gespeichert wurde.
 - Jedes Preset hat seinen eigenen Link (`chisper.qvantor.org/?preset=…`): Die Adressleiste zeigt ihn, sobald du
   eines auswählst.
+
+Die Icons einer Zeile sagen, was ein Preset tut, immer in derselben Reihenfolge; fahr mit der Maus über eines, um
+seinen Namen zu sehen:
+
+| Icon                         | Bedeutet                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| Ein Dreieck vor dem Namen    | **With clip**: Das Preset öffnet sich mit einer eigenen Melodie          |
+| Ein Roboterkopf              | **AI generated**                                                         |
+| Ein Metronom                 | **Tempo-sync**: ein LFO, eine Hüllkurve oder ein Effekt folgt dem Tempo  |
+| **1**                        | **Mono**: eine Note nach der anderen                                     |
+| Eine Kurve zwischen zwei Punkten | **Glide**: Jede Note gleitet in die nächste                          |
+
+Das Dreieck vor einem Namen ist eine Taste: Klick darauf, um das Preset zu öffnen und seinen Clip im Loop anzuhören,
+während der Dialog offen bleibt. Die Taste wird zu einem Quadrat; ein zweiter Klick stoppt ihn. Die Taste einer
+anderen Zeile wechselt zu diesem Preset und seinem Clip; ein Klick auf eine Zeile oder das Schließen des Dialogs
+stoppen ihn auch. Die Melodie, die du in der Piano Roll hattest, kommt beim Stoppen so zurück, wie sie war, mit ihrem
+Tempo. Die Taste ist aus, solange **REC** aufnimmt oder eine MIDI Clock das Tempo vorgibt.
+
+Die Tastatur funktioniert auch im Dialog: <kbd>↓</kbd> und <kbd>↑</kbd> (oder <kbd>→</kbd> und <kbd>←</kbd>) öffnen
+das nächste Preset der Liste oder das davor, und die <kbd>Leertaste</kbd> spielt oder stoppt den Clip des ausgewählten
+Presets; bei einem Preset ohne Clip spielt sie den Clip der Piano Roll, wenn er Noten hat. Solange etwas läuft, spielen
+die Pfeile weiter: Ein Preset mit Clip spielt seinen eigenen, eines ohne den Clip der Piano Roll. Im Suchfeld tippt die
+<kbd>Leertaste</kbd> ein Leerzeichen, und <kbd>↓</kbd> <kbd>↑</kbd> blättern weiter durch die Liste.
 
 ## Was ist wo auf dem Bildschirm?
 
@@ -187,7 +224,10 @@ auf einer Sägezahn-Tabelle, eine Hüllkurve öffnet das Filter bei jeder Note.
 1. Drück **Save** (oder <kbd>⌘ S</kbd> / <kbd>Ctrl S</kbd>).
 2. Gib ihm einen Namen mit bis zu 40 Zeichen. Namen sind eindeutig, egal ob groß oder klein geschrieben: Ist einer
    schon vergeben, siehst du das schon beim Tippen.
-3. Drück **Save**. Der Dialog zeigt den Link zu deinem Preset und **Copy link**.
+3. Wenn du magst, sag, was es ist: eine Kategorie (Chisper wählt eine nach Namen und Sound, bis du selbst wählst),
+   eine Unterkategorie davon, bis zu drei Tags und eine Beschreibung mit bis zu 280 Zeichen, ohne Links. Sie helfen
+   anderen, es in der Liste zu finden; nötig ist nur der Name.
+4. Drück **Save**. Der Dialog zeigt den Link zu deinem Preset und **Copy link**.
 
 Wer den Link öffnet, hört deinen Sound: jeden Regler, jede Modulation und jeden Effekt. **Share** in der Kopfzeile
 kopiert den Link des Presets später noch einmal. Er spielt den Sound so, wie er gespeichert wurde: Speichere also
@@ -195,7 +235,12 @@ erneut, bevor du eine Änderung teilst.
 
 Ein Konto gibt es nicht: Der Browser, in dem du gespeichert hast, behält einen Schlüssel zum Preset, und dieser
 Browser kann es später überschreiben (**Save** bietet dann **Save** und **Save as new** an). Ein anderer Browser,
-ein anderes Gerät oder gelöschte Websitedaten können es nicht überschreiben, nur ein neues speichern.
+ein anderes Gerät oder gelöschte Websitedaten können es nicht überschreiben, nur ein neues speichern. In der Liste der
+Presets zeigt dieser Browser bei seinen Presets außerdem einen Stift, **Edit info**: Er ändert ihre Kategorie, ihre
+Tags und ihre Beschreibung, ohne den Sound neu zu speichern.
+
+Ist derselbe Sound schon gespeichert, sagt der Dialog das und gibt seinen Link: Dieses Preset behält seinen Namen,
+seinen Clip, seine Kategorie und seine Tags.
 
 Hat die Piano Roll Noten, bietet der Dialog außerdem **Default clip** an: Das Preset öffnet sich dann mit dieser
 Melodie, und sein Link spielt sie auch.

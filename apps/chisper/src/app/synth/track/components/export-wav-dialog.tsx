@@ -577,7 +577,7 @@ export const ExportWavDialog = ({
 
 // a key that tells why it can't export (a tooltip over a disabled key needs a wrapper)
 const KeyTip = ({ tip, children }: React.PropsWithChildren<{ tip: string }>) => (
-  <Tooltip title={tip} mouseEnterDelay={0.5}>
+  <Tooltip title={tip}>
     <span>{children}</span>
   </Tooltip>
 );

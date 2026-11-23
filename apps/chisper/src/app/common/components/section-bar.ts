@@ -93,6 +93,18 @@ export const Key = styled.button.attrs({ type: 'button', onMouseDown: keepFocus 
   ${keyStyle}
 `;
 
+// a key that stays on (aria-pressed): lit in the blue of the synth while it is
+export const LitKey = styled(Key)`
+  &[aria-pressed='true'] {
+    color: ${theme.colors.secondAccent};
+  }
+`;
+
+// a disabled key gets no mouse events: its tooltip is on this
+export const TipWrap = styled.span`
+  display: flex;
+`;
+
 // the screen of the roll: the dark of the charts, sunk into the section
 export const screenStyle = css`
   border-radius: 3px;

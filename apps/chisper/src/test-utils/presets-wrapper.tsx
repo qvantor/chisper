@@ -1,7 +1,8 @@
 import React from 'react';
 import { render } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { AppProvider } from '../app/app';
+import { createQueryClient } from '../app/app/query-client';
 import { SynthCoreProvider, InputControllerProvider } from '../app/synth/common/modules';
 import { PresetsProvider, usePresets } from '../app/presets/modules/presets';
 import { TrackContext } from '../app/synth/track/modules/track';
@@ -32,7 +33,8 @@ export const renderWithPresets = (
   ui: React.ReactElement,
   { track = fakeTrack() }: { track?: TrackModule } = {}
 ) => {
-  const queryClient = new QueryClient({
+  // the app's (what it reports), without retries
+  const queryClient = createQueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   let presets: PresetsModule | undefined;
@@ -56,5 +58,5 @@ export const renderWithPresets = (
   );
   const result = render(ui, { wrapper });
   if (!presets) throw new Error('presets model is not initialized');
-  return { ...result, presets };
+  return { ...result, presets, queryClient };
 };

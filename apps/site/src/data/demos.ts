@@ -25,7 +25,7 @@ export type Demo = {
   category: Category;
   // the preset on the site (/?preset=<id>)
   presetId: string;
-  // its name there without the prefix of the featured presets ([AI]) and of the category (FX)
+  // its name there (the one the site shows: scripts/site/check-presets.mjs checks it)
   name: string;
 };
 

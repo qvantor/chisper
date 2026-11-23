@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import {
   CLIP_BAR,
   DEFAULT_WAVETABLE_PATH,
+  EMPTY_PRESET_INFO,
   ENVELOPE_DEFAULTS,
   ENVELOPE_DIVISIONS,
   normalizePreset,
@@ -23,24 +24,29 @@ import * as app from '../../app';
 import { getSnapshot } from '../../app';
 import type { SoundSwitchModule } from '../../synth/common/modules/sound-switch';
 import { recordAnalytics } from '../../../test-utils/analytics';
+import { listItem as presetListItem } from '../../../test-utils/presets-fixtures';
 import {
   clearUrlPresetId,
+  editTokenIds,
   getEditToken,
   getPreset,
   getTopPresets,
   getUrlPresetId,
   markPresetOpened,
+  setEditToken,
   setUrlPresetId,
 } from '../services';
-import { CurrentPreset, INIT_NAME, presets } from './presets';
+import { CurrentPreset, INIT_NAME, keepOrder, presets, RECENT_MAX } from './presets';
 
 jest.mock('../services', () => ({
   clearUrlPresetId: jest.fn(),
+  editTokenIds: jest.fn(() => []),
   getEditToken: jest.fn(),
   getPreset: jest.fn(),
   getTopPresets: jest.fn(),
   getUrlPresetId: jest.fn(() => null),
   markPresetOpened: jest.fn(),
+  setEditToken: jest.fn(),
   setUrlPresetId: jest.fn(),
 }));
 
@@ -61,6 +67,8 @@ const deferred = <T>() => {
 };
 
 const listItem = (id: string) => ({ id, name: id }) as PresetListItem;
+// a row with all its fields
+const fullItem = (id: string) => presetListItem(id, id);
 
 // the state of the tab before a reload: its preset (the hash it was loaded with) and the attack of its sound
 const storeTabState = (current: CurrentPreset | null, attack: number, loadedAttack?: number) =>
@@ -737,12 +745,12 @@ describe('presets model', () => {
       const loading = deferred<Preset>();
       getPresetMock.mockReturnValue(loading.promise);
 
-      setList([{ id: 'p1', name: 'Listed name', uniqueUsers: 0 }]);
+      setList([{ ...fullItem('p1'), name: 'Listed name' }]);
       const load = loadById('p1');
-      expect($opening.value).toEqual({ name: 'Listed name', requested: true });
+      expect($opening.value).toEqual({ id: 'p1', name: 'Listed name', requested: true });
       loading.resolve({ ...preset('p1', 0.5), name: 'Renamed' });
       await load;
-      expect($opening.value).toEqual({ name: 'Renamed', requested: false });
+      expect($opening.value).toEqual({ id: 'p1', name: 'Renamed', requested: false });
       expect($current.value).toBeNull();
 
       pending.shift()?.();
@@ -758,7 +766,7 @@ describe('presets model', () => {
       const loading = deferred<Preset>();
       getPresetMock.mockReturnValue(loading.promise);
       const load = loadById('p1');
-      expect($opening.value).toEqual({ name: null, requested: true });
+      expect($opening.value).toEqual({ id: 'p1', name: null, requested: true });
       loading.resolve(preset('p1', 0.5));
       await load;
       expect($opening.value).toBeNull();
@@ -795,7 +803,7 @@ describe('presets model', () => {
         model: [{ $opening, $current }, { loadById, setList }],
       } = setup(soundSwitch);
       await flush();
-      setList(['a', 'b', 'c'].map((id) => ({ id, name: id.toUpperCase(), uniqueUsers: 0 })));
+      setList(['a', 'b', 'c'].map((id) => ({ ...fullItem(id), name: id.toUpperCase() })));
       const failing = deferred<Preset>();
       getPresetMock
         .mockResolvedValueOnce(preset('a', 0.1))
@@ -805,14 +813,14 @@ describe('presets model', () => {
       await loadById('a');
       const b = loadById('b');
       loadById('c');
-      expect($opening.value).toEqual({ name: 'C', requested: true });
+      expect($opening.value).toEqual({ id: 'c', name: 'C', requested: true });
       // a fades out after the clicks: applied, c still opening
       pending.shift()?.();
       expect($current.value?.id).toBe('a');
-      expect($opening.value).toEqual({ name: 'C', requested: true });
+      expect($opening.value).toEqual({ id: 'c', name: 'C', requested: true });
       failing.resolve(preset('b', 0.2));
       await b;
-      expect($opening.value).toEqual({ name: 'C', requested: true });
+      expect($opening.value).toEqual({ id: 'c', name: 'C', requested: true });
     });
 
     it('steps ◀ ▶ with the names of the list', async () => {
@@ -824,7 +832,7 @@ describe('presets model', () => {
       setList([listItem('x'), listItem('y')]);
       next();
       await flush();
-      expect($opening.value).toEqual({ name: 'x', requested: true });
+      expect($opening.value).toEqual({ id: 'x', name: 'x', requested: true });
     });
 
     it('shows Init at once on reset, until it is applied', () => {
@@ -833,7 +841,7 @@ describe('presets model', () => {
         model: [{ $opening }, { reset }],
       } = setup(soundSwitch);
       reset();
-      expect($opening.value).toEqual({ name: INIT_NAME, requested: false });
+      expect($opening.value).toEqual({ id: null, name: INIT_NAME, requested: false });
       pending.shift()?.();
       expect($opening.value).toBeNull();
     });
@@ -852,7 +860,7 @@ describe('presets model', () => {
       expect($loadProgress.value).toBe(0.1);
       top.resolve([listItem('a')]);
       await flush();
-      expect($opening.value).toEqual({ name: 'a', requested: true });
+      expect($opening.value).toEqual({ id: 'a', name: 'a', requested: true });
       expect($loadProgress.value).toBe(0.1);
 
       // changed meanwhile: the popular one isn't applied over the change (its bar fades where it is)
@@ -1296,6 +1304,381 @@ describe('presets model', () => {
       } = setup();
       setSaved({ id: 's1', name: 'Saved' });
       expect(markPresetOpenedMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('its info', () => {
+    const info = {
+      category: 'pad' as const,
+      subcategory: 'warm',
+      description: 'Soft',
+      tags: ['warm' as const],
+    };
+
+    it('knows the info of a preset opened or saved, none of Init', async () => {
+      const {
+        model: [{ $currentInfo }, { loadById, setSaved, reset }],
+      } = setup();
+      getPresetMock.mockResolvedValue({ ...preset('p1', 0.5), info });
+      await loadById('p1');
+      expect($currentInfo.value).toEqual(info);
+
+      setSaved({ id: 's1', name: 'Saved', info: EMPTY_PRESET_INFO });
+      expect($currentInfo.value).toEqual(EMPTY_PRESET_INFO);
+      reset();
+      expect($currentInfo.value).toBeNull();
+    });
+
+    it('keeps it in the tab: a reload knows it', async () => {
+      jest.useFakeTimers();
+      const first = setup();
+      const [, { setSaved }] = first.model;
+      const [, { setEnvelopeValue }] = first.env;
+      setEnvelopeValue('env1', 'attack', 0.4);
+      setSaved({ id: 's1', name: 'Saved', info });
+      setEnvelopeValue('env1', 'attack', 0.6);
+      jest.advanceTimersByTime(200);
+      expect(tabState().info).toEqual(info);
+      stopModels();
+
+      getUrlPresetIdMock.mockReturnValue('s1');
+      const [{ $currentInfo }] = setup().model;
+      expect($currentInfo.value).toEqual(info);
+    });
+
+    it('takes the info of an Edit info: the current preset and the popular presets know it', async () => {
+      getTopPresetsMock.mockResolvedValue([fullItem('p1'), fullItem('p2')]);
+      const {
+        model: [{ $currentInfo, $top }, { loadById, setInfo }],
+      } = setup();
+      await flush();
+      getPresetMock.mockResolvedValue(preset('p1', 0.5));
+      await loadById('p1');
+
+      setInfo('p1', info);
+      expect($currentInfo.value).toEqual(info);
+      expect($top.value?.[0]).toMatchObject(info);
+      expect($top.value?.[1]).toEqual(fullItem('p2'));
+      // of another preset: the current one keeps its own
+      setInfo('p2', EMPTY_PRESET_INFO);
+      expect($currentInfo.value).toEqual(info);
+    });
+  });
+
+  describe('the lists of this browser', () => {
+    it('lists the presets saved from it in Mine (the last first), a new one with its edit token kept', () => {
+      jest.mocked(editTokenIds).mockReturnValueOnce(['m1', 'm2']);
+      const {
+        model: [{ $mine }, { setSaved }],
+      } = setup();
+      expect($mine.value).toEqual(['m1', 'm2']);
+      setSaved({ id: 'm2', name: 'Saved', editToken: 'token-of-m2' });
+      expect(setEditToken).toHaveBeenCalledWith('m2', 'token-of-m2');
+      expect($mine.value).toEqual(['m2', 'm1']);
+      // an overwrite has no token: Mine stays
+      setSaved({ id: 'm1', name: 'Updated' });
+      expect(setEditToken).toHaveBeenCalledTimes(1);
+      expect($mine.value).toEqual(['m2', 'm1']);
+    });
+
+    it('stars a preset into Favorites (the last first) and out of it, kept by the browser', () => {
+      const { features } = recordAnalytics();
+      const {
+        model: [{ $favorites }, { toggleFavorite }],
+      } = setup();
+      toggleFavorite('a');
+      toggleFavorite('b');
+      expect($favorites.value).toEqual(['b', 'a']);
+      expect(JSON.parse(localStorage.getItem('presetFavorites') ?? '')).toEqual(['b', 'a']);
+      toggleFavorite('b');
+      expect($favorites.value).toEqual(['a']);
+      // a star added is a use, one taken off isn't
+      expect(features()).toEqual(['preset:favorites']);
+
+      stopModels();
+      expect(setup().model[0].$favorites.value).toEqual(['a']);
+    });
+
+    it.each(['not json', '{"a":1}', '[1,2]'])('reads %s of the storage as no favorites', (raw) => {
+      localStorage.setItem('presetFavorites', raw);
+      expect(setup().model[0].$favorites.value).toEqual([]);
+    });
+
+    it('keeps the presets opened by the user and saved in Recent, the last first, 50 at most', async () => {
+      const {
+        model: [{ $recent }, { loadById, setSaved }],
+      } = setup();
+      getPresetMock.mockImplementation(async (id) => preset(id, 0.5));
+      await loadById('a');
+      await loadById('b');
+      await loadById('a');
+      setSaved({ id: 's', name: 'Saved' });
+      expect($recent.value).toEqual(['s', 'a', 'b']);
+      expect(JSON.parse(localStorage.getItem('presetRecent') ?? '')).toEqual(['s', 'a', 'b']);
+
+      for (let i = 0; i < 60; i++) setSaved({ id: `p${i}`, name: `P${i}` });
+      expect($recent.value).toHaveLength(RECENT_MAX);
+      expect($recent.value[0]).toBe('p59');
+    });
+
+    it('changes a list as it is stored now: what another tab added or took off since stays so', async () => {
+      const {
+        model: [{ $favorites, $recent }, { toggleFavorite, loadById }],
+      } = setup();
+      getPresetMock.mockImplementation(async (id) => preset(id, 0.5));
+      toggleFavorite('a');
+      await loadById('a');
+      // another tab, since: a star added, Recent of its own
+      localStorage.setItem('presetFavorites', JSON.stringify(['x', 'a']));
+      localStorage.setItem('presetRecent', JSON.stringify(['y']));
+
+      toggleFavorite('b');
+      expect($favorites.value).toEqual(['b', 'x', 'a']);
+      expect(JSON.parse(localStorage.getItem('presetFavorites') ?? '')).toEqual(['b', 'x', 'a']);
+      await loadById('c');
+      expect($recent.value).toEqual(['c', 'y']);
+      expect(JSON.parse(localStorage.getItem('presetRecent') ?? '')).toEqual(['c', 'y']);
+
+      // a star the other tab took off: a click adds it, not takes it off
+      localStorage.setItem('presetFavorites', JSON.stringify(['x']));
+      toggleFavorite('b');
+      expect($favorites.value).toEqual(['b', 'x']);
+    });
+
+    it('shows what another tab stored in a list, all of them cleared too', () => {
+      const {
+        model: [{ $favorites, $recent }],
+      } = setup();
+      const stored = (key: string | null, ids?: string[]) => {
+        if (key && ids) localStorage.setItem(key, JSON.stringify(ids));
+        window.dispatchEvent(new StorageEvent('storage', { key }));
+      };
+      stored('presetFavorites', ['x']);
+      expect($favorites.value).toEqual(['x']);
+      expect($recent.value).toEqual([]);
+      stored('presetRecent', ['y', 'z']);
+      expect($recent.value).toEqual(['y', 'z']);
+      // (a key of another kind changes neither)
+      localStorage.setItem('presetFavorites', JSON.stringify(['w']));
+      stored('presetState');
+      expect($favorites.value).toEqual(['x']);
+
+      localStorage.clear();
+      stored(null);
+      expect($favorites.value).toEqual([]);
+      expect($recent.value).toEqual([]);
+    });
+
+    it('keeps the order of a list shown: ids moved stay, new ones first, those gone out', () => {
+      const shown = ['a', 'b', 'c'];
+      expect(keepOrder(shown, ['b', 'a', 'c'])).toBe(shown);
+      expect(keepOrder(shown, ['d', 'c', 'a', 'b'])).toEqual(['d', 'a', 'b', 'c']);
+      expect(keepOrder(shown, ['c', 'a'])).toEqual(['a', 'c']);
+      expect(keepOrder([], ['a', 'b'])).toEqual(['a', 'b']);
+    });
+
+    it('keeps the list in memory while the storage can’t be read', () => {
+      const {
+        model: [{ $favorites }, { toggleFavorite }],
+      } = setup();
+      const getItem = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      toggleFavorite('a');
+      toggleFavorite('b');
+      expect($favorites.value).toEqual(['b', 'a']);
+      getItem.mockRestore();
+    });
+
+    it('leaves the preset opened on start by itself out of Recent', async () => {
+      getTopPresetsMock.mockResolvedValue(['a'].map(listItem));
+      getPresetMock.mockResolvedValue(preset('a', 0.5));
+      const {
+        model: [{ $current, $recent }],
+      } = setup();
+      await flush();
+      expect($current.value?.auto).toBe(true);
+      expect($recent.value).toEqual([]);
+    });
+  });
+
+  describe('the clip of a row heard', () => {
+    const clip = { id: 'c1', clip: { bpm: 100, length: CLIP_BAR, notes: [], name: 'Riff' } };
+    const withClip = (id: string): Preset => ({ ...preset(id, 0.5), clip });
+
+    // a switch the test applies and ends: on from a switch to its end
+    const endingSwitch = () => {
+      const pending: (() => void)[] = [];
+      const $switching = new BehaviorSubject<boolean>(false);
+      const soundSwitch = [
+        { $progress: new BehaviorSubject<number | null>(null), $switching },
+        {
+          switchSound: (apply: () => void) => {
+            $switching.next(true);
+            pending.push(apply);
+          },
+        },
+      ] as unknown as SoundSwitchModule;
+      return { pending, soundSwitch, $switching };
+    };
+
+    it('opens the preset and plays its clip once its sound plays: the track stops at once, takes it in the switch', async () => {
+      const { features } = recordAnalytics();
+      const { pending, soundSwitch, $switching } = endingSwitch();
+      const {
+        model: [{ $auditioning, $current }, { audition }],
+        track: [, { holdAudition, auditionClip, playAudition, openPresetClip }],
+      } = setup(soundSwitch);
+      getPresetMock.mockResolvedValue(withClip('p1'));
+
+      await audition('p1');
+      expect($auditioning.value).toBe('p1');
+      expect(holdAudition).toHaveBeenCalledTimes(1);
+      expect(auditionClip).not.toHaveBeenCalled();
+
+      pending.shift()?.();
+      expect(auditionClip).toHaveBeenCalledWith(clip);
+      expect(openPresetClip).not.toHaveBeenCalled();
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      // not in the fade: once the output opens
+      expect(playAudition).not.toHaveBeenCalled();
+      $switching.next(false);
+      expect(playAudition).toHaveBeenCalledTimes(1);
+      expect(features()).toEqual(['preset:audition']);
+    });
+
+    it('a Play of another row takes its place: only the last one plays', async () => {
+      const { pending, soundSwitch, $switching } = endingSwitch();
+      const {
+        model: [{ $auditioning, $current }, { audition }],
+        track: [, { auditionClip, playAudition, endAudition }],
+      } = setup(soundSwitch);
+      getPresetMock.mockImplementation(async (id) => withClip(id));
+      await audition('p1');
+      pending.shift()?.();
+      await audition('p2');
+      expect($auditioning.value).toBe('p2');
+      $switching.next(false);
+      expect(playAudition).not.toHaveBeenCalled();
+
+      pending.shift()?.();
+      $switching.next(false);
+      expect(auditionClip).toHaveBeenCalledTimes(2);
+      expect(playAudition).toHaveBeenCalledTimes(1);
+      expect(endAudition).not.toHaveBeenCalled();
+      expect($current.value?.id).toBe('p2');
+    });
+
+    it('hears the clip of the current preset as it sounds: not opened again, its knobs turned stay', async () => {
+      const { pending, soundSwitch, $switching } = endingSwitch();
+      const {
+        env: [{ $envelopes }, { setEnvelopeValue }],
+        model: [{ $auditioning, $current, $opening }, { loadById, audition }],
+        track: [, { auditionClip, playAudition }],
+      } = setup(soundSwitch);
+      getPresetMock.mockResolvedValue(withClip('p1'));
+      await loadById('p1');
+      pending.shift()?.();
+      $switching.next(false);
+      setEnvelopeValue('env1', 'attack', 0.3);
+      // (spied by a test before: its calls of the opening above)
+      const applySnapshot = jest.spyOn(app, 'applySnapshot');
+      applySnapshot.mockClear();
+
+      await audition('p1');
+      expect(pending).toHaveLength(0);
+      expect($opening.value).toBeNull();
+      expect(applySnapshot).not.toHaveBeenCalled();
+      // the clip it opened with: not asked for again
+      expect(getPresetMock).toHaveBeenCalledTimes(1);
+      expect(auditionClip).toHaveBeenCalledWith(clip);
+      expect(playAudition).toHaveBeenCalledTimes(1);
+      expect($auditioning.value).toBe('p1');
+      expect($current.value).toEqual({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      expect($envelopes.value.env1.attack).toBe(0.3);
+    });
+
+    it('asks for the clip of a current preset it does not know (saved), a failed request ends it, said', async () => {
+      const {
+        model: [{ $auditioning }, { setSaved, audition }],
+        track: [, { auditionClip, playAudition, endAudition }],
+      } = setup();
+      setSaved({ id: 'p1', name: 'Preset p1', clipId: 'c1' });
+      getPresetMock.mockRejectedValueOnce(new Error('Server down'));
+
+      await audition('p1');
+      expect(getPresetMock).toHaveBeenCalledWith('p1');
+      expect(auditionClip).not.toHaveBeenCalled();
+      expect($auditioning.value).toBeNull();
+      expect(playAudition).not.toHaveBeenCalled();
+      expect(endAudition).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith('Server down');
+    });
+
+    it('Stop gives the track its clip back; a start still to come never plays', async () => {
+      const { pending, soundSwitch, $switching } = endingSwitch();
+      const {
+        model: [{ $auditioning }, { audition, stopAudition }],
+        track: [, { playAudition, endAudition }],
+      } = setup(soundSwitch);
+      getPresetMock.mockResolvedValue(withClip('p1'));
+      await audition('p1');
+      pending.shift()?.();
+      stopAudition();
+      expect($auditioning.value).toBeNull();
+      expect(endAudition).toHaveBeenCalledTimes(1);
+      $switching.next(false);
+      expect(playAudition).not.toHaveBeenCalled();
+    });
+
+    it('a preset the list closed on before it came opens without its clip heard', async () => {
+      const { soundSwitch, pending } = endingSwitch();
+      const {
+        model: [{ $auditioning }, { audition, stopAudition }],
+        track: [, { auditionClip, openPresetClip }],
+      } = setup(soundSwitch);
+      const request = deferred<Preset>();
+      getPresetMock.mockReturnValue(request.promise);
+      const opening = audition('p1');
+      stopAudition();
+      request.resolve(withClip('p1'));
+      await opening;
+      pending.shift()?.();
+      expect(auditionClip).not.toHaveBeenCalled();
+      expect(openPresetClip).toHaveBeenCalledWith(clip);
+      expect($auditioning.value).toBeNull();
+    });
+
+    it.each([
+      ['has no clip any more', () => Promise.resolve(preset('p1', 0.5)), false],
+      ['is refused by the track (REC, a MIDI Clock)', () => Promise.resolve(withClip('p1')), true],
+      ['fails to load', () => Promise.reject(new Error('gone')), false],
+    ])('ends when its preset %s', async (_, load, refuse) => {
+      const track = fakeTrack();
+      track[0].$auditionBlocked.next(refuse ? 'rec' : null);
+      createEnvelopes();
+      const [{ $auditioning }, { audition }] = initModel(
+        presets({ soundSwitch: immediateSoundSwitch(), track }),
+        'presets',
+        undefined
+      );
+      getPresetMock.mockImplementation(load);
+      await audition('p1');
+      expect($auditioning.value).toBeNull();
+      expect(track[1].playAudition).not.toHaveBeenCalled();
+    });
+
+    it('ends with the clip the track stops itself (its Stop, REC, a MIDI Clock)', async () => {
+      const {
+        model: [{ $auditioning }, { audition }],
+        track,
+      } = setup();
+      getPresetMock.mockResolvedValue(withClip('p1'));
+      await audition('p1');
+      expect($auditioning.value).toBe('p1');
+      expect(track[1].playAudition).toHaveBeenCalledTimes(1);
+      track[1].endAudition();
+      expect($auditioning.value).toBeNull();
     });
   });
 });

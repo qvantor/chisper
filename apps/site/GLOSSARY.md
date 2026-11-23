@@ -107,12 +107,22 @@ The names of the synth (knobs, sections, modes, buttons, presets, tables) stay i
 | cover picture (a tag)                     | la imagen de portada     | das Coverbild                               | es: carátula; de: Cover                                         |
 | icon (of Chisper)                         | el icono                 | das Icon                                    | de: Symbol                                                      |
 | preset                                    | el preset                | das Preset                                  |                                                                 |
+| category (of a preset: Bass, Pad…)        | la categoría             | die Kategorie                               | de: Sparte                                                      |
+| subcategory (of a preset)                 | la subcategoría          | die Unterkategorie                          |                                                                 |
+| tag (of a preset: Dark, Warm…)            | la etiqueta              | das Tag                                     | es: tag; de: Schlagwort                                         |
+| description (of a preset)                 | la descripción           | die Beschreibung                            |                                                                 |
+| filter (of the list of presets)           | el filtro                | der Filter                                  |                                                                 |
+| favorites (a list of the browser)         | los favoritos            | die Favoriten                               |                                                                 |
+| star (that adds a favorite)               | la estrella              | der Stern                                   |                                                                 |
+| to listen to (a clip from the list)       | escuchar                 | anhören                                     | es: oír                                                         |
+| icon (of a row: what a preset does)       | el icono                 | das Icon                                    | de: Symbol                                                      |
 
 ## Playing
 
 | en                | es                       | de                   | Not                           |
 | ----------------- | ------------------------ | -------------------- | ----------------------------- |
 | key               | la tecla                 | die Taste            |                               |
+| Space (the key)   | Espacio                  | die Leertaste        | es: barra espaciadora         |
 | note              | la nota                  | die Note             |                               |
 | chord             | el acorde                | der Akkord           |                               |
 | computer keyboard | el teclado del ordenador | die Computertastatur | es: teclado de la computadora |

@@ -4,11 +4,22 @@ export { ToastAsk, Toasts } from './toast';
 export { NoteValueKeys } from './note-value-keys';
 export { OctaveControl } from './octave-control';
 export { CaretButton } from './caret-button';
-export { Bar, BarTitle, DirtyDot, Key, screenStyle, SECTION_SHADOW, Spacer } from './section-bar';
+export {
+  Bar,
+  BarTitle,
+  DirtyDot,
+  Key,
+  LitKey,
+  screenStyle,
+  SECTION_SHADOW,
+  Spacer,
+  TipWrap,
+} from './section-bar';
 export {
   Dialog,
   DialogIntro,
   DialogScreen,
+  SCREEN_LINE,
   ScreenHead,
   screenCheckStyle,
   screenItemStyle,

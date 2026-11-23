@@ -1,5 +1,6 @@
 import { ConfigProvider } from 'antd';
 import { StyleSheetManager } from 'styled-components';
+import { TIP_DELAY } from '@chisper/ui-kit';
 import { App } from './app';
 import Synth from './synth';
 
@@ -8,6 +9,8 @@ export function Core() {
   return (
     <StyleSheetManager enableVendorPrefixes>
       <ConfigProvider
+        // a tooltip waits as those of the keys of the synth: passing over the page shows none
+        tooltip={{ mouseEnterDelay: TIP_DELAY / 1000 }}
         theme={{
           token: {
             borderRadius: 0,

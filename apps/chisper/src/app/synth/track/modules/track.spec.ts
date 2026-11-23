@@ -1283,6 +1283,168 @@ describe('track', () => {
     });
   });
 
+  describe('the clip of a preset heard from the list', () => {
+    const riff: Clip = { bpm: 100, length: CLIP_BAR, notes: [note(0, 1, 60)], name: 'Riff' };
+    const bass: Clip = { bpm: 140, length: CLIP_BAR * 2, notes: [note(1, 1, 40)], name: 'Bass' };
+    const mine: Clip = { bpm: 90, length: CLIP_BAR, notes: [note(0, 2, 64)] };
+    const ofPreset = (id: string, clip: Clip) => ({ id, clip });
+
+    // the track with a clip of the user: saved under c0 then changed (its undo has a step), its tempo 90
+    const withMine = async () => {
+      window.history.replaceState(null, '', '/?clip=c0');
+      const loadClip = jest.fn().mockResolvedValue({ id: 'c0', clip: mine, createdAt: '' });
+      const context = await setup(loadClip);
+      await flush();
+      context.actions.setNotes([note(0, 2, 64), note(2, 1, 67)]);
+      return context;
+    };
+
+    it('plays in place of the clip of the user, which comes back as it was with Stop: its tempo, link, undo', async () => {
+      const { actions, model, transportModel, sent, play } = await withMine();
+      const before = model.$clip.value;
+      expect(actions.auditionClip(ofPreset('c1', riff))).toBe(true);
+      expect(model.$auditioning.value).toBe(true);
+      expect(model.$clip.value).toEqual(riff);
+      expect(transportModel.$bpm.value).toBe(100);
+      // not in the url: a link of the page is of the clip of the user
+      expect(window.location.search).toBe('?clip=c0');
+      // stopped until its sound plays
+      expect(model.$playing.value).toBe(false);
+
+      actions.playAudition();
+      await play(0.02);
+      expect(sent).toEqual(['on C4 @0.05']);
+
+      actions.endAudition();
+      expect(model.$auditioning.value).toBe(false);
+      expect(model.$playing.value).toBe(false);
+      expect(model.$clip.value).toBe(before);
+      expect(model.$id.value).toBe('c0');
+      expect(transportModel.$bpm.value).toBe(90);
+      await wait(150);
+      expect(model.$dirty.value).toBe(true);
+      actions.undo();
+      expect(model.$clip.value.notes).toEqual(mine.notes);
+    });
+
+    it('another heard after it takes its place, the clip of the user stays aside', async () => {
+      const { actions, model } = await withMine();
+      const before = model.$clip.value;
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.playAudition();
+      expect(model.$playing.value).toBe(true);
+      actions.holdAudition();
+      expect(model.$playing.value).toBe(false);
+      actions.auditionClip(ofPreset('c2', bass));
+      expect(model.$clip.value).toEqual(bass);
+      actions.endAudition();
+      expect(model.$clip.value).toBe(before);
+    });
+
+    it('the tab keeps the clip of the user meanwhile: a reload has it', async () => {
+      const { actions } = await withMine();
+      await wait(250);
+      actions.auditionClip(ofPreset('c1', riff));
+      await wait(250);
+      const stored = JSON.parse(sessionStorage.getItem('trackState') ?? 'null');
+      expect(stored).toMatchObject({ id: 'c0' });
+      expect(stored.clip.notes).toEqual([note(0, 2, 64), note(2, 1, 67)]);
+    });
+
+    it('a free track takes the clip as a preset opens it: it stays after, stopped', async () => {
+      const { actions, model } = await setup();
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.playAudition();
+      actions.endAudition();
+      expect(model.$clip.value).toEqual(riff);
+      expect(model.$id.value).toBe('c1');
+      expect(model.$playing.value).toBe(false);
+      expect(window.location.search).toBe('?clip=c1');
+      // the clip of a preset: the next preset takes its place
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c2');
+    });
+
+    it('a free track opens each clip heard after another in the url too: the last one stays, a reload has it', async () => {
+      const { actions, model } = await setup();
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.auditionClip(ofPreset('c2', bass));
+      expect(model.$clip.value).toEqual(bass);
+      expect(model.$id.value).toBe('c2');
+      expect(window.location.search).toBe('?clip=c2');
+      actions.endAudition();
+      expect(model.$clip.value).toEqual(bass);
+      expect(window.location.search).toBe('?clip=c2');
+      await wait(250);
+      expect(JSON.parse(sessionStorage.getItem('trackState') ?? 'null')).toMatchObject({ id: 'c2' });
+    });
+
+    it('a preset opened while a clip is heard leaves the track to it: the clip aside comes back with its url', async () => {
+      const { actions, model } = await withMine();
+      const before = model.$clip.value;
+      actions.auditionClip(ofPreset('c1', riff));
+      // (an opening of a preset that ends late: its fade over while the next one heard is still asked for)
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$clip.value).toEqual(riff);
+      expect(window.location.search).toBe('?clip=c0');
+      actions.endAudition();
+      expect(model.$clip.value).toBe(before);
+      expect(model.$id.value).toBe('c0');
+      expect(window.location.search).toBe('?clip=c0');
+      actions.undo();
+      expect(model.$clip.value.notes).toEqual(mine.notes);
+    });
+
+    it('over a free track a preset opened while a clip is heard opens nothing either', async () => {
+      const { actions, model } = await setup();
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.openPresetClip(ofPreset('c2', bass));
+      expect(model.$id.value).toBe('c1');
+      expect(window.location.search).toBe('?clip=c1');
+    });
+
+    it('the Stop of the track ends it: the clip of the user is back', async () => {
+      const { actions, model } = await withMine();
+      const before = model.$clip.value;
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.playAudition();
+      actions.stop();
+      expect(model.$auditioning.value).toBe(false);
+      expect(model.$clip.value).toBe(before);
+    });
+
+    it('REC ends it and records into the clip of the user', async () => {
+      const { actions, model } = await withMine();
+      const before = model.$clip.value;
+      actions.auditionClip(ofPreset('c1', riff));
+      actions.record();
+      expect(model.$auditioning.value).toBe(false);
+      expect(model.$clip.value).toBe(before);
+      expect(model.$recording.value).toBe(true);
+    });
+
+    it('is refused while REC records or a MIDI Clock leads, which it tells; a MIDI Clock ends one', async () => {
+      const { actions, model, transportActions } = await withMine();
+      const before = model.$clip.value;
+      expect(model.$auditionBlocked.value).toBeNull();
+      actions.record();
+      expect(model.$auditionBlocked.value).toBe('rec');
+      expect(actions.auditionClip(ofPreset('c1', riff))).toBe(false);
+      actions.stop();
+      expect(model.$auditionBlocked.value).toBeNull();
+      transportActions.setSource('midi');
+      expect(model.$auditionBlocked.value).toBe('midi');
+      expect(actions.auditionClip(ofPreset('c1', riff))).toBe(false);
+      expect(model.$clip.value).toBe(before);
+
+      transportActions.setSource('internal');
+      actions.auditionClip(ofPreset('c1', riff));
+      transportActions.setSource('midi');
+      expect(model.$auditioning.value).toBe(false);
+      expect(model.$clip.value).toBe(before);
+    });
+  });
+
   describe('Space', () => {
     // a keydown of Space on `target` (none focused: the body)
     const space = (init: KeyboardEventInit = {}, target: EventTarget = document.body) => {

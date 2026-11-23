@@ -1,5 +1,18 @@
 import { z } from 'zod';
 import type { ClipResponse } from './clip';
+import { isProfane, profaneDescription } from './profanity';
+import {
+  CATEGORY_SLUGS,
+  fitsCategory,
+  PRESET_FEATURES,
+  PRESET_ORIGINS,
+  type PresetCategory,
+  type PresetFeature,
+  type PresetInfo,
+  presetInfoSchema,
+  type PresetTag,
+  TAG_SLUGS,
+} from './taxonomy';
 import {
   DIVISION_MAX,
   DIVISION_OFF,
@@ -800,11 +813,23 @@ const presetClipIdSchema = clipIdSchema.nullable().optional();
 // a Cloudflare Turnstile response, single use
 export const turnstileTokenSchema = z.string().min(1).max(4096);
 
+// an info as it is saved: a description it can be saved with, checked as a name is, its word refused told (the issue
+// on the description: the server tells it, the fields show it as it is typed)
+export const savedPresetInfoSchema = presetInfoSchema.refine(
+  ({ description }) => description === null || !isProfane(description),
+  {
+    error: ({ input }) => profaneDescription((input as PresetInfo).description ?? '') ?? undefined,
+    path: ['description'],
+  }
+);
+
 export const savePresetRequestSchema = z.object({
   name: presetNameSchema,
   data: savedPresetDataSchema,
   turnstileToken: turnstileTokenSchema,
   clipId: presetClipIdSchema,
+  // its category, description and tags (none: an empty info)
+  info: savedPresetInfoSchema.optional(),
 });
 export type SavePresetRequest = z.input<typeof savePresetRequestSchema>;
 
@@ -816,8 +841,17 @@ export const updatePresetRequestSchema = z.object({
   data: savedPresetDataSchema,
   editToken: editTokenSchema,
   clipId: presetClipIdSchema,
+  // missing: the info stays as it is
+  info: savedPresetInfoSchema.optional(),
 });
 export type UpdatePresetRequest = z.input<typeof updatePresetRequestSchema>;
+
+// Edit info: the category, description and tags of a preset alone (its sound, name and hash stay)
+export const updatePresetInfoRequestSchema = z.object({
+  editToken: editTokenSchema,
+  info: savedPresetInfoSchema,
+});
+export type UpdatePresetInfoRequest = z.input<typeof updatePresetInfoRequestSchema>;
 
 // the author opened the preset, it is kept from the cleanup
 export const presetOpenedRequestSchema = z.object({
@@ -841,17 +875,66 @@ export type UsageRequest = z.input<typeof usageRequestSchema>;
 export const PRESET_SORTS = ['new', 'name', 'popular'] as const;
 export type PresetSort = (typeof PRESET_SORTS)[number];
 
-export const listPresetsQuerySchema = z.object({
-  q: z.string().trim().max(PRESET_NAME_MAX_LENGTH).optional(),
-  sort: z.enum(PRESET_SORTS).default('new'),
-  cursor: z.string().max(512).optional(),
-});
+// a list of a query: comma separated, empty items dropped
+const csv = <T extends z.ZodType<unknown, string>>(item: T, max: number) =>
+  z
+    .string()
+    .max(4096)
+    .transform((value) => value.split(',').filter((part) => part !== ''))
+    .pipe(z.array(item).max(max));
+
+// the ids a list of this browser asks for at once (Favorites, Recent, Mine)
+export const PRESET_IDS_MAX = 100;
+
+// the filter of GET /api/presets and /top (presetFilterParams of ./taxonomy writes it)
+export const presetFilterQuerySchema = z
+  .object({
+    q: z.string().trim().max(PRESET_NAME_MAX_LENGTH).optional(),
+    category: z.enum(CATEGORY_SLUGS).optional(),
+    subcategory: z.string().max(32).optional(),
+    tags: csv(z.enum(TAG_SLUGS), TAG_SLUGS.length).optional(),
+    features: csv(z.enum(PRESET_FEATURES), PRESET_FEATURES.length).optional(),
+    origin: z.enum(PRESET_ORIGINS).optional(),
+  })
+  .refine(({ category, subcategory }) => fitsCategory(category, subcategory));
+// a filter of the lists: of the server (GET /api/presets, /top) or of a list of this browser (matchesPresetFilter)
+export type PresetFilter = z.output<typeof presetFilterQuerySchema>;
+
+export const listPresetsQuerySchema = z.intersection(
+  presetFilterQuerySchema,
+  z.object({
+    sort: z.enum(PRESET_SORTS).default('new'),
+    cursor: z.string().max(512).optional(),
+    // these presets alone, in this order (a list of this browser), one page
+    ids: csv(presetIdSchema, PRESET_IDS_MAX).optional(),
+  })
+);
 
 // API responses
 export interface PresetListItem {
   id: string;
   name: string;
   uniqueUsers: number;
+  category: PresetCategory | null;
+  subcategory: string | null;
+  description: string | null;
+  tags: PresetTag[];
+  // in the order of PRESET_FEATURES
+  features: PresetFeature[];
+  // a preset of the synth (its author's)
+  factory: boolean;
+}
+
+// an item of the Popular (GET /api/presets/top): featured or over the threshold of the popular presets (true), the
+// rest of a filter after them (false)
+export interface TopPresetItem extends PresetListItem {
+  popular: boolean;
+}
+
+// the presets of each category and subcategory (not hidden)
+export interface PresetCounts {
+  total: number;
+  categories: Partial<Record<PresetCategory, { count: number; subcategories: Record<string, number> }>>;
 }
 
 // the clip a preset opens with: a saved clip (its name in it)
@@ -864,6 +947,9 @@ export interface Preset {
   createdAt: string;
   // the clip it opens with, chosen by its author; null: none
   clip: PresetClip | null;
+  info: PresetInfo;
+  factory: boolean;
+  features: PresetFeature[];
 }
 
 export interface PresetsPage {
@@ -879,6 +965,8 @@ export interface SavePresetResponse {
   editToken?: string;
   // the clip the preset opens with (of the one saved before when it existed); null: none
   clipId: string | null;
+  // its info (of the one saved before when it existed: it stays)
+  info: PresetInfo;
 }
 
 export interface NameAvailableResponse {
@@ -890,6 +978,12 @@ export interface UpdatePresetResponse {
   name: string;
   // the clip the preset opens with now; null: none
   clipId: string | null;
+  info: PresetInfo;
+}
+
+export interface UpdatePresetInfoResponse {
+  id: string;
+  info: PresetInfo;
 }
 
 export interface ApiError {

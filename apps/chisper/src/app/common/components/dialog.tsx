@@ -174,12 +174,15 @@ export const DialogScreen = styled.div`
   overflow: hidden;
 `;
 
+// the hairline between the rows of a screen
+export const SCREEN_LINE = `1px solid ${hexToRgba(colors.white, 0.08)}`;
+
 // the first row of a screen (a field, All), a hairline under it
 export const ScreenHead = styled.div`
   flex: none;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid ${hexToRgba(colors.white, 0.08)};
+  border-bottom: ${SCREEN_LINE};
 `;
 
 // the rows of a screen scrolled where there are many

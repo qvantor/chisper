@@ -449,6 +449,29 @@ an oscillator) are read, never written.
 - A preset may name the clip it opens with (`presets.clip_id`, a checkbox of the Save dialog saves the clip of the
   track first if needed; GET returns the clip). The track opens it (`openPresetClip`) only over no notes or an
   unchanged clip a preset opened, never over a clip of the user or a `?clip=` link; cleanup keeps such clips.
+- What a preset is lives in columns of `presets`, never in its data (the hash and the sound stay; no rehash):
+  `category`/`subcategory`/`tags` (closed lists of `taxonomy.ts` in `libs/preset-schema`, slugs only grow; a
+  subcategory is of its category, 3 tags at most), `description` (plain text, 280, no links, `isProfane`),
+  `features` (Mono, Glide, Tempo-sync worked out of the data by `presetFeatures` as a preset is saved; With clip and
+  AI of `clip_id`/`ai_generated`; `PRESET_FEATURES` is the order of the icons of a row), `factory` (the presets of
+  the synth: cleanup keeps them) and `ai_generated` — the last two set by `scripts/presets/flags.mjs` alone (the API
+  can't: new ported presets are saved without a prefix, then `flags.mjs --ai=<ids file> --apply`). Save takes the info
+  (an existing sound keeps its own), PUT `/:id/info` changes it alone with the edit token (Edit info: a pencil of a
+  row of an own preset); `/top` of a filter fills the Popular of a category with the rest of it by score (an item
+  says whether it is `popular`: the browser draws a line, _Others in …_, before the rest); `/counts` the presets of
+  each category; `?ids=` a list of the browser. The info of the existing presets: `categorize.mjs` (a sheet to check
+  by hand, then `--apply --csv=`). `matchesPresetFilter` filters as the server does (Favorites, Recent and Mine are
+  filtered in the browser).
+- The clip of a row heard (its Play): the preset opens as a click does, the track holds the clip of the user aside
+  (`auditionClip`: not in the url nor the tab; a free track opens it as a preset would) and plays the clip once
+  `$switching` of the sound switch is over (`playAudition`); Stop, a click on a row, the list closed, the Stop of the
+  track, REC or a MIDI Clock give it back (`endAudition`) with its undo and tempo, the track stopped. The current
+  preset isn't opened again: its clip is the one it opened with, fetched alone where the model doesn't have it (a
+  reload, a save) (its knobs turned stay). Keys of the open list
+  (`use-browser-keys.ts`, before the page's: the Space of the track skips them): the arrows open the next or the one
+  before of the selected preset (the one opening, else the current one: the lit row), Space plays or stops its clip;
+  without a clip the loop of the track (`play` of the track, as its Space; Space stops what plays). While Play is on
+  (`playMode` of the browser) a step plays the clip of the next one, one without a clip the loop of the track.
 
 ### Wavetables and noises
 

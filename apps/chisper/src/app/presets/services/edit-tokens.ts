@@ -11,6 +11,8 @@ export const editTokenStore = (key: string) => {
   return {
     get: (id: string): string | undefined => readTokens()[id],
     set: (id: string, token: string) => writeStored('localStorage', key, { ...readTokens(), [id]: token }),
+    // the ids of all of them, the newest last
+    ids: (): string[] => Object.keys(readTokens()),
   };
 };
 
@@ -19,3 +21,6 @@ const presetTokens = editTokenStore('presetEditTokens');
 export const getEditToken = presetTokens.get;
 
 export const setEditToken = presetTokens.set;
+
+// the presets saved from this browser (Mine), the newest first
+export const editTokenIds = () => presetTokens.ids().reverse();

@@ -13,6 +13,8 @@ export {
   DottedIcon,
   FollowIcon,
   HighPassIcon,
+  ICON_LINE,
+  IconSvg,
   LegatoIcon,
   LoopIcon,
   OneShotIcon,
@@ -136,8 +138,9 @@ const TipWhy = styled(TipText)`
   color: ${theme.colors.thirdAccent};
 `;
 
-// ms a key is hovered before its tooltip shows: passing over the keys (along a column of them) shows none
-export const SWITCH_KEY_TIP_DELAY = 1200;
+// ms a key is hovered before its tooltip shows: passing over the keys (along a column of them) shows none; every
+// tooltip of the app waits as long (the ConfigProvider of the app)
+export const TIP_DELAY = 1200;
 
 // the tooltip takes no pointer: moved onto it, the pointer leaves the key (the tooltip hides) and reaches the key
 // under it (in a column the tooltip covers the key above)
@@ -184,7 +187,7 @@ const PlateKey = ({
   const why = plate.disabled ? plate.disabledHint : disabledHint;
   return (
     <Tooltip
-      mouseEnterDelay={SWITCH_KEY_TIP_DELAY / 1000}
+      mouseEnterDelay={TIP_DELAY / 1000}
       styles={TIP_STYLES}
       title={keyTip(name, hint, off ? why : undefined)}
     >

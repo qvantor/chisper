@@ -1,6 +1,13 @@
-import { getEditToken, setEditToken } from './edit-tokens';
+import { editTokenIds, getEditToken, setEditToken } from './edit-tokens';
 
 describe('edit tokens', () => {
+  it('lists the presets saved from this browser, the newest first', () => {
+    expect(editTokenIds()).toEqual([]);
+    setEditToken('a', 'token-a');
+    setEditToken('b', 'token-b');
+    expect(editTokenIds()).toEqual(['b', 'a']);
+  });
+
   it('stores tokens per preset', () => {
     setEditToken('a', 'token-a');
     setEditToken('b', 'token-b');

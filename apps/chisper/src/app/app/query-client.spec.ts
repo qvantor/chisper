@@ -35,6 +35,28 @@ describe('createQueryClient', () => {
     expect(errors[0].properties).toMatchObject({ route: '/api/presets', method: 'GET', status: 500 });
   });
 
+  it('reports an answer of the API with an error of a query that names its load as the API one, once', async () => {
+    const { fingerprints } = recordAnalytics();
+    const client = createQueryClient({ defaultOptions: { queries: { retry: false } } });
+    fetchMock.mockResolvedValue(jsonResponse(500, {}));
+    await expect(
+      client.fetchQuery({
+        queryKey: ['presets'],
+        queryFn: () => listPresets({ sort: 'new' }),
+        meta: { load: 'preset_list' },
+      })
+    ).rejects.toMatchObject({ status: 500 });
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(
+      client.fetchQuery({
+        queryKey: ['presets', 2],
+        queryFn: () => listPresets({ sort: 'new' }),
+        meta: { load: 'preset_list' },
+      })
+    ).rejects.toThrow('Failed to fetch');
+    expect(fingerprints()).toEqual(['load:api:GET /api/presets:500', 'load:preset_list:TypeError']);
+  });
+
   it('reports no answer of the API its request reported already', async () => {
     const { fingerprints } = recordAnalytics();
     const client = createQueryClient({ defaultOptions: { queries: { retry: false } } });

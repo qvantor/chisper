@@ -19,11 +19,13 @@ const exportMock = exportWav as jest.MockedFunction<typeof exportWav>;
 
 jest.mock('../presets/services', () => ({
   clearUrlPresetId: jest.fn(),
+  editTokenIds: jest.fn(() => []),
   getEditToken: jest.fn(),
   getPreset: jest.fn(),
   getTopPresets: jest.fn(() => Promise.resolve([])),
   getUrlPresetId: jest.fn(() => null),
   markPresetOpened: jest.fn(),
+  setEditToken: jest.fn(),
   setUrlPresetId: jest.fn(),
 }));
 

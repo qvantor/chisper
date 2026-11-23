@@ -208,3 +208,6 @@ export const ContiguousIcon = () => (
     <path d='M1.5 9c1.6-5.4 4.9-5.4 6.5-1s4.9 4.4 6.5-1' {...LINE} />
   </Icon>
 );
+
+// the frame and the lines of these icons, for the icons of the app
+export { Icon as IconSvg, LINE as ICON_LINE };
