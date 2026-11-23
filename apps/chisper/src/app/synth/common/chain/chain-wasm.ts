@@ -11,6 +11,7 @@ import {
   FX_KINDS,
   LFO_STATE,
   LFO_TABLE,
+  MACROS,
   MAX_PARAMS,
   NOTE,
   ROUTE,
@@ -166,6 +167,12 @@ export const createChainWasm = (
         );
       }
       exports.chain_note(handle, 1);
+    },
+    // the levels of the macros from frame `at` on (0: the next block; null: that macro as it is)
+    setMacros: (levels: readonly (number | null)[], at = 0, instantly = false) => {
+      const buffer = values();
+      for (let k = 0; k < MACROS; k++) buffer[VALUES + k] = levels[k] ?? NaN;
+      event(CHAIN_EVENT.macros, instantly ? 1 : 0, 0, at);
     },
     // the LFOs from the time of a state on
     setLfos: ({ at, instantly, lfos }: LfosState) => {

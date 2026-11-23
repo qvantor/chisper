@@ -8,6 +8,7 @@ import {
   FX_KINDS,
   FxKind,
   LIMITER_STAGE,
+  MACROS,
   neutralState,
 } from '../chain/chain-params';
 import type { ChainWasm } from '../chain/chain-wasm';
@@ -21,8 +22,15 @@ import { seeded } from './seeded';
 // browsers in Node): the engine of its options, what a message tells it, what a block leaves to read, the meters
 // of its effects. No window, document or React here (the worklet module imports it)
 
-// The engine of a node made with `options` (its processorOptions): the chain of its state, the LFOs of the voices
-// and the chain as they are at once, what its notes draw at random (`seed`: two renders alike; else `random` of
+// the frame of the first block a time (seconds of the context) is due in, for both halves alike (0: none, the next
+// block): the halves of the engine take the levels of the macros in the same block
+export const dueFrame = (at: number | undefined, sampleRate: number) =>
+  at === undefined ? 0 : Math.max(0, Math.ceil(at * sampleRate - 1e-6));
+
+const NO_MACROS: readonly number[] = new Array<number>(MACROS).fill(0);
+
+// The engine of a node made with `options` (its processorOptions): the chain of its state, the LFOs and the
+// macros of the voices and the chain as they are at once, what its notes draw at random (`seed`: two renders alike; else `random` of
 // the caller), without the limiter (`unlimited`, or the caller's `limited: false`), each voice kept apart (`tap`),
 // the events of a scene before its first block. `state`: the one the engine was made of (its meters)
 export const createNodeEngine = (
@@ -42,6 +50,9 @@ export const createNodeEngine = (
   });
   // (the LFOs of the voices as those of the chain: a node made again has them at once)
   if (lfos) shared.setLfos(lfos);
+  // (the macros too: the shared of the voices outlives a node, those of the one before are forgotten)
+  shared.setMacros(options.macros ?? NO_MACROS, 0, true);
+  if (options.macros) engine.chain.setMacros(options.macros, 0, true);
   if (tap) engine.voices.tap(true);
   if (events) engine.voices.apply(events);
   return { engine, state };
@@ -127,7 +138,8 @@ const takeChainMessage = (chain: ChainWasm, message: ChainMessage, sampleRate: n
 
 // what a message of the main thread tells the engine of a node, as the worklet and a render on the main thread
 // take it: a state of the LFOs to the halves that read them (it is for a time ahead of now: one that comes late,
-// after `next`, the frame of the next block, takes over then), the events of the voices, what the chain is told,
+// after `next`, the frame of the next block, takes over then), the levels of the macros to both halves (each in
+// the first block of its time, the same block for both), the events of the voices, what the chain is told,
 // a meter watched or no more, a stage to make again (told back with `post`: made, or failed again). Each part
 // loses only itself: a state or events it can't read, a call of the chain that throws (`onError`; a call of the
 // core that traps loses its own events: apply), the parts after it are taken. Not here: `stop` and `probe`, which
@@ -157,6 +169,20 @@ export const takeEngineMessage = (
     }
   } catch (error) {
     onError(error);
+  }
+  if (message.macros) {
+    const { levels, at, instantly = false } = message.macros;
+    const frame = dueFrame(at, sampleRate);
+    try {
+      shared.setMacros(levels, frame, instantly);
+    } catch (error) {
+      onError(error);
+    }
+    try {
+      chain.setMacros(levels, frame, instantly);
+    } catch (error) {
+      onError(error);
+    }
   }
   try {
     if (message.events) voices.apply(message.events);

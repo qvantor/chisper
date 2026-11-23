@@ -1,17 +1,19 @@
 //! apps/chisper/src/app/synth/common/wavetable/voice-modulation.ts: the envelopes of a voice move its params,
 //! base + Σ amount × level (base × 2^Σ for a log one), clamped; one value while every envelope a param follows
 //! is in a flat stage. Source 3, after ENV 1–3, is the velocity of the voice (VELO: velocity.rs), flat but
-//! for a glide to the velocity of a note that takes the voice over; sources 4–7 its LFOs (lfo.rs). A bipolar
+//! for a glide to the velocity of a note that takes the voice over; sources 4–7 its LFOs (lfo.rs), 8–11 the macros
+//! of the node (dsp-core/src/macros.rs: one level each in Shared, flat but for a glide to a new one). A bipolar
 //! route moves a param by amount × (level - ½) (a uni one: amount × level, to the bit). The params are the knobs of
 //! the modules of targets.rs, by id; the base of each comes from the module that has it (BaseOf), asked only for
 //! the params a route moves. The pitch of an oscillator (Semi, Fine) is two params of base 0 (an offset of its
 //! detune within the bounds of its routes: the range of the knob from its value), so is the pitch of the noise. The
-//! knobs of the LFOs are params too (a Modulation of their own in the voice, sources ENV 1–3 and VELO): the times
+//! knobs of the LFOs are params too (a Modulation of their own in the voice, every source but the LFOs): the times
 //! by a share of their travel (pow: the knob is max · share⁴), Phase around the cycle (not clamped)
 
 use crate::envelope::EnvelopeBlock;
 use crate::glided::{glide_length, Glided};
-use crate::lfo::{frac, LfoBlock, LFOS, PHASE};
+use crate::lfo::{frac, LfoBlock, PHASE};
+use crate::macros::Macros;
 use crate::targets::{self, CUTOFF, FILTER, FILTER_EXTRA, FILTER_GAIN, LFO_KNOBS, TARGETS, WARP};
 use crate::voice::is_constant;
 use alloc::{vec, vec::Vec};
@@ -28,10 +30,10 @@ pub trait BaseOf {
     fn base(&self, module: usize, instance: usize, knob: usize) -> &[f32];
 }
 
-// the sources of the routes, by index (MOD_SOURCES of the schema): ENV 1–3, the velocity of the voice, LFO 1–4
-const VELO: usize = 3;
-pub const LFO: usize = VELO + 1;
-pub const SOURCES: usize = LFO + LFOS;
+// the sources of the routes, by index (sources.rs of dsp-core, those of the chain: MOD_SOURCES of the schema): ENV
+// 1–3, the velocity of the voice, LFO 1–4, the macros of the node
+use crate::sources::VELO;
+pub use crate::sources::{is_lfo, LFO_SOURCE as LFO, MACRO_SOURCE as MACRO, SOURCES};
 
 /// the scale of a param: linear, log (the routes in octaves), pow (a share of the travel of the knob)
 pub const LINEAR: u32 = 0;
@@ -51,11 +53,12 @@ pub struct VoiceRoute {
 }
 
 /// what the routes of a voice read: its envelopes, its velocity (VELO), its LFOs (none for the routes of the knobs
-/// of the LFOs)
+/// of the LFOs), the macros of its node (rendered for the block)
 pub struct Sources<'a> {
     pub envelopes: &'a [EnvelopeBlock],
     pub velocity: &'a Glided,
     pub lfos: &'a [LfoBlock],
+    pub macros: &'a Macros,
 }
 
 const BLOCK: usize = 128;
@@ -71,16 +74,26 @@ struct Level<'a> {
     values: &'a [f32],
 }
 
-// source `k` of the routes: an envelope, the velocity, an LFO (their fields, no call through a vtable in the loops
-// of the routes)
+// source `k` that is the velocity or a macro: flat but for a glide
+#[inline(always)]
+fn glided<'a>(sources: &Sources<'a>, k: usize) -> &'a Glided {
+    if k == VELO {
+        sources.velocity
+    } else {
+        &sources.macros.levels[k - MACRO]
+    }
+}
+
+// source `k` of the routes: an envelope, the velocity, an LFO, a macro (their fields, no call through a vtable in
+// the loops of the routes)
 #[inline(always)]
 fn source<'a>(sources: &Sources<'a>, k: usize) -> Level<'a> {
-    if k == VELO {
-        let velocity = sources.velocity;
+    if k == VELO || k >= MACRO {
+        let glided = glided(sources, k);
         Level {
-            constant: velocity.constant,
-            value: velocity.value(),
-            values: &velocity.values,
+            constant: glided.constant,
+            value: glided.value(),
+            values: &glided.values,
         }
     } else if k >= LFO {
         let lfo = &sources.lfos[k - LFO];
@@ -99,13 +112,14 @@ fn source<'a>(sources: &Sources<'a>, k: usize) -> Level<'a> {
     }
 }
 
-// the frame the flat stage of source `k` lasts until (-Infinity: it moved); the velocity is flat but for a glide
+// the frame the flat stage of source `k` lasts until (-Infinity: it moved); the velocity and a macro are flat but
+// for a glide
 fn flat_until(sources: &Sources, k: usize) -> f64 {
-    if k >= LFO {
+    if is_lfo(k) {
         sources.lfos[k - LFO].flat_until()
-    } else if k != VELO {
+    } else if k < VELO {
         sources.envelopes[k].flat_until()
-    } else if sources.velocity.gliding() {
+    } else if glided(sources, k).gliding() {
         f64::NEG_INFINITY
     } else {
         f64::INFINITY
@@ -344,7 +358,7 @@ impl Modulation {
                 continue;
             }
             let source = source as usize;
-            if (source < VELO && source >= self.envelopes) || (source >= LFO && !self.lfos) {
+            if (source < VELO && source >= self.envelopes) || (is_lfo(source) && !self.lfos) {
                 continue;
             }
             if route.param >= TARGETS || self.accesses >> route.param & 1 == 0 {
@@ -478,7 +492,7 @@ impl Modulation {
 
     /// a route reads an LFO
     pub fn uses_lfos(&self) -> bool {
-        self.used[LFO..].iter().any(|used| *used)
+        self.used[LFO..MACRO].iter().any(|used| *used)
     }
 
     pub fn wake(&mut self) {
@@ -648,7 +662,7 @@ impl Modulation {
 mod tests {
     use super::*;
     use crate::envelope::EnvelopeParams;
-    use crate::lfo::{LfoGlobal, LfoState, DELAY, KNOBS, RATE};
+    use crate::lfo::{LfoGlobal, LfoState, DELAY, KNOBS, LFOS, RATE};
     use crate::targets::{target, CUTOFF, FILTER, GAIN, OSC};
     use core::cell::RefCell;
 
@@ -725,6 +739,7 @@ mod tests {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &[],
+            macros: &Macros::default(),
         };
         modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
         modulation.moved(param).map(|values| values[0])
@@ -779,6 +794,7 @@ mod tests {
                 envelopes: &envelopes,
                 velocity: &velocity,
                 lfos: &[],
+                macros: &Macros::default(),
             };
             for _ in 0..blocks {
                 modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
@@ -840,6 +856,7 @@ mod tests {
                 envelopes: &envelopes,
                 velocity: &velocity,
                 lfos: &[],
+                macros: &Macros::default(),
             };
             for _ in 0..blocks {
                 modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
@@ -886,6 +903,7 @@ mod tests {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &[],
+            macros: &Macros::default(),
         };
         modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
         modulation.set(&[ranged(50.0)]);
@@ -960,6 +978,119 @@ mod tests {
     }
 
     #[test]
+    fn a_macro_moves_a_param_by_its_level_as_sources_8_to_11_and_the_knobs_of_the_lfos_take_it() {
+        let envelopes = envelopes(0.0);
+        let velocity = Glided::new(0.0);
+        let mut macros = Macros::default();
+        macros.set(&[0.25, 0.5, 0.75, 1.0], true, 1.0);
+        macros.render(0.0, 128);
+        let one = [1.0f32];
+        let moved = |routes: &[VoiceRoute], param: usize, lfos: bool| {
+            let mut modulation = Modulation::new(RATE_48, 3, lfos, routes, only(param));
+            let bases = Bases::new(&one);
+            let sources = Sources {
+                envelopes: &envelopes,
+                velocity: &velocity,
+                lfos: &[],
+                macros: &macros,
+            };
+            modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+            (
+                modulation.moved(param).map(|values| values[0]),
+                modulation.quiet_until,
+            )
+        };
+        for (k, level) in [0.25, 0.5, 0.75, 1.0].into_iter().enumerate() {
+            let source = (MACRO + k) as f64;
+            assert_eq!(
+                moved(&[route(source, GAIN1, 2.0, LINEAR, false)], GAIN1, true),
+                (Some((1.0 + 2.0 * level) as f32), f64::INFINITY)
+            );
+            // (bipolar: around the knob)
+            assert_eq!(
+                moved(&[route(source, GAIN1, 2.0, LINEAR, true)], GAIN1, true).0,
+                Some((1.0 + 2.0 * (level - 0.5)) as f32)
+            );
+        }
+        // MACRO 2 on Rate of LFO 1 (a Modulation of the knobs of the LFOs: no LFO there, a macro is)
+        let rate = lfo_target(0, RATE);
+        assert_eq!(
+            moved(&[route(9.0, rate, 1.0, LOG, false)], rate, false).0,
+            Some(2f32.sqrt())
+        );
+        assert_eq!(moved(&[route(5.0, rate, 1.0, LOG, false)], rate, false).0, None);
+        // a macro is not an LFO: the LFOs of the voice are not rendered for it
+        let modulation = Modulation::new(
+            RATE_48,
+            3,
+            true,
+            &[route(8.0, GAIN1, 1.0, LINEAR, false)],
+            only(GAIN1),
+        );
+        assert!(modulation.uses(MACRO) && !modulation.uses_lfos());
+        // past the macros: no source
+        assert_eq!(
+            moved(&[route(12.0, GAIN1, 2.0, LINEAR, false)], GAIN1, true).0,
+            None
+        );
+    }
+
+    #[test]
+    fn a_macro_that_glides_moves_its_params_without_a_step_and_they_are_quiet_again_once_it_is_there() {
+        let envelopes = envelopes(0.0);
+        let velocity = Glided::new(0.0);
+        let mut macros = Macros::default();
+        let mut modulation = Modulation::new(
+            RATE_48,
+            3,
+            true,
+            &[route(10.0, GAIN1, 10.0, LINEAR, false)],
+            only(GAIN1),
+        );
+        let one = [1.0f32];
+        let bases = Bases::new(&one);
+        let glide = glide_length(RATE_48);
+        let mut played: Vec<f32> = Vec::new();
+        let mut quiet = Vec::new();
+        for block in 0..8 {
+            // MACRO 3 to 1 from block 2 on
+            if block == 2 {
+                macros.set(&[f64::NAN, f64::NAN, 1.0, f64::NAN], false, glide);
+                modulation.wake();
+            }
+            macros.render(block as f64 * 128.0, 128);
+            let sources = Sources {
+                envelopes: &envelopes,
+                velocity: &velocity,
+                lfos: &[],
+                macros: &macros,
+            };
+            let frame = played.len() as f64;
+            modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+            quiet.push(modulation.quiet_until);
+            let moved = modulation.moved(GAIN1).expect("moved");
+            played.extend((0..128).map(|i| moved[if moved.len() > 1 { i } else { 0 }]));
+        }
+        let glide = glide as usize;
+        assert!(played[..256].iter().all(|value| *value == 1.0));
+        assert!(played[256 + glide..].iter().all(|value| *value == 11.0));
+        // 10 × 1 over the glide, a line (the points of the routes every 32 samples, linear between them)
+        let most = 10.0 / glide as f64 * 1.001;
+        for i in 1..played.len() {
+            assert!(
+                ((played[i] - played[i - 1]) as f64).abs() <= most,
+                "{i}: {} after {}",
+                played[i],
+                played[i - 1]
+            );
+        }
+        // quiet while it is flat, worked out every block while it glides (and the block after it got there)
+        assert_eq!(quiet[1], f64::INFINITY);
+        assert!(quiet[2..6].iter().all(|until| *until == f64::NEG_INFINITY));
+        assert_eq!(quiet[7], f64::INFINITY);
+    }
+
+    #[test]
     fn an_lfo_in_its_delay_keeps_the_routes_quiet_until_the_delay_ends() {
         let mut lfo = LfoGlobal::default();
         lfo.set(
@@ -992,6 +1123,7 @@ mod tests {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &lfos,
+            macros: &Macros::default(),
         };
         modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
         assert_eq!(modulation.moved(GAIN1).map(|values| values[0]), Some(0.5));
@@ -1011,6 +1143,7 @@ mod tests {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &[],
+            macros: &Macros::default(),
         };
         let mut played: Vec<f32> = Vec::new();
         let mut render = |modulation: &mut Modulation, blocks: usize| {
@@ -1059,6 +1192,7 @@ mod tests {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &[],
+            macros: &Macros::default(),
         };
         modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
         assert_eq!(

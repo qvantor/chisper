@@ -37,6 +37,8 @@ export interface EngineOptions {
   state?: ChainState;
   // the LFOs as they are (the voices and the chain have them at once)
   lfos?: LfosState;
+  // the levels of the macros as they are (MACROS, both halves have them at once; none: all 0)
+  macros?: readonly number[];
   // the events of a scene, before its first block (a message to an OfflineAudioContext comes in a block no one can
   // tell)
   events?: VoiceEvent[];
@@ -56,7 +58,7 @@ export interface EngineOptions {
 export type LfoReader = 'voices' | 'chain';
 
 // what the knobs and the notes tell the node: the events of the voices of a task, what the chain is told, the LFOs
-// of both halves
+// and the macros of both halves
 export type EngineKnobsMessage = ChainMessage & {
   events?: VoiceEvent[];
   // the halves a state of the LFOs (`lfos`) is for: the other reads none and takes none (none named: both)

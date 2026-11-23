@@ -5,13 +5,15 @@ import { theme } from '@chisper/ui-kit';
 import { Oscillator1, Oscillator2 } from '../synth/components';
 import { EnvelopeSection, VelocitySection } from '../envelope';
 import { LfoSection } from '../lfo';
+import { MacrosSection } from '../macros';
 import { FilterSection } from '../filter';
 import { VoicingSection } from '../voicing';
 import { NoiseSection } from '../noise';
 import { SubSection } from '../sub';
 
 // column: portrait phone, grid: landscape phone (and the portrait mini view), row: landscape mini view; the order
-// of the desktop: the sub, the oscillators, the noise and the filter, then ENV, the LFOs, VELO and the voicing
+// of the desktop: the sub, the oscillators, the noise and the filter, then the macros, ENV, the LFOs, VELO and the
+// voicing. The macros side by side in a column and a grid (a line of their own), one under another in a row
 export type SectionsLayout = 'column' | 'grid' | 'row';
 
 const Root = styled.div`
@@ -21,8 +23,8 @@ const Root = styled.div`
 
   &.column {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 260px 280px 280px 260px 230px 230px 260px 200px 200px;
-    grid-template-areas: 'sub' 'osc1' 'osc2' 'noise' 'filter' 'env' 'lfo' 'velo' 'voicing';
+    grid-template-rows: 260px 280px 280px 260px 230px 110px 230px 260px 200px 200px;
+    grid-template-areas: 'sub' 'osc1' 'osc2' 'noise' 'filter' 'macros' 'env' 'lfo' 'velo' 'voicing';
   }
 
   &.grid {
@@ -30,18 +32,19 @@ const Root = styled.div`
        no room for them in its row), the oscillators half of the rest each, then the noise, the filter and ENV, the
        LFOs */
     grid-template-columns: minmax(160px, 6fr) minmax(0, 5fr) minmax(0, 7fr) minmax(0, 7fr) minmax(0, 5fr);
-    grid-template-rows: 270px 300px 230px;
+    grid-template-rows: 270px 300px 110px 230px;
     grid-template-areas:
       'sub osc1 osc1 osc2 osc2'
       'noise noise filter env env'
+      'macros macros macros macros macros'
       'lfo lfo lfo velo voicing';
   }
 
   /* the sub wide enough for its knobs beside its shapes */
   &.row {
-    grid-template-columns: 2fr 3fr 3fr 1.5fr 3fr 3fr 3fr 1.5fr 2fr;
+    grid-template-columns: 2fr 3fr 3fr 1.5fr 3fr 1.5fr 3fr 3fr 1.5fr 2fr;
     grid-template-rows: 270px;
-    grid-template-areas: 'sub osc1 osc2 noise filter env lfo velo voicing';
+    grid-template-areas: 'sub osc1 osc2 noise filter macros env lfo velo voicing';
   }
 `;
 
@@ -56,6 +59,7 @@ const sections: [string, React.ComponentType][] = [
   ['osc2', Oscillator2],
   ['noise', NoiseSection],
   ['filter', FilterSection],
+  ['macros', MacrosSection],
   ['env', EnvelopeSection],
   ['lfo', LfoSection],
   ['velo', VelocitySection],

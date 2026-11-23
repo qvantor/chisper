@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { presetHash } from './hash';
+import { normalizePreset } from './normalize';
 import { fxSnapSchema, PRESET_DEFAULTS } from './schema';
 
 // The hashes of the presets are their identity in the database (dedup by hash): a change of a library under the
@@ -216,6 +217,14 @@ const PRESETS: Record<string, unknown> = {
   // a type of a newer client: the default type (the hash of the preset with it)
   'an unknown filter type': { filter: { a: true, t: 'comb', cut: 880 } },
   'its default type': { filter: { a: true, t: 'lowpass', cut: 880 } },
+  // the macros at 0: no section (the hash of the preset without macros)
+  'the macros at 0': { mac: { m1: 0, m3: 0 } },
+  'no macros': { mac: {} },
+  // the levels of the macros and routes of them
+  macros: {
+    mac: { m1: 0.5, m2: 0, m4: 1 },
+    mod: { 'macro1:osc1.wave': 0.5, 'macro4:delay.time': { a: -0.25, bi: true }, 'macro2:lfo1.rate': 0.75 },
+  },
 };
 
 const PRESET_HASHES: Record<string, string> = {
@@ -227,6 +236,9 @@ const PRESET_HASHES: Record<string, string> = {
   'a model filter': '4680d5329eb726f28013693650a1237bfc17057882dd86fe52b312495c25b621',
   'an unknown filter type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
   'its default type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
+  'the macros at 0': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
+  'no macros': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
+  macros: '0ae91c703e91fa0bfdbd0517469bf8e6d23982af9d6a315383b9b957d6efb559',
 };
 
 // not presets: the schema rejects them
@@ -250,6 +262,10 @@ const INVALID: Record<string, unknown> = {
   'a filter drive past 100': { filter: { dr: 101 } },
   'a negative filter variation': { filter: { v: -1 } },
   'an LFO on the knob of an LFO': { mod: { 'lfo1:lfo2.rate': 0.5 } },
+  'a macro past 1': { mac: { m2: 1.5 } },
+  'a negative macro': { mac: { m1: -0.1 } },
+  'a macro that is no number': { mac: { m3: 'half' } },
+  'a fifth macro': { mod: { 'macro5:osc1.wave': 0.5 } },
   'a route object without a flag': { mod: { 'env1:osc1.wave': { a: 0.5 } } },
   'five sources on a knob': {
     mod: {
@@ -306,6 +322,12 @@ const hashOf = (value: unknown) =>
 describe('the hashes of presets', () => {
   it.each(Object.keys(PRESETS))('%s', (name) => {
     expect(presetHash(PRESETS[name])).toBe(PRESET_HASHES[name]);
+  });
+
+  it('the macros at 0 leave out their section: the presets of before keep their hashes', () => {
+    expect(PRESET_HASHES['the macros at 0']).toBe(PRESET_HASHES['empty']);
+    expect(normalizePreset({ mac: { m1: 0 } })).not.toHaveProperty('mac.m1');
+    expect(normalizePreset(PRESETS['macros']).mac).toEqual({ m1: 0.5, m4: 1 });
   });
 
   it('a filter type of a newer client is the default one', () => {

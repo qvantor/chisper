@@ -8,6 +8,10 @@ import {
   fxSnapSchema,
   LFO_DEFAULTS,
   listPresetsQuerySchema,
+  MACRO_CC,
+  MACRO_KEYS,
+  MACROS,
+  MOD_SOURCES,
   nameKey,
   presetDataSchema,
   presetIdSchema,
@@ -971,6 +975,29 @@ describe('normalizePreset', () => {
   ])('rejects reverb %s out of range or not integer (%p)', (key, value) => {
     const data = { ...preset, fx: { ...preset.fx, reverb: { ...preset.fx.reverb, [key]: value } } };
     expect(presetDataSchema.safeParse(data).success).toBe(false);
+  });
+});
+
+describe('the macros', () => {
+  it('are sources after the LFOs (their index is the one of the cores), saved as m1–m4 within 0..1', () => {
+    expect(MOD_SOURCES.indexOf('macro1')).toBe(8);
+    expect(MOD_SOURCES.slice(8)).toEqual([...MACROS]);
+    expect(Object.values(MACRO_KEYS)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(
+      normalizePreset({ mac: { m2: 0.123456, m4: 1 }, mod: { 'macro3:filter.cutoff': -0.5 } })
+    ).toMatchObject({
+      mac: { m2: 0.1235, m4: 1 },
+      mod: { 'macro3:filter.cutoff': -0.5 },
+    });
+  });
+
+  it('have CC 20–23 of MIDI, 14 bits with the LSB 32 after', () => {
+    expect(MACROS.map((id) => MACRO_CC[id])).toEqual([
+      { msb: 20, lsb: 52 },
+      { msb: 21, lsb: 53 },
+      { msb: 22, lsb: 54 },
+      { msb: 23, lsb: 55 },
+    ]);
   });
 });
 

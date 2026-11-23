@@ -5,7 +5,7 @@
 use crate::envelope::{EnvelopeBlock, EnvelopeParams};
 use crate::filter::{self, Designs, FilterOptions, VoiceFilter};
 use crate::lfo::{LfoBlock, LfoGlobal, DELAY, KNOBS, LFOS, RATE, RISE, SMOOTH};
-use crate::modulation::{lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
+use crate::modulation::{is_lfo, lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
 use crate::noise::{Noise, NoiseOptions};
 use crate::shared::{
     Bus, CycleKey, Scratch, Shared, WarpedCycle, DIRECT_SAMPLES, MIX_SAMPLES, PARAMS, UNISON, VOICES,
@@ -2167,6 +2167,8 @@ pub struct Voice {
     lfo_mod: Modulation,
     lfo_one: [f32; LFOS * KNOBS],
     lfo_epoch: u32,
+    // the count of the levels of the macros the shared took that the voice saw
+    macro_epoch: u32,
 }
 
 // the base of knob `knob` of an LFO at t: Rate its frequency, Phase as it glides
@@ -2256,6 +2258,7 @@ impl Voice {
             lfo_mod,
             lfo_one: [0.0; LFOS * KNOBS],
             lfo_epoch: shared.lfo_epoch,
+            macro_epoch: shared.macro_epoch,
         }
     }
 
@@ -2346,6 +2349,10 @@ impl Voice {
         self.trap = true;
     }
 
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+
     /// a voice of mono: it lives on RELEASE_LEAD after the end of its release (silent, its phases running), so a
     /// note the main thread sends it before that end takes it over: its gate comes at most RELEASE_LEAD late. A
     /// stolen one ends with its fade
@@ -2370,7 +2377,7 @@ impl Voice {
     }
 
     // the levels the routes read may move again (a release, a start again, another velocity, a state of the
-    // LFOs): the routes of the params and those of the knobs of the LFOs
+    // LFOs, a level of a macro): the routes of the params and those of the knobs of the LFOs
     fn wake_routes(&mut self) {
         self.modulation.wake();
         self.lfo_mod.wake();
@@ -2378,7 +2385,7 @@ impl Voice {
 
     pub fn set_routes(&mut self, routes: &[VoiceRoute]) {
         // (the levels of the LFOs before the routes: an allocation that traps leaves the routes as they were)
-        if routes.iter().any(|route| route.source >= LFO as f64) {
+        if routes.iter().any(|route| is_lfo(route.source as usize)) {
             self.lfos.iter_mut().for_each(LfoBlock::reserve);
         }
         // (a change of type of the filter that waits for the end of a fade: its knobs keep the ranges of the type
@@ -2438,6 +2445,7 @@ impl Voice {
                 envelopes: &self.envelopes,
                 velocity: &self.velocity.level,
                 lfos: &[],
+                macros: &shared.macros,
             };
             self.lfo_mod.apply(&bases, &sources, frame, a, b, n);
         }
@@ -2525,6 +2533,11 @@ impl Voice {
         self.grow(n, shared);
         self.block_frame = frame;
         self.take_velocity(frame);
+        // (a level of a macro taken: the routes that slept on it work it out)
+        if shared.macro_epoch != self.macro_epoch {
+            self.macro_epoch = shared.macro_epoch;
+            self.wake_routes();
+        }
         let a = max(0.0, self.start_frame - frame);
         if a >= nf {
             out_l.fill(0.0);
@@ -2612,6 +2625,7 @@ impl Voice {
                 envelopes: &self.envelopes,
                 velocity: &self.velocity.level,
                 lfos: &self.lfos,
+                macros: &shared.macros,
             };
             self.modulation.apply(&bases, &sources, frame, a, b, n);
         }

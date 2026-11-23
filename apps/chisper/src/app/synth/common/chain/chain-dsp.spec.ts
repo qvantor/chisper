@@ -18,7 +18,15 @@ import { createEqWasm } from '../../fx/effects/eq-wasm';
 import { createLimiterWasm } from '../limiter/limiter-wasm';
 import { CEILING } from '../limiter/limiter-params';
 import type { LfosState } from '../lfo/lfo-curve';
-import { CHAIN_KEYS, FX_KINDS, LFO_SOURCE, MIX_KEY, NEUTRAL_PARAMS, TARGET_KEYS } from './chain-params';
+import {
+  CHAIN_KEYS,
+  FX_KINDS,
+  LFO_SOURCE,
+  MACRO_SOURCE,
+  MIX_KEY,
+  NEUTRAL_PARAMS,
+  TARGET_KEYS,
+} from './chain-params';
 
 // The chain core through its facade (the crate has its own tests: cargo test -p chain): its slots are the units of
 // the effects, what a node is made with is what it plays, the events and the routes reach the core
@@ -278,6 +286,28 @@ describe('the chain core', () => {
       peak(swept.left.subarray((10 + block) * 128, (11 + block) * 128))
     );
     expect(Math.max(...blocks) / Math.min(...blocks)).toBeGreaterThan(2);
+  });
+
+  it('moves a knob by a macro without a note: its level from the block of its frame, a glide of 10 ms', () => {
+    const input = noise(FRAMES);
+    const level = slotOf('distortion') * TARGET_KEYS + CHAIN_KEYS.distortion.indexOf('level');
+    // MACRO 3 takes the level 24 dB down at 1
+    const routes = [{ target: level, source: MACRO_SOURCE + 2, amount: -24, min: -24, max: 12 }];
+    const plain = renderChain(makeChain(chainState(['distortion'])), input);
+    const routed = () => makeChain(chainState(['distortion'], 1, {}, { routes }));
+    // at 0 it moves nothing
+    expect(renderChain(routed(), input).left).toEqual(plain.left);
+    // sent at block 5 for frame 1200: the block at 1280 takes it (a null leaves its macro)
+    const moved = renderChain(routed(), input, (chain, frame) => {
+      if (frame === 5 * 128) chain.setMacros([null, null, 1, null], 1200);
+    });
+    expect(moved.left.subarray(0, 10 * 128)).toEqual(plain.left.subarray(0, 10 * 128));
+    expect(peak(moved.left.subarray(20 * 128))).toBeLessThan(0.1 * peak(plain.left.subarray(20 * 128)));
+    // instantly: from the first block (a node made with the levels)
+    const at = renderChain(routed(), input, (chain, frame) => {
+      if (frame === 0) chain.setMacros([0, 0, 1, 0], 0, true);
+    });
+    expect(peak(at.left.subarray(0, 10 * 128))).toBeLessThan(0.1 * peak(plain.left.subarray(0, 10 * 128)));
   });
 
   it('moves the mix of a slot and the knobs of the delay a sample at a time', () => {

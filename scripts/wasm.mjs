@@ -33,8 +33,10 @@ const CORES = [
   // shares of a pitch and the mix of them: fill_warped_cycle, apply_warped_cycle); 203.1 KB with a build of a cycle
   // kept at its own cost in the budget (what a mix is built of worked out before the budget is asked: warped_plan);
   // 203.4 KB with a fade cut with its segment where the levels jump (render_cuts_warped); 204.3 KB with a table
-  // under a still map read in one loop (render11_mapped: a voice held on PWM 6 % faster, on Bend + 2 %)
-  { crate: 'engine', name: 'engine', budget: 204600 },
+  // under a still map read in one loop (render11_mapped: a voice held on PWM 6 % faster, on Bend + 2 %); 206.3 KB with
+  // the macros of the node as sources of the routes of the voices and of the chain (Macros, the levels that wait
+  // for their frames: Shared::set_macros, render_macros; the levels of the chain at the points: level_at)
+  { crate: 'engine', name: 'engine', budget: 206600 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];

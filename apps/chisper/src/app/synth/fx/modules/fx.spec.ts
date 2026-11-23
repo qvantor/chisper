@@ -1381,6 +1381,24 @@ describe('fx', () => {
       ]);
     });
 
+    it('gives the chain the routes of a macro (sources 8–11), with a note or without; the LFOs only for an LFO', async () => {
+      const { actions, modulation, told, posted } = await ready();
+      actions.setAdded('reverb', true);
+      modulation[1].addRoute('macro1', 'reverb.size', 0.5);
+      modulation[1].addRoute('macro4', 'lfo2.rate', 0.25);
+      // (no route of an LFO: the knobs of the LFOs move nothing the chain plays, no LFO is sent)
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: 8, amount: 0.5, min: 0, max: 1 },
+      ]);
+      expect(posted('lfos')).toEqual([]);
+      modulation[1].addRoute('lfo2', 'reverb.decay', 0.5);
+      expect(told.setRoutes).toHaveBeenLastCalledWith([
+        { target: 130, source: 8, amount: 0.5, min: 0, max: 1 },
+        expect.objectContaining({ source: LFO2 }),
+        expect.objectContaining({ target: 200, source: 11, scale: 'log' }),
+      ]);
+    });
+
     it('bounds the routes to Time of the delay in BPM by its divisions at the tempo', async () => {
       const { actions, modulation, $fxNote, told, transport } = await ready();
       actions.setAdded('delay', true);

@@ -380,10 +380,11 @@ export const createLfoRunner = (sampleRate: number) => {
       phaseD = lfo.clock(tD);
     }
     // (from the point before, not before tD; at the first point from tD: a runner that starts late runs as if it
-    // had all along, at the frequency of then)
+    // had all along, at the frequency of then. A free runner has no tD, -Infinity: its first point has no point
+    // before it either, it adds nothing)
     if (tD !== Infinity && mods?.rate !== undefined) {
-      const extra = mods.rate - 1 / lfo.period(t);
-      delta += extra * (t - (previous > tD ? previous : tD));
+      const from = previous > tD ? previous : tD;
+      if (Number.isFinite(from)) delta += (mods.rate - 1 / lfo.period(t)) * (t - from);
     }
     const clock = lfo.clock(t);
     const theta = noteless || knobs.mode === FREE ? clock + delta : clock - phaseD + delta;

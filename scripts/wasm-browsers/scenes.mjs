@@ -525,7 +525,45 @@ const engineScene = (name, kinds, scene) => ({
   whole: true,
   state: chainState(kinds),
 });
+// the macros of the node (MACRO 1–4, sources 8–11) at the levels it is made with: on the wave, the gain and the
+// cutoff of a voice and on Rate of its LFO 1; on the level of the distortion, the time of the delay and on Rate of
+// LFO 1 of the chain, which moves the mix of the reverb (no note there: the LFO runs free, a macro moves it)
+const MACRO_VOICES = oscScene('macros', {
+  frames: OSC_RATE / 2,
+  tables: { a: [saw(2048, 200), saw(1024, 300, 0.7)] },
+  lfos: [lfo('sine', { mode: 1 }), lfo('triangle'), lfo('saw-up'), lfo('square')],
+  voices: [
+    note([{ table: 'a', unison: 3, phase: 0, phaseRand: 0 }, null], { frequency: 220, spread1: 12 }, [], {
+      filter: { type: 'lowpass', cutoff: 900, resonance: 4, gain: 0 },
+      routes: [
+        { source: 8, param: 'position1', amount: 1, min: 0, max: 1 },
+        { source: 9, param: 'gain1', amount: 0.6, min: 0, max: 1, bipolar: true },
+        { source: 10, param: 'cutoff', amount: 2, min: 20, max: 16000, scale: 'log' },
+        { source: 4, param: 'detune1', amount: 30, min: -4800, max: 4800, bipolar: true },
+        { source: 11, param: 'lfo1.rate', amount: 1.5, min: 1 / 32, max: 100, scale: 'log' },
+      ],
+    }),
+  ],
+});
+const MACRO_KINDS = ['distortion', 'delay', 'reverb'];
+
 const ENGINE_SCENES = [
+  {
+    ...engineScene('engine: the macros on the voices and on the effects', MACRO_KINDS, MACRO_VOICES),
+    state: chainState(
+      MACRO_KINDS,
+      { delay: { params: { time: 0.05 }, mix: 0.3 }, reverb: { mix: 0.3 } },
+      {
+        routes: [
+          { target: target('distortion', 'level'), source: 8, amount: -9, min: -24, max: 12 },
+          { target: target('delay', 'time'), source: 10, amount: 0.02, min: 0.01, max: 1 },
+          { target: target('reverb', 'mix'), source: 4, amount: 0.5, min: 0, max: 1, bipolar: true },
+          { target: KINDS.length * 32, source: 11, amount: 1, min: 0.01, max: 100, scale: 'log' },
+        ],
+      }
+    ),
+    macros: [0.7, 0.25, 1, 0.5],
+  },
   engineScene(
     'engine: a chord through every effect',
     ['distortion', 'chorus', 'delay', 'compressor', 'reverb'],
@@ -782,7 +820,12 @@ const nodeEngineRender = async (scene, cores) => {
     ? { ...lfos, lfos: lfos.lfos.map((wire) => ({ ...wire, table: Float32Array.from(wire.table) })) }
     : null;
   // (the engine of the options of the node, as its processor makes it)
-  const options = { state: scene.state, ...(state && { lfos: state }), events: sceneEvents(scene) };
+  const options = {
+    state: scene.state,
+    ...(state && { lfos: state }),
+    ...(scene.macros && { macros: scene.macros }),
+    events: sceneEvents(scene),
+  };
   const { engine } = dsp.createNodeEngine(scope, scene.rate, options, store, shared);
   const output = [new Float32Array(scene.frames), new Float32Array(scene.frames)];
   for (let at = 0; at < scene.frames; at += BLOCK)

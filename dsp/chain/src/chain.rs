@@ -29,7 +29,8 @@ use crate::units::{law, Law, Moves, Unit, DELAY, EQ, LIMITER, MAX_METER, MAX_PAR
 
 /// the events: the params of a slot (a: the slot, b: the bits of the keys, the values by key), its mix (a, b),
 /// whether it plays (a, b: not 0), the order (a: how many slots, the values: which), the master gain (a), the
-/// mute (a: the seconds of the fade), its end, everything forgotten (a preset switch)
+/// mute (a: the seconds of the fade), its end, everything forgotten (a preset switch), the levels of the macros (the
+/// values: MACROS, one that is not a number leaves its macro; a: not 0, there at once). Only appended to (the ABI)
 pub const SET_PARAMS: u32 = 0;
 pub const SET_MIX: u32 = 1;
 pub const SET_ACTIVE: u32 = 2;
@@ -38,6 +39,7 @@ pub const MASTER_GAIN: u32 = 4;
 pub const MUTE: u32 = 5;
 pub const UNMUTE: u32 = 6;
 pub const CLEAR: u32 = 7;
+pub const SET_MACROS: u32 = 8;
 
 /// the stage of the limiter (the slots are theirs by index)
 pub const LIMITER_STAGE: u32 = SLOTS as u32;
@@ -577,6 +579,7 @@ impl Chain {
                     self.end();
                 }
             }
+            SET_MACROS => self.modulation.set_macros(&event.values, event.a != 0.0),
             _ => {}
         }
     }
@@ -688,6 +691,8 @@ impl Chain {
     fn modulate(&mut self) {
         self.sets.clear();
         self.set_at = 0;
+        // (the macros glide on at rest too)
+        self.modulation.render_macros(self.frame, self.frames);
         if self.resting {
             self.cursor = self.count;
         } else if !self.modulation.idle() {

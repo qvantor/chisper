@@ -340,8 +340,8 @@ pub unsafe extern "C" fn chain_trap(chain: *mut Chain, stage: u32, call: u32) {
 
 /// what the wrapper has to have as the core has it, into the command buffer (the specs: only the perf build has
 /// it; LAYOUT of chain-layout.spec.ts names the values in this order): the sizes, the targets of the routes, the
-/// stage of the limiter, the events, the knobs of an LFO, then of each kind: the kind, how many params it has,
-/// the key of its mix (-1: its slot mixes). How many values it wrote
+/// stage of the limiter, the events, the knobs of an LFO, the event of the macros, their source and count, then of
+/// each kind: the kind, how many params it has, the key of its mix (-1: its slot mixes). How many values it wrote
 #[cfg(feature = "perf")]
 #[no_mangle]
 pub extern "C" fn chain_layout() -> usize {
@@ -376,6 +376,9 @@ pub extern "C" fn chain_layout() -> usize {
         lfo::RISE as f64,
         lfo::SMOOTH as f64,
         lfo::PHASE as f64,
+        chain::SET_MACROS as f64,
+        modulation::MACRO_SOURCE as f64,
+        dsp_core::macros::MACROS as f64,
     ];
     for kind in [
         units::DISTORTION,

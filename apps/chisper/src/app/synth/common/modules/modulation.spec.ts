@@ -1,8 +1,9 @@
 import { MOD_SOURCES } from '@chisper/preset-schema';
 import { applySnapshot, getSnapshot } from '../../../app';
 import { createModulation } from '../../../../test-utils/models';
+import { recordAnalytics } from '../../../../test-utils/analytics';
 import { MOD_TARGETS } from '../modulation/modulation-targets';
-import { readsSource, takesSource } from './modulation';
+import { MacroMove, readsSource, takesSource } from './modulation';
 
 // every route there can be: every source on every knob it takes (no LFO on a knob of an LFO)
 const ALL = MOD_SOURCES.flatMap((source) =>
@@ -245,5 +246,111 @@ describe('modulation', () => {
     applySnapshot({ mod: Object.fromEntries(ALL.map(([source, target]) => [`${source}:${target}`, 0.5])) });
     expect($routes.value).toHaveLength(64);
     expect($routes.value.at(-1)).toMatchObject({ source: ALL[63][0], target: ALL[63][1] });
+  });
+});
+
+describe('the macros', () => {
+  // the moves of the macros the engine is told
+  const movesOf = (module: ReturnType<typeof createModulation>) => {
+    const moves: MacroMove[] = [];
+    module[0].$macroMoves.subscribe((move) => moves.push(move));
+    return moves;
+  };
+
+  it('are 0 by default, sources 8–11 after the LFOs, the knobs of every module and of the LFOs take them', () => {
+    const [{ $macros }] = createModulation();
+    expect($macros.value).toEqual([0, 0, 0, 0]);
+    expect(getSnapshot()['mac']).toEqual({});
+    expect(MOD_SOURCES.slice(8)).toEqual(['macro1', 'macro2', 'macro3', 'macro4']);
+    expect(
+      ['osc1.wave', 'filter.cutoff', 'delay.time', 'lfo1.rate', 'noise.level', 'sub.pan'].every((target) =>
+        takesSource('macro3', target)
+      )
+    ).toBe(true);
+  });
+
+  it('sets a level within 0..1 (not a number: nothing), from a time on, by a hand by default', () => {
+    const module = createModulation();
+    const [{ $macros }, { setMacro }] = module;
+    const moves = movesOf(module);
+    setMacro('macro2', 0.25);
+    setMacro('macro4', 2, 1.5, 'track');
+    setMacro('macro1', -1, undefined, 'midi');
+    setMacro('macro3', NaN);
+    expect($macros.value).toEqual([0, 0.25, 0, 1]);
+    expect(moves).toEqual([
+      { levels: [null, 0.25, null, null], source: 'hand' },
+      { levels: [null, null, null, 1], at: 1.5, source: 'track' },
+      { levels: [0, null, null, null], source: 'midi' },
+    ]);
+  });
+
+  it('counts a move of a hand as a use, not one of the track or a preset', () => {
+    const analytics = recordAnalytics();
+    const [, { setMacro }] = createModulation();
+    setMacro('macro3', 0.5, 1, 'track');
+    applySnapshot({ mac: { m1: 0.5 } });
+    expect(analytics.features()).toEqual([]);
+    setMacro('macro3', 0.5);
+    expect(analytics.features()).toEqual(['macro:macro3']);
+  });
+
+  it('drops a macro bipolar on a knob centered on 0, uni elsewhere, at +50%', () => {
+    const [{ $routes }, { addRoute }] = createModulation();
+    addRoute('macro1', 'filter.gain');
+    addRoute('macro2', 'filter.cutoff');
+    expect($routes.value).toEqual([
+      { source: 'macro1', target: 'filter.gain', amount: 0.5, bipolar: true },
+      { source: 'macro2', target: 'filter.cutoff', amount: 0.5 },
+    ]);
+  });
+
+  it('round trips through the snapshot without the levels of 0, a level of 1 too; a missing key is 0', () => {
+    const module = createModulation();
+    const [{ $macros, $routes }, { setMacro, addRoute }] = module;
+    addRoute('macro3', 'osc1.wave', -0.25);
+    setMacro('macro1', 1);
+    setMacro('macro3', 0.125);
+    setMacro('macro4', 0.5);
+    setMacro('macro4', 0);
+    const snapshot = getSnapshot();
+    expect(snapshot['mac']).toEqual({ m1: 1, m3: 0.125 });
+    expect(snapshot['mod']).toEqual({ 'macro3:osc1.wave': -0.25 });
+    const moves = movesOf(module);
+    applySnapshot({});
+    expect($macros.value).toEqual([0, 0, 0, 0]);
+    expect($routes.value).toEqual([]);
+    applySnapshot(snapshot);
+    expect($macros.value).toEqual([1, 0, 0.125, 0]);
+    expect($routes.value).toEqual([{ source: 'macro3', target: 'osc1.wave', amount: -0.25 }]);
+    // (every level to the engine, from the next block)
+    expect(moves).toEqual([{ levels: [0, 0, 0, 0] }, { levels: [1, 0, 0.125, 0] }]);
+  });
+
+  it('takes the levels of a snapshot within 0..1, an odd value as 0', () => {
+    const [{ $macros }] = createModulation();
+    applySnapshot({ mac: { m1: 1.5, m2: -0.5, m3: 'x' as unknown as number, m4: 0.75 } });
+    expect($macros.value).toEqual([1, 0, 0, 0.75]);
+  });
+
+  it('swaps two macros: their levels and their routes', () => {
+    const module = createModulation();
+    const [{ $macros, $routes }, { setMacro, addRoute, swapMacros }] = module;
+    setMacro('macro1', 0.25);
+    setMacro('macro2', 0.75);
+    addRoute('macro1', 'osc1.wave');
+    addRoute('macro2', 'filter.cutoff', -0.5);
+    addRoute('env1', 'osc1.gain');
+    const moves = movesOf(module);
+    swapMacros('macro1', 'macro2');
+    expect($macros.value).toEqual([0.75, 0.25, 0, 0]);
+    expect($routes.value).toEqual([
+      { source: 'macro2', target: 'osc1.wave', amount: 0.5 },
+      { source: 'macro1', target: 'filter.cutoff', amount: -0.5 },
+      { source: 'env1', target: 'osc1.gain', amount: 0.5 },
+    ]);
+    expect(moves).toEqual([{ levels: [0.75, 0.25, 0, 0] }]);
+    swapMacros('macro3', 'macro3');
+    expect(moves).toHaveLength(1);
   });
 });

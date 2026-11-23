@@ -11,6 +11,8 @@ import {
   LFO_TABLE,
   LFO_TARGET,
   LIMITER_STAGE,
+  MACRO_SOURCE,
+  MACROS,
   MAX_PARAMS,
   MIX_KEY,
   NOTE,
@@ -50,6 +52,9 @@ const SIZES = [
     (event) => `event.${event}`
   ),
   ...['rate', 'delay', 'rise', 'smooth', 'phase'].map((knob) => `knob.${knob}`),
+  'event.macros',
+  'macroSource',
+  'macros',
 ];
 // then of each kind: its kind, how many params it has, the key of its mix (-1: its slot mixes)
 const KIND = 3;
@@ -85,8 +90,10 @@ describe('the layout of the chain core', () => {
       limiterStage: LIMITER_STAGE,
       ...Object.fromEntries(Object.entries(CHAIN_EVENT).map(([event, kind]) => [`event.${event}`, kind])),
       ...Object.fromEntries(LFO_KNOBS.map((knob, index) => [`knob.${knob}`, index])),
+      macroSource: MACRO_SOURCE,
+      macros: MACROS,
     });
-    expect(Object.keys(CHAIN_EVENT)).toHaveLength(8);
+    expect(Object.keys(CHAIN_EVENT)).toHaveLength(9);
     expect(LFO_KNOBS).toHaveLength(5);
   });
 

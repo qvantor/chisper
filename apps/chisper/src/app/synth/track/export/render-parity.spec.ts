@@ -156,4 +156,28 @@ describe('a render of the clip against the page playing it', () => {
     expect(peak(rendered)).toBeGreaterThan(0.05);
     expect(firstMismatch(rendered, played)).toBe(-1);
   });
+
+  it('the macros on a knob of an oscillator and of an effect at the levels of the page: the same samples', async () => {
+    const notes: ClipNote[] = [
+      [0, CLIP_PPQ / 2, 60, 100],
+      [CLIP_PPQ, CLIP_PPQ, 67, 100],
+    ];
+    const reverb = (page: Page) => {
+      page.fx[1].setAdded('reverb', true);
+      page.fx[1].setOn('reverb', true);
+    };
+    const { rendered, played } = await parity(notes, (page) => {
+      reverb(page);
+      // MACRO 1 at 0.5: the gain of OSC 1 (0.5) at half; MACRO 2 at 1: the size of the reverb up (a route of -100%
+      // at 0.5 would take the gain to 0: a silent render that is the page's too)
+      page.modulation[1].addRoute('macro1', 'osc1.gain', -0.5);
+      page.modulation[1].addRoute('macro2', 'reverb.size', 0.5);
+      page.modulation[1].setMacro('macro1', 0.5);
+      page.modulation[1].setMacro('macro2', 1);
+    });
+    expect(firstMismatch(rendered, played)).toBe(-1);
+    // (the render plays the macros: the gain at half of the one without them)
+    const without = await parity(notes, reverb);
+    expect(peak(rendered) / peak(without.rendered)).toBeCloseTo(0.5, 1);
+  });
 });

@@ -42,6 +42,7 @@ import { VoicingSection } from './voicing';
 import { MidiInput, SettingsButton } from './settings';
 import { EnvelopeSection, VelocitySection } from './envelope';
 import { LfoSection } from './lfo';
+import { MacrosSection } from './macros';
 import { NoiseSection } from './noise';
 import { SUB_LOW_SCREEN, SUB_WIDE_WIDTH, SUB_WIDTH, SubSection } from './sub';
 import { MobileLayout } from './mobile';
@@ -75,16 +76,15 @@ const SynthRow = styled.div`
   gap: 1px;
 `;
 
-// the columns of the row above (fr shares what the gaps leave: the same tracks, so the lines meet): ENV under the
-// sub and OSC 1, the LFOs under OSC 2 and the noise
+// the columns of the row above (fr shares what the gaps leave: the same tracks, so the lines meet): the macros
+// under the sub, ENV under OSC 1, the LFOs under OSC 2 and the noise
 const ModRow = styled.div`
   display: grid;
   ${COLUMNS};
   background: ${theme.colors.primaryLowContrast};
   gap: 1px;
 
-  & > :nth-child(1),
-  & > :nth-child(2) {
+  & > :nth-child(3) {
     grid-column: span 2;
   }
 `;
@@ -132,6 +132,7 @@ const SynthRowInternal = () => (
 // the sources of the modulation and the voicing, on both screens
 const ModRowInternal = () => (
   <ModRow>
+    <MacrosSection />
     <EnvelopeSection />
     <LfoSection />
     <ModRight>

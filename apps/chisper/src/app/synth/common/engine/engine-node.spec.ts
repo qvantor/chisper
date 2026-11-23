@@ -617,6 +617,27 @@ describe('createEngineNode', () => {
     });
   });
 
+  describe('the macros', () => {
+    it('tells the node the levels of the macros as they are sent; a node made later starts with them at once', async () => {
+      const { engine, node, nodes } = await ready();
+      expect(node.options.processorOptions).not.toHaveProperty('macros');
+      engine.macros.set({ levels: [0.5, null, null, null], at: 2 });
+      expect(posts(node)).toEqual([{ macros: { levels: [0.5, null, null, null], at: 2 } }]);
+      throws(node);
+      // (told while there is no node)
+      engine.macros.set({ levels: [null, 0.25, null, 1] });
+      engine.retry();
+      await flush();
+      expect(nodes()[1].options.processorOptions.macros).toEqual([0.5, 0.25, 0, 1]);
+      // every macro at 0 again: none in the options of a node
+      engine.macros.set({ levels: [0, 0, 0, 0] });
+      throws(nodes()[1]);
+      engine.retry();
+      await flush();
+      expect(nodes()[2].options.processorOptions).not.toHaveProperty('macros');
+    });
+  });
+
   describe('tapVoices', () => {
     it('connects the second output of the node to the input of the target and tells the node to fill it', async () => {
       const { audioCtx, engine, node, posts } = await ready();

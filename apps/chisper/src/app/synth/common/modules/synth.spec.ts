@@ -3,6 +3,7 @@ import { divisionIndex, ENVELOPE_DEFAULTS, PITCH_BEND_DEFAULT, PITCH_BEND_MAX } 
 import { applySnapshot, getSnapshot } from '../../../app';
 import { createSynth, stopModels } from '../../../../test-utils/models';
 import { withoutAudioWorklet } from '../../../../test-utils/no-audio-worklet';
+import { chainNode, chainPosts } from '../../../../test-utils/chain-node';
 import { WorkerStub } from '../../../../test-utils/worker-stub';
 import { withCurves, played } from '../../../../test-utils/envelopes';
 import { eventsOf, voiceEvents, VoiceView, voicesNodes } from '../../../../test-utils/voice-events';
@@ -2133,6 +2134,42 @@ describe('synth', () => {
       expect(first[1]).toBeNull();
       expect(second[0]?.unison).toBe(7);
       expect(second[1]).not.toBeNull();
+    });
+  });
+
+  describe('macros', () => {
+    it('a route of a macro is a route of a note, sources 8–11; a move of the macro tells the node its levels, not the routes', async () => {
+      const { onPress, voices, modulation, audioCtx } = await setup();
+      const [, { addRoute, setMacro }] = modulation;
+      addRoute('macro2', 'osc1.gain', -0.5);
+      addRoute('macro4', 'osc1.wave');
+      onPress([4, 'C']);
+      const [voice] = voices();
+      expect(voice.options.routes).toEqual([
+        { source: 9, param: 'gain1', amount: -0.5, min: 0, max: 1 },
+        expect.objectContaining({ source: 11, param: 'position1' }),
+      ]);
+      const node = chainNode(audioCtx);
+      const before = chainPosts(node).length;
+      setMacro('macro2', 0.75);
+      setMacro('macro4', 0.25, 1.5, 'track');
+      voices();
+      expect(chainPosts(node).slice(before)).toEqual([
+        { macros: { levels: [null, 0.75, null, null] } },
+        { macros: { levels: [null, null, null, 0.25], at: 1.5 } },
+      ]);
+      expect(voice.messages).toEqual([]);
+    });
+
+    it('a node made with the levels of the macros of the preset; the levels of a preset applied go to it', async () => {
+      const { audioCtx, modulation } = await setup({ ready: false });
+      const [, { setMacro }] = modulation;
+      setMacro('macro1', 0.5);
+      await flush();
+      const node = chainNode(audioCtx);
+      expect(node.options.processorOptions.macros).toEqual([0.5, 0, 0, 0]);
+      applySnapshot({ mac: { m3: 1 } });
+      expect(chainPosts(node).at(-1)).toEqual({ macros: { levels: [0, 0, 1, 0] } });
     });
   });
 

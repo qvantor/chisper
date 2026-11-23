@@ -1,7 +1,11 @@
+import { Subject } from 'rxjs';
 import { ArrayBS, rxModel, rxModelReact } from '@chisper/rxjs-react';
 import {
   isLfo,
   isLfoKnob,
+  MACRO_KEYS,
+  MacroId,
+  MACROS,
   MOD_KNOB_SOURCES_MAX,
   MOD_ROUTES_MAX,
   MOD_SOURCES,
@@ -10,9 +14,9 @@ import {
 } from '@chisper/preset-schema';
 import { urlSnapshotPlugin } from '../../../app';
 import { featureUsed } from '../../../common/services/analytics';
-import { centered, isModTarget } from '../modulation/modulation-targets';
+import { bipolarByDefault, isModTarget } from '../modulation/modulation-targets';
 
-// a source (ENV 1–3, VELO, LFO 1–4) moves a knob (a target of modulation-targets.ts) by amount × its level: amount
+// a source (ENV 1–3, VELO, LFO 1–4, MACRO 1–4) moves a knob (a target of modulation-targets.ts) by amount × its level: amount
 // is a share of the range of the knob in its scale, -1..1; a bipolar route moves it around its value, amount ×
 // (level - ½); one switched off (the menu of the knob) is kept with its amount and moves nothing
 export interface ModRoute {
@@ -46,6 +50,21 @@ const withinLimits = (routes: ModRoute[]) =>
   );
 
 const clampAmount = (amount: number) => Math.min(1, Math.max(-1, amount));
+const clampLevel = (level: number) => Math.min(1, Math.max(0, level));
+
+// who moved a macro: a hand on its knob, a CC of a MIDI input, the automation of the track (a recording takes what
+// a player did, not what the track plays itself)
+export type MacroSource = 'hand' | 'midi' | 'track';
+// the levels of the macros the engine is told (null: that macro as it is) from `at` (seconds of the context; none:
+// the next block), and who moved them (none: a preset, a swap)
+export interface MacroMove {
+  levels: (number | null)[];
+  at?: number;
+  source?: MacroSource;
+}
+// a level of the snapshot: within 0..1, anything else 0 (a missing key too)
+const levelOf = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? clampLevel(value) : 0;
 const routeKey = ({ source, target }: Pick<ModRoute, 'source' | 'target'>) => `${source}:${target}`;
 const isSource = (value: string): value is ModSource => (MOD_SOURCES as readonly string[]).includes(value);
 // a route of the snapshot: a uni one is its amount, a bipolar one { a, bi: true }, one switched off has off: true
@@ -64,13 +83,17 @@ const fromValue = (value: unknown): Pick<ModRoute, 'amount' | 'bipolar' | 'off'>
 };
 
 // the routes of the modulation, one per source and knob; saved as { 'env2:osc1.wave': 0.5 }, a bipolar one as
-// { 'lfo1:filter.gain': { a: 0.5, bi: true } }, one switched off as { a: 0.5, off: true } (snapshot mod)
+// { 'lfo1:filter.gain': { a: 0.5, bi: true } }, one switched off as { a: 0.5, off: true } (snapshot mod). The levels
+// of the macros MACRO 1–4 (0..1, in the order of MACROS), saved as { m1: 0.5 } without the levels of 0 (snapshot
+// mac); every move of them goes to the engine with its time ($macroMoves: the synth tells the node, the routes stay)
 export const modulation = () =>
   rxModel(() => {
     const $routes = new ArrayBS<ModRoute[]>([]);
-    return { $routes };
+    const $macros = new ArrayBS<number[]>(MACROS.map(() => 0));
+    const $macroMoves = new Subject<MacroMove>();
+    return { $routes, $macros, $macroMoves };
   })
-    .actions(({ $routes }) => {
+    .actions(({ $routes, $macros, $macroMoves }) => {
       const find = (source: ModSource, target: string) =>
         $routes.value.find((route) => route.source === source && route.target === target);
       const update = (source: ModSource, target: string, change: (route: ModRoute) => ModRoute) =>
@@ -86,14 +109,14 @@ export const modulation = () =>
         update(source, target, ({ [flag]: _, ...rest }) => (value ? { ...rest, [flag]: value } : rest));
       };
       return {
-        // a source already on the knob keeps its amount, none is added past the limits; an LFO bipolar by
-        // default on a knob centered on 0 (around its value), an envelope and VELO uni (up from it: at rest the
+        // a source already on the knob keeps its amount, none is added past the limits; an LFO and a macro bipolar
+        // by default on a knob centered on 0 (around its value), an envelope and VELO uni (up from it: at rest the
         // knob is its value)
         addRoute: (
           source: ModSource,
           target: string,
           amount = DEFAULT_AMOUNT,
-          bipolar = isLfo(source) && centered(target)
+          bipolar = bipolarByDefault(source, target)
         ) => {
           if (find(source, target) || !takesSource(source, target)) return;
           if (routesFull($routes.value) || knobFull($routes.value, target)) return;
@@ -116,9 +139,38 @@ export const modulation = () =>
           if (!$routes.value.some((route) => route.target === target)) return;
           $routes.next($routes.value.filter((route) => route.target !== target));
         },
+        // the level of a macro (within 0..1; not a number: nothing) from `at` on (seconds of the context; none: the
+        // next block), moved by `source` (the knob of the macro: a hand). The engine glides to it, the routes stay
+        setMacro: (id: MacroId, level: number, at?: number, source: MacroSource = 'hand') => {
+          const index = MACROS.indexOf(id);
+          if (index < 0 || !Number.isFinite(level)) return;
+          const value = clampLevel(level);
+          if (source === 'hand') featureUsed('macro', id);
+          if ($macros.value[index] !== value)
+            $macros.next($macros.value.map((other, k) => (k === index ? value : other)));
+          $macroMoves.next({ levels: MACROS.map((_, k) => (k === index ? value : null)), at, source });
+        },
+        // two macros trade places: their levels and their routes
+        swapMacros: (a: MacroId, b: MacroId) => {
+          const [i, j] = [MACROS.indexOf(a), MACROS.indexOf(b)];
+          if (i < 0 || j < 0 || i === j) return;
+          const levels = [...$macros.value];
+          [levels[i], levels[j]] = [levels[j], levels[i]];
+          $routes.next(
+            $routes.value.map((route) =>
+              route.source === a
+                ? { ...route, source: b }
+                : route.source === b
+                  ? { ...route, source: a }
+                  : route
+            )
+          );
+          $macros.next(levels);
+          $macroMoves.next({ levels: [...levels] });
+        },
       };
     })
-    .plugins(
+    .plugins([
       urlSnapshotPlugin({
         modelToSnap: ({ $routes }) =>
           Object.fromEntries($routes.value.map((route) => [routeKey(route), routeValue(route)])) as Record<
@@ -139,8 +191,21 @@ export const modulation = () =>
               })
             )
           ),
-      })
-    );
+      }),
+      // mac: { m1: 0.5 }, a level of 0 left out (the presets without macros keep their hashes); a missing key is 0
+      urlSnapshotPlugin({
+        prefix: 'mac',
+        modelToSnap: ({ $macros }) =>
+          Object.fromEntries(
+            MACROS.flatMap((id, k) => ($macros.value[k] !== 0 ? [[MACRO_KEYS[id], $macros.value[k]]] : []))
+          ) as Record<string, number>,
+        applySnap: (snap, { $macros, $macroMoves }) => {
+          const levels = MACROS.map((id) => levelOf(snap[MACRO_KEYS[id]]));
+          $macros.next(levels);
+          $macroMoves.next({ levels: [...levels] });
+        },
+      }),
+    ]);
 
 export const {
   ModelProvider: ModulationProvider,

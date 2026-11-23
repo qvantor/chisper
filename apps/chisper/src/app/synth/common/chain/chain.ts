@@ -10,7 +10,7 @@ import {
   ChainRoute,
   ChainState,
   FX_KINDS,
-  LFO_SOURCE,
+  isLfoSource,
   LIMITER_STAGE,
   neutralState,
 } from './chain-params';
@@ -169,7 +169,7 @@ export const createChain = (clock: Pick<SynthClock, 'currentTime'>, host: Engine
       state.routes = routes;
       host.lfos.use(
         'chain',
-        routes.some(({ source }) => source >= LFO_SOURCE)
+        routes.some(({ source }) => isLfoSource(source))
       );
       // (the note of now with the first routes: none was sent while no knob followed it)
       post(first ? { note: state.note, routes } : { routes });

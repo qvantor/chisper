@@ -76,9 +76,12 @@ const renderInPage = (page, { bundle, processor, options, rate, input }) =>
 // events of its options (each voice, its params at the note on, the steps of its gate), each voice into a pair of
 // channels of its own (a tap) split into the destination. `state` (a scene of the whole node): no tap, the voices
 // through the chain of that state into the two channels of the output
-const renderOscInPage = (page, { bundle, processor, rate, frames, tables, voices, events, lfos, state }) =>
+const renderOscInPage = (
+  page,
+  { bundle, processor, rate, frames, tables, voices, events, lfos, state, macros }
+) =>
   page.evaluate(
-    async ({ bundle, processor, rate, frames, tables, voices, events, lfos, state }) => {
+    async ({ bundle, processor, rate, frames, tables, voices, events, lfos, state, macros }) => {
       const decode = (text) => {
         const binary = atob(text);
         const bytes = new Uint8Array(binary.length);
@@ -129,6 +132,8 @@ const renderOscInPage = (page, { bundle, processor, rate, frames, tables, voices
         processorOptions: {
           events,
           ...(state ? { state } : { tap: true }),
+          // the levels of the macros at once
+          ...(macros && { macros }),
           // the LFOs at once, their tables Float32Arrays
           ...(lfos && {
             lfos: {
@@ -148,7 +153,7 @@ const renderOscInPage = (page, { bundle, processor, rate, frames, tables, voices
         encode(rendered.getChannelData(channel))
       );
     },
-    { bundle, processor, rate, frames, tables, voices, events, lfos, state }
+    { bundle, processor, rate, frames, tables, voices, events, lfos, state, macros }
   );
 
 const differences = (a, b) => {
@@ -200,6 +205,7 @@ try {
                 frames: scene.frames,
                 voices: scene.voices,
                 state: scene.whole ? scene.state : null,
+                macros: scene.macros ?? null,
                 tables,
                 events: sceneEvents(scene),
                 lfos: await sceneLfos(scene),

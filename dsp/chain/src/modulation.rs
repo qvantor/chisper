@@ -1,7 +1,8 @@
 //! The modulation of the knobs of the effects: there is one chain for the whole synth, so its knobs follow the
 //! envelopes and the LFOs of the last note pressed (fx-modulation.ts of the app has the same sums for the marks
-//! of the knobs; the LFOs run without a note too, on their clocks). Worked out once for the chain, only while a
-//! route moves a knob of an effect that plays.
+//! of the knobs; the LFOs run without a note too, on their clocks) and the macros (their levels the node's, as
+//! the voices have them: with a note or without one). Worked out once for the chain, only while a route moves a
+//! knob of an effect that plays.
 //!
 //! A knob of a unit takes one value a block (`set`: the unit glides to it). The knobs of the delay, the bands of
 //! the EQ and the mix of a slot are lines: the offset the routes move the knob by, a value a sample (worked out
@@ -16,6 +17,10 @@ use dsp_core::envelope::{envelope_value, EnvelopeParams};
 use dsp_core::finite;
 use dsp_core::glided::glide_length;
 use dsp_core::lfo::{frac, Anchor, LfoBlock, LfoGlobal, LfoState, KNOBS, LFOS, PHASE, RATE, TABLE};
+use dsp_core::macros::{levels_of, Macros};
+// the sources: ENV 1–3, VELO, LFO 1–4, MACRO 1–4 (those of the voices: MOD_SOURCES of the app)
+use dsp_core::sources::{is_lfo, is_macro, SOURCES};
+pub use dsp_core::sources::{ENVELOPES, LFO_SOURCE, MACRO_SOURCE};
 use jsmath::{log2, max, min, pow, sqrt};
 
 use crate::chain::equal_power;
@@ -23,9 +28,6 @@ use crate::delay;
 use crate::eq;
 use crate::units::{law, Law, DELAY as DELAY_SLOT, EQ as EQ_SLOT, MAX_PARAMS, SLOTS};
 
-/// the sources: ENV 1–3, VELO, LFO 1–4 (MOD_SOURCES of the app)
-pub const ENVELOPES: usize = 3;
-pub const LFO_SOURCE: usize = 4;
 /// a target: slot · 32 + the key of a param of its unit, MIX_KEY its mix; from LFO_TARGET on lfo · LFO_KEYS + a knob of
 /// an LFO (the routes of the note to its LFOs)
 pub const KEYS: usize = 32;
@@ -177,6 +179,9 @@ pub struct Modulation {
     back: Vec<(usize, usize)>,
     lines: [Line; LINES],
     knobs: [[Group; KNOBS]; LFOS],
+    // the knobs of each LFO its routes move (a bit a knob) and those of them a macro moves (without a note too)
+    lfo_knobs: [u8; LFOS],
+    macro_knobs: [u8; LFOS],
     // the routes as of set_routes: a line that reads them anew glides
     epoch: u32,
     note: Option<Note>,
@@ -185,6 +190,8 @@ pub struct Modulation {
     runners: [LfoBlock; LFOS],
     points: Vec<usize>,
     levels: [Vec<f64>; LFOS],
+    // the levels of the macros, rendered for the block
+    macros: Macros,
 }
 
 fn term(route: &Route, level: f64) -> f64 {
@@ -245,6 +252,8 @@ impl Modulation {
                 values: Vec::new(),
             }),
             knobs: [[Group::default(); KNOBS]; LFOS],
+            lfo_knobs: [0; LFOS],
+            macro_knobs: [0; LFOS],
             epoch: 0,
             note: None,
             next: None,
@@ -252,6 +261,7 @@ impl Modulation {
             runners,
             points: Vec::new(),
             levels: core::array::from_fn(|_| Vec::new()),
+            macros: Macros::default(),
         }
     }
 
@@ -283,7 +293,7 @@ impl Modulation {
         for route in values.chunks_exact(ROUTE) {
             let target = finite(route[0]) as usize;
             let source = finite(route[1]) as usize;
-            if target >= LFO_TARGET + LFOS * LFO_KEYS || source >= LFO_SOURCE + LFOS {
+            if target >= LFO_TARGET + LFOS * LFO_KEYS || source >= SOURCES {
                 continue;
             }
             self.routes.push(Route {
@@ -299,6 +309,8 @@ impl Modulation {
         // (the routes of a knob one after another, in the order they came)
         self.routes.sort_by_key(|route| route.target);
         self.knobs = [[Group::default(); KNOBS]; LFOS];
+        self.lfo_knobs = [0; LFOS];
+        self.macro_knobs = [0; LFOS];
         for line in self.lines.iter_mut() {
             line.group = None;
         }
@@ -322,13 +334,14 @@ impl Modulation {
     fn place(&mut self, target: usize, group: Group) {
         if target >= LFO_TARGET {
             let (lfo, knob) = ((target - LFO_TARGET) / LFO_KEYS, (target - LFO_TARGET) % LFO_KEYS);
-            // (an LFO moves no knob of an LFO: the routes of the note, its envelopes and VELO)
-            let reads_lfo = self
-                .routes_of(group)
-                .iter()
-                .any(|route| route.source >= LFO_SOURCE);
+            // (an LFO moves no knob of an LFO: the routes of the note, its envelopes and VELO, and the macros)
+            let reads_lfo = self.routes_of(group).iter().any(|route| is_lfo(route.source));
             if knob < KNOBS && !reads_lfo {
                 self.knobs[lfo][knob] = group;
+                self.lfo_knobs[lfo] |= 1 << knob;
+                if self.routes_of(group).iter().any(|route| is_macro(route.source)) {
+                    self.macro_knobs[lfo] |= 1 << knob;
+                }
             }
             return;
         }
@@ -455,6 +468,29 @@ impl Modulation {
         }
     }
 
+    /// the levels of the macros (MACROS values: one that is not a number leaves its macro) from the next block,
+    /// gliding there; `instantly`: there at once (a node made again)
+    pub fn set_macros(&mut self, values: &[f64], instantly: bool) {
+        self.macros.set(&levels_of(values), instantly, self.glide);
+    }
+
+    /// the levels of the macros in the block of `frames` at `frame`: at every block, whether the routes are worked
+    /// out or not (a glide takes its time)
+    pub fn render_macros(&mut self, frame: f64, frames: usize) {
+        self.macros.render(frame, frames);
+    }
+
+    // the level of `source` at `t` (seconds): an envelope or VELO of the note (none: 0), a macro; not an LFO
+    fn level_at(&self, source: usize, t: f64) -> f64 {
+        if is_macro(source) {
+            return self.macros.level_at(source - MACRO_SOURCE, t * self.rate);
+        }
+        match &self.note {
+            Some(note) => level_of(note, source, t - note.start),
+            None => 0.0,
+        }
+    }
+
     /// a route moves this knob of a unit that plays: its value comes from `block`, not from its knob
     pub fn moves(&self, slot: usize, key: usize) -> bool {
         self.moved.iter().any(|knob| knob.slot == slot && knob.key == key)
@@ -503,18 +539,24 @@ impl Modulation {
         self.note = next;
     }
 
-    // the knobs of an LFO the routes of the note move at t
-    fn mods(&self, lfo: usize, t: f64) -> [Option<f64>; KNOBS] {
+    // the knobs of LFO `lfo` its routes move now (a bit a knob): without a note those a macro moves
+    fn moved_knobs(&self, lfo: usize) -> u8 {
+        if self.note.is_some() {
+            self.lfo_knobs[lfo]
+        } else {
+            self.macro_knobs[lfo]
+        }
+    }
+
+    // the knobs of an LFO the routes of the note and the macros move at t (those of `mask`, moved_knobs: without a
+    // note only the macros move them; a knob not in it is its own, None)
+    fn mods(&self, lfo: usize, mask: u8, t: f64) -> [Option<f64>; KNOBS] {
         let mut mods = [None; KNOBS];
-        let Some(note) = &self.note else {
-            return mods;
-        };
+        let noted = self.note.is_some();
+        let moves = |route: &Route| noted || is_macro(route.source);
         let global = &self.globals[lfo];
-        for (knob, group) in self.knobs[lfo].iter().enumerate() {
-            if group.count == 0 {
-                continue;
-            }
-            let routes = self.routes_of(*group);
+        for knob in (0..KNOBS).filter(|knob| mask & (1 << knob) != 0) {
+            let routes = self.routes_of(self.knobs[lfo][knob]);
             let knobs = global.knobs(t);
             let base = match knob {
                 RATE => 1.0 / global.period(t),
@@ -524,8 +566,8 @@ impl Modulation {
                 _ => knobs.smooth,
             };
             let mut sum = 0.0;
-            for route in routes {
-                sum += term(route, level_of(note, route.source, t - note.start));
+            for route in routes.iter().filter(|route| moves(route)) {
+                sum += term(route, self.level_at(route.source, t));
             }
             let value = moved_by(base, sum, &routes[0]);
             mods[knob] = Some(if knob == PHASE {
@@ -540,18 +582,27 @@ impl Modulation {
     // the level of an LFO at a frame, stepped from its last point in points of 32 samples
     fn lfo_at(&mut self, lfo: usize, frame: f64) -> f64 {
         let (last, level) = self.runners[lfo].last();
+        // (the knobs moved: the same at every step, the note is that of the block; none moved, none worked out)
+        let mask = self.moved_knobs(lfo);
+        let mods_at = |modulation: &Modulation, f: f64| {
+            if mask == 0 {
+                [None; KNOBS]
+            } else {
+                modulation.mods(lfo, mask, f / modulation.rate)
+            }
+        };
         if !last.is_nan() {
             if frame <= last {
                 return level;
             }
             let mut f = max(last + SEGMENT as f64, frame - CATCH_UP * SEGMENT as f64);
             while f < frame {
-                let mods = self.mods(lfo, f / self.rate);
+                let mods = mods_at(self, f);
                 self.runners[lfo].point(f, &self.globals[lfo], &mods);
                 f += SEGMENT as f64;
             }
         }
-        let mods = self.mods(lfo, frame / self.rate);
+        let mods = mods_at(self, frame);
         self.runners[lfo].point(frame, &self.globals[lfo], &mods)
     }
 
@@ -564,13 +615,10 @@ impl Modulation {
         let t = (frame + self.points[j] as f64) / self.rate;
         let mut sum = 0.0;
         for route in self.routes_of(group) {
-            let level = if route.source >= LFO_SOURCE {
+            let level = if is_lfo(route.source) {
                 self.levels[route.source - LFO_SOURCE][j]
             } else {
-                match &self.note {
-                    Some(note) => level_of(note, route.source, t - note.start),
-                    None => 0.0,
-                }
+                self.level_at(route.source, t)
             };
             sum += term(route, level);
         }
@@ -639,7 +687,7 @@ impl Modulation {
         let mut reads = [0usize; LFOS];
         for knob in self.moved.iter().filter(|knob| bases.on[knob.slot]) {
             for route in self.routes_of(knob.group) {
-                if route.source >= LFO_SOURCE {
+                if is_lfo(route.source) {
                     reads[route.source - LFO_SOURCE] = reads[route.source - LFO_SOURCE].max(1);
                 }
             }
@@ -650,7 +698,7 @@ impl Modulation {
             }
             let Some(group) = line.group else { continue };
             for route in self.routes_of(group) {
-                if route.source >= LFO_SOURCE {
+                if is_lfo(route.source) {
                     reads[route.source - LFO_SOURCE] = self.points.len();
                 }
             }

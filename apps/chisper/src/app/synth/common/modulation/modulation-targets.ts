@@ -4,12 +4,15 @@ import {
   FilterType,
   FX_TYPES,
   FxType,
+  isLfo,
+  isMacro,
   LFO_RATE_MAX,
   LFO_RATE_MIN,
   LFO_SMOOTH_MAX,
   LFOS,
   LfoKnob,
   MOD_SOURCES,
+  ModSource,
   FINE_MAX,
   NOISE_PITCH_MAX,
   SEMI_MAX,
@@ -289,6 +292,11 @@ export const centered = (id: string, filterType?: FilterType) => {
     );
   return definition.range[0] === -definition.range[1];
 };
+
+// a route of `source` added to knob `id` moves it around its value (bipolar) by default: an LFO or a macro on a knob
+// centered on 0 (`filterType`: of Var), the others up from it
+export const bipolarByDefault = (source: ModSource, id: string, filterType?: FilterType) =>
+  (isLfo(source) || isMacro(source)) && centered(id, filterType);
 
 // the amount of a route in the units of the param (octaves for a log one, a share of the travel of a pow one)
 export const amountInUnits = (amount: number, scale: ModScale, [min, max]: [number, number]) =>

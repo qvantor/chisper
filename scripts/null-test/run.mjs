@@ -89,11 +89,13 @@ const reference = await prepareReference(args.against, { build: false });
 const theirs = path.relative(root, path.join(reference.dir, 'tmp/wasm'));
 const scenes = SCENES.filter((scene) => !args.only || scene.name.includes(args.only));
 
+// the chain-params.ts of a tree (the numbers of its chain core)
+const chainParams = (dir) =>
+  fs.readFileSync(path.join(dir, 'apps/chisper/src/app/synth/common/chain/chain-params.ts'), 'utf8');
 // the kinds of the chain of a tree (FX_KINDS of its chain-params.ts): a chain of other kinds is another ABI
 // (the params of its slots in the buffer of chain_new), its scenes of the chain are its own
 const kindsOf = (dir) =>
-  fs
-    .readFileSync(path.join(dir, 'apps/chisper/src/app/synth/common/chain/chain-params.ts'), 'utf8')
+  chainParams(dir)
     .match(/FX_KINDS = \[([^\]]*)\]/)?.[1]
     .split(',')
     .map((kind) => kind.trim().replace(/'/g, ''))
@@ -102,6 +104,8 @@ const sameChain = JSON.stringify(kindsOf(reference.dir)) === JSON.stringify(kind
 // the options of a voice of a tree (writeOsc and read_osc of its core): of other options its scenes of the voices
 // (the oscillator, the engine: the voices into the chain) are its own
 const sameOptions = hasOscWarp(reference.dir) === hasOscWarp(root);
+// the reference has the macros (sources of the routes 8–11): a scene of them is its own otherwise (none)
+const theirMacros = chainParams(reference.dir).includes('MACRO_SOURCE');
 
 // the scenes of the reference as it renders them itself (null: it has none)
 let own;
@@ -121,7 +125,8 @@ const renders = async (scene) => {
   // (a scene of the engine is a scene of the oscillator into the chain)
   const voiced = scene.kind === 'osc';
   const theirCore = scene.module && hasCore(scene.module, theirs);
-  if (!scene.module || (theirCore && (sameChain || !chained) && (sameOptions || !voiced)))
+  const macros = !scene.macros || theirMacros;
+  if (!scene.module || (theirCore && (sameChain || !chained) && (sameOptions || !voiced) && macros))
     return [await seeded(() => nodeRender(scene)), await seeded(() => nodeRender(scene, theirs))];
   const module = await ownScenes();
   const same = module?.SCENES.find(({ name, rate }) => name === scene.name && rate === scene.rate);

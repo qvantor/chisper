@@ -633,14 +633,43 @@ const lfoSectionSchema = z
   .object({ l1: lfoSchema, l2: lfoSchema, l3: lfoSchema, l4: lfoSchema })
   .prefault({});
 
+// the macros MACRO 1–4: sources of the routes after the LFOs, a knob each with a level 0..1 (the same for every
+// voice and the effects, with a note or without one). Their levels in the preset: mac: { m1, m2, m3, m4 }, a level
+// of 0 left out and the section too when every one is 0 (the presets of before keep their hashes)
+export const MACROS = ['macro1', 'macro2', 'macro3', 'macro4'] as const;
+export type MacroId = (typeof MACROS)[number];
+export const MACRO_KEYS: Record<MacroId, string> = { macro1: 'm1', macro2: 'm2', macro3: 'm3', macro4: 'm4' };
+export const isMacro = (source: string): source is MacroId => (MACROS as readonly string[]).includes(source);
+// the MIDI CC of each macro, for a MIDI input, the files of the track and the automation of a clip: CC 20–23 (none
+// of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32)
+export const MACRO_CC: Record<MacroId, { msb: number; lsb: number }> = {
+  macro1: { msb: 20, lsb: 52 },
+  macro2: { msb: 21, lsb: 53 },
+  macro3: { msb: 22, lsb: 54 },
+  macro4: { msb: 23, lsb: 55 },
+};
+const macroLevel = range(0, 1).optional();
+const macSchema = z
+  .object({ m1: macroLevel, m2: macroLevel, m3: macroLevel, m4: macroLevel })
+  .optional()
+  .transform((mac) => {
+    const set = Object.entries(mac ?? {}).filter(([, level]) => level !== undefined && level !== 0);
+    return set.length > 0
+      ? (Object.fromEntries(set) as Partial<Record<'m1' | 'm2' | 'm3' | 'm4', number>>)
+      : undefined;
+  })
+  // (an optional key of the preset: none is no key)
+  .optional();
+
 // the modulation: a route moves a knob (a target of the app: osc1.wave, filter.cutoff, delay.time…) by its
 // source × amount, a share of the range of the knob in its scale (-1..1, a log knob in octaves: +0.5 on
 // Cutoff is about +5.5 octaves). Saved as { 'env2:osc1.wave': 0.5 }: one route per source and knob; a bipolar one
 // (around the knob, amount × (level - ½)) as { 'lfo1:filter.gain': { a: 0.5, bi: true } }, one switched off (kept,
-// moving nothing) with off: { a: 0.5, off: true }. The sources: the envelopes, the velocity (VELO), then the LFOs;
-// an index into MOD_SOURCES is the index of the source in the voice. The knobs of the LFOs take no LFO
-export type ModSource = EnvelopeId | 'velo' | LfoId;
-export const MOD_SOURCES: readonly ModSource[] = [...ENVELOPES, 'velo', ...LFOS];
+// moving nothing) with off: { a: 0.5, off: true }. The sources: the envelopes, the velocity (VELO), the LFOs, then
+// the macros (only appended to); an index into MOD_SOURCES is the index of the source in the voice and the chain.
+// The knobs of the LFOs take no LFO
+export type ModSource = EnvelopeId | 'velo' | LfoId | MacroId;
+export const MOD_SOURCES: readonly ModSource[] = [...ENVELOPES, 'velo', ...LFOS, ...MACROS];
 export const isLfo = (source: string): source is LfoId => (LFOS as readonly string[]).includes(source);
 // the target of a route moves a knob of an LFO (lfo2.rate): no LFO goes there
 export const isLfoKnob = (target: string) => /^lfo[1-4]\./.test(target);
@@ -648,7 +677,7 @@ export const isLfoKnob = (target: string) => /^lfo[1-4]\./.test(target);
 // knob (a full one takes none)
 export const MOD_ROUTES_MAX = 64;
 export const MOD_KNOB_SOURCES_MAX = 4;
-const modKeySchema = z.string().regex(/^(env[1-3]|velo|lfo[1-4]):[a-z][a-z0-9]*\.[a-z][a-z0-9]*$/);
+const modKeySchema = z.string().regex(/^(env[1-3]|velo|lfo[1-4]|macro[1-4]):[a-z][a-z0-9]*\.[a-z][a-z0-9]*$/);
 // an object has a flag: a route without one is its amount
 const modValueSchema = z.union([
   range(-1, 1),
@@ -779,6 +808,7 @@ const presetData = <F extends z.ZodType>(filter: F) =>
     env: envSchema,
     lfo: lfoSectionSchema,
     mod: modSchema,
+    mac: macSchema,
     v: voicingSchema,
     fx: fxSchema,
   });

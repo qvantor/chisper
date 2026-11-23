@@ -49,6 +49,7 @@ export type Feature =
   | 'env'
   | 'lfo'
   | 'route'
+  | 'macro'
   | 'voicing'
   | 'track'
   | 'preset'

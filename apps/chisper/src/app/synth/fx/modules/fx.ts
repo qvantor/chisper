@@ -21,13 +21,14 @@ import {
   CHAIN_KEYS,
   ChainNote,
   ChainRoute,
+  isLfoSource,
   LFO_KEYS,
   LFO_TARGET,
   MIX_KEY,
   TARGET_KEYS,
 } from '../../common/chain/chain-params';
 import { createFxSlot, FX_REGISTRY, FxSlot, FxStatus, isFxUsable } from '../effects';
-import { FxNote, FxRoute, isLfoSource, lfoKnobOf } from '../effects/fx-modulation';
+import { FxNote, FxRoute, lfoKnobOf } from '../effects/fx-modulation';
 import { delayTime } from '../effects/delay';
 
 // the source VELO (MOD_SOURCES)
