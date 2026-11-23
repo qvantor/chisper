@@ -37,6 +37,8 @@ pub struct Entry {
     pub version: f64,
     pub levels: Levels,
     refs: u32,
+    // which of the versions the store ever held it is (a slot is reused, a serial never)
+    serial: u64,
 }
 
 // a version coming in chunks, its data as long as they have come, `length` samples once complete
@@ -59,6 +61,8 @@ pub struct Store {
     pending: Vec<Option<Pending>>,
     pool: Vec<Vec<f32>>,
     sine: Levels,
+    // the versions it ever held (Entry.serial)
+    serials: u64,
     // (perf) the versions held and their bytes
     versions: f64,
     bytes: f64,
@@ -101,6 +105,7 @@ impl Default for Store {
             // (a freed buffer goes in without allocating: a release never traps)
             pool: Vec::with_capacity(POOL),
             sine: sine_levels(),
+            serials: 0,
             versions: 0.0,
             bytes: 0.0,
             freed: Vec::new(),
@@ -117,6 +122,19 @@ impl Store {
             EntryRef::Sine => &self.sine,
             EntryRef::Id(id) => &self.entries[id as usize].as_ref().expect("a held version").levels,
         }
+    }
+
+    /// what tells the levels of `entry` from every other version the store ever held (the sine: 0)
+    pub fn serial(&self, entry: EntryRef) -> u64 {
+        match entry {
+            EntryRef::Sine => 0,
+            EntryRef::Id(id) => self.entries[id as usize].as_ref().expect("a held version").serial,
+        }
+    }
+
+    fn next_serial(&mut self) -> u64 {
+        self.serials += 1;
+        self.serials
     }
 
     fn find(&self, table: u32) -> Option<usize> {
@@ -229,11 +247,13 @@ impl Store {
             self.versions += 1.0;
             self.bytes += 4.0 * levels.data.len() as f64;
         }
+        let serial = self.next_serial();
         let id = self.insert(Entry {
             table,
             version,
             levels,
             refs: 1,
+            serial,
         });
         match previous {
             Some(i) => {
@@ -298,6 +318,7 @@ impl Store {
                 rate,
             },
             refs: 0,
+            serial: self.next_serial(),
         };
         let pending = Some(Pending { entry, length });
         let slot = match self.pending.iter().position(Option::is_none) {

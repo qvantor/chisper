@@ -12,7 +12,7 @@ import {
   distinctUntilChanged,
 } from 'rxjs';
 import { ObjectBS, rxModel, rxModelReact, PrimitiveBS, ArrayBS } from '@chisper/rxjs-react';
-import { FINE_MAX, OSC_DEFAULTS, SEMI_MAX, withLegacyPhase } from '@chisper/preset-schema';
+import { FINE_MAX, OSC_DEFAULTS, SEMI_MAX, WARP_MODES, withLegacyPhase } from '@chisper/preset-schema';
 import { generateId, Vector2D } from '@chisper/math';
 import { urlSnapshotPlugin } from '../../../app';
 import { abortable } from '../../../common/services';
@@ -147,6 +147,10 @@ export const oscillator = ({
       })
     );
     const $gain = new PrimitiveBS<number>(0.5);
+    // the Warp: its mode (an index of WARP_MODES, 0 Off) and its knob (0..1); playing notes follow both (a new mode
+    // crossfades in 10 ms, the knob glides through a one-pole of 11.3 ms: `SMOOTHING` of warp.rs)
+    const $warpMode = new PrimitiveBS<number>(OSC_DEFAULTS.wm);
+    const $warp = new PrimitiveBS<number>(OSC_DEFAULTS.wa);
     // its table loading, how far (load-share.ts), where it is in the wavetable oscillator (refused or failed:
     // OscillatorStatus shows why, Retry sends it again), whether its notes play it (setWaveTable sends the table
     // loaded before its load ends)
@@ -172,6 +176,8 @@ export const oscillator = ({
       $morph,
       $frames,
       $gain,
+      $warpMode,
+      $warp,
       $params,
       $waveTablePath,
       $waveTableLoading,
@@ -208,6 +214,14 @@ export const oscillator = ({
     }))
     .actions(({ $unisonShape }) => ({
       setUnisonShape: (shape: Partial<UnisonShape>) => $unisonShape.next({ ...$unisonShape.value, ...shape }),
+    }))
+    .actions(({ $warpMode, $warp }) => ({
+      // a mode chosen (Off is no use; a preset sets $warpMode itself)
+      setWarpMode: (mode: number) => {
+        if (mode !== 0) featureUsed('warp', WARP_MODES[mode]);
+        $warpMode.next(mode);
+      },
+      setWarp: (value: number) => $warp.next(value),
     }))
     .actions(({ id }) => ({
       // its table sent again (refused by the store or failed to build)
@@ -286,6 +300,8 @@ export const oscillator = ({
             ph: model.$osc.value.phase,
             pr: model.$osc.value.phaseRand,
             g: model.$gain.value,
+            wm: model.$warpMode.value,
+            wa: model.$warp.value,
           };
         },
         // r: the Phase rand of a legacy url (seconds of a start delay), read only
@@ -295,6 +311,8 @@ export const oscillator = ({
           snap.p !== undefined && model.$waveTablePath.next(snap.p);
           snap.w !== undefined && model.$position.next(snap.w);
           snap.g !== undefined && model.$gain.next(snap.g);
+          model.$warpMode.next(snap.wm ?? OSC_DEFAULTS.wm);
+          model.$warp.next(snap.wa ?? OSC_DEFAULTS.wa);
           model.$osc.next({
             octave: snap.o ?? OSC_DEFAULTS.o,
             semi: snap.s ?? OSC_DEFAULTS.s,

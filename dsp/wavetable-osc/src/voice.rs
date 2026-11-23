@@ -7,23 +7,28 @@ use crate::filter::{self, Designs, FilterOptions, VoiceFilter};
 use crate::lfo::{LfoBlock, LfoGlobal, DELAY, KNOBS, LFOS, RATE, RISE, SMOOTH};
 use crate::modulation::{lfo_target, BaseOf, Modulation, Sources, VoiceRoute, LFO};
 use crate::noise::{Noise, NoiseOptions};
-use crate::shared::{Bus, Scratch, Shared, DIRECT_SAMPLES, MIX_SAMPLES, PARAMS, UNISON, VOICES};
+use crate::shared::{
+    Bus, CycleKey, Scratch, Shared, WarpedCycle, DIRECT_SAMPLES, MIX_SAMPLES, PARAMS, UNISON, VOICES,
+};
 use crate::source::{each_source, RenderCx, Slots, Source, StartCx, ZERO};
 use crate::store::{EntryRef, Levels, Store, FRAME_GUARD};
 use crate::sub::{Sub, SubOptions};
 use crate::targets::{
     self, mask, BLEND, CUTOFF, DRIVE, FILTER, FILTER_EXTRA, FILTER_GAIN, FINE, GAIN, LFO_KNOBS, OSC, PITCH,
-    POSITION, RESONANCE, SPREAD, VARIATION,
+    POSITION, RESONANCE, SPREAD, VARIATION, WARP, WARP_KNOB,
 };
 use crate::velocity::{PendingVelocities, Velocity, VoiceVelocity, Volume};
+use crate::warp;
 use alloc::{boxed::Box, vec, vec::Vec};
 use dsp_core::filter_model::Layout;
 use dsp_core::simd::{F32x4, U32x4};
-use jsmath::{ceil, cos, floor, log2, max, min, pow, round, sin, PI};
+use jsmath::{ceil, cos, exp, floor, log2, max, min, pow, round, sin, PI};
 
 pub const MAX_UNISON: usize = 8;
 const SEGMENT: usize = 32;
 const BLOCK: usize = 128;
+// how near its still knob the one-pole of the warp is there (the knob itself from the next block on)
+const WARP_THERE: f64 = 1e-7;
 const FADE_IN: f64 = 0.0015;
 const KILL_FADE: f64 = 0.02;
 const CROSSFADE: f64 = 0.01;
@@ -63,6 +68,19 @@ const MIX_BAND: f64 = MIX_REACH + 1e-9;
 // 0.16–0.22 ns, a sample from a mix 0.5–0.9 ns less than directly, the more the wider the pitch moves): a moving
 // pitch builds a mix only where it is likely to play it as long × its multiply-adds
 const MIX_PAYBACK: f64 = 0.3;
+// the multiply-adds of a mix build (the budget's, MIX_BUDGET_WASM) a sample of a warped mix costs (build_warped_mix:
+// the pass of its phases and of the shares of its two levels, the loop that reads them; Node: 4096 samples of two
+// levels 6.6 µs, 7.7 multiply-adds of a mix of two levels a sample, of one 3.4): a unison of 8 on mixes of 2048 builds
+// them at once (131072), on mixes of 4096 or two oscillators of 8 too (262144). Measured with the passes over the
+// whole cycle: over half of it now (render_warped_cycle) a build costs less, one of a cycle kept (WarpedCycle: the
+// voices of a unison after the first, a note struck again) a few times less, the budget is kept (another cost moves
+// the block a voice takes its mix in: other bits)
+const WARPED_COST: f64 = 8.0;
+// the same of a mix whose cycle is kept (WarpedCycle: the voices of a unison after the first, a note struck again):
+// the shares of its pitch over half the cycle and the mix of them, no pass of the phases and no read of the levels
+// (the chord of 12 × 2 × u8 bent in Node: a tenth to a fifth of the time of a build that fills its cycle). At the
+// cost of a fill the voices of a unison waited for the budget reading directly, the dearest way to play them
+const KEPT_COST: f64 = 1.5;
 // the pitches past the reach of the levels a voice read that it still glides from (SourceFade): as far as a pitch
 // moves in a sample (the last block held the reach, the next one starts a sample on; a fall of 36 semitones in 80
 // ms moves 0.003 a sample at 48 kHz), a pitch that stepped further reads its own at once
@@ -170,6 +188,9 @@ pub struct OscOptions {
     /// on: its lowest voice starts at random[0] of the first one, the share of the note (both in phase)
     pub random: [f64; MAX_UNISON],
     pub shape: UnisonShape,
+    /// its warp (warp.rs): the mode, the knob (0..1) at the start
+    pub warp_mode: u32,
+    pub warp: f64,
 }
 
 /// the stacks of a unison (UNISON_STACKS): 12 (1x, 2x, 3x), 12+7 (1x, 2x, 3x), the centre -12 and -24
@@ -284,6 +305,25 @@ pub(crate) fn is_constant(values: &[f32]) -> bool {
     values[1..].iter().all(|value| *value == first)
 }
 
+// one value over a..b at the points a knob of the warp is read at (from a every SEGMENT samples, then b - 1: its
+// routes are worked out there alone, `sparse`)
+fn constant_at_points(values: &[f32], a: usize, b: usize) -> bool {
+    if values.len() == 1 {
+        return true;
+    }
+    let first = values[a];
+    let mut s = a;
+    loop {
+        if values[s] != first {
+            return false;
+        }
+        if s + 1 >= b {
+            return true;
+        }
+        s = (s + SEGMENT).min(b - 1);
+    }
+}
+
 #[inline(always)]
 pub(crate) fn read(values: &[f32], s: usize) -> f32 {
     if values.len() > 1 {
@@ -368,7 +408,7 @@ const LOW_BITS: u32 = 20;
 const LOW: u64 = (1 << LOW_BITS) - 1;
 const CYCLE_MASK: u64 = (1 << 52) - 1;
 // the samples the low bits of a still phase add up over without their carry leaving a lane (2^32 / 2^20)
-const SPAN: usize = 4000;
+pub(crate) const SPAN: usize = 4000;
 
 // a table of this length is read in fixed point (else, a length no table has, by the loops in doubles)
 #[inline(always)]
@@ -384,7 +424,7 @@ fn cycles(x: f64) -> u64 {
 }
 
 // the phases of the four samples of a group, and what moves them to the next group
-struct Phases {
+pub(crate) struct Phases {
     // the top 32 bits, and what is under them (as they add up: the carry is theirs over LOW_BITS)
     acc: U32x4,
     low: U32x4,
@@ -398,7 +438,7 @@ struct Phases {
 
 impl Phases {
     #[inline(always)]
-    fn new(ph: f64, inc: f64, d_inc: f64) -> Phases {
+    pub(crate) fn new(ph: f64, inc: f64, d_inc: f64) -> Phases {
         let (first, by) = (cycles(ph), cycles(inc));
         let top = |x: u64| (x >> LOW_BITS) as u32;
         let a = top(first);
@@ -444,12 +484,12 @@ impl Phases {
 
     // the phases of the group in 0.32
     #[inline(always)]
-    fn group(&self) -> U32x4 {
+    pub(crate) fn group(&self) -> U32x4 {
         self.acc.plus(self.low.shifted(LOW_BITS))
     }
 
     #[inline(always)]
-    fn next(&mut self) {
+    pub(crate) fn next(&mut self) {
         self.acc = self.acc.plus(self.step);
         self.low = self.low.plus(self.low_step);
         self.step = self.step.plus(self.d_step);
@@ -458,7 +498,7 @@ impl Phases {
     // the phase after the `length` samples of the span: of a still step the one the lanes reach, of a moving one
     // the sum of its steps in doubles, rounded once
     #[inline(always)]
-    fn end(&self, inc: f64, d_inc: f64, length: usize) -> f64 {
+    pub(crate) fn end(&self, inc: f64, d_inc: f64, length: usize) -> f64 {
         let moved = if d_inc == 0.0 {
             self.by.wrapping_mul(length as u64)
         } else {
@@ -981,6 +1021,344 @@ fn render22(
     ph
 }
 
+// The loops of a warped voice (warp.rs): the phases of its samples from `phases` (warp_phases wrote them, in 0.32,
+// whole groups of 4 from the start of its span; a group past s1 reads what is there: any phase is in the frame, add4
+// leaves it out), the rest as the loops above in fixed point; no phase to step or return. A length that isn't a power
+// of two (no table has one) is read by render_warped_any
+
+#[inline(never)]
+fn render11_warped(
+    t: &[f32],
+    o: usize,
+    len: f64,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    if !fixed(len) {
+        let none = (0.0, 0.0);
+        return render_warped_any(t, [o; 4], [len; 4], 1, none, none, None, phases, g, out, s0, s1);
+    }
+    let reader = Reader::new(t, o, len);
+    let gain = F32x4::splat(g as f32);
+    let out = &mut out[..s1];
+    let mut s = s0;
+    while s < s1 {
+        let (i, f) = reader.at(U32x4::load(&phases[s..s + 4]));
+        add4(out, s, s1, gain * Reader::lerp(reader.base, i, f));
+        s += 4;
+    }
+}
+
+// render11 of a table under a still map (`BEND`: a bend at a = `param`, else PWM at the slope `param`): the phases of
+// a group through the map and the frame read at them in one loop, the bits of warp_phases then render11_warped (the
+// lanes of warp.rs both run; two passes over the phases of a span cost a voice held on its table 10 to 20 % more);
+// the phase after the span
+#[inline(never)]
+fn render11_mapped<const BEND: bool>(
+    t: &[f32],
+    o: usize,
+    len: f64,
+    param: f64,
+    ph: f64,
+    inc: f64,
+    d_inc: f64,
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) -> f64 {
+    if s1 > s0 + SPAN {
+        let (mid, n) = (s0 + SPAN, SPAN as f64);
+        let ph = render11_mapped::<BEND>(t, o, len, param, ph, inc, d_inc, g, out, s0, mid);
+        return render11_mapped::<BEND>(t, o, len, param, ph, inc + d_inc * n, d_inc, g, out, mid, s1);
+    }
+    let reader = Reader::new(t, o, len);
+    let mut phases = Phases::new(ph, inc, d_inc);
+    let gain = F32x4::splat(g as f32);
+    let out = &mut out[..s1];
+    let (h, g0, g1, half) = warp::bend_consts(param);
+    let (slope, top) = warp::pwm_consts(param);
+    let mut s = s0;
+    while s < s1 {
+        let mapped = if BEND {
+            warp::bend_lanes(phases.group(), h, g0, g1, half)
+        } else {
+            warp::pwm_lanes(phases.group(), slope, top)
+        };
+        let (i, f) = reader.at(mapped);
+        add4(out, s, s1, gain * Reader::lerp(reader.base, i, f));
+        phases.next();
+        s += 4;
+    }
+    phases.end(inc, d_inc, s1.saturating_sub(s0))
+}
+
+// two windows of one length, the second at the share w (render21_same)
+#[inline(never)]
+fn render21_same_warped(
+    t: &[f32],
+    o1: usize,
+    len1: f64,
+    o2: usize,
+    w: f64,
+    dw: f64,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    if !fixed(len1) {
+        let lens = [len1; 4];
+        return render_warped_any(
+            t,
+            [o1, o2, o1, o2],
+            lens,
+            2,
+            (0.0, 0.0),
+            (w, dw),
+            None,
+            phases,
+            g,
+            out,
+            s0,
+            s1,
+        );
+    }
+    let (first, second) = (Reader::new(t, o1, len1), Reader::new(t, o2, len1));
+    let gain = F32x4::splat(g as f32);
+    let (mut share, by) = shares(w, dw);
+    let out = &mut out[..s1];
+    let mut s = s0;
+    while s < s1 {
+        let (i, f) = first.at(U32x4::load(&phases[s..s + 4]));
+        let (v1, v2) = (Reader::lerp(first.base, i, f), Reader::lerp(second.base, i, f));
+        add4(out, s, s1, gain * (v1 + (v2 - v1) * share));
+        share = share + by;
+        s += 4;
+    }
+}
+
+// two windows of other lengths, the second at the share w (render21)
+#[inline(never)]
+fn render21_warped(
+    t: &[f32],
+    o1: usize,
+    len1: f64,
+    o2: usize,
+    len2: f64,
+    w: f64,
+    dw: f64,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    if !(fixed(len1) && fixed(len2)) {
+        let lens = [len1, len2, len1, len2];
+        return render_warped_any(
+            t,
+            [o1, o2, o1, o2],
+            lens,
+            2,
+            (0.0, 0.0),
+            (w, dw),
+            None,
+            phases,
+            g,
+            out,
+            s0,
+            s1,
+        );
+    }
+    let (first, second) = (Reader::new(t, o1, len1), Reader::new(t, o2, len2));
+    let gain = F32x4::splat(g as f32);
+    let (mut share, by) = shares(w, dw);
+    let out = &mut out[..s1];
+    let mut s = s0;
+    while s < s1 {
+        let group = U32x4::load(&phases[s..s + 4]);
+        let (i1, f1) = first.at(group);
+        let (i2, f2) = second.at(group);
+        let (v1, v2) = (
+            Reader::lerp(first.base, i1, f1),
+            Reader::lerp(second.base, i2, f2),
+        );
+        add4(out, s, s1, gain * (v1 + (v2 - v1) * share));
+        share = share + by;
+        s += 4;
+    }
+}
+
+// two frames (from, to at m) of two levels (at w, or the share of each sample: `seconds`, the levels of a bend sample
+// by sample): `offsets` from and to on the level, from and to on the next one (render22_same, render22; the fade of
+// a frame over a crossfade of levels: rare, one loop for all)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render22_warped(
+    t: &[f32],
+    offsets: [usize; 4],
+    len1: f64,
+    len2: f64,
+    (m, dm): (f64, f64),
+    (w, dw): (f64, f64),
+    seconds: Option<&[f32]>,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    if !(fixed(len1) && fixed(len2)) {
+        let lens = [len1, len1, len2, len2];
+        return render_warped_any(
+            t,
+            offsets,
+            lens,
+            4,
+            (m, dm),
+            (w, dw),
+            seconds,
+            phases,
+            g,
+            out,
+            s0,
+            s1,
+        );
+    }
+    let readers = [
+        (offsets[0], len1),
+        (offsets[1], len1),
+        (offsets[2], len2),
+        (offsets[3], len2),
+    ]
+    .map(|(o, len)| Reader::new(t, o, len));
+    let gain = F32x4::splat(g as f32);
+    let ((mut morph, by_m), (mut share, by_w)) = (shares(m, dm), shares(w, dw));
+    let out = &mut out[..s1];
+    let mut s = s0;
+    while s < s1 {
+        let group = U32x4::load(&phases[s..s + 4]);
+        let (i1, f1) = readers[0].at(group);
+        let (i2, f2) = readers[2].at(group);
+        let (a1, b1) = (
+            Reader::lerp(readers[0].base, i1, f1),
+            Reader::lerp(readers[1].base, i1, f1),
+        );
+        let (a2, b2) = (
+            Reader::lerp(readers[2].base, i2, f2),
+            Reader::lerp(readers[3].base, i2, f2),
+        );
+        let (v1, v2) = (a1 + (b1 - a1) * morph, a2 + (b2 - a2) * morph);
+        let at = match seconds {
+            Some(seconds) => F32x4::load(&seconds[s..s + 4]),
+            None => share,
+        };
+        add4(out, s, s1, gain * (v1 + (v2 - v1) * at));
+        morph = morph + by_m;
+        share = share + by_w;
+        s += 4;
+    }
+}
+
+// two levels of other lengths, the second at the share of each sample (`seconds`: the levels of a bend sample by
+// sample, warp::local_phases)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render21_shared_warped(
+    t: &[f32],
+    o1: usize,
+    len1: f64,
+    o2: usize,
+    len2: f64,
+    phases: &[u32],
+    seconds: &[f32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    if !(fixed(len1) && fixed(len2)) {
+        let (lens, none) = ([len1, len2, len1, len2], (0.0, 0.0));
+        let offsets = [o1, o2, o1, o2];
+        return render_warped_any(
+            t,
+            offsets,
+            lens,
+            2,
+            none,
+            none,
+            Some(seconds),
+            phases,
+            g,
+            out,
+            s0,
+            s1,
+        );
+    }
+    let (first, second) = (Reader::new(t, o1, len1), Reader::new(t, o2, len2));
+    let gain = F32x4::splat(g as f32);
+    let out = &mut out[..s1];
+    let mut s = s0;
+    while s < s1 {
+        let group = U32x4::load(&phases[s..s + 4]);
+        let share = F32x4::load(&seconds[s..s + 4]);
+        let (i1, f1) = first.at(group);
+        let (i2, f2) = second.at(group);
+        let (v1, v2) = (
+            Reader::lerp(first.base, i1, f1),
+            Reader::lerp(second.base, i2, f2),
+        );
+        add4(out, s, s1, gain * (v1 + (v2 - v1) * share));
+        s += 4;
+    }
+}
+
+// the loops above for lengths that aren't powers of two (no table has one), sample by sample in doubles: `count`
+// windows of `offsets` (1: the first; 2: the second at the share w; 4: from and to at m of two levels at w), each at
+// its weight, w of each sample from `shares` if any (one loop over them: the smallest code, it never plays)
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render_warped_any(
+    t: &[f32],
+    offsets: [usize; 4],
+    lens: [f64; 4],
+    count: usize,
+    (mut m, dm): (f64, f64),
+    (mut w, dw): (f64, f64),
+    shares: Option<&[f32]>,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    for s in s0..s1 {
+        let ph = phases[s] as f64 / 4294967296.0;
+        if let Some(shares) = shares {
+            w = shares[s] as f64;
+        }
+        let weights = match count {
+            1 => [1.0, 0.0, 0.0, 0.0],
+            2 => [1.0 - w, w, 0.0, 0.0],
+            _ => [(1.0 - m) * (1.0 - w), m * (1.0 - w), (1.0 - m) * w, m * w],
+        };
+        let mut v = 0.0;
+        for k in 0..count {
+            let (i, f) = split(ph * lens[k], lens[k] as i32 - 1);
+            v += weights[k] * lerp(window(t, offsets[k], lens[k] as usize), i, f);
+        }
+        out[s] = (out[s] as f64 + g * v) as f32;
+        m += dm;
+        w += dw;
+    }
+}
+
 // the weights of the 6-point Lagrange interpolation at the shares q / ratio of a sample (a mix is as long as its first
 // level, the next one as long or half as long: ratio 2)
 fn upsampler(ratio: usize) -> Vec<f64> {
@@ -1251,14 +1629,58 @@ pub(crate) fn level_weights(x0: f64, x1: f64) -> (f64, f64, f64) {
     )
 }
 
+// the run from sample a (< end) one crossfade holds, of the x of a segment at the edges of its samples (xs[i]: at
+// sample i, xs[end] after the last): the longest a..b whose x stays within a level and the next, at least one sample
+// (a jump within one is the crossfade at its ends, as `level_weights`); its level, its weights at a and at b
+pub(crate) fn level_cut(xs: &[f64], a: usize, end: usize) -> (usize, f64, f64, f64) {
+    let (mut lo, mut hi) = (min(xs[a], xs[a + 1]), max(xs[a], xs[a + 1]));
+    let mut b = a + 1;
+    while b < end {
+        let (l, h) = (min(lo, xs[b + 1]), max(hi, xs[b + 1]));
+        if h > max(0.0, floor(l)) + 1.0 {
+            break;
+        }
+        (lo, hi, b) = (l, h, b + 1);
+    }
+    let level = max(0.0, floor(lo));
+    (
+        b,
+        level,
+        min(1.0, max(0.0, xs[a] - level)),
+        min(1.0, max(0.0, xs[b] - level)),
+    )
+}
+
 // what a voice reads from one table (render11, a pair in render11_pair): frame `frame` of `level` and of the next one
 // at the weight w, below 1 (that of a constant pitch, level_weights), the mix of the voice; at w 0 the frame of the
-// level itself, no mix (frame -1: none)
+// level itself, no mix (frame -1: none). A still bend of a < 0 reads a warped mix (build_warped_mix) of the level of
+// its pitch, of w WARPED (no weight: the rest of its key in Osc.warps, out of the keys the blocks copy), of that key
+// alone: no reach holds another pitch, a level alone or a mix of no warp
 #[derive(Clone, Copy, PartialEq)]
 struct MixKey {
     frame: i32,
     level: usize,
     w: f64,
+}
+
+// the w of the key of a warped mix
+const WARPED: f64 = -1.0;
+
+// what a warped mix was built of besides its MixKey: the mode, a of the bend and the x of the pitch of the voice
+// unwarped (offset + 3·log2 of its frequency, the x of `segment` before level_x), its cycle a function of them alone
+#[derive(Clone, Copy, PartialEq)]
+struct WarpKey {
+    mode: u32,
+    a: f64,
+    x: f64,
+}
+
+impl WarpKey {
+    const NONE: WarpKey = WarpKey {
+        mode: 0,
+        a: 0.0,
+        x: 0.0,
+    };
 }
 
 impl MixKey {
@@ -1292,10 +1714,11 @@ impl MixKey {
         self.level as f64 + self.w
     }
 
-    // whether it plays frame `frame` at the pitches low..high (x of `segment`) within `reach`
+    // whether it plays frame `frame` at the pitches low..high (x of `segment`) within `reach` (a warped mix none: its
+    // key alone)
     fn holds(&self, frame: i32, low: f64, high: f64, reach: f64) -> bool {
         let (from, to) = self.reach(reach);
-        self.frame == frame && low >= from && high <= to && high < self.level as f64 + 1.0
+        self.w != WARPED && self.frame == frame && low >= from && high <= to && high < self.level as f64 + 1.0
     }
 
     // the frame of a level a voice reads alone at the pitches low..high: of the level nearest to them, if its reach
@@ -1386,12 +1809,14 @@ pub(crate) struct Osc {
     factors: [f64; MAX_UNISON],
     factors_spread: f64,
     cached: bool,
-    last: [f64; 4],
+    last: [f64; 5],
     last_entry: Option<EntryRef>,
     // the mix table of each voice and what it was built of (kept while the voice reads a level alone: a pitch that
     // comes back takes it again), and the table it reads: its mix, or a level alone (a key of w 0)
     mixes: [Option<Vec<f32>>; MAX_UNISON],
     built: [MixKey; MAX_UNISON],
+    // (the rest of the key of a warped mix it keeps: built of w WARPED)
+    warps: [WarpKey; MAX_UNISON],
     mix_keys: [MixKey; MAX_UNISON],
     bands: [PitchBand; MAX_UNISON],
     // the levels each voice reads in the version it plays: of its pitch, of its mix, a glide between them
@@ -1410,10 +1835,22 @@ pub(crate) struct Osc {
     width: Option<(f64, f64)>,
     // the position spread of its options within -1..1, read at the note on
     position_spread: f64,
+    // its warp (warp.rs): the mode its voices play, the one a crossfade (`next`) goes to, one a `knobs` event asked
+    // for (taken by the next block, once no crossfade goes on), its knob (the base of the routes: a `knobs` event sets
+    // it at once) and the knob the voices read, the knob with its routes through the one-pole of warp::SMOOTHING at
+    // the start of the next block (NaN: none yet, a note or a mode after Off starts at its knob), its time constant
+    // in samples and its pole over a segment
+    warp_mode: u32,
+    next_mode: u32,
+    asked_mode: Option<u32>,
+    warp_one: [f32; 1],
+    warp_smooth: f64,
+    warp_tau: f64,
+    warp_pole: f64,
 }
 
 impl Osc {
-    fn new(index: usize, config: &OscOptions) -> Osc {
+    fn new(index: usize, config: &OscOptions, sample_rate: f64) -> Osc {
         // (a unison that isn't a number is one voice: NaN passes min and max)
         let unison = (min(MAX_UNISON as f64, max(1.0, round(config.unison))) as usize).max(1);
         Osc {
@@ -1437,10 +1874,11 @@ impl Osc {
             factors: [1.0; MAX_UNISON],
             factors_spread: f64::NAN,
             cached: false,
-            last: [f64::NAN; 4],
+            last: [f64::NAN; 5],
             last_entry: None,
             mixes: Default::default(),
             built: [MixKey::NONE; MAX_UNISON],
+            warps: [WarpKey::NONE; MAX_UNISON],
             mix_keys: [MixKey::NONE; MAX_UNISON],
             bands: [PitchBand::NONE; MAX_UNISON],
             sources: [SourceFade::NONE; MAX_UNISON],
@@ -1452,6 +1890,13 @@ impl Osc {
             blend_at: None,
             width: None,
             position_spread: position_spread_of(&config.shape),
+            warp_mode: config.warp_mode,
+            next_mode: config.warp_mode,
+            asked_mode: None,
+            warp_one: [config.warp as f32],
+            warp_smooth: f64::NAN,
+            warp_tau: warp::SMOOTHING * sample_rate,
+            warp_pole: exp(-(SEGMENT as f64) / (warp::SMOOTHING * sample_rate)),
         }
     }
 
@@ -1461,6 +1906,10 @@ impl Osc {
     // the param a route moves of this oscillator: its knob `knob` (POSITION…)
     fn target(&self, knob: usize) -> usize {
         targets::target(OSC, self.index, knob)
+    }
+    /// the base of the routes of its warp knob (one value: the knob, smoothed after the routes)
+    pub(crate) fn warp_base(&self) -> &[f32] {
+        &self.warp_one
     }
     // a unison of 3 or more: centre voices and others (one of 1 or 2 is all centre)
     fn blends(&self) -> bool {
@@ -1543,7 +1992,7 @@ fn shape_unison(osc: &mut Osc) {
 
 impl Source for Osc {
     fn targets(&self) -> u128 {
-        mask(OSC, self.index)
+        mask(OSC, self.index) | mask(WARP, self.index)
     }
 
     /// the latest version of its table (the placeholder sine until one has arrived)
@@ -1591,6 +2040,20 @@ impl Source for Osc {
     /// its param of the block (the offsets of its pitch from 0)
     fn base<'a>(&'a self, knob: usize, params: &'a Params<'a>, _n: usize) -> &'a [f32] {
         base_param(knob).map_or(ZERO, |kind| params[self.param(kind)])
+    }
+
+    /// the warp of the oscillators (a `knobs` event of WARP: the mode and the knob of each, in their order): the
+    /// knob is its value at once (the voices read it through the one-pole), a new mode crossfades from the next block
+    /// on (render_osc)
+    fn set_knobs(&mut self, module: usize, values: &[f64]) -> bool {
+        let at = 2 * self.index;
+        if module != WARP || values.len() < at + 2 {
+            return false;
+        }
+        let (mode, knob) = (values[at] as u32, values[at + 1]);
+        self.warp_one[0] = knob as f32;
+        self.asked_mode = (mode != self.warp_mode || self.next.is_some()).then_some(mode);
+        true
     }
 
     fn render(&mut self, cx: &RenderCx, store: &mut Store, shared: &mut Shared) {
@@ -1740,7 +2203,7 @@ impl Voice {
         };
         for (index, config) in options.osc.iter().enumerate() {
             if let Some(config) = config {
-                slots.oscs[index] = Some(Box::new(Osc::new(index, config)));
+                slots.oscs[index] = Some(Box::new(Osc::new(index, config, sample_rate)));
             }
         }
         // the params the routes move: the knobs of the sources on, of the filter
@@ -2444,6 +2907,338 @@ fn build_mix(osc: &mut Osc, v: usize, levels: &Levels, level: usize, w: f64, k: 
     osc.mix_keys[v] = key;
 }
 
+// what a warped mix of a key is built of (build_warped_mix): the data of its levels, its length, the levels of its
+// samples (lo, hi and the pitch: warp::LocalLevels), its frame on lo (its sample 0 and its length) and on hi if it is
+// another, the key of its cycle (WarpedCycle)
+struct WarpedPlan<'a> {
+    data: &'a [f32],
+    length: usize,
+    local: warp::LocalLevels,
+    first: (usize, f64),
+    second: Option<(usize, f64)>,
+    cycle: CycleKey,
+}
+
+// (the pitch of the voice unwarped at warp.x, of 2^`harmonics` harmonics at the nyquist, `top` the top level that
+// sounds, `serial` of the version of the levels)
+fn warped_plan<'a>(
+    levels: &'a Levels,
+    key: MixKey,
+    warp: WarpKey,
+    harmonics: f64,
+    top: f64,
+    serial: u64,
+) -> WarpedPlan<'a> {
+    let length = mix_length(levels, key.level);
+    let most = warp::local_most(warp.a);
+    let line = warp::LocalLine {
+        most: (most, most),
+        x: (warp.x, warp.x),
+        harmonics: (harmonics, harmonics),
+        top,
+        length: length as f64,
+    };
+    let local = warp::local_levels(&line);
+    let (lo, hi, k) = (local.lo as usize, local.hi as usize, key.frame as usize);
+    let first = (frame_start(levels, lo, k), levels.lengths[lo] as f64);
+    let second = (lo != hi).then(|| (frame_start(levels, hi, k), levels.lengths[hi] as f64));
+    let cycle = CycleKey {
+        serial,
+        data: levels.data.as_ptr() as usize,
+        a: warp.a.to_bits(),
+        length,
+        first: (first.0, first.1 as usize),
+        second: second.map(|(o, len)| (o, len as usize)),
+    };
+    WarpedPlan {
+        data: &levels.data,
+        length,
+        local,
+        first,
+        second,
+        cycle,
+    }
+}
+
+// the warped mix of voice v (`key` of w WARPED and `warp`: a still bend of a < 0, its pitch unwarped at x of log2
+// `harmonics` of it at the nyquist, `top` the top level that sounds): its cycle as the voice reads it directly (render_local_warped: the
+// levels of each sample, lo and hi) at the phases c / length of the table, unwarped, as long as the level of its pitch
+// (`key.level`). Read linearly between those samples it is the voice read directly within 59 to 61 dB of its peak at
+// the jump of a saw (a twice as long one: 65 to 70, at twice the cost of a build: a chord struck again every 107 ms
+// paid for its builds 14 %, not 6 %), within 52 dB at the steepest wrap (Bend - at 1); of a pitch on a level of 4096
+// samples (under 250 Hz of a table of 1023 harmonics) 44 to 59 dB at that jump, its cycle within 63 dB of its RMS: a
+// droop over 15 kHz. Its cycle: render_warped_cycle (not inlined: a call of the builds only)
+#[inline(never)]
+fn build_warped_mix(
+    osc: &mut Osc,
+    v: usize,
+    key: MixKey,
+    warp: WarpKey,
+    plan: &WarpedPlan,
+    shared: &mut Shared,
+) {
+    let (data, length, local) = (plan.data, plan.length, &plan.local);
+    let (first, second, cycle) = (plan.first, plan.second, plan.cycle);
+    if let Some(mix) = osc.mixes[v].take() {
+        shared.release_mix(mix);
+    }
+    let Some(mut mix) = shared.acquire_mix(length) else {
+        return;
+    };
+    let kept = shared.cycle(cycle);
+    let Shared { scratch, cycles, .. } = shared;
+    let Scratch { phases, shares, .. } = scratch;
+    match kept {
+        Some((i, filled)) => {
+            let kept = &mut cycles[i];
+            if !filled {
+                fill_warped_cycle(data, first, second, warp.a, length, phases, kept);
+                kept.key = Some(cycle);
+            }
+            apply_warped_cycle(kept, second.map(|_| local), length, shares, &mut mix);
+        }
+        // (no memory for a cycle to keep: no mix, the voice reads directly)
+        None => {
+            shared.release_mix(mix);
+            return;
+        }
+    }
+    mix[0] = mix[length];
+    mix[length + 1] = mix[1];
+    mix[length + 2] = mix[2];
+    osc.mixes[v] = Some(mix);
+    osc.built[v] = key;
+    osc.warps[v] = warp;
+    osc.mix_keys[v] = key;
+}
+
+// the cycle of a warped mix into mix[1..=length] (build_warped_mix): its frame on the level lo (`first`: its sample
+// 0 in `data` and its length) and on hi at the share of each sample (`second`; None: lo is hi, one level), read at the
+// phases c / length through the bend at a, still (its levels `local`). In pieces of the room of a block (the phases
+// and the shares of the scratch), each from its own phase: a step of 1 / length adds up exactly. The passes run over
+// samples 0..=length / 2 only: the bend is symmetric about 1/2 to the bit (a lane maps d = the phase - 1/2 to q,
+// -d to -q: f32 of an integer, products, a division and the cut of q toward 0 alike either sign) and the share of a
+// sample is of |d|, so sample length - c is c mirrored: its phase 2^32 - that of c (c · 2^32 / length exactly, a
+// length of a power of two as every table's), its share that of c, read by the same loops (the passes are three fifths
+// of the work of a build). The mirror of sample 0 goes into mix[1 + length], the guard build_warped_mix sets after it.
+// A build takes the cycle kept instead (fill_warped_cycle, apply_warped_cycle: what of this is of no pitch once for
+// the voices of a unison); the specs hold it to the bits of this one
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn render_warped_cycle(
+    data: &[f32],
+    (o1, len1): (usize, f64),
+    second: Option<(usize, f64)>,
+    a: f64,
+    local: &warp::LocalLevels,
+    length: usize,
+    phases: &mut [u32],
+    shares: &mut [f32],
+    mix: &mut [f32],
+) {
+    let read = |phases: &[u32], shares: &[f32], out: &mut [f32], n: usize| match second {
+        None => render11_warped(data, o1, len1, phases, 1.0, out, 0, n),
+        Some((o2, len2)) => render21_shared_warped(data, o1, len1, o2, len2, phases, shares, 1.0, out, 0, n),
+    };
+    // (the passes write whole groups of 4: up to 3 past a piece)
+    let room = phases.len() - 4;
+    let inc = 1.0 / length as f64;
+    // (samples over `half` are the mirrors of 0..end)
+    let (half, end) = (length / 2, length - length / 2);
+    let mut c = 0;
+    while c <= half {
+        let n = room.min(half + 1 - c);
+        let ph = c as f64 * inc;
+        match second {
+            None => warp::warp_phases(true, a, 0.0, ph, inc, 0.0, phases, 0, n),
+            Some(_) => warp::local_phases(a, 0.0, local, ph, inc, 0.0, phases, shares, 0, n),
+        };
+        read(phases, shares, &mut mix[1 + c..1 + c + n], n);
+        // the mirrors of c' in c..c + n within 0..end, from the last c' down: their samples length - c' in order
+        let m = (c + n).min(end).saturating_sub(c);
+        for k in 0..m / 2 {
+            let (p, q) = (phases[k], phases[m - 1 - k]);
+            (phases[k], phases[m - 1 - k]) = (0u32.wrapping_sub(q), 0u32.wrapping_sub(p));
+            shares.swap(k, m - 1 - k);
+        }
+        if m % 2 == 1 {
+            phases[m / 2] = 0u32.wrapping_sub(phases[m / 2]);
+        }
+        if m > 0 {
+            let j = length + 1 - (c + m);
+            read(phases, shares, &mut mix[1 + j..1 + j + m], m);
+        }
+        c += n;
+    }
+}
+
+// the cycle of a warped mix to keep (WarpedCycle; render_warped_cycle less the shares): its frame on the level lo
+// into `first`, on hi (if `second`) less it into `second`, each as the loops of a voice read it alone at a gain of 1
+// (render11_warped over zeros: a sample of -0 is 0, as it is in the mix: a zero of either sign plus the rest is the
+// same sum but for a zero, which the mix has as 0), the levels of the slopes of its first half into `ups`. The phases
+// as render_warped_cycle has them: the passes over half the cycle, the rest their mirrors
+#[inline(never)]
+fn fill_warped_cycle(
+    data: &[f32],
+    (o1, len1): (usize, f64),
+    second: Option<(usize, f64)>,
+    a: f64,
+    length: usize,
+    phases: &mut [u32],
+    cycle: &mut WarpedCycle,
+) {
+    let WarpedCycle {
+        first,
+        second: rest,
+        ups,
+        ..
+    } = cycle;
+    let (first, rest) = (&mut first[..=length], &mut rest[..=length]);
+    first.fill(0.0);
+    rest.fill(0.0);
+    let mut read = |phases: &[u32], at: usize, n: usize| {
+        render11_warped(data, o1, len1, phases, 1.0, &mut first[at..at + n], 0, n);
+        if let Some((o2, len2)) = second {
+            render11_warped(data, o2, len2, phases, 1.0, &mut rest[at..at + n], 0, n);
+        }
+    };
+    let room = phases.len() - 4;
+    let inc = 1.0 / length as f64;
+    let (half, end) = (length / 2, length - length / 2);
+    let mut c = 0;
+    while c <= half {
+        let n = room.min(half + 1 - c);
+        let ph = c as f64 * inc;
+        match second {
+            None => warp::warp_phases(true, a, 0.0, ph, inc, 0.0, phases, 0, n),
+            Some(_) => warp::local_ups(a, ph, inc, phases, &mut ups[c..], 0, n),
+        };
+        read(phases, c, n);
+        let m = (c + n).min(end).saturating_sub(c);
+        for k in 0..m / 2 {
+            let (p, q) = (phases[k], phases[m - 1 - k]);
+            (phases[k], phases[m - 1 - k]) = (0u32.wrapping_sub(q), 0u32.wrapping_sub(p));
+        }
+        if m % 2 == 1 {
+            phases[m / 2] = 0u32.wrapping_sub(phases[m / 2]);
+        }
+        if m > 0 {
+            read(phases, length + 1 - (c + m), m);
+        }
+        c += n;
+    }
+    if second.is_some() {
+        for (hi, lo) in rest.iter_mut().zip(first.iter()) {
+            *hi -= *lo;
+        }
+    }
+}
+
+// the cycle of a warped mix into mix[1..=length] of the one kept (fill_warped_cycle), the bits of
+// render_warped_cycle: of one level (`local` None) its samples; of two the first plus what the second is over it at
+// the share of each sample, which is of the levels of its slope kept and of the pitch of the voice
+// (warp::local_shares, in the pieces render_warped_cycle passes: the lanes of the pitch start with each), a sample
+// past the half at the share of its mirror. Its sample `length` is left to the guard build_warped_mix sets
+#[inline(never)]
+fn apply_warped_cycle(
+    cycle: &WarpedCycle,
+    local: Option<&warp::LocalLevels>,
+    length: usize,
+    shares: &mut [f32],
+    mix: &mut [f32],
+) {
+    let (first, second) = (&cycle.first[..length], &cycle.second[..length]);
+    let mix = &mut mix[1..=length];
+    let Some(local) = local else {
+        mix.copy_from_slice(first);
+        return;
+    };
+    let room = shares.len() - 4;
+    let (half, end) = (length / 2, length - length / 2);
+    let mut c = 0;
+    while c <= half {
+        let n = room.min(half + 1 - c);
+        warp::local_shares(local, &cycle.ups[c..], shares, 0, n);
+        // (sample `length`, the mirror of 0, is none of the mix)
+        let direct = n.min(length - c);
+        let (out, v1, d) = (
+            &mut mix[c..c + direct],
+            &first[c..c + direct],
+            &second[c..c + direct],
+        );
+        for (((out, v1), d), share) in out.iter_mut().zip(v1).zip(d).zip(&shares[..direct]) {
+            *out = 0.0 + (*v1 + *d * *share);
+        }
+        // the mirrors of c' in max(c, 1)..min(c + n, end): samples length - c', at the shares of c'
+        let (from, to) = (c.max(1), (c + n).min(end));
+        if from < to {
+            let (j, m) = (length - (to - 1), to - from);
+            let (out, v1, d) = (&mut mix[j..j + m], &first[j..j + m], &second[j..j + m]);
+            let mirrored = shares[from - c..to - c].iter().rev();
+            for (((out, v1), d), share) in out.iter_mut().zip(v1).zip(d).zip(mirrored) {
+                *out = 0.0 + (*v1 + *d * *share);
+            }
+        }
+        c += n;
+    }
+}
+
+// whether voice v plays its warped mix in a still block of a bend of a < 0 (Mixing::Warped, its version of `levels`
+// in `mode`, on `frame`, offset the x of its pitch at 1 Hz): the one of its pitch and a, kept or built now if the budget
+// allows, else it reads directly; no reach (a pitch above the nyquist of its fundamental, or one that isn't one, reads
+// directly: silent, or as before; not inlined: a call of such blocks only, out of the loops of render_voices)
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn warped_source(
+    ctx: &Ctx,
+    osc: &mut Osc,
+    v: usize,
+    levels: &Levels,
+    mode: u32,
+    frame: i32,
+    offset: f64,
+    serial: u64,
+    shared: &mut Shared,
+) -> bool {
+    let silent = levels.lengths.len() - 1;
+    let log = osc.logs[v * ctx.points_length];
+    let x = offset + 3.0 * log;
+    // (the level of `segment` at one pitch)
+    let at = level_x(x);
+    let (level, w, _) = level_weights(at, at);
+    if !x.is_finite() || level + (if w == 1.0 { 1.0 } else { 0.0 }) >= silent as f64 {
+        return false;
+    }
+    let level = level as usize;
+    let key = MixKey {
+        frame,
+        level,
+        w: WARPED,
+    };
+    let a = shared.scratch.warp_params[0];
+    let warp = WarpKey { mode, a, x };
+    let built = |osc: &Osc| kept(osc, v) == Some(key) && osc.warps[v] == warp;
+    if !built(osc) {
+        let top = (silent - 1) as f64;
+        let plan = warped_plan(levels, key, warp, ctx.log2_nyquist - log, top, serial);
+        // (of a cycle kept: the shares of its pitch and the mix of them)
+        let cost = if shared.keeps(&plan.cycle) {
+            KEPT_COST
+        } else {
+            WARPED_COST
+        };
+        if shared.take_build(ctx.block_frame, cost * plan.length as f64) {
+            build_warped_mix(osc, v, key, warp, &plan, shared);
+        }
+    }
+    let reads = built(osc);
+    if reads {
+        osc.mix_keys[v] = key;
+    }
+    reads
+}
+
 // the mix voice v keeps (what it was built of), whatever it reads
 fn kept(osc: &Osc, v: usize) -> Option<MixKey> {
     osc.mixes[v].is_some().then_some(osc.built[v])
@@ -2604,6 +3399,263 @@ fn render_fade(
     )
 }
 
+// the map of the warp of `mode` over segment p of `length` (of a block it moves a phase in): its param at the start
+// and its step a sample (a line to the next point), none where it leaves the phases as they are at both points (not
+// inlined: a call of the warped voices only)
+#[inline(never)]
+fn segment_warp(mode: u32, params: &[f64], p: usize, length: f64) -> Option<(f64, f64)> {
+    let (from, to) = (params[p], params[p + 1]);
+    (!(warp::neutral(mode, from) && warp::neutral(mode, to))).then_some((from, (to - from) / length))
+}
+
+// render_span of a warped voice: its phases from `phases` (warp_phases stepped its phase; not inlined: a call of the
+// warped voices only)
+#[inline(never)]
+fn render_span_warped(
+    levels: &Levels,
+    level: usize,
+    w: f64,
+    dw: f64,
+    k: usize,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s: usize,
+    e: usize,
+) {
+    let data = &levels.data;
+    if let Some(level1) = span_level(level, w, dw) {
+        let len1 = levels.lengths[level1] as f64;
+        return render11_warped(data, frame_start(levels, level1, k), len1, phases, g, out, s, e);
+    }
+    let (len1, len2) = (levels.lengths[level] as usize, levels.lengths[level + 1] as usize);
+    let (o1, o2) = (frame_start(levels, level, k), frame_start(levels, level + 1, k));
+    if len1 == len2 {
+        return render21_same_warped(data, o1, len1 as f64, o2, w, dw, phases, g, out, s, e);
+    }
+    render21_warped(
+        data,
+        o1,
+        len1 as f64,
+        o2,
+        len2 as f64,
+        w,
+        dw,
+        phases,
+        g,
+        out,
+        s,
+        e,
+    );
+}
+
+// the x of a pitch read through the warp: up by its levels, never past the top level that sounds (a pitch under it
+// never goes silent) nor down
+#[inline(always)]
+fn warp_x(x: f64, up: f64, top: f64) -> f64 {
+    if up > 0.0 && x < top {
+        min(x + up, top)
+    } else {
+        x
+    }
+}
+
+// the x of a warped segment of a voice at the edges of its samples (render_cuts_warped): its pitch (the logs at its
+// points, a line between) up by the levels of the param of the map there (p0, dp a sample: segment_warp), its ends
+// those of the points
+struct WarpLine {
+    mode: u32,
+    p0: f64,
+    dp: f64,
+    offset: f64,
+    logs: (f64, f64),
+    top: f64,
+    ends: (f64, f64),
+}
+
+// a warped segment s0..s1 whose levels jump over more than one (a knob of PWM or Bend - moving fast near its top):
+// its samples cut where their x (`level_cut`) leaves the crossfade of a level and the next, each run a span (one
+// crossfade over them read levels far richer than its pitch through the warp, then stepped; a run at or over `silent`
+// reads nothing). A frame that fades in (`fade`: its span at s0, until the sample `until`) is cut alike, a run over
+// the end of the fade there too (the weights of its run, as a line). A voice that glides from or to a table
+// (`glide`: its SourceFade and the frame of s0) is cut at the x of its glide at each sample (SourceFade::x_at: one
+// that left a mix as a knob of PWM came down from its top read levels far richer than its pitch over the segment);
+// not inlined: a call of such segments only
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render_cuts_warped(
+    levels: &Levels,
+    line: &WarpLine,
+    glide: Option<(SourceFade, f64)>,
+    silent: usize,
+    k: usize,
+    fade: Option<(usize, (usize, f64, f64))>,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    let end = s1 - s0;
+    let mut xs = [0.0; SEGMENT + 1];
+    let (l0, l1) = line.logs;
+    for (i, x) in xs.iter_mut().enumerate().take(end + 1) {
+        let up = warp::line_levels(line.mode, line.p0 + line.dp * i as f64);
+        let log = l0 + (l1 - l0) * (i as f64 / end as f64);
+        *x = level_x(warp_x(line.offset + 3.0 * log, up, line.top));
+        if let Some((glide, t0)) = glide {
+            *x = glide.x_at(t0 + i as f64, *x);
+        }
+    }
+    (xs[0], xs[end]) = line.ends;
+    let xs = &xs[..=end];
+    // (the samples of the segment that fade)
+    let faded = fade.map_or(0, |(until, _)| until - s0);
+    let mut a = 0;
+    while a < end {
+        let (b, level, w0, w1) = level_cut(xs, a, end);
+        let dw = (w1 - w0) / (b - a) as f64;
+        // (a run from the end of the fade on starts on the line of its own)
+        let mut at = a;
+        while at < b {
+            let fading = at < faded;
+            let to = if fading { b.min(faded) } else { b };
+            // (the weights of a whole run are its own: the bits of a segment that fades nowhere)
+            let v0 = if at == a { w0 } else { w0 + dw * (at - a) as f64 };
+            let v1 = if to == b { w1 } else { w0 + dw * (to - a) as f64 };
+            let full = v0 == 1.0 && v1 == 1.0;
+            if (level as usize + full as usize) < silent {
+                let level = level as usize;
+                match fade {
+                    Some((_, (from, m, dm))) if fading => {
+                        let span = (from, m + dm * at as f64, dm);
+                        render_fade_warped(levels, level, v0, dw, k, span, phases, g, out, s0 + at, s0 + to);
+                    }
+                    _ => render_span_warped(levels, level, v0, dw, k, phases, g, out, s0 + at, s0 + to),
+                }
+            }
+            at = to;
+        }
+        a = b;
+    }
+}
+
+// a segment s0..s1 of a bend of a < 0 (warp.rs, `local_phases`): frame k of two levels, lo and hi, each sample at
+// its share of hi, the frame it fades from too until `fade` ends (one level if they are one); the phase after it
+// (not inlined: a call of such voices only)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render_local_warped(
+    levels: &Levels,
+    line: &warp::LocalLine,
+    k: usize,
+    fade: Option<(usize, (usize, f64, f64))>,
+    (p0, dp, ph, inc, d_inc): (f64, f64, f64, f64, f64),
+    phases: &mut [u32],
+    seconds: &mut [f32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) -> f64 {
+    let local = warp::local_levels(line);
+    let (lo, hi) = (local.lo as usize, local.hi as usize);
+    let end = if lo == hi {
+        warp::warp_phases(true, p0, dp, ph, inc, d_inc, phases, s0, s1)
+    } else {
+        warp::local_phases(p0, dp, &local, ph, inc, d_inc, phases, seconds, s0, s1)
+    };
+    let (phases, seconds) = (&*phases, &*seconds);
+    let data = &levels.data;
+    let (len1, len2) = (levels.lengths[lo] as f64, levels.lengths[hi] as f64);
+    let at1 = |frame: usize| frame_start(levels, lo, frame);
+    let at2 = |frame: usize| frame_start(levels, hi, frame);
+    let mut sample = s0;
+    if let Some((until, (from, m, dm))) = fade {
+        sample = until;
+        if lo == hi {
+            render21_same_warped(data, at1(from), len1, at1(k), m, dm, phases, g, out, s0, sample);
+        } else {
+            let offsets = [at1(from), at1(k), at2(from), at2(k)];
+            render22_warped(
+                data,
+                offsets,
+                len1,
+                len2,
+                (m, dm),
+                (0.0, 0.0),
+                Some(seconds),
+                phases,
+                g,
+                out,
+                s0,
+                sample,
+            );
+        }
+    }
+    if sample < s1 {
+        if lo == hi {
+            render11_warped(data, at1(k), len1, phases, g, out, sample, s1);
+        } else {
+            render21_shared_warped(
+                data,
+                at1(k),
+                len1,
+                at2(k),
+                len2,
+                phases,
+                seconds,
+                g,
+                out,
+                sample,
+                s1,
+            );
+        }
+    }
+    end
+}
+
+// render_fade of a warped voice (not inlined: a call of the voices that fade only)
+#[inline(never)]
+fn render_fade_warped(
+    levels: &Levels,
+    level: usize,
+    w: f64,
+    dw: f64,
+    k: usize,
+    (from, m, dm): (usize, f64, f64),
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s: usize,
+    e: usize,
+) {
+    let data = &levels.data;
+    if let Some(level1) = span_level(level, w, dw) {
+        let len1 = levels.lengths[level1] as f64;
+        let at1 = |frame: usize| frame_start(levels, level1, frame);
+        return render21_same_warped(data, at1(from), len1, at1(k), m, dm, phases, g, out, s, e);
+    }
+    let (len1, len2) = (levels.lengths[level] as f64, levels.lengths[level + 1] as f64);
+    let at1 = |frame: usize| frame_start(levels, level, frame);
+    let at2 = |frame: usize| frame_start(levels, level + 1, frame);
+    let offsets = [at1(from), at1(k), at2(from), at2(k)];
+    render22_warped(
+        data,
+        offsets,
+        len1,
+        len2,
+        (m, dm),
+        (w, dw),
+        None,
+        phases,
+        g,
+        out,
+        s,
+        e,
+    );
+}
+
 // the channels a render of an oscillator adds into: the bus of the voice, or those of the oscillator (a: its
 // version, b: the version a crossfade goes to)
 #[derive(Clone, Copy)]
@@ -2624,8 +3676,15 @@ impl Channels {
 }
 
 // channel 0 left, 1 right, 2 center of the channels (3 mid left, 4 mid right: of the oscillator only, while its
-// blend moves), and `fading`
-fn channel_of(s: &mut Scratch, channels: Channels, channel: usize) -> (&mut [f32], &mut [f32]) {
+// blend moves), `fading`, the phases of a warped voice (warp_phases) and the shares of the level its samples read
+// (local_phases); inlined: the buffers a caller leaves are none of its work
+#[inline(always)]
+#[allow(clippy::type_complexity)]
+fn channel_of(
+    s: &mut Scratch,
+    channels: Channels,
+    channel: usize,
+) -> (&mut [f32], &mut [f32], &mut [u32], &mut [f32]) {
     let Scratch {
         bus: Bus { left, right, center },
         a_left,
@@ -2639,6 +3698,8 @@ fn channel_of(s: &mut Scratch, channels: Channels, channel: usize) -> (&mut [f32
         b_mid_left,
         b_mid_right,
         fading,
+        phases,
+        shares,
         ..
     } = s;
     let out = match (channels, channel) {
@@ -2656,26 +3717,137 @@ fn channel_of(s: &mut Scratch, channels: Channels, channel: usize) -> (&mut [f32
         (Channels::B, 4) => b_mid_right,
         (Channels::B, _) => b_center,
     };
-    (out, fading)
+    (out, fading, phases, shares)
 }
 
 // whether the voices of an oscillator may play their mix tables in a block: not at all; the pitch, the position and
-// the version of the last block (steady: the mixes of that pitch); another pitch or one that moves over a constant
-// position and the same version (the mixes whose reach holds it; `build`: one is built for a pitch that moves)
+// the version of the last block (steady: the mixes of that pitch); the same of a bend of a < 0 at a still knob (its
+// warped mixes, each of its key alone: build_warped_mix); another pitch or one that moves over a constant position
+// and the same version (the mixes whose reach holds it; `build`: one is built for a pitch that moves)
 #[derive(Clone, Copy, PartialEq)]
 enum Mixing {
     Off,
     Steady,
+    Warped,
     Reach { build: bool },
+}
+
+// what the loops of the voices of an oscillator over a block read of it and of its table (render_voices): the x of
+// a pitch as offset + 3·log2 of it, the silent level and the top one that sounds, the frames and the position spread
+// as q, the middle voice of an odd count (-1: an even one) and whether the middle two of an even one are apart
+struct OscBlock {
+    offset: f64,
+    silent: usize,
+    top: f64,
+    frames_q: f64,
+    spread_q: f64,
+    middle: i64,
+    mid_pair: bool,
+    voices: usize,
+    points_length: usize,
+}
+
+impl OscBlock {
+    // the frame of voice v at a point (q: the position there)
+    #[inline(always)]
+    fn frame_at(&self, v: usize, q: f64) -> usize {
+        let q = min(self.frames_q, max(0.0, q + self.spread_q * SPREAD_OFFSETS[v]));
+        min(self.frames_q - 1.0, max(0.0, ceil(q) - 1.0)) as usize
+    }
+
+    // the channel of voice v: the middle voice of an odd count plays in both channels, the others take turns around
+    // it from the lowest on the right (dsp/measurements/unison.json: the stacks of an even count move one side); a
+    // blend that moves: the middle two of an even count in the mid channels, 3 left and 4 right, apart from the
+    // others (the middle one of an odd count is apart in the centre channel)
+    #[inline(always)]
+    fn channel(&self, v: usize) -> usize {
+        let side = if self.middle >= 0 && v as i64 > self.middle {
+            v - 1
+        } else {
+            v
+        };
+        let channel = if v as i64 == self.middle {
+            2
+        } else if side % 2 == 0 {
+            1
+        } else {
+            0
+        };
+        if self.mid_pair && pair_of_voice(v, self.voices) == 0 {
+            channel + 3
+        } else {
+            channel
+        }
+    }
+
+    // the x of a pitch moved up by `up` levels of the warp (warp_x)
+    #[inline(always)]
+    fn raw(&self, x: f64, up: f64) -> f64 {
+        warp_x(x, up, self.top)
+    }
+
+    // the pitch of voice v at point p, as the x of the levels it reads
+    #[inline(always)]
+    fn pitch(&self, osc: &Osc, v: usize, p: usize) -> f64 {
+        level_x(self.offset + 3.0 * osc.logs[v * self.points_length + p])
+    }
+
+    // the same, the warp moving it up by `up` (0: the same bits as `pitch`)
+    #[inline(always)]
+    fn pitch_warped(&self, osc: &Osc, v: usize, p: usize, up: f64) -> f64 {
+        level_x(self.raw(self.offset + 3.0 * osc.logs[v * self.points_length + p], up))
+    }
+
+    // the level and the weights of a segment a voice reads at x0..x1 (None: above the fundamental's nyquist, silent)
+    #[inline(always)]
+    fn segment(&self, x0: f64, x1: f64, length: f64) -> Option<(usize, f64, f64)> {
+        let (level_f, w0, w1) = level_weights(x0, x1);
+        if (level_f + (if w0 == 1.0 && w1 == 1.0 { 1.0 } else { 0.0 })) >= self.silent as f64 {
+            return None;
+        }
+        Some((level_f as usize, w0, (w1 - w0) / length))
+    }
+}
+
+// a voice that fades in over a..b (fade_left: its samples to go): what it rendered into `fading` added to its channel,
+// linear from 0 at the first sample of the fade; the samples it has left after b
+#[inline(always)]
+fn fade_in(
+    ctx: &Ctx,
+    s: &mut Scratch,
+    channels: Channels,
+    channel: usize,
+    fade_left: i32,
+    a: usize,
+    b: usize,
+) -> i32 {
+    let mut remaining = fade_left;
+    let (channel_out, fading, _, _) = channel_of(s, channels, channel);
+    for i in a..b {
+        let gain = if remaining > 0 {
+            1.0 - remaining as f64 / ctx.fade_length as f64
+        } else {
+            1.0
+        };
+        channel_out[i] = (channel_out[i] as f64 + fading[i] as f64 * gain) as f32;
+        if remaining > 0 {
+            remaining -= 1;
+        }
+    }
+    remaining
 }
 
 // the voices of an oscillator over a..b of the block from one version of its table, × g added to the channels;
 // settled: the voices stay on their frames, none fades (render_osc); first: its first block (a voice takes the
-// table it reads at once: it read nothing before); counted: its samples count
+// table it reads at once: it read nothing before); counted: its samples count; mode: its warp (the knob at each
+// point in scratch.warp_knobs; mixing is Off unless the levels it moves the pitch by stay, Warped for a still bend
+// of a < 0). A warp that moves a phase in the block renders its voices in render_voices_warped; the others in the
+// loop of no warp, as without one
 fn render_voices(
     ctx: &Ctx,
     osc: &mut Osc,
     entry: EntryRef,
+    mode: u32,
     position: &[f32],
     constant_position: bool,
     settled: bool,
@@ -2698,13 +3870,24 @@ fn render_voices(
     let (voices, slot) = (osc.voices, channels.version());
     // the position as q = its share × the frames at each point: frame ceil(q) - 1 plays, within the table (q in
     // (k, k + 1] is frame k); the position spread (-1..1) moves voice v by its SPREAD_OFFSETS × the spread, within
-    // the table. A voice plays one frame, two only while it fades from one into another (FrameFade)
+    // the table. A voice plays one frame, two only while it fades from one into another (FrameFade). (The offset and
+    // the top level once the table sounds)
     let frames_q = n as f64;
-    let spread_q = osc.position_spread * frames_q;
-    // the frame of voice v at a point (q: the position there)
-    let frame_at = |v: usize, q: f64| {
-        let q = min(frames_q, max(0.0, q + spread_q * SPREAD_OFFSETS[v]));
-        min(frames_q - 1.0, max(0.0, ceil(q) - 1.0)) as usize
+    let middle: i64 = if voices % 2 == 1 {
+        ((voices - 1) / 2) as i64
+    } else {
+        -1
+    };
+    let mut layout = OscBlock {
+        offset: 0.0,
+        silent,
+        top: 0.0,
+        frames_q,
+        spread_q: osc.position_spread * frames_q,
+        middle,
+        mid_pair: split && middle < 0,
+        voices,
+        points_length,
     };
     let t = ctx.block_frame + a as f64;
     // the frame of each voice at point 0 and whether a fade holds a change to it back (a still position: the frame
@@ -2730,7 +3913,7 @@ fn render_voices(
         // (the frames of the version the voices play: those of a crossfade to the next one never settle)
         let mut still = constant_position && slot == 0;
         for v in 0..voices {
-            let frame = frame_at(v, q);
+            let frame = layout.frame_at(v, q);
             let fade = &mut osc.frame_fades[slot][v];
             fade.at_point(frame, t, osc.incs[v * points_length], ctx.frame_fade_limit);
             targets[v] = frame;
@@ -2751,45 +3934,43 @@ fn render_voices(
     }
     // x = 1 + 3·log2(base · f / nyquist) = offset + 3·log2(f)
     let offset = 1.0 + 3.0 * (log2(level_base(levels.harmonics[0])) - ctx.log2_nyquist);
-    // the middle voice of an odd count plays in both channels, the others take turns around it from the lowest on
-    // the right (dsp/measurements/unison.json: the stacks of an even count move one side)
-    let middle: i64 = if voices % 2 == 1 {
-        ((voices - 1) / 2) as i64
-    } else {
-        -1
+    layout.offset = offset;
+    layout.top = (silent - 1) as f64;
+    let layout = &layout;
+    // the warp: the param of its map at each point and the levels it moves the pitch up by (warp::wrap_levels), of a
+    // bend the most levels its slope moves a sample by (warp::local_most: once a point, not once a voice and
+    // segment); none (`warped` false) while it leaves every phase as it is over the block: the loop of no warp, its
+    // bits
+    let bend = warp::bends(mode);
+    let warped = mode != warp::OFF && {
+        let Scratch {
+            warp_knobs,
+            warp_params,
+            warp_levels,
+            warp_most,
+            ..
+        } = &mut shared.scratch;
+        let mut moves = false;
+        for p in 0..count {
+            let param = warp::line_param(mode, warp_knobs[p]);
+            warp_params[p] = param;
+            // (a bend reads its levels sample by sample: warp::local; none at a >= 0)
+            warp_levels[p] = if bend { 0.0 } else { warp::line_levels(mode, param) };
+            warp_most[p] = if bend { warp::local_most(param) } else { 0.0 };
+            moves |= !warp::neutral(mode, param);
+        }
+        moves
     };
-    // (a blend that moves: the middle two of an even count in the mid channels, 3 left and 4 right, apart from the
-    // others; the middle one of an odd count is apart in the centre channel)
-    let mid_pair = split && middle < 0;
-    let channel_of_voice = |v: usize| {
-        let side = if middle >= 0 && v as i64 > middle {
-            v - 1
+    // (the levels of the warp at point p: none without one)
+    let levels_at = |shared: &Shared, p: usize| {
+        if warped {
+            shared.scratch.warp_levels[p]
         } else {
-            v
-        };
-        let channel = if v as i64 == middle {
-            2
-        } else if side % 2 == 0 {
-            1
-        } else {
-            0
-        };
-        if mid_pair && pair_of_voice(v, voices) == 0 {
-            channel + 3
-        } else {
-            channel
+            0.0
         }
     };
-    // the pitch of voice v at point p, as the x of the levels it reads
-    let pitch = |osc: &Osc, v: usize, p: usize| level_x(offset + 3.0 * osc.logs[v * points_length + p]);
-    // the level and the weights of a segment a voice reads at x0..x1 (None: above the fundamental's nyquist, silent)
-    let segment = |x0: f64, x1: f64, length: f64| {
-        let (level_f, w0, w1) = level_weights(x0, x1);
-        if (level_f + (if w0 == 1.0 && w1 == 1.0 { 1.0 } else { 0.0 })) >= silent as f64 {
-            return None;
-        }
-        Some((level_f as usize, w0, (w1 - w0) / length))
-    };
+    // (the levels of the warp over the block when mixing: Off while they move)
+    let still_levels = levels_at(shared, 0);
     // the voices that play one table over the block (a mix, or the frame of a level alone: a key of w 0, no build),
     // decided first, in their order (the budget and the counters as the TS decides them voice by voice), so two
     // neighbours that both play theirs render in one loop (render11_pair). A voice keeps its mix while it reads a
@@ -2811,11 +3992,25 @@ fn render_voices(
                 continue;
             }
             let frame = osc.frame_fades[slot][v].frame;
+            if mixing == Mixing::Warped {
+                on_mix[v] = warped_source(
+                    ctx,
+                    osc,
+                    v,
+                    levels,
+                    mode,
+                    frame,
+                    offset,
+                    store.serial(entry),
+                    shared,
+                );
+                continue;
+            }
             if mixing == Mixing::Steady {
                 // (one pitch over the block)
                 let length = (shared.scratch.points[1] - shared.scratch.points[0]) as f64;
-                let x = pitch(osc, v, 0);
-                let Some((level, w0, _)) = segment(x, x, length) else {
+                let x = layout.pitch_warped(osc, v, 0, still_levels);
+                let Some((level, w0, _)) = layout.segment(x, x, length) else {
                     continue;
                 };
                 let key = MixKey { frame, level, w: w0 };
@@ -2851,7 +4046,7 @@ fn render_voices(
             let mut sounds = true;
             let mut before = f64::NEG_INFINITY;
             for log in xs {
-                let x = offset + 3.0 * log;
+                let x = layout.raw(offset + 3.0 * log, still_levels);
                 low = min(low, x);
                 high = max(high, x);
                 sounds &= min(before, x) < silent as f64;
@@ -2864,7 +4059,7 @@ fn render_voices(
             // levels of the pitch: one leaving it is done gliding before the pitch passes where its richest level
             // reaches the nyquist (the rise of the pitch itself: over the flat of a level its x stands still, over the
             // crossfade it moves 1 / LEVEL_BAND times as fast)
-            let rise = (high - (offset + 3.0 * xs[0])) / (b - a) as f64;
+            let rise = (high - layout.raw(offset + 3.0 * xs[0], still_levels)) / (b - a) as f64;
             let ahead = level_x(high + rise * fade_length(osc.incs[v * points_length], ctx.frame_fade_limit));
             // the band of pitches it held as x / LEVEL_BAND: as fast as the levels move over a crossfade, and over the
             // flat of a level as fast as they will over the crossfade it comes to (they stand still there)
@@ -2926,24 +4121,46 @@ fn render_voices(
     // (the version a crossfade goes to plays directly at the pitch)
     if slot == 0 {
         for v in 0..voices {
-            let to = on_mix[v].then(|| osc.mix_keys[v].x());
+            // (a warped mix is of its pitch: the levels of before, from or to it at once)
+            let to = (on_mix[v] && osc.mix_keys[v].w != WARPED).then(|| osc.mix_keys[v].x());
             if first {
                 osc.sources[v] = SourceFade {
                     to,
                     ..SourceFade::NONE
                 };
             } else if to != osc.sources[v].to {
-                let x = pitch(osc, v, 0);
+                let x = layout.pitch_warped(osc, v, 0, still_levels);
                 // (the x of its levels a sample over the block: 0 over the flat of a level)
-                let speed = (pitch(osc, v, count - 1) - x).abs() / (b - a) as f64;
+                let last = layout.pitch_warped(osc, v, count - 1, levels_at(shared, count - 1));
+                let speed = (last - x).abs() / (b - a) as f64;
                 osc.sources[v].at_block(to, x, speed, t, osc.incs[v * points_length], ctx.frame_fade_limit);
             }
         }
     }
+    if warped {
+        let decided = (&targets, &held_back, &on_mix);
+        render_voices_warped(
+            ctx,
+            osc,
+            layout,
+            levels,
+            mode,
+            decided,
+            constant_position,
+            count,
+            a,
+            b,
+            channels,
+            g,
+            counted,
+            shared,
+        );
+        return;
+    }
     let mut v = 0;
     while v < voices {
         let fade_left = osc.fades[v];
-        let channel = channel_of_voice(v);
+        let channel = layout.channel(v);
         let g = g * osc.gains[v];
         if fade_left > 0 {
             shared.scratch.fading[a..b].fill(0.0);
@@ -2961,7 +4178,7 @@ fn render_voices(
                 let frame = if constant_position {
                     targets[v]
                 } else {
-                    frame_at(v, shared.scratch.positions[p])
+                    layout.frame_at(v, shared.scratch.positions[p])
                 };
                 osc.frame_fades[slot][v].at_point(frame, t0, inc0, ctx.frame_fade_limit);
             }
@@ -2972,7 +4189,7 @@ fn render_voices(
                 // its table (decided for the block: a voice on one sounds in every segment), the step of the phase
                 // as directly
                 let (table, o, len) = source(osc, levels, v);
-                let (channel_out, fading) = channel_of(&mut shared.scratch, channels, channel);
+                let (channel_out, fading, _, _) = channel_of(&mut shared.scratch, channels, channel);
                 let out = if fade_left > 0 { fading } else { channel_out };
                 ph = render11(table, o, len, ph, inc0, d_inc, g, out, s0, s1);
                 if cfg!(feature = "perf") && counted {
@@ -2981,13 +4198,13 @@ fn render_voices(
                 continue;
             }
             // the levels of its pitch, or of the glide from or to a table while it goes on
-            let (x0, x1) = (pitch(osc, v, p), pitch(osc, v, p + 1));
+            let (x0, x1) = (layout.pitch(osc, v, p), layout.pitch(osc, v, p + 1));
             let (x0, x1) = if gliding {
                 osc.sources[v].segment_x(t0, ctx.block_frame + s1 as f64, x0, x1)
             } else {
                 (x0, x1)
             };
-            let Some((level, w0, dw)) = segment(x0, x1, length) else {
+            let Some((level, w0, dw)) = layout.segment(x0, x1, length) else {
                 // above the fundamental's nyquist: silent, the phase goes on
                 ph = advance(ph, inc0, d_inc, length);
                 continue;
@@ -2997,7 +4214,7 @@ fn render_voices(
                 shared.counts[DIRECT_SAMPLES] += length;
             }
             let fade = osc.frame_fades[slot][v];
-            let (channel_out, fading) = channel_of(&mut shared.scratch, channels, channel);
+            let (channel_out, fading, _, _) = channel_of(&mut shared.scratch, channels, channel);
             let out = if fade_left > 0 { fading } else { channel_out };
             // the frame of the voice, both while it fades into it (a fade starts only at a point): split where the
             // fade ends
@@ -3028,21 +4245,295 @@ fn render_voices(
         }
         osc.phases[v] = ph;
         if fade_left > 0 {
-            // linear from 0 at the first sample
-            let mut remaining = fade_left;
-            let (channel_out, fading) = channel_of(&mut shared.scratch, channels, channel);
-            for i in a..b {
-                let gain = if remaining > 0 {
-                    1.0 - remaining as f64 / ctx.fade_length as f64
+            osc.fades[v] = fade_in(ctx, &mut shared.scratch, channels, channel, fade_left, a, b);
+        }
+        v += 1;
+    }
+}
+
+// render11_mapped of a segment of render_voices_warped by its mode (`param`: a of a bend, the edge of PWM). Not
+// inlined (NO_INLINE of scripts/wasm.mjs too): its two calls in the loop of the segments cost a voice moved by an
+// LFO, which never takes them, 2 to 3 %
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render_table_mapped(
+    bend: bool,
+    t: &[f32],
+    o: usize,
+    len: f64,
+    param: f64,
+    ph: f64,
+    inc: f64,
+    d_inc: f64,
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) -> f64 {
+    if bend {
+        render11_mapped::<true>(t, o, len, param, ph, inc, d_inc, g, out, s0, s1)
+    } else {
+        render11_mapped::<false>(t, o, len, 1.0 / param, ph, inc, d_inc, g, out, s0, s1)
+    }
+}
+
+// a segment of a voice of render_voices_warped whose levels jump (render_cuts_warped): its line, its fade at t0 and
+// its glide (`glide`: t0 while it glides); not inlined (NO_INLINE of scripts/wasm.mjs too: a call of such segments
+// only, what it takes is worked out here, out of the loop of the segments)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn render_jumps_warped(
+    levels: &Levels,
+    osc: &Osc,
+    layout: &OscBlock,
+    mode: u32,
+    (p0, dp): (f64, f64),
+    (v, index, t0): (usize, usize, f64),
+    ends: (f64, f64),
+    glide: Option<f64>,
+    k: usize,
+    fade: &FrameFade,
+    phases: &[u32],
+    g: f64,
+    out: &mut [f32],
+    s0: usize,
+    s1: usize,
+) {
+    let line = WarpLine {
+        mode,
+        p0,
+        dp,
+        offset: layout.offset,
+        logs: (osc.logs[index], osc.logs[index + 1]),
+        top: layout.top,
+        ends,
+    };
+    let fade = fade.span(t0).map(|span| ((s0 + fade.left(t0)).min(s1), span));
+    let glide = glide.map(|t0| (osc.sources[v], t0));
+    render_cuts_warped(
+        levels,
+        &line,
+        glide,
+        layout.silent,
+        k,
+        fade,
+        phases,
+        g,
+        out,
+        s0,
+        s1,
+    );
+}
+
+// the voices of render_voices whose warp moves a phase in the block (the param of its map at each point in
+// scratch.warp_params, the levels it moves the pitch up by in scratch.warp_levels): the phases of each segment
+// through the map, a bend of a < 0 by its levels sample by sample; `decided`: the frames of the voices at point 0,
+// whether a fade holds a change of one back, whether it plays a table over the block (not inlined: the loop of the
+// voices of no warp stays as it is without one, this one a call of the warped oscillators only)
+#[inline(never)]
+fn render_voices_warped(
+    ctx: &Ctx,
+    osc: &mut Osc,
+    layout: &OscBlock,
+    levels: &Levels,
+    mode: u32,
+    (targets, held_back, on_mix): (&[usize; MAX_UNISON], &[bool; MAX_UNISON], &[bool; MAX_UNISON]),
+    constant_position: bool,
+    count: usize,
+    a: usize,
+    b: usize,
+    channels: Channels,
+    g: f64,
+    counted: bool,
+    shared: &mut Shared,
+) {
+    let (voices, slot) = (osc.voices, channels.version());
+    let points_length = layout.points_length;
+    let bend = warp::bends(mode);
+    let mut v = 0;
+    while v < voices {
+        let fade_left = osc.fades[v];
+        let channel = layout.channel(v);
+        let g = g * osc.gains[v];
+        if fade_left > 0 {
+            shared.scratch.fading[a..b].fill(0.0);
+        }
+        let mut ph = osc.phases[v];
+        // the end of the glide of its levels (none in the version a crossfade goes to)
+        let glide_end = if slot == 0 { osc.sources[v].end } else { 0.0 };
+        for p in 0..count - 1 {
+            let s0 = shared.scratch.points[p] as usize;
+            let s1 = shared.scratch.points[p + 1] as usize;
+            let index = v * points_length + p;
+            let inc0 = osc.incs[index];
+            let t0 = ctx.block_frame + s0 as f64;
+            if p > 0 && (!constant_position || held_back[v]) {
+                let frame = if constant_position {
+                    targets[v]
                 } else {
-                    1.0
+                    layout.frame_at(v, shared.scratch.positions[p])
                 };
-                channel_out[i] = (channel_out[i] as f64 + fading[i] as f64 * gain) as f32;
-                if remaining > 0 {
-                    remaining -= 1;
-                }
+                osc.frame_fades[slot][v].at_point(frame, t0, inc0, ctx.frame_fade_limit);
             }
-            osc.fades[v] = remaining;
+            let length = (s1 - s0) as f64;
+            let d_inc = (osc.incs[index + 1] - inc0) / length;
+            let gliding = t0 < glide_end;
+            let span_warp = segment_warp(mode, &shared.scratch.warp_params, p, length);
+            if on_mix[v] && !gliding {
+                // its table (decided for the block: a voice on one sounds in every segment), the step of the phase
+                // as directly (a warped mix by the phase unwarped: the warp is in it)
+                let span_warp = span_warp.filter(|_| osc.mix_keys[v].w != WARPED);
+                let (table, o, len) = source(osc, levels, v);
+                let (channel_out, fading, phases, _) = channel_of(&mut shared.scratch, channels, channel);
+                let out = if fade_left > 0 { fading } else { channel_out };
+                ph = match span_warp {
+                    // (a still map: one loop)
+                    Some((p0, dp)) if dp == 0.0 && fixed(len) => {
+                        render_table_mapped(bend, table, o, len, p0, ph, inc0, d_inc, g, out, s0, s1)
+                    }
+                    Some((p0, dp)) => {
+                        let end = warp::warp_phases(bend, p0, dp, ph, inc0, d_inc, phases, s0, s1);
+                        render11_warped(table, o, len, phases, g, out, s0, s1);
+                        end
+                    }
+                    None => render11(table, o, len, ph, inc0, d_inc, g, out, s0, s1),
+                };
+                if cfg!(feature = "perf") && counted {
+                    shared.counts[MIX_SAMPLES] += length;
+                }
+                continue;
+            }
+            // the levels of its pitch, or of the glide from or to a table while it goes on
+            let (up0, up1) = (shared.scratch.warp_levels[p], shared.scratch.warp_levels[p + 1]);
+            let pitch_x = (
+                layout.pitch_warped(osc, v, p, up0),
+                layout.pitch_warped(osc, v, p + 1, up1),
+            );
+            let (x0, x1) = if gliding {
+                osc.sources[v].segment_x(t0, ctx.block_frame + s1 as f64, pitch_x.0, pitch_x.1)
+            } else {
+                pitch_x
+            };
+            let Some((level, w0, dw)) = layout.segment(x0, x1, length) else {
+                // above the fundamental's nyquist: silent, the phase goes on
+                ph = advance(ph, inc0, d_inc, length);
+                continue;
+            };
+            let k = osc.frame_fades[slot][v].frame as usize;
+            if cfg!(feature = "perf") && counted {
+                shared.counts[DIRECT_SAMPLES] += length;
+            }
+            let fade = osc.frame_fades[slot][v];
+            // (a of a bend at the ends of the segment: none of the voices of no warp)
+            let ends = match span_warp {
+                Some(_) if bend => (shared.scratch.warp_params[p], shared.scratch.warp_params[p + 1]),
+                _ => (0.0, 0.0),
+            };
+            let most = (shared.scratch.warp_most[p], shared.scratch.warp_most[p + 1]);
+            let (channel_out, fading, phases, seconds) = channel_of(&mut shared.scratch, channels, channel);
+            let out = if fade_left > 0 { fading } else { channel_out };
+            if let Some((p0, dp)) = span_warp.filter(|_| ends.0 < 0.0 || ends.1 < 0.0) {
+                // a bend of a < 0 at an end: its levels sample by sample, from the x of its pitch unwarped (moved as a
+                // glide of its levels moves it: x - its pitch), the harmonics of its pitch at the nyquist (warp.rs)
+                let line = warp::LocalLine {
+                    most,
+                    x: (
+                        layout.offset + 3.0 * osc.logs[index] + (x0 - pitch_x.0),
+                        layout.offset + 3.0 * osc.logs[index + 1] + (x1 - pitch_x.1),
+                    ),
+                    harmonics: (
+                        ctx.log2_nyquist - osc.logs[index],
+                        ctx.log2_nyquist - osc.logs[index + 1],
+                    ),
+                    top: layout.top,
+                    length,
+                };
+                let fade = fade.span(t0).map(|span| ((s0 + fade.left(t0)).min(s1), span));
+                let warp = (p0, dp, ph, inc0, d_inc);
+                ph = render_local_warped(levels, &line, k, fade, warp, phases, seconds, g, out, s0, s1);
+                continue;
+            }
+            if let Some((p0, dp)) = span_warp {
+                // the phases of the segment through the map, once: the fade and the span read them
+                let end = warp::warp_phases(bend, p0, dp, ph, inc0, d_inc, phases, s0, s1);
+                let phases = &*phases;
+                // (the levels of the warp over more than one in the segment: cut where they leave a crossfade, the
+                // samples of a fade too, those of a glide of its levels at the x of the glide)
+                if up0 != up1 && (x1 - x0).abs() > 1.0 && s1 - s0 <= SEGMENT {
+                    let glide = gliding.then_some(t0);
+                    let at = (v, index, t0);
+                    render_jumps_warped(
+                        levels,
+                        osc,
+                        layout,
+                        mode,
+                        (p0, dp),
+                        at,
+                        (x0, x1),
+                        glide,
+                        k,
+                        &fade,
+                        phases,
+                        g,
+                        out,
+                        s0,
+                        s1,
+                    );
+                } else {
+                    let mut sample = s0;
+                    if let Some(span) = fade.span(t0) {
+                        sample = (s0 + fade.left(t0)).min(s1);
+                        render_fade_warped(levels, level, w0, dw, k, span, phases, g, out, s0, sample);
+                    }
+                    if sample < s1 {
+                        let offset = (sample - s0) as f64;
+                        render_span_warped(
+                            levels,
+                            level,
+                            w0 + dw * offset,
+                            dw,
+                            k,
+                            phases,
+                            g,
+                            out,
+                            sample,
+                            s1,
+                        );
+                    }
+                }
+                ph = end;
+                continue;
+            }
+            // the frame of the voice, both while it fades into it (a fade starts only at a point): split where the
+            // fade ends
+            let mut sample = s0;
+            if let Some(span) = fade.span(t0) {
+                sample = (s0 + fade.left(t0)).min(s1);
+                ph = render_fade(
+                    levels, level, w0, dw, k, span, ph, inc0, d_inc, g, out, s0, sample,
+                );
+            }
+            if sample < s1 {
+                let offset = (sample - s0) as f64;
+                ph = render_span(
+                    levels,
+                    level,
+                    w0 + dw * offset,
+                    dw,
+                    k,
+                    ph,
+                    inc0 + d_inc * offset,
+                    d_inc,
+                    g,
+                    out,
+                    sample,
+                    s1,
+                );
+            }
+        }
+        osc.phases[v] = ph;
+        if fade_left > 0 {
+            osc.fades[v] = fade_in(ctx, &mut shared.scratch, channels, channel, fade_left, a, b);
         }
         v += 1;
     }
@@ -3081,6 +4572,23 @@ fn render_osc(
                 } else {
                     [FrameFade::NONE; MAX_UNISON]
                 };
+                osc.next_mode = osc.warp_mode;
+            }
+        }
+    }
+    // a mode of the warp asked for: at once in its first block (it played nothing yet), else a crossfade from its
+    // version in the mode it plays to the same version in the new one (on the frames they play); while a crossfade
+    // goes on it waits for its end
+    if osc.next.is_none() {
+        if let Some(mode) = osc.asked_mode.take() {
+            if osc.last_entry.is_none() {
+                osc.warp_mode = mode;
+                osc.next_mode = mode;
+            } else if mode != osc.warp_mode {
+                osc.next = Some(store.acquire(osc.entry));
+                osc.next_mode = mode;
+                osc.crossfade = 0.0;
+                osc.frame_fades[1] = osc.frame_fades[0];
             }
         }
     }
@@ -3115,17 +4623,35 @@ fn render_osc(
     } else if osc.blend_at != Some(blend[0] as f64) {
         set_blend(osc, blend[0] as f64);
     }
+    // the knob of the warp (its routes are worked out at the points alone: `sparse`) and the one-pole it goes through,
+    // still over the block or not (the knob still, the one-pole there); none to read while neither the voices nor a
+    // crossfade play a warp (Off: nothing more than without one; its one-pole starts again from the knob)
+    let warping = osc.warp_mode != warp::OFF || (osc.next.is_some() && osc.next_mode != warp::OFF);
+    let warp_base = osc.warp_one;
+    let warp_knob: &[f32] = warping
+        .then(|| modulation.moved(targets::target(WARP, osc.index, WARP_KNOB)))
+        .flatten()
+        .unwrap_or(&warp_base);
+    let warp_at = |s: usize| warp::knob_of(read(warp_knob, s) as f64);
+    if !warping {
+        osc.warp_smooth = f64::NAN;
+    } else if osc.warp_smooth.is_nan() {
+        osc.warp_smooth = warp_at(a);
+    }
+    let warp_still = !warping || constant_at_points(warp_knob, a, b);
+    let constant_warp = !warping || (warp_still && osc.warp_smooth == warp_at(a));
     let constant_spread = is_constant(spread);
     let constant_pitch = is_constant(frequency) && detune.constant(a, b) && constant_spread;
     // (a table of one frame is played at any position)
     let one_frame =
         store.levels(osc.entry).frames == 1 && osc.next.is_none_or(|next| store.levels(next).frames == 1);
     let constant_position = one_frame || is_constant(position);
-    // the points of the pitch and the position: one segment if they are constant, else every SEGMENT samples
+    // the points of the pitch, the position and the warp: one segment if they are constant, else every SEGMENT
+    // samples
     let mut count = 0;
     {
         let points = &mut shared.scratch.points;
-        if constant_pitch && constant_position {
+        if constant_pitch && constant_position && constant_warp {
             points[count] = a as i32;
             count += 1;
             points[count] = b as i32;
@@ -3141,6 +4667,53 @@ fn render_osc(
             count += 1;
         }
     }
+    // the knob of the warp at each point (the last one past the block: its last sample), and the levels it moves the
+    // pitch of the voices up by: while they stay over the block (Bend + reads none, a still knob) the voices may play
+    // their mix tables as without a warp (a map of the phase reads a mix as it reads a level); `local`: a bend of a < 0
+    // somewhere in the block (its levels sample by sample: its warped mixes of a still knob alone)
+    let (warp_levels, constant_levels, local) = if !warping {
+        (0.0, true, false)
+    } else {
+        let Scratch {
+            points, warp_knobs, ..
+        } = &mut shared.scratch;
+        let mode = osc.warp_mode;
+        let levels = |knob: f64| warp::wrap_levels(mode, warp::param(mode, knob));
+        let mut constant = true;
+        // (the knob through the one-pole: from the knob before at each point, its input a line from the knob there; a
+        // bend of a < 0 reads its levels sample by sample: no mixes)
+        let (mut y, mut x0) = (osc.warp_smooth, warp_at(a));
+        let mut local = false;
+        for p in 0..count {
+            let x = warp_at((points[p] as usize).min(b - 1));
+            if p > 0 && !constant_warp {
+                let length = (points[p] - points[p - 1]) as f64;
+                let pole = (length == SEGMENT as f64).then_some(osc.warp_pole);
+                y = warp::smooth(y, x0, x, length, osc.warp_tau, pole);
+            }
+            warp_knobs[p] = y;
+            local |= warp::local(mode, warp::param(mode, y));
+            x0 = x;
+            if p > 0 && mode != warp::OFF && !constant_warp {
+                constant &= levels(warp_knobs[p]) == levels(warp_knobs[0]);
+            }
+        }
+        // there once within 1e-7 of a still knob: still again (one segment, the mixes)
+        osc.warp_smooth = if warp_still && (y - x0).abs() < WARP_THERE {
+            x0
+        } else {
+            y
+        };
+        (
+            if mode == warp::OFF {
+                0.0
+            } else {
+                levels(warp_knobs[0])
+            },
+            constant && !local,
+            local,
+        )
+    };
 
     // the same still position and version as the last block: the frames of the voices stay once they settled
     // (whatever the pitch: a fade starts only at a change of frame)
@@ -3150,17 +4723,21 @@ fn render_osc(
         && osc.last_entry == Some(osc.entry);
     let settled = still && osc.frames_settled;
     let first = osc.last_entry.is_none();
-    // the same pitch too: the voices may play their mixes
+    // the same pitch and levels of the warp too: the voices may play their mixes (a bend of a < 0: its knob still, one
+    // a over the block)
     let steady = constant_pitch
+        && (constant_levels || (local && constant_warp))
         && still
         && osc.last[0] == frequency[0] as f64
         && osc.last[1] == detune.at(0) as f64
-        && osc.last[2] == spread[0] as f64;
+        && osc.last[2] == spread[0] as f64
+        && osc.last[4] == warp_levels;
     osc.last = [
         frequency[0] as f64,
         detune.at(0) as f64,
         spread[0] as f64,
         position[0] as f64,
+        warp_levels,
     ];
     osc.last_entry = Some(osc.entry);
 
@@ -3184,11 +4761,14 @@ fn render_osc(
     }
     osc.cached = constant_pitch && count == 2;
 
-    // the mixes of the version the voices play: those of the pitch of a steady block, those whose reach holds
-    // another pitch over a constant position (one that moves changes frames: directly)
-    let mixing = if steady {
+    // the mixes of the version the voices play: those of the pitch of a steady block (of a bend of a < 0 its warped
+    // ones), those whose reach holds another pitch over a constant position and levels of the warp (one that moves
+    // changes frames, or the levels the warp reads: directly; a bend of a < 0 never)
+    let mixing = if steady && local {
+        Mixing::Warped
+    } else if steady {
         Mixing::Steady
-    } else if constant_position && osc.next.is_none() {
+    } else if constant_position && constant_levels && osc.next.is_none() {
         Mixing::Reach {
             build: !constant_pitch,
         }
@@ -3204,6 +4784,7 @@ fn render_osc(
             ctx,
             osc,
             osc.entry,
+            osc.warp_mode,
             position,
             constant_position,
             settled,
@@ -3241,6 +4822,7 @@ fn render_osc(
         ctx,
         osc,
         osc.entry,
+        osc.warp_mode,
         position,
         constant_position,
         settled,
@@ -3274,6 +4856,7 @@ fn render_osc(
             ctx,
             osc,
             next,
+            osc.next_mode,
             position,
             constant_position,
             settled,
@@ -3308,8 +4891,13 @@ fn render_osc(
             if osc.entry != EntryRef::Sine {
                 store.release(osc.entry);
             }
-            release_mixes(osc, shared);
+            // (a new mode on the same entry keeps its mixes: of its levels, not of the warp; a block takes one whose
+            // key its pitch still asks for)
+            if next != osc.entry {
+                release_mixes(osc, shared);
+            }
             osc.entry = next;
+            osc.warp_mode = osc.next_mode;
             osc.next = None;
             osc.frame_fades[0] = osc.frame_fades[1];
             // (its voices played it directly at their pitches)
@@ -3414,6 +5002,32 @@ fn mix_blend(s: &mut Scratch, a: usize, b: usize, width: Option<(f64, f64)>, ble
             break;
         }
         (p0, c0, s0) = (p1, c1, s1);
+    }
+}
+
+#[cfg(test)]
+impl Voice {
+    /// the knob of the warp of oscillator `osc` through its one-pole, at the start of the next block (NaN: none)
+    pub(crate) fn warp_smoothed(&self, osc: usize) -> f64 {
+        self.slots.oscs[osc]
+            .as_ref()
+            .map_or(f64::NAN, |osc| osc.warp_smooth)
+    }
+
+    /// the key of the mix voice v of oscillator `osc` keeps (frame, level, w, the warp of a warped one: mode, a, x),
+    /// None: none
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn kept_mix(
+        &self,
+        osc: usize,
+        v: usize,
+    ) -> Option<(i32, usize, f64, Option<(u32, f64, f64)>)> {
+        let osc = self.slots.oscs[osc].as_ref()?;
+        let (key, warp) = (osc.built[v], osc.warps[v]);
+        osc.mixes[v].as_ref().map(|_| {
+            let warp = (key.w == WARPED).then_some((warp.mode, warp.a, warp.x));
+            (key.frame, key.level, key.w, warp)
+        })
     }
 }
 
@@ -3548,6 +5162,217 @@ mod tests {
         assert_eq!(ph, phase);
     }
 
+    // the phases render11 steps over s0..s1 (in a buffer from s0, as warp_phases writes them unwarped)
+    fn stepped(ph: f64, inc: f64, d_inc: f64, s0: usize, s1: usize) -> Vec<u32> {
+        let mut buf = vec![0; s1 + 4];
+        let mut phases = Phases::new(ph, inc, d_inc);
+        let mut s = s0;
+        while s < s1 {
+            phases.group().store(&mut buf[s..s + 4]);
+            phases.next();
+            s += 4;
+        }
+        buf
+    }
+
+    #[test]
+    fn the_warped_loops_on_phases_as_they_are_play_the_bits_of_the_loops_of_no_warp() {
+        let (len1, len2) = (64, 32);
+        let (t, o) = frames(&[(0, len1), (1, len1), (2, len2)]);
+        let Fade {
+            w,
+            dw,
+            ph,
+            inc,
+            d_inc,
+            g,
+            ..
+        } = FADE;
+        let phases = stepped(ph, inc, d_inc, S0, S1);
+        let (mut plain, mut warped) = (vec![0.5; 128], vec![0.5; 128]);
+        render11(&t, o[0], len1 as f64, ph, inc, d_inc, g, &mut plain, S0, S1);
+        render11_warped(&t, o[0], len1 as f64, &phases, g, &mut warped, S0, S1);
+        assert_eq!(plain, warped);
+        render21_same(
+            &t,
+            o[0],
+            len1 as f64,
+            o[1],
+            w,
+            dw,
+            ph,
+            inc,
+            d_inc,
+            g,
+            &mut plain,
+            S0,
+            S1,
+        );
+        render21_same_warped(
+            &t,
+            o[0],
+            len1 as f64,
+            o[1],
+            w,
+            dw,
+            &phases,
+            g,
+            &mut warped,
+            S0,
+            S1,
+        );
+        assert_eq!(plain, warped);
+        render21(
+            &t,
+            o[0],
+            len1 as f64,
+            o[2],
+            len2 as f64,
+            w,
+            dw,
+            ph,
+            inc,
+            d_inc,
+            g,
+            &mut plain,
+            S0,
+            S1,
+        );
+        render21_warped(
+            &t,
+            o[0],
+            len1 as f64,
+            o[2],
+            len2 as f64,
+            w,
+            dw,
+            &phases,
+            g,
+            &mut warped,
+            S0,
+            S1,
+        );
+        assert_eq!(plain, warped);
+    }
+
+    #[test]
+    fn the_warped_fade_between_the_frames_of_two_levels_reads_all_four() {
+        // (as render22 in doubles: the same mix of the four, in f32 lanes)
+        for (len1, len2) in [(64, 32), (64, 64)] {
+            let (t, o) = frames(&[(0, len1), (1, len1), (2, len2), (3, len2)]);
+            let mut out = vec![0.5; 128];
+            let (expected, phase) = expected(FADE, len1, len2, &out);
+            let Fade {
+                m,
+                dm,
+                w,
+                dw,
+                ph,
+                inc,
+                d_inc,
+                g,
+            } = FADE;
+            let phases = stepped(ph, inc, d_inc, S0, S1);
+            let offsets = [o[0], o[1], o[2], o[3]];
+            render22_warped(
+                &t,
+                offsets,
+                len1 as f64,
+                len2 as f64,
+                (m, dm),
+                (w, dw),
+                None,
+                &phases,
+                g,
+                &mut out,
+                S0,
+                S1,
+            );
+            expect_close(&out, &expected, 1e-5);
+            assert!((Phases::new(ph, inc, d_inc).end(inc, d_inc, S1 - S0) - phase).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_table_under_a_still_map_in_one_loop_is_the_bits_of_its_two_passes() {
+        // render11_mapped against warp_phases then render11_warped: a bend at a of either sign and PWM, a pitch still
+        // and one that moves, spans from any sample of a block, of lengths no group of 4 ends and longer than SPAN,
+        // over an output that has a sound already; the phase after them too
+        let (data, offsets) = frames(&[(0, 2048), (1, 512)]);
+        let cases = [(true, 0.56), (true, -0.3), (false, 2.0), (false, 37.5)];
+        let spans = [(0, 128), (3, 61), (10, 11), (1, SPAN + 139)];
+        for (bend, param) in cases {
+            for (frame, len) in [(0, 2048.0), (1, 512.0)] {
+                for d_inc in [0.0, 3e-7] {
+                    for (s0, s1) in spans {
+                        let (ph, inc, g) = (0.37, 0.0123, 0.7);
+                        let mut two = vec![0.25f32; s1 + 4];
+                        let mut one = two.clone();
+                        let mut phases = vec![0u32; s1 + 4];
+                        // (the line of PWM is its edge: 1 / the slope)
+                        let line = if bend { param } else { 1.0 / param };
+                        let end = warp::warp_phases(bend, line, 0.0, ph, inc, d_inc, &mut phases, s0, s1);
+                        render11_warped(&data, offsets[frame], len, &phases, g, &mut two, s0, s1);
+                        let slope = 1.0 / line;
+                        let mapped = if bend {
+                            render11_mapped::<true>(
+                                &data,
+                                offsets[frame],
+                                len,
+                                param,
+                                ph,
+                                inc,
+                                d_inc,
+                                g,
+                                &mut one,
+                                s0,
+                                s1,
+                            )
+                        } else {
+                            render11_mapped::<false>(
+                                &data,
+                                offsets[frame],
+                                len,
+                                slope,
+                                ph,
+                                inc,
+                                d_inc,
+                                g,
+                                &mut one,
+                                s0,
+                                s1,
+                            )
+                        };
+                        let bits = |out: &[f32]| out.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                        assert_eq!(bits(&one), bits(&two), "bend {bend} at {param}, {s0}..{s1}");
+                        assert_eq!(
+                            mapped.to_bits(),
+                            end.to_bits(),
+                            "bend {bend} at {param}, {s0}..{s1}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_length_no_table_has_is_read_in_doubles_through_the_warp_too() {
+        let len = 48;
+        let (t, o) = frames(&[(0, len)]);
+        let Fade { ph, inc, g, .. } = FADE;
+        let phases = stepped(ph, inc, 0.0, S0, S1);
+        let (mut plain, mut warped) = (vec![0.5; 128], vec![0.5; 128]);
+        render11(&t, o[0], len as f64, ph, inc, 0.0, g, &mut plain, S0, S1);
+        render11_warped(&t, o[0], len as f64, &phases, g, &mut warped, S0, S1);
+        // (the phases of the lanes against those of doubles: within 2^-32 of a cycle a sample)
+        expect_close(
+            &warped,
+            &plain.iter().map(|v| *v as f64).collect::<Vec<_>>(),
+            1e-6,
+        );
+    }
+
     #[test]
     fn render22_same_fades_between_the_frames_of_two_levels_in_its_lanes() {
         let len = 64;
@@ -3586,6 +5411,148 @@ mod tests {
             // (in f32: the weights stepped by sums)
             expect_close(&out, &expected, 1e-5);
             assert_eq!(ph, phase);
+        }
+    }
+
+    #[test]
+    fn a_warped_mix_rendered_over_half_its_cycle_is_the_one_of_all_of_it() {
+        // the passes over samples 0..=length / 2, the others their mirrors: the bits of the passes over the whole
+        // cycle in pieces of a block, as they were (a bend of each a, its levels by the slope of each sample on two
+        // levels, the second half as long, and on one; the guard after the cycle aside: the mirror of sample 0)
+        for length in [512, 1024, 4096] {
+            let (data, offsets) = frames(&[(0, length), (2, length / 2)]);
+            let first = (offsets[0], length as f64);
+            for a in [-0.8, -0.48, -0.1] {
+                for second in [Some((offsets[1], (length / 2) as f64)), None] {
+                    let local = warp::LocalLevels {
+                        x0: 9.3,
+                        dx: 0.0,
+                        f0: -3.5,
+                        df: 0.0,
+                        top: 27.0,
+                        lo: 8.0,
+                        hi: 13.0,
+                    };
+                    let (mut phases, mut shares) = (vec![0; 132], vec![0.0; 132]);
+                    let mut half = vec![0.0; length + FRAME_GUARD];
+                    render_warped_cycle(
+                        &data,
+                        first,
+                        second,
+                        a,
+                        &local,
+                        length,
+                        &mut phases,
+                        &mut shares,
+                        &mut half,
+                    );
+                    let mut whole = vec![0.0; length + FRAME_GUARD];
+                    let inc = 1.0 / length as f64;
+                    let mut c = 0;
+                    while c < length {
+                        let n = 128.min(length - c);
+                        let (ph, out) = (c as f64 * inc, &mut whole[1 + c..1 + c + n]);
+                        if let Some((o2, len2)) = second {
+                            warp::local_phases(a, 0.0, &local, ph, inc, 0.0, &mut phases, &mut shares, 0, n);
+                            render21_shared_warped(
+                                &data, first.0, first.1, o2, len2, &phases, &shares, 1.0, out, 0, n,
+                            );
+                        } else {
+                            warp::warp_phases(true, a, 0.0, ph, inc, 0.0, &mut phases, 0, n);
+                            render11_warped(&data, first.0, first.1, &phases, 1.0, out, 0, n);
+                        }
+                        c += n;
+                    }
+                    let bits = |mix: &[f32]| mix.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                    assert!(whole[1..=length].iter().all(|v| *v != 0.0));
+                    assert_eq!(
+                        bits(&half[..=length]),
+                        bits(&whole[..=length]),
+                        "{length} at {a}, two levels: {}",
+                        second.is_some()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_warped_mix_of_the_cycle_kept_is_the_one_rendered_alone() {
+        // the cycle kept once (the phases, the frame on its two levels, the levels of the slopes), then the mix of
+        // each pitch of it: the bits of render_warped_cycle of that pitch (a bend of each a on two levels and on one,
+        // pitches whose levels are cut at 0, at the top and at the floor, one of -0; a frame with zeros of both signs)
+        for length in [512, 1024, 4096] {
+            let (mut data, offsets) = frames(&[(0, length), (2, length / 2)]);
+            for (k, o) in offsets.iter().enumerate() {
+                (data[o + 7], data[o + 8], data[o + 9]) = (0.0, -0.0, if k == 0 { -0.0 } else { 0.0 });
+                (data[o + 40], data[o + 41]) = (-0.0, -0.0);
+            }
+            let first = (offsets[0], length as f64);
+            for a in [-0.8, -0.48, -0.1] {
+                for second in [Some((offsets[1], (length / 2) as f64)), None] {
+                    let mut shared = Shared::default();
+                    let key = CycleKey {
+                        serial: 1,
+                        data: data.as_ptr() as usize,
+                        a: f64::to_bits(a),
+                        length,
+                        first: (first.0, length),
+                        second: second.map(|(o, len)| (o, len as usize)),
+                    };
+                    let (mut phases, mut shares) = (vec![0; 132], vec![0.0; 132]);
+                    for (n, (x0, f0, top)) in [
+                        (9.3, -3.5, 27.0),
+                        (9.31, -3.5, 27.0),
+                        (12.9, 1.25, 27.0),
+                        (8.2, -3.5, 10.5),
+                        (-0.0, -3.5, 27.0),
+                        (1.5, -3.5, 27.0),
+                        (11.0, 6.0, 27.0),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let local = warp::LocalLevels {
+                            x0,
+                            dx: 0.0,
+                            f0,
+                            df: 0.0,
+                            top,
+                            lo: 8.0,
+                            hi: 13.0,
+                        };
+                        let mut alone = vec![0.0; length + FRAME_GUARD];
+                        render_warped_cycle(
+                            &data,
+                            first,
+                            second,
+                            a,
+                            &local,
+                            length,
+                            &mut phases,
+                            &mut shares,
+                            &mut alone,
+                        );
+                        let (i, filled) = shared.cycle(key).unwrap();
+                        assert_eq!(filled, n > 0);
+                        let kept = &mut shared.cycles[i];
+                        if !filled {
+                            fill_warped_cycle(&data, first, second, a, length, &mut phases, kept);
+                            kept.key = Some(key);
+                        }
+                        // (a mix out of the pool has what it had)
+                        let mut of_kept = vec![0.5; length + FRAME_GUARD];
+                        apply_warped_cycle(kept, second.map(|_| &local), length, &mut shares, &mut of_kept);
+                        let bits = |mix: &[f32]| mix.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+                        assert_eq!(
+                            bits(&of_kept[1..=length]),
+                            bits(&alone[1..=length]),
+                            "{length} at {a}, x {x0}, two levels: {}",
+                            second.is_some()
+                        );
+                    }
+                }
+            }
         }
     }
 }

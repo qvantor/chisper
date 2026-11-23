@@ -1,14 +1,15 @@
 import React from 'react';
 import { styled } from 'styled-components';
-import { Handle, HandleProps } from '@chisper/ui-kit';
+import hexToRgba from 'hex-to-rgba';
+import { Handle, HandleProps, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
 import { OSC_DEFAULTS } from '@chisper/preset-schema';
 import { OscillatorActions, OscillatorModel, useOscillator1 } from '../common/modules';
 import { RxHandle } from '../../common/components';
 import { useKnobModulation } from '../modulation/use-knob-modulation';
-import { OscillatorContext, useHeld, useOscillatorContext } from './hooks';
-import { formatWavePosition, Wave, WaveSelector } from './components';
+import { OscillatorContext, useCompact, useHeld, useOscillatorContext } from './hooks';
+import { formatWavePosition, WarpMode, Wave, WaveSelector } from './components';
 
 export { useOscillatorContext };
 
@@ -35,6 +36,17 @@ const HandlesGroup = styled.div`
   gap: 10px;
 `;
 
+// the Warp knob and the plate of its mode right of it, in a faint outline of their own; its padding and edge out of
+// the row (the knob level with the others, the row no wider)
+const WarpGroup = styled.div`
+  display: flex;
+  gap: 2px;
+  margin: -3px;
+  padding: 2px;
+  border: 1px solid ${hexToRgba(theme.colors.primaryDarkMediumContrast, 0.12)};
+  border-radius: ${theme.borderRadius.l};
+`;
+
 // a knob of a value of $osc (the unison detune, its blend): it renders itself on a change, not the oscillator (Oct,
 // Semi, Fine, the phases and the unison render their strips)
 const OscKnob = ({
@@ -57,14 +69,19 @@ export const Oscillator = ({
   $position,
   $frames,
   $gain,
+  $warpMode,
+  $warp,
   ranges,
   setOscValue,
   useOscillator,
   setPosition,
   setGain,
+  setWarp,
   target = 'osc1',
 }: Props) => {
   const oscillator = useOscillator();
+  // narrow (a phone, a narrow window): the strips of values smaller, the plate of the Warp mode its glyph alone
+  const [rootRef, compact] = useCompact<HTMLDivElement>();
   // Detune, Blend and Unison held: the chart shows the voices of the unison (the overlay renders, not the oscillator)
   const [$unisonHeld, holdUnison] = useHeld();
   // the frames played (of an expanded table 256)
@@ -73,6 +90,9 @@ export const Oscillator = ({
   const waveModulation = useKnobModulation(`${target}.wave`);
   const detuneModulation = useKnobModulation(`${target}.detune`);
   const blendModulation = useKnobModulation(`${target}.blend`);
+  const warpModulation = useKnobModulation(`${target}.warp`);
+  // Off: the Warp knob is grey (its routes are not shown)
+  const warping = useBehaviorSubject($warpMode) !== 0;
   const unison = React.useMemo(
     () => ({
       $visible: $unisonHeld,
@@ -84,15 +104,17 @@ export const Oscillator = ({
 
   return (
     <OscillatorContext.Provider value={oscillator}>
-      <Root>
+      <Root ref={rootRef}>
         <Table>
           <WaveSelector />
         </Table>
         <Wave
           modulations={waveModulation.modulations}
+          warpModulations={warpModulation.modulations}
           target={target}
           unison={unison}
           onUnisonActiveChange={holdUnison}
+          compact={compact}
         />
         <Handles>
           <HandlesGroup>
@@ -123,6 +145,22 @@ export const Oscillator = ({
               defaultValue={OSC_DEFAULTS.w}
               {...waveModulation}
             />
+            <WarpGroup>
+              <RxHandle
+                min={0}
+                max={1}
+                $value={$warp}
+                label='Warp'
+                name='Warp amount'
+                onChange={setWarp}
+                formatValue={(value) => number.percent(number.round(value, 100))}
+                precision={100}
+                defaultValue={OSC_DEFAULTS.wa}
+                disabled={!warping}
+                {...warpModulation}
+              />
+              <WarpMode compact={compact} />
+            </WarpGroup>
           </HandlesGroup>
           <HandlesGroup>
             <OscKnob

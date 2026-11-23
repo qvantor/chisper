@@ -68,11 +68,69 @@ pub struct Scratch {
     pub b_mid_left: Vec<f32>,
     pub b_mid_right: Vec<f32>,
     pub fading: Vec<f32>,
+    // the warped phases of a span of a voice (warp_phases: the block and a group past it), the share of the second
+    // level each of its samples reads (local_phases)
+    pub phases: Vec<u32>,
+    pub shares: Vec<f32>,
     pub points: Vec<i32>,
     pub positions: Vec<f64>,
+    // the knob of the warp of an oscillator at each point, the param of its map there, the levels it moves the
+    // pitch by (render_osc, render_voices) and of a bend the most levels its slope moves a sample by (warp::local_most:
+    // once a point for all its voices)
+    pub warp_knobs: Vec<f64>,
+    pub warp_params: Vec<f64>,
+    pub warp_levels: Vec<f64>,
+    pub warp_most: Vec<f64>,
     // the bases of the knobs of the LFOs of a voice per sample (LFOS · KNOBS × the block), while one changes in it
     pub lfo_bases: Vec<f32>,
 }
+
+/// what the cycle of a warped mix is of besides the pitch of its voice (voice.rs build_warped_mix): the levels (the
+/// serial of their version, Store::serial, and where they are), a of the bend, the length of the mix, its frame on the
+/// level lo (its sample 0 in the data and its length) and on hi if it is another
+#[derive(Clone, Copy, PartialEq)]
+pub struct CycleKey {
+    pub serial: u64,
+    pub data: usize,
+    pub a: u64,
+    pub length: usize,
+    pub first: (usize, usize),
+    pub second: Option<(usize, usize)>,
+}
+
+/// the cycle of a warped mix before the pitch of a voice tells the share of each of its samples: `first` its frame
+/// on the level lo at the phases of the mix through the bend (sample c at c), `second` the one on hi less it, `ups`
+/// the levels of the slope of samples 0..=length / 2 (warp::local_ups). The voices of a unison, and a note struck
+/// again, build their mixes of it: no pass of the phases, no read of the levels
+#[derive(Default)]
+pub struct WarpedCycle {
+    pub key: Option<CycleKey>,
+    pub first: Vec<f32>,
+    pub second: Vec<f32>,
+    pub ups: Vec<f32>,
+    used: u64,
+}
+
+impl WarpedCycle {
+    // the room of a cycle of `length` (of the longest level at once: it never grows again); false: no memory for it
+    fn room(&mut self, length: usize) -> bool {
+        let size = length.max(MAX_LEVEL_LENGTH) + 1;
+        let fits = |buffer: &mut Vec<f32>, size: usize| {
+            if buffer.len() < size {
+                if buffer.try_reserve_exact(size - buffer.len()).is_err() {
+                    return false;
+                }
+                buffer.resize(size, 0.0);
+            }
+            true
+        };
+        // (the pass of the ups writes whole groups of 4)
+        fits(&mut self.first, size) && fits(&mut self.second, size) && fits(&mut self.ups, size / 2 + 5)
+    }
+}
+
+/// the cycles kept (two: the two oscillators of a note)
+pub const CYCLES: usize = 2;
 
 struct Phrase {
     id: f64,
@@ -85,6 +143,9 @@ pub struct Shared {
     pub scratch: Scratch,
     // the mix tables no voice holds, each as long as the longest level can be (any of them holds any mix)
     pool: Vec<Vec<f32>>,
+    // the cycles the warped mixes were last built of
+    pub cycles: [WarpedCycle; CYCLES],
+    cycle_uses: u64,
     budget_frame: f64,
     spent: f64,
     pub counts: [f64; 10],
@@ -104,6 +165,9 @@ pub struct Shared {
     // the phase of the sub of the note started last (a note of Contiguous starts at it) and the serials of the subs
     pub sub: SubPhase,
     pub sub_serial: u64,
+    // (the specs: every build refused, the voices play directly)
+    #[cfg(test)]
+    pub refuse_builds: bool,
 }
 
 impl Default for Shared {
@@ -112,6 +176,8 @@ impl Default for Shared {
             size: 0,
             scratch: Scratch::default(),
             pool: Vec::new(),
+            cycles: Default::default(),
+            cycle_uses: 0,
             budget_frame: -1.0,
             spent: 0.0,
             counts: [0.0; 10],
@@ -125,6 +191,8 @@ impl Default for Shared {
             lfo_epoch: 0,
             sub: SubPhase::default(),
             sub_serial: 0,
+            #[cfg(test)]
+            refuse_builds: false,
         }
     }
 }
@@ -222,7 +290,7 @@ impl Shared {
         }
     }
 
-    /// the buffers of a block of `length` (they grow, never shrink); the size is set once all of them are allocated:
+    /// the buffers of a block of `length` (they grow, never shrink) and the room of the kept cycles; the size is set once all of them are allocated:
     /// an allocation that traps leaves the old size, the next block allocates them again
     pub fn grow(&mut self, length: usize) {
         if length > self.size {
@@ -245,10 +313,21 @@ impl Shared {
             ] {
                 *buffer = vec![0.0; length];
             }
+            s.phases = vec![0; length + 4];
+            s.shares = vec![0.0; length + 4];
             let points = ceil(length as f64 / SEGMENT) as usize + 2;
             s.points = vec![0; points];
             s.positions = vec![0.0; points];
+            s.warp_knobs = vec![0.0; points];
+            s.warp_params = vec![0.0; points];
+            s.warp_levels = vec![0.0; points];
+            s.warp_most = vec![0.0; points];
             s.lfo_bases = vec![0.0; LFOS * KNOBS * length];
+            // the room of the cycles of the warped mixes with them: none allocated at the first mix of a note (one
+            // without memory for it now asks again there: `cycle`)
+            for cycle in &mut self.cycles {
+                cycle.room(0);
+            }
             self.size = length;
         }
     }
@@ -285,11 +364,38 @@ impl Shared {
         }
     }
 
+    /// whether the cycle of `key` is kept: a build of it is the shares of a pitch alone (its cost in the budget)
+    pub fn keeps(&self, key: &CycleKey) -> bool {
+        self.cycles.iter().any(|cycle| cycle.key.as_ref() == Some(key))
+    }
+
+    /// the cycle of `key` among those kept (its index, true), or the one used the longest ago with room for it, its
+    /// key gone (false: to fill); None: no memory for it
+    pub fn cycle(&mut self, key: CycleKey) -> Option<(usize, bool)> {
+        self.cycle_uses += 1;
+        if let Some(i) = self.cycles.iter().position(|cycle| cycle.key == Some(key)) {
+            self.cycles[i].used = self.cycle_uses;
+            return Some((i, true));
+        }
+        let i = (0..CYCLES).min_by_key(|&i| self.cycles[i].used)?;
+        let cycle = &mut self.cycles[i];
+        cycle.key = None;
+        if !cycle.room(key.length) {
+            return None;
+        }
+        cycle.used = self.cycle_uses;
+        Some((i, false))
+    }
+
     /// a mix build of `cost` in the block at `frame`, if the budget allows (the first of a block always)
     pub fn take_build(&mut self, frame: f64, cost: f64) -> bool {
         if frame != self.budget_frame {
             self.budget_frame = frame;
             self.spent = 0.0;
+        }
+        #[cfg(test)]
+        if self.refuse_builds {
+            return false;
         }
         if self.spent > 0.0 && self.spent + cost > MIX_BUDGET_WASM {
             if cfg!(feature = "perf") {

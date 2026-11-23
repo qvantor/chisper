@@ -73,7 +73,8 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
 - `node scripts/null-test/run.mjs --against=<ref> [--only=…] [--limit=<dB>]` — the scenes of the browser parity
   rendered by the cores of the tree and of `<ref>`, their difference in dB under the signal (a half of the engine
   against the core `<ref>` has it in, `chain.wasm` or `wavetable-osc.wasm` before the engine; a scene of a core
-  `<ref>` has not, the chain: against the scene of that name as `<ref>` renders it, ours without the limiter).
+  `<ref>` has not, the chain: against the scene of that name as `<ref>` renders it, ours without the limiter; so are
+  those of its chain of other kinds and of its voices of other options, the warp: `hasOscWarp`).
 - `node scripts/renders/run.mjs` — renders of the reference Audio Unit (macOS, `.env` `RENDERS_*`) into
   `dsp/measurements/*.json`, which the specs compare the engine with. An effect of its rack goes into its state
   (`state.mjs`), a signal of ours through it as a one-shot sample of its noise oscillator; renders of different
@@ -131,7 +132,8 @@ time).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), `EQ_TYPES`
   (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
   a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
-  `voice-modules.spec` holds them).
+  `voice-modules.spec` holds them), `WARP_MODES` (the modes of `warp.rs` by their index; `warp-model.spec` holds the
+  order).
 - **Analytics** (`common/services/analytics.ts`: PostHog Cloud EU, its slim SDK bundled, through `ANALYTICS_PATH`
   rewritten by `netlify.toml`): `feature_used` only from what a user does (a handler of the UI or an action it calls,
   never a state set by `applySnap`, a preset, an undo or a restore: `analytics-features.spec`); a failure the user
@@ -319,15 +321,62 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `interleaves` of `filter.rs`, two pairs in one loop), `voice.rs`, `source.rs` (oscillators, noise and sub as
   slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
   `envelope.rs`, `lfo.rs`, `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `sub.rs`, `store.rs`,
-  `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids). Options/messages:
-  `voice-options.ts`, params: `wavetable-osc-params.ts`.
+  `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids), `warp.rs`.
+  Options/messages: `voice-options.ts`, params: `wavetable-osc-params.ts`.
 - The sub (`sub.rs`): one voice, its own loop (the levels read as an oscillator reads them, `render11`/
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
   tables of one frame `sub:<shape>` (`sub-shapes.ts`: measured spectra), the Sine is the sine of the store.
+- The Warp of an oscillator (`warp.rs`, measured: `dsp/measurements/warp.json`, `warp-measured.spec.ts`): a map of
+  the phase each sample reads its frame at, by the mode (`WARP_MODES`: Off, Bend +, Bend -, Bend +/-, PWM) and the
+  knob. The bends a Möbius map of each half (a = 0.8k, -0.8k, 0.8(1 - 2k)), PWM φ / (1 - k) then phase 0 (its first
+  sample held, an offset at 1 as the reference keeps: the mean of a cosine, `dc` of the spectra). The phase a
+  voice keeps is never warped: `warp_phases` steps the phases of a segment as `Phases` does and writes them through
+  the map into `scratch.phases` (u32, 0.32; a division a sample in f32 lanes, its param a line over the segment, a
+  kernel of a still param and one of a moving one; the line of PWM is of its edge 1 - k, each phase over it:
+  `line_param`, its slope is not linear in the knob), the read loops `render*_warped` take them from there, one loop a
+  shape (not a mode). A table (a mix, a level alone) under a still map is read in one loop, the map and the read
+  (`render11_mapped`: the bits of the two passes, the lanes of `warp.rs` both run). A neutral knob (Off, the bends at a = 0, PWM at 0) takes the loops of no warp: the same bits,
+  and no work while the mode is Off. The pitch of PWM reads the levels of its slope at the wrap of the frame
+  (`wrap_levels`), never past the top level that sounds; levels that jump over more than one in a segment (a knob
+  moving fast near the top of PWM) are cut at its samples where they leave a crossfade (`level_cut`), a frame that
+  fades in there with them, a voice that glides from its mix there at the x of its glide. Bend + reads
+  the levels of its pitch (it stretches the wrap: up for its steepest slope a saw at C0 lost its harmonics over 18).
+  A bend of a < 0 (Bend -, Bend +/- over 0.5) reads its levels sample by sample (`local_phases`, measured: `notes` of
+  warp.json, a ramp at D2 and D4): its pitch up by 3·log2 of the slope of the map there, down by 3.5 at most where it
+  stretches the frame (the reference keeps a stretched jump as bright), over a floor that rises to the levels of the
+  wrap as the pitch has 64 to 24 harmonics (a level a sample of so few aliased 12 dB over the reference at C7); two
+  levels a segment, each sample at its share between them (`scratch.shares` next to the phases,
+  `render_local_warped`; the log2 a cubic of the bits, `log2_coarse`), no mixes while anything moves. A still voice
+  of it (a steady block: its pitch, position, version and knob still: `Mixing::Warped`) plays a warped mix of its own:
+  its cycle rendered once that way at the phases of a table, unwarped (`build_warped_mix`, as long as the level of its
+  pitch: read linearly it is the voice read directly within 59 to 61 dB of its peak at the jump of a saw, 52 at the
+  steepest wrap, at low notes on levels of 4096 samples 44 to 59 dB, a droop over 15 kHz; a table twice as long cost
+  twice the builds: a chord struck again every 107 ms paid 14 % for them, not 6 %; its passes over half the cycle,
+  the rest their mirrors, the bend symmetric to the bit: `render_warped_cycle`; `WARPED_COST` a sample in the
+  budget of the builds; what of a cycle is of no pitch, its phases, its frame read on the two levels and the levels of
+  its slopes, is kept for the voices of a unison and a note struck again: `WarpedCycle` of `shared.rs`, two, their room
+  allocated with the buffers of the block, by the
+  serial of the version of the table, a, the length and the levels; a mix of it is the bits of one rendered alone, its
+  cost in the budget `KEPT_COST`, not that of a fill: the voices of a unison are on their mixes blocks sooner, a chord
+  of unisons struck again took 36 % less), read as a mix by `render11`, from and to the levels read directly at once (the same levels:
+  no step). Its key is the mode, a and the x of its pitch (`MixKey` of w `WARPED`, the rest in `Osc.warps`: the keys
+  the blocks copy stay small): no reach, a mix of no warp never plays for it nor it for one; another key reads directly
+  until it is built again. Mix tables play under a warp whose levels stay. A new mode on a note crossfades as a new version does (`next` of the same entry,
+  `next_mode`; one waits for the other), its mixes kept. The knob a `knobs` event of `warp` (both oscillators, at
+  once), its routes `warp1`/`warp2` read at the points (`sparse`), sent only while its mode is on (`voiceRoutes`);
+  the maps read the knob with its routes through a one-pole of 11.3 ms (`warp::SMOOTHING`, as the reference follows
+  an LFO on it: `smooth`, exact over the line of the knob between two points; a note, or a mode after Off, starts at
+  its knob), still again once within 1e-7 of a still knob (one segment, the mixes). `libs/math/src/oscillator/warp.ts`
+  is the same map in f32 for the chart (`warp-model.spec`: bit for bit through `osc_warp` of the perf build, its
+  `WARP_SMOOTHING` too: the chart draws the routes through that one-pole, `smoothing` of `useLiveDraw`).
+  Deliberate: Bend + at C6/C7 aliases up to 30 dB over the reference (it renders the warp oversampled; at C7 none
+  reaches −70 dB: the kinks of the maps alias whatever level is read), and of a frame that jumps at its wrap Bend +
+  (Bend +/- under 0.5) is duller than it over 4.6 kHz at D2 (up to 24 dB a third of an octave: the stretched wrap
+  reads the levels of its pitch); a bend of a < 0 on a ramp at 0.9 and 1 is within 8 dB a third of an octave of it
+  (its harmonics a comb from 5 kHz on).
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub, filter types; `compressor`, `chorus` and `eq` for the
-  effects).
-  Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub, filter types, warp; `compressor`, `chorus` and `eq` for the
+  effects). Aliasing −70 dB, spurs −80 dB.
 - The filter of a voice (`filter.rs`): the types of a BiquadFilterNode (a TPT SVF, bit for bit as before) and the
   model types of the AU (`dsp-core/src/filter_model.rs`, measured: `filter-types.json`, `filter-types-measured.spec.ts`;
   the resonance by the cutoff: `filter-resonance.json`, `filter-resonance-measured.spec.ts`):

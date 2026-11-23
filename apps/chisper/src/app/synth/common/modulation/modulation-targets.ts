@@ -38,7 +38,7 @@ export type ModScale = 'linear' | 'log' | 'pow';
 interface OscTarget {
   kind: 'osc';
   osc: number;
-  param: 'position' | 'spread' | 'gain' | 'pitch' | 'fine' | 'blend';
+  param: 'position' | 'spread' | 'gain' | 'pitch' | 'fine' | 'blend' | 'warp';
   route: string;
   label: string;
   scale: ModScale;
@@ -164,7 +164,14 @@ const oscTargets = (osc: number): Record<string, OscTarget> => {
       knob: 'fine',
     },
   };
-  return withRoutes(targets, (param) => routeParam('osc', osc, param));
+  return {
+    ...withRoutes(targets, (param) => routeParam('osc', osc, param as Exclude<OscTarget['param'], 'warp'>)),
+    // the Warp knob: a module of its own (appended after the others in the core); its mode Off reads none
+    ...withRoutes<Omit<OscTarget, 'route'>>(
+      { [id('warp')]: { kind: 'osc', osc, param: 'warp', label: 'Warp', scale: 'linear', range: [0, 1] } },
+      () => routeParam('warp', osc, 'warp')
+    ),
+  };
 };
 
 const noiseTargets: Record<string, NoiseTarget> = withRoutes<Omit<NoiseTarget, 'route'>>(

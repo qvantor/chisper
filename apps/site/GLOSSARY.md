@@ -61,6 +61,10 @@ The names of the synth (knobs, sections, modes, buttons, presets, tables) stay i
 | in steps, steppy                        | a escalones                                                  | in Stufen, stufig                                            |                                                                                                          |
 | crossfade                               | el fundido cruzado                                           | die Überblendung                                             |                                                                                                          |
 | phase (of a wave)                       | la fase                                                      | die Phase                                                    |                                                                                                          |
+| warp (what **Warp** does to a frame)    | el warp                                                      | der Warp                                                     | es: deformación alone; de: Verzerrung (that is distortion)                                               |
+| to squeeze (a part of a frame)          | comprimir                                                    | stauchen                                                     | es: apretar; de: quetschen, komprimieren                                                                 |
+| to stretch (a part of a frame)          | estirar                                                      | dehnen                                                       | es: alargar; de: strecken                                                                                |
+| pulse width                             | el ancho de pulso                                            | die Pulsbreite                                               | es: anchura de pulso; de: Pulsweite                                                                      |
 
 ## On the screen
 

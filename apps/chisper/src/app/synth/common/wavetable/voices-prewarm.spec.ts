@@ -73,7 +73,7 @@ const recorded = (scope: ReturnType<typeof createOscScope>) => {
 };
 
 describe('the warm-up of the voices', () => {
-  it('renders a voice alone, then the voices of a scope of its own, and frees what it made', () => {
+  it('renders a voice alone, one warped and one of PWM swept, then the voices of a scope of its own, and frees what it made', () => {
     const { scope, store, calls } = counted([
       'osc_store_new',
       'osc_store_free',
@@ -94,14 +94,21 @@ describe('the warm-up of the voices', () => {
       osc_store_free: 1,
       osc_shared_new: 1,
       osc_shared_free: 1,
-      osc_voice_new: 1,
-      osc_voice_process: 10,
-      osc_voice_free: 1,
+      osc_voice_new: 3,
+      osc_voice_process: 22,
+      osc_voice_free: 3,
       osc_scope_new: 1,
       osc_scope_process: 6,
       osc_scope_fail: 0,
       osc_scope_free: 1,
     });
+    // (the same blocks of 128 frames of each voice alone: the warped one across the frames at the same pitches;
+    // then two of PWM, its pitch swept up and down)
+    expect(calls.osc_voice_process.map(([, , , frame, frames]) => [frame, frames])).toEqual([
+      ...[0, 1].flatMap(() => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => [index * 128, 128])),
+      [0, 128],
+      [128, 128],
+    ]);
     // (the blocks of the scope of 128 frames, one after another)
     expect(calls.osc_scope_process.map(([, , , frame, frames]) => [frame, frames])).toEqual(
       [0, 1, 2, 3, 4, 5].map((index) => [index * 128, 128])
@@ -162,10 +169,21 @@ describe('the warm-up of the voices', () => {
     // the voice of both oscillators, its noise and its sub, then one for each path of the filters
     const notes = applied[0].flatMap((event) => (event.kind === 'on' ? [event] : []));
     expect(notes.map(({ voice }) => voice)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    // (its oscillators warped: a bend and PWM, the knob of the bend routed by ENV 2)
     expect(notes[0].options).toMatchObject({
-      osc: [{ unison: 4 }, { unison: 3 }],
+      osc: [
+        { unison: 4, warpMode: 1, warp: 0.5 },
+        { unison: 3, warpMode: 4, warp: 0.5 },
+      ],
       noise: { sample: 'warm-mono', loop: false },
       sub: { contiguous: true },
+    });
+    expect(notes[0].options.routes).toContainEqual({
+      source: 1,
+      param: 'warp1',
+      amount: 0.25,
+      min: 0,
+      max: 1,
     });
     expect(notes.slice(1).map(({ options }) => options.filter?.type)).toEqual([
       'bandpass',
@@ -186,8 +204,16 @@ describe('the warm-up of the voices', () => {
     expect(applied[2].map((event) => [event.kind, 'module' in event ? event.module : null])).toEqual([
       ['knobs', 'noise'],
       ['knobs', 'sub'],
+      ['knobs', 'warp'],
       ['filter', null],
     ]);
+    // (the knobs of its warp both glide, its PWM goes into Bend -: a new mode on a playing note crossfades)
+    expect(applied[2][2]).toEqual({
+      kind: 'knobs',
+      voices: [0],
+      module: 'warp',
+      values: { mode1: 1, warp1: 0.75, mode2: 2, warp2: 0.25 },
+    });
     // every voice started on time; the first one, stolen in block 4, still fades when the scope is freed
     const started = told.flatMap((report) => report.started ?? []);
     expect(started.map(([voice]) => voice).sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -259,8 +285,8 @@ describe('the warm-up of the voices', () => {
         throw new Error('a trap of the prewarm');
       })
     ).toThrow('a trap of the prewarm');
-    // (after the voice alone: its noise has built them)
-    expect(calls.osc_voice_process).toHaveLength(10);
+    // (after the voices alone: the noise of the first has built them)
+    expect(calls.osc_voice_process).toHaveLength(22);
     expect(calls.osc_store_take_kernels).toHaveLength(1);
     expect(calls.osc_store_take_kernels[0][0]).toBe(store.handle);
     // (what it made is left where it is; the scope and its store play all the same)

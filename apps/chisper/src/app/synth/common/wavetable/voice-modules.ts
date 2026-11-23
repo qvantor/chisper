@@ -42,6 +42,13 @@ export const VOICE_MODULES = [
     knobs: ['drive', 'variation'],
     name: (knob: string) => knob,
   },
+  {
+    // the Warp knob of each oscillator (warp.rs)
+    module: 'warp',
+    instances: 2,
+    knobs: ['warp'],
+    name: (knob: string, instance: number) => `${knob}${instance + 1}`,
+  },
 ] as const;
 
 export type VoiceModule = (typeof VOICE_MODULES)[number]['module'];
@@ -74,4 +81,5 @@ export const ROUTE_IDS: Readonly<Record<string, number>> = Object.fromEntries(
 export const KNOB_ORDER: { [M in KnobsModule]: readonly (keyof VoiceModuleKnobs[M])[] } = {
   noise: ['level', 'pan', 'cents'],
   sub: ['level', 'pan', 'cents'],
+  warp: ['mode1', 'warp1', 'mode2', 'warp2'],
 };

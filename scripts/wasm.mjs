@@ -22,8 +22,19 @@ const CORES = [
   // where the two modules had it twice: 167.2 KB, they were 74.0 and 110.1; 178.2 KB with the spans of the filter of
   // a voice as lines (their coefficients a step on at every refresh in each of its loops, the lines taken); 182.5 KB
   // with the loops of a filter at rest apart from those of its lines (in one, a chord at rest was 3 % slower);
-  // 187.0 KB with the EQ (a sixth slot, its unit and the lines of its bands)
-  { crate: 'engine', name: 'engine', budget: 187500 },
+  // 187.0 KB with the EQ (a sixth slot, its unit and the lines of its bands); 192.5 KB with the warp of the
+  // oscillators (the pass of the phases of a span through its map, a read loop a shape on them); 193.5 KB with its
+  // knob through a one-pole and the edge of PWM a line (a pass of its own); 196.4 KB with the levels of a bend of
+  // a < 0 sample by sample (the pass of its phases and of their shares of two levels, the loop of a span of them);
+  // 198.3 KB with the warped mix of a still voice of such a bend (its cycle built once that way, read as a mix);
+  // 199.8 KB with the loop of the voices of a warp apart from the one of no warp (render_voices_warped); 200.4 KB
+  // with the passes of a warped mix over half its cycle, the rest their mirror (render_warped_cycle); 203.0 KB with
+  // the cycle of a warped mix kept for the voices of a unison (its fill, the pass of the levels of its slopes, the
+  // shares of a pitch and the mix of them: fill_warped_cycle, apply_warped_cycle); 203.1 KB with a build of a cycle
+  // kept at its own cost in the budget (what a mix is built of worked out before the budget is asked: warped_plan);
+  // 203.4 KB with a fade cut with its segment where the levels jump (render_cuts_warped); 204.3 KB with a table
+  // under a still map read in one loop (render11_mapped: a voice held on PWM 6 % faster, on Bend + 2 %)
+  { crate: 'engine', name: 'engine', budget: 204600 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -74,7 +85,10 @@ const cargo = (perf) => {
 // the functions of a core -O3 doesn't inline (patterns of their names in the build of cargo): the render of each
 // source of a voice (the noise, the sub) stays a function of its own (inlined into Voice::process, its one caller, its loops would share
 // the registers of everything else the voice does in a block); so do the spans of the filter of a voice alone
-// (inlined into run_alone, next to the design of a span: a third slower)
+// (inlined into run_alone, next to the design of a span: a third slower); so do the pass of a warped voice and its
+// reads of a span (render_voices calls them where a voice is warped alone: inlined, each of its callers had a copy),
+// the levels of a bend sample by sample too, and the loop of the voices of a warp (render_voices_warped: inlined into
+// render_voices, the voices of no warp were 3 to 7 % slower)
 const NO_INLINE = {
   engine: [
     '*Noise11render_into*',
@@ -82,6 +96,15 @@ const NO_INLINE = {
     '*filter10model_span*',
     '*filter10model_line*',
     '*filter16model_line_plain*',
+    '*warp11warp_phases*',
+    '*voice12segment_warp*',
+    '*voice18render_span_warped*',
+    '*voice18render_fade_warped*',
+    '*warp12local_phases*',
+    '*voice19render_local_warped*',
+    '*voice20render_voices_warped*',
+    '*voice19render_table_mapped*',
+    '*voice19render_jumps_warped*',
   ],
 };
 

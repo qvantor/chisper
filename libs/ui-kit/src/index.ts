@@ -52,6 +52,8 @@ export { SegmentDisplay } from './segment-display';
 export { Checkbox, checkboxLit, checkboxOff } from './checkbox';
 export { TapeSwitch } from './tape-switch';
 export { ModeSwitch } from './mode-switch';
+export { ModePlate } from './mode-plate';
+export type { ModeOption } from './mode-plate';
 export { Lamp, LampLight } from './lamp';
 export {
   ActionKey,

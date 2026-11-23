@@ -12,7 +12,7 @@
 use crate::envelope::EnvelopeBlock;
 use crate::glided::{glide_length, Glided};
 use crate::lfo::{frac, LfoBlock, LFOS, PHASE};
-use crate::targets::{self, CUTOFF, FILTER, FILTER_EXTRA, FILTER_GAIN, LFO_KNOBS, TARGETS};
+use crate::targets::{self, CUTOFF, FILTER, FILTER_EXTRA, FILTER_GAIN, LFO_KNOBS, TARGETS, WARP};
 use crate::voice::is_constant;
 use alloc::{vec, vec::Vec};
 use jsmath::{max, min, pow, sqrt};
@@ -377,7 +377,8 @@ impl Modulation {
                         max: route.max,
                         scale,
                         wrap,
-                        sparse: module == FILTER && (knob == CUTOFF || knob == FILTER_GAIN),
+                        sparse: (module == FILTER && (knob == CUTOFF || knob == FILTER_GAIN))
+                            || module == WARP,
                         values,
                         one: [0.0],
                         current: Current::None,

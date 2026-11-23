@@ -349,10 +349,28 @@ mod lanes4 {
         pub fn or(self, other: U32x4) -> U32x4 {
             U32x4(v128_or(self.0, other.0))
         }
+        #[inline(always)]
+        pub fn xor(self, other: U32x4) -> U32x4 {
+            U32x4(v128_xor(self.0, other.0))
+        }
         /// the lanes as f32 (each under 2^31)
         #[inline(always)]
         pub fn to_f32(self) -> F32x4 {
             F32x4(f32x4_convert_i32x4(self.0))
+        }
+        /// the first four values of a slice
+        #[inline(always)]
+        pub fn load(values: &[u32]) -> U32x4 {
+            assert!(values.len() >= 4);
+            // SAFETY: four u32 at the pointer; v128.load takes any alignment
+            U32x4(unsafe { v128_load(values.as_ptr() as *const v128) })
+        }
+        /// into the first four values of a slice
+        #[inline(always)]
+        pub fn store(self, values: &mut [u32]) {
+            assert!(values.len() >= 4);
+            // SAFETY: four u32 at the pointer; v128.store takes any alignment
+            unsafe { v128_store(values.as_mut_ptr() as *mut v128, self.0) }
         }
     }
 }
@@ -564,8 +582,20 @@ mod lanes4 {
             U32x4(core::array::from_fn(|k| self.0[k] | other.0[k]))
         }
         #[inline(always)]
+        pub fn xor(self, other: U32x4) -> U32x4 {
+            U32x4(core::array::from_fn(|k| self.0[k] ^ other.0[k]))
+        }
+        #[inline(always)]
         pub fn to_f32(self) -> F32x4 {
             F32x4(self.0.map(|x| x as i32 as f32))
+        }
+        #[inline(always)]
+        pub fn load(values: &[u32]) -> U32x4 {
+            U32x4([values[0], values[1], values[2], values[3]])
+        }
+        #[inline(always)]
+        pub fn store(self, values: &mut [u32]) {
+            values[..4].copy_from_slice(&self.0);
         }
     }
 }

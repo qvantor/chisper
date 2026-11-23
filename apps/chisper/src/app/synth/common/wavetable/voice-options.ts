@@ -17,6 +17,10 @@ export interface VoiceOscOptions {
   phaseRand: number;
   // how its unison voices sound, UNISON_SHAPE without it
   unisonShape?: UnisonShape;
+  // its Warp (warp.rs of the core): the mode (an index of WARP_MODES of the presets, 0 Off) and the knob (0..1) at the
+  // note on; a playing note follows them (a `knobs` event of the warp); none: Off
+  warpMode?: number;
+  warp?: number;
 }
 
 // the stacks of a unison (12 (1x, 2x, 3x), 12+7 (1x, 2x, 3x), Center-12, Center-24; the measurements in
@@ -137,11 +141,21 @@ export interface VoiceOptions {
   mono?: boolean;
 }
 
+// the Warp of both oscillators of a note, the mode and the knob of each (an oscillator off for the note takes none):
+// a new mode crossfades in 10 ms, the knob glides through a one-pole of 11.3 ms (`SMOOTHING` of warp.rs)
+export interface VoiceWarpKnobs {
+  mode1: number;
+  warp1: number;
+  mode2: number;
+  warp2: number;
+}
+
 // the knobs of the modules of a voice no param of it carries, which playing voices follow (one `knobs` event for
 // every module: KNOB_ORDER of voice-modules.ts on the wire)
 export interface VoiceModuleKnobs {
   noise: VoiceNoiseKnobs;
   sub: VoiceSubKnobs;
+  warp: VoiceWarpKnobs;
 }
 export type KnobsModule = keyof VoiceModuleKnobs;
 

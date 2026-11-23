@@ -83,10 +83,11 @@ describe('Oscillator', () => {
   afterEach(() => (Handle as jest.Mock).mockClear());
 
   describe('modulation', () => {
-    it('Gain, Wave, Detune and Blend take the envelopes, with their own targets', () => {
+    it('Gain, Wave, Warp, Detune and Blend take the envelopes, with their own targets', () => {
       const { knob } = setup({ target: 'osc2' });
       expect(knob('Gain').modTarget).toBe('osc2.gain');
       expect(knob('Wave').modTarget).toBe('osc2.wave');
+      expect(knob('Warp').modTarget).toBe('osc2.warp');
       expect(knob('Detune').modTarget).toBe('osc2.detune');
       expect(knob('Blend').modTarget).toBe('osc2.blend');
     });
@@ -235,13 +236,113 @@ describe('Oscillator', () => {
     });
   });
 
-  it('has the knobs Gain, Wave, Detune and Blend: Oct, Semi and Fine are over the wave, Phase, Phase rand and Unison under it', () => {
+  it('has the knobs Gain, Wave, Warp, Detune and Blend: Oct, Semi and Fine are over the wave, Phase, Phase rand and Unison under it', () => {
     setup();
     const labels = (Handle as jest.Mock).mock.calls.map(([props]) => (props as HandleProps).label);
-    expect([...new Set(labels)]).toEqual(['Gain', 'Wave', 'Detune', 'Blend']);
+    expect([...new Set(labels)]).toEqual(['Gain', 'Wave', 'Warp', 'Detune', 'Blend']);
     const sliders = screen.getAllByRole('slider').map((slider) => slider.getAttribute('aria-label'));
     expect(sliders).toEqual(['Oct', 'Semi', 'Fine', 'Phase', 'Phase rand', 'Unison']);
     expect(useWavetables).toHaveBeenCalled();
+  });
+
+  it('has the Warp knob in percents, grey while its mode is Off', () => {
+    const { model, actions, knob } = setup();
+    expect(knob('Warp')).toMatchObject({
+      name: 'Warp amount',
+      value: 0,
+      min: 0,
+      max: 1,
+      defaultValue: 0,
+      disabled: true,
+    });
+    expect(knob('Warp').formatValue?.(0.35)).toBe('35%');
+    act(() => actions.setWarpMode(1));
+    expect(knob('Warp').disabled).toBe(false);
+    act(() => knob('Warp').onChange?.(0.6));
+    expect(model.$warp.value).toBe(0.6);
+    expect(knob('Warp').value).toBe(0.6);
+    act(() => actions.setWarpMode(0));
+    expect(knob('Warp').disabled).toBe(true);
+  });
+
+  describe('the mode of the Warp', () => {
+    const plate = () => screen.getByRole('button', { name: 'Warp mode' });
+    const choose = (mode: string) => {
+      act(() => plate().click());
+      act(() => screen.getByRole('menuitemradio', { name: mode }).click());
+    };
+
+    it('is on a plate right of its knob, Off by default and unlit', () => {
+      setup();
+      expect(plate().textContent).toBe('Off');
+      expect(plate().classList.contains('lit')).toBe(false);
+      expect(plate().querySelector('svg')?.getAttribute('data-testid')).toBe('warp-mode-0');
+    });
+
+    it('lists the modes in the order of the presets, the current one checked', () => {
+      setup();
+      act(() => plate().click());
+      const items = screen.getAllByRole('menuitemradio');
+      expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+        'Off',
+        'Bend +',
+        'Bend -',
+        'Bend +/-',
+        'PWM',
+      ]);
+      expect(items.map((item) => item.getAttribute('aria-checked'))).toEqual([
+        'true',
+        'false',
+        'false',
+        'false',
+        'false',
+      ]);
+      expect(items.map((item) => item.querySelector('svg')?.getAttribute('data-testid'))).toEqual([
+        'warp-mode-0',
+        'warp-mode-1',
+        'warp-mode-2',
+        'warp-mode-3',
+        'warp-mode-4',
+      ]);
+    });
+
+    it('a mode chosen sets the model, lights the plate and the knob, Off greys them again', () => {
+      const { model, knob } = setup();
+      choose('Bend +');
+      expect(model.$warpMode.value).toBe(1);
+      expect(plate().textContent).toBe('Bend +');
+      expect(plate().classList.contains('lit')).toBe(true);
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(knob('Warp').disabled).toBe(false);
+      choose('PWM');
+      expect(model.$warpMode.value).toBe(4);
+      choose('Off');
+      expect(model.$warpMode.value).toBe(0);
+      expect(plate().classList.contains('lit')).toBe(false);
+      expect(knob('Warp').disabled).toBe(true);
+    });
+
+    it('follows the model (a preset)', () => {
+      const { actions } = setup();
+      act(() => actions.setWarpMode(3));
+      expect(plate().textContent).toBe('Bend +/-');
+    });
+
+    it.each([
+      [500, false],
+      [300, true],
+    ])('in an oscillator of %s px shows its glyph alone: %s', (width, compact) => {
+      const restore = withElementSize(width, 300);
+      try {
+        setup({});
+        act(() => undefined);
+        expect(plate().classList.contains('compact')).toBe(compact);
+        expect(plate().textContent).toBe(compact ? '' : 'Off');
+        expect(plate().querySelector('svg')).not.toBeNull();
+      } finally {
+        restore();
+      }
+    });
   });
 
   it('has Blend in percents set on the model, its default 75% (the init patch of the reference AU)', () => {

@@ -21,6 +21,8 @@ const FULL = {
     ph: 0.25,
     pr: 0.5,
     g: 0.7,
+    wm: 1,
+    wa: 0.4,
   },
   osc2: {
     a: true,
@@ -35,6 +37,8 @@ const FULL = {
     ph: 0,
     pr: 0,
     g: 0.5,
+    wm: 4,
+    wa: 0.75,
   },
   noise: {
     a: true,
@@ -215,20 +219,23 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: '111cf48e2af8aee4a6bf4ec649055e0f543360ad215fc55b667b84a1b15bf4fa',
-  full: 'db84066953cde16ce70380ea37ce78638d552dc4816858bc2a22d92c747d1e00',
-  legacy: '16eeb1526d8d1379316255a011bdba0df864664be8e6060c5a55510d46fe0fb9',
-  partial: '1917be9e53ebb34e98b3f16bf2d07c2ca76ee85e7fab0cc486d69b9e5dc32990',
-  'fx order without a type': 'caf31e412e94c5138e96f9796d0ce705202bcf95b34462d46de7dbced4862735',
-  'a model filter': '4e4b696fbd3183bbd2f603a552f7794210f0f49f5423400eb2fe723a1c1fb8c8',
-  'an unknown filter type': '3c757c5688fab9eedc20e1986f334f87bdafac7415646563076ef6f901604a2d',
-  'its default type': '3c757c5688fab9eedc20e1986f334f87bdafac7415646563076ef6f901604a2d',
+  empty: '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
+  full: 'd9572894cc934253a823ddba3dca6dabbbf9d8f9d192b9033e631fd3cb429de7',
+  legacy: '234daf0f7f1a6811bf3e25dbf28241dcc2fb358a8d822a3c6908bf706b144425',
+  partial: '9c889065db141472d4dd9490d97d2aa8bf58b9de2047ad8565e3c0acec2b6ea2',
+  'fx order without a type': 'b451078b0b175bd604fa796002ec86b74184e82add5510d2eccaf4b1c45b55ae',
+  'a model filter': '4680d5329eb726f28013693650a1237bfc17057882dd86fe52b312495c25b621',
+  'an unknown filter type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
+  'its default type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
 };
 
 // not presets: the schema rejects them
 const INVALID: Record<string, unknown> = {
   null: null,
   'a fractional unison': { osc1: { u: 1.5 } },
+  'a warp mode past the last': { osc1: { wm: 5 } },
+  'a fractional warp mode': { osc1: { wm: 1.5 } },
+  'a warp knob past 1': { osc2: { wa: 1.5 } },
   'an infinite position': { osc1: { w: Infinity } },
   'no wavetable path': { osc1: { p: [] } },
   'a noise pitch past 48 semitones': { noise: { s: 49 } },
