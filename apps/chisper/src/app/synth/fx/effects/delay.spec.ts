@@ -17,9 +17,10 @@ import { DELAY_PRESETS } from './delay-presets';
 const FX_DEFAULTS = mapValues(FX_PARAMS.delay, (param) => param.default);
 
 const RATE = 44100;
-// the samples of Time in the renders (10 ms), what the feedback of a line comes late by (a render quantum)
+// the samples of Time in the renders (10 ms), what the feedback of a line comes late by, the shortest echo
 const TIME = 441;
-const LATE = 128;
+const LATE = 1;
+const SHORTEST = 129;
 
 // both channels silent but a click at their first sample
 const click = (left: number, right: number, frames = 4096): [Float32Array, Float32Array] => {
@@ -173,7 +174,7 @@ describe('delay', () => {
 
   // the unit of the chain core (dsp/chain/src/delay.rs): delay-measured and delay-goldens hold its sound
   describe('in the core', () => {
-    it('normal: each line feeds itself, an echo Time and a quantum after the one before, quieter by the feedback', () => {
+    it('normal: each line feeds itself, an echo Time and a sample after the one before, quieter by the feedback', () => {
       const { left, right } = renderDelay({ time: TIME / RATE, fb: 0.5 }, click(1, 0));
       expect(echoes(left).slice(0, 3)).toEqual([TIME, 2 * TIME + LATE, 3 * TIME + 2 * LATE]);
       expect(peak(right)).toBe(0);
@@ -193,9 +194,10 @@ describe('delay', () => {
 
     it('ping-pong: the mono sum goes into the left line, the echoes alternate between the channels', () => {
       const one = renderDelay({ time: TIME / RATE, fb: 0.5, mode: 1 }, click(1, 0));
-      // (only the way from the left line to the right one is a quantum late)
+      // (the right line gives the echo of the left one back as it is, a Time later: the feedback once a round)
       expect(echoes(one.left).slice(0, 2)).toEqual([TIME, 3 * TIME + LATE]);
-      expect(echoes(one.right).slice(0, 2)).toEqual([2 * TIME + LATE, 4 * TIME + 2 * LATE]);
+      expect(echoes(one.right).slice(0, 2)).toEqual([2 * TIME, 4 * TIME + LATE]);
+      expect(one.right.subarray(TIME, 2 * TIME + 256)).toEqual(one.left.subarray(0, TIME + 256));
       // half of a click of one channel, whichever it is
       const other = renderDelay({ time: TIME / RATE, fb: 0.5, mode: 1 }, click(0, 1));
       expect(other.left).toEqual(one.left);
@@ -215,15 +217,20 @@ describe('delay', () => {
       const toRight = run(0.01);
       expect(echoes(toRight.left).slice(0, 2)).toEqual([2 * TIME, 3 * TIME + LATE]);
       expect(echoes(toRight.right)[0]).toBe(TIME);
-      // the late channel is the other one, late (read between two samples: not to the bit)
-      toRight.right
-        .subarray(0, 2048)
-        .forEach((value, i) => expect(Math.abs(toRight.left[i + TIME] - value)).toBeLessThan(1e-3));
+      // the late channel is the other one, late by whole samples
+      expect(toRight.left.subarray(TIME, TIME + 2048)).toEqual(toRight.right.subarray(0, 2048));
     });
 
-    it('a line is never read under a render quantum: the shortest echo', () => {
+    it('a line is never read under a segment of the core: the shortest echo', () => {
       const { left } = renderDelay({ time: 0.001, fb: 0.5 }, click(1, 0));
-      expect(echoes(left).slice(0, 2)).toEqual([LATE, 3 * LATE]);
+      expect(echoes(left).slice(0, 2)).toEqual([SHORTEST, 2 * SHORTEST + LATE]);
+    });
+
+    it('a Time that holds is whole samples: an echo is the sound as the line got it', () => {
+      const { left } = renderDelay({ time: (TIME + 0.4) / RATE, fb: 0, q: 0.0001 }, click(1, 0));
+      expect(echoes(left)).toEqual([TIME]);
+      const late = renderDelay({ time: (TIME + 0.6) / RATE, fb: 0, q: 0.0001 }, click(1, 0));
+      expect(echoes(late.left)).toEqual([TIME + 1]);
     });
 
     it('Freq and Q are the bandpass of the echoes: a narrow one rings quieter', () => {

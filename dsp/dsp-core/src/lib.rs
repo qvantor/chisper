@@ -46,6 +46,20 @@ pub fn finite(value: f64) -> f64 {
     }
 }
 
+/// the dry and the wet gain of a mix as the chorus and the delay of the Audio Unit have it (measured): the wet gain
+/// sin²(mix · π / 2), the dry one 1 - wet² (the dry signal nearly whole under a half of the knob)
+pub fn squared_mix(mix: f64) -> (f64, f64) {
+    let wet = if mix >= 1.0 {
+        1.0
+    } else if mix <= 0.0 {
+        0.0
+    } else {
+        let share = jsmath::sin(mix * jsmath::PI / 2.0);
+        share * share
+    };
+    (1.0 - wet * wet, wet)
+}
+
 /// ToInt32 of x, fast while x fits (a compare and a truncation), else the full wrap of JS
 #[inline(always)]
 pub fn int32(x: f64) -> i32 {

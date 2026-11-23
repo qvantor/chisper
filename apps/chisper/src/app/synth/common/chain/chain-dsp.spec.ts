@@ -7,6 +7,7 @@ import {
   renderChain,
   slotOf,
 } from '../../../../test-utils/chain-render';
+import { mixGains } from '../../../../test-utils/chorus-render';
 import { expectSameBits } from '../../../../test-utils/parity';
 import { renderStereo } from '../../../../test-utils/fx-render';
 import { createDelayWasm } from '../../fx/effects/delay-wasm';
@@ -84,7 +85,7 @@ describe('the chain core', () => {
     expect(other.left).not.toEqual(out.left);
   });
 
-  it('mixes a slot by the law of its kind: equal power for the echoes and the reverb', () => {
+  it('mixes a slot by the law of its kind: the one of the echoes for the delay, equal power for the reverb', () => {
     const input = noise(FRAMES);
     const core = chainCore();
     const mix = 0.3;
@@ -96,10 +97,8 @@ describe('the chain core', () => {
       createDelayWasm(core, RATE, { ...NEUTRAL_PARAMS.delay, time: 0.011 } as never),
       input
     );
-    const [dry, share] = [
-      Math.fround(Math.cos((mix * Math.PI) / 2)),
-      Math.fround(Math.sin((mix * Math.PI) / 2)),
-    ];
+    // (the echoes: the law of the chorus, the wet gain sin² of the knob, the dry one 1 - wet²)
+    const [dry, share] = mixGains(mix).map(Math.fround);
     const expected = input[0].map((value, i) => Math.fround(dry * value) + Math.fround(share * wet.left[i]));
     out.left.forEach((value, i) => expect(Math.abs(value - expected[i])).toBeLessThan(1e-6));
     expect(peak(wet.left)).toBeGreaterThan(0.01);

@@ -37,8 +37,13 @@ const CORES = [
   // the macros of the node as sources of the routes of the voices and of the chain (Macros, the levels that wait
   // for their frames: Shared::set_macros, render_macros; the levels of the chain at the points: level_at); 207.4 KB
   // with the passes of the reverb four samples at a time (its early reflections, its shelves, its output: a
-  // quarter less time) and the laws of a hall at the top of its Size and its Damp
-  { crate: 'engine', name: 'engine', budget: 207700 },
+  // quarter less time) and the laws of a hall at the top of its Size and its Damp; 209.8 KB with the delay of the
+  // Audio Unit (a segment of it in one loop of four samples from the rings into them, the passes of the plain order
+  // beside it for a knob that moves: 59 % faster at rest; that loop from an odd sample too and the pairs of its
+  // bandpass kept through a new design; the time of the delay and the offsets of its channels through the one-pole
+  // of the Audio Unit at the points of their lines: `Smoothing`, a loop of their own, in the loop of every line the
+  // lines of the EQ and of a mix were 5 % slower)
+  { crate: 'engine', name: 'engine', budget: 210100 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];

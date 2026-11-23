@@ -41,10 +41,12 @@ export const {
 } = synced;
 
 // the delay of the chain core (dsp/chain/src/delay.rs): a line a channel, a bandpass in the feedback, normal (each
-// line feeds itself) or ping-pong (the mono sum goes into the left line, the lines feed each other), Pan a channel
-// of the echoes late. Time glides as a tape, so a knob drag bends the echoes once instead of chirping per step; in
-// BPM (sync) it is its division at the tempo of the synth, a line DELAY_LINE_MAX long. A knob the envelopes and the
-// LFOs move follows them in the core, the offset of its routes added to the knob as it glides
+// line feeds itself) or ping-pong (the mono sum into the left line, its echoes into the right one, which gives them
+// back as they are a Time later and feeds the left line: the feedback once a round), Pan a channel of the echoes
+// late. Time moves as a tape, the echoes bend: the knob and the offset of its routes (those of Pan too) through the
+// one-pole of the Audio Unit (TIME_SMOOTHING of the core, measured: an LFO on its time); in BPM (sync) it is its
+// division at the tempo of the synth, a line DELAY_LINE_MAX long. A knob the envelopes and the LFOs move follows
+// them in the core, the offset of its routes added to the knob as it glides
 export const delay: FxDefinition<DelayParam> = {
   label: 'Delay',
   params: {

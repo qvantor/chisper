@@ -24,6 +24,7 @@ extern crate alloc;
 
 use dsp_core::blocks::{louder, loudest, Rows, Smoothed};
 use dsp_core::simd::{F32x4, F64x2};
+use dsp_core::squared_mix;
 use jsmath::{exp, floor, max, min, pow, sin, PI};
 
 // the params, in the order of CHORUS_KEYS of chorus-wasm.ts
@@ -227,15 +228,13 @@ impl Chorus {
     // the gains of the params as they are at the end of the block
     fn update(&mut self) {
         let rate = self.sample_rate;
-        let mix = clamp(self.value(MIX), 0.0, 1.0);
+        let (dry, wet) = squared_mix(self.value(MIX));
         let level = 4.0 * self.value(LEVEL) * self.value(LEVEL);
-        let share = sin(0.5 * PI * mix);
-        let wet = share * share;
         // the cutoff the filter has by its knob, two passes a sample: its coefficient at twice the rate
         let knob = clamp(self.value(CUT), 20.0, 20000.0);
         let cutoff = 50.0 * pow(knob / 50.0, 0.95);
         self.gains = Gains {
-            dry: (1.0 - wet * wet) as f32,
+            dry: dry as f32,
             wet: (0.5 * wet * level) as f32,
             feedback: clamp(self.value(FB), 0.0, MAX_FEEDBACK) as f32,
             coefficient: min(2.0 * sin(PI * cutoff / (2.0 * rate)), MAX_COEFFICIENT),

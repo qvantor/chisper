@@ -664,8 +664,8 @@ const createCases = (dsp) => {
   const CHAIN_KINDS = SLOT_KINDS.slice(0, 5);
   // the EQ of the cases: a peak of band 1 and a high shelf of band 2 (both bands render)
   const EQ = { t1: 1, f1: 400, q1: 50, g1: 6, t2: 0, f2: 6000, q2: 60, g2: -4, level: 0.5 };
-  // the state of a chain of `kinds` in this order, `moved`: its knobs by LFOs
-  const chainStateOf = (kinds, moved = false) => {
+  // the state of a chain of `kinds` in this order, `moved`: its knobs by LFOs (of `period` seconds)
+  const chainStateOf = (kinds, moved = false, period = 0.31) => {
     const neutral = {
       distortion: { mode: 0, drive: 8, tone: 20000, level: 0 },
       chorus: { rate: 0.078, d1: 5, d2: 0, depth: 26, fb: 0.095, cut: 1000, hpf: 0, level: 0.5, mix: 0.5 },
@@ -686,7 +686,7 @@ const createCases = (dsp) => {
       rise: 0,
       smooth: 0,
       phase: 0,
-      anchor: { time: 0, phase: 0, period: 0.31 },
+      anchor: { time: 0, phase: 0, period },
     };
     // `moved` as a list: the routes of its rows [effect, knob, source, amount, min, max, scale] and no more
     const listed = Array.isArray(moved)
@@ -766,9 +766,11 @@ const createCases = (dsp) => {
     ],
   };
   const chainOf =
-    (kinds, source, moved = false, limited = true) =>
+    (kinds, source, moved = false, limited = true, period) =>
     () => {
-      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds, moved), { limited });
+      const chain = dsp.createChainWasm(dsp.wasm.chain, RATE, chainStateOf(kinds, moved, period), {
+        limited,
+      });
       let at = 0;
       let frame = 0;
       const inL = new Float32Array(BLOCK);
@@ -1111,9 +1113,14 @@ const createCases = (dsp) => {
         'chain eq': chainOf(['eq'], input),
         'chain eq, lfos': chainOf(['eq'], input, true),
       }),
-    // the delay of the chain core alone: its echoes held (a copy and a pass of lanes), then its Time on the way
+    // the delay of the chain core alone: its echoes held (a copy and a pass of lanes), then its Time on the way;
+    // a sound from an odd sample (the first sample of every block the second of a pair of its bandpass)
     ...(dsp.wasm.delay && {
       delay: effect(() => dsp.createDelayWasm(dsp.wasm.delay, RATE, DELAY).process, input),
+      'delay from an odd sample': effect(
+        () => dsp.createDelayWasm(dsp.wasm.delay, RATE, DELAY).process,
+        input.map((value, i) => (i === 0 ? 0 : value))
+      ),
       'delay ping-pong, a channel late': effect(
         () => dsp.createDelayWasm(dsp.wasm.delay, RATE, { ...DELAY, mode: 1, pan: 0.01 }).process,
         input
@@ -1139,6 +1146,22 @@ const createCases = (dsp) => {
           [`fx ${kind}, lfos`, chainOf([kind], input, OWN_ROUTES[kind], false)],
           [`fx ${kind}, lfo mix`, chainOf([kind], input, [[kind, 'mix', 4, 0.4, 0, 1]], false)],
         ])
+      ),
+      // the delay under one LFO on its Time (10 ms), slow (0.2 Hz) and fast (20 Hz): its reads between two samples
+      // and the pole of its routes, whatever the rate
+      'fx delay, slow lfo on time': chainOf(
+        ['delay'],
+        input,
+        [['delay', 'time', 4, 0.01, 0.01, 1]],
+        false,
+        5
+      ),
+      'fx delay, fast lfo on time': chainOf(
+        ['delay'],
+        input,
+        [['delay', 'time', 4, 0.01, 0.01, 1]],
+        false,
+        0.05
       ),
     }),
     ...(dsp.createEngineWasm &&

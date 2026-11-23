@@ -5,7 +5,7 @@ use crate::biquad::{coefficients_into, FilterType};
 use crate::consts::{
     CASCADE_DOWN_PHASE, CASCADE_HALF_DOWN, CASCADE_HALF_UP, CASCADE_UP_LATE_PHASES, CASCADE_UP_PHASES,
 };
-use crate::fir::{dot, lanes_of, phases, TAPS};
+use crate::fir::{dot, lanes_of, phases, Phases, TAPS};
 use crate::simd::{F32x4, F64x2};
 use crate::tanh::tanh4;
 use alloc::{vec, vec::Vec};
@@ -175,10 +175,10 @@ const HALF_UP: usize = 3;
 const HALF_DOWN: usize = 5;
 
 // the taps the other way round: a window of a buffer runs forward in time
-static UP: [[f32; TAPS]; 2] = phases(&CASCADE_UP_PHASES, true, 1.0);
-static UP_LATE: [[f32; TAPS]; 2] = phases(&CASCADE_UP_LATE_PHASES, true, 1.0);
+static UP: Phases<2> = phases(&CASCADE_UP_PHASES, true, 1.0);
+static UP_LATE: Phases<2> = phases(&CASCADE_UP_LATE_PHASES, true, 1.0);
 // (the average of both streams in the taps)
-static DOWN: [[f32; TAPS]; 1] = phases(&CASCADE_DOWN_PHASE, true, 0.5);
+static DOWN: Phases<1> = phases(&CASCADE_DOWN_PHASE, true, 0.5);
 
 // the samples of before the first stage works out again in every block, for the halfband that reads their points
 // (it keeps no points of its own: a chain that starts has those of one that ran all along)
@@ -265,7 +265,7 @@ impl Chain {
 
     /// the points at 2× of a block: `input` of each channel is INPUT_CARRY samples of before, then the frames
     pub fn up(&mut self, input: [&[f32]; 2], frames: usize) {
-        let taps = if self.hard { &UP_LATE } else { &UP };
+        let taps = if self.hard { &UP_LATE.0 } else { &UP.0 };
         let taps = [lanes_of(&taps[0]), lanes_of(&taps[1])];
         for (points, input) in self.points.iter_mut().zip(input) {
             let input = &input[..INPUT_CARRY + frames];
@@ -318,7 +318,7 @@ impl Chain {
     pub fn down(&mut self, output: [&mut [f32]; 2], frames: usize, add: bool) {
         let [h0, h1, h2] = HALF_DOWN_TAPS.map(F32x4::splat);
         let half = F32x4::splat(0.5);
-        let taps = lanes_of(&DOWN[0]);
+        let taps = lanes_of(&DOWN.0[0]);
         let streams = self.center.iter_mut().zip(self.window.iter_mut());
         for (([even, odd], (center, window)), output) in self.shaped.iter_mut().zip(streams).zip(output) {
             let mut j = 0;

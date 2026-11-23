@@ -225,6 +225,16 @@ mod lanes4 {
             let (a, b) = (f32x4_demote_f64x2_zero(lo.0), f32x4_demote_f64x2_zero(hi.0));
             F32x4(i32x4_shuffle::<0, 1, 4, 5>(a, b))
         }
+        /// the lanes as doubles (exact): lanes 0 and 1, lanes 2 and 3
+        #[inline(always)]
+        pub fn to_f64(self) -> (super::F64x2, super::F64x2) {
+            (
+                super::F64x2(f64x2_promote_low_f32x4(self.0)),
+                super::F64x2(f64x2_promote_low_f32x4(i32x4_shuffle::<2, 3, 2, 3>(
+                    self.0, self.0,
+                ))),
+            )
+        }
         /// the lanes under TINY as +0 (a NaN stays): a state in f32 that decays would reach the denormals, which
         /// wasm can't flush and a CPU works out many times slower
         #[inline(always)]
@@ -465,6 +475,13 @@ mod lanes4 {
         #[inline(always)]
         pub fn from_f64(lo: super::F64x2, hi: super::F64x2) -> F32x4 {
             F32x4([lo.0[0] as f32, lo.0[1] as f32, hi.0[0] as f32, hi.0[1] as f32])
+        }
+        #[inline(always)]
+        pub fn to_f64(self) -> (super::F64x2, super::F64x2) {
+            (
+                super::F64x2([self.0[0] as f64, self.0[1] as f64]),
+                super::F64x2([self.0[2] as f64, self.0[3] as f64]),
+            )
         }
         #[inline(always)]
         pub fn flush(self) -> F32x4 {

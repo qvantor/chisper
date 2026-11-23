@@ -20,6 +20,7 @@ use core::sync::atomic::{compiler_fence, Ordering};
 
 use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::simd::F32x4;
+use dsp_core::squared_mix;
 use jsmath::{cos, max, sin, PI};
 
 use crate::modulation::{
@@ -44,11 +45,11 @@ pub const SET_MACROS: u32 = 8;
 /// the stage of the limiter (the slots are theirs by index)
 pub const LIMITER_STAGE: u32 = SLOTS as u32;
 const NO_WORK: u32 = u32::MAX;
-// the steps of a block, each taken up where a trap left it: the events due, the units that render nothing, the
-// knobs the routes move, the stages
+// the steps of a block, each taken up where a trap left it: the events due and the routes worked out, the knobs
+// the routes move, the units that render nothing, the stages
 const EVENTS: u32 = 0;
-const REST: u32 = 1;
-const ROUTES: u32 = 2;
+const ROUTES: u32 = 1;
+const REST: u32 = 2;
 const STAGES: u32 = 3;
 /// the calls of a unit a trap of the specs is in: its block, a knob, a rest, its sound forgotten; `AFTER`: past
 /// its stage, in none; `IN_NEW`: as a retry makes it
@@ -145,6 +146,9 @@ pub struct Chain {
     // (the specs of the crate: the slots are never skipped, what the rest is held to)
     #[cfg(test)]
     pub(crate) restless: bool,
+    // (the blocks that rested)
+    #[cfg(test)]
+    pub(crate) rests: usize,
 }
 
 /// the dry and the wet gain of a mix by equal power (all wet: no dry signal at all, cos(π / 2) is 6e-17)
@@ -158,17 +162,23 @@ pub fn equal_power(mix: f64) -> (f64, f64) {
     }
 }
 
+/// the dry and the wet gain of a mix by a law (an effect that mixes inside: all of it, the slot passes it)
+pub fn gains(law: Law, mix: f64) -> (f64, f64) {
+    match law {
+        Law::Inside(_) => (0.0, 1.0),
+        Law::Linear => (1.0 - mix, mix),
+        Law::EqualPower => equal_power(mix),
+        Law::Echoes => squared_mix(mix),
+    }
+}
+
 // the gains of a slot: the dry one (of the input, late by the latency), the wet one, the direct one (`late`: of
 // the input as it is; a slot that is not late is a wire by its dry gain)
 fn targets(kind: usize, on: bool, mix: f64, late: bool) -> (f64, f64, f64) {
     if !on {
         return if late { (0.0, 0.0, 1.0) } else { (1.0, 0.0, 0.0) };
     }
-    let (dry, wet) = match law(kind as u32) {
-        Law::Inside(_) => (0.0, 1.0),
-        Law::Linear => (1.0 - mix, mix),
-        Law::EqualPower => equal_power(mix),
-    };
+    let (dry, wet) = gains(law(kind as u32), mix);
     (dry, wet, 0.0)
 }
 
@@ -299,6 +309,8 @@ impl Chain {
             trap: (NO_WORK, IN_PROCESS),
             #[cfg(test)]
             restless: false,
+            #[cfg(test)]
+            rests: 0,
         }
     }
 
@@ -615,7 +627,7 @@ impl Chain {
         self.resume();
     }
 
-    // the events due, the input and whether the slots are skipped
+    // the events due, the input and whether it is all 0
     fn take(&mut self) {
         let frame = self.frame;
         // (an event leaves the queue once it is applied: one a unit trapped in is taken again, without the unit)
@@ -645,9 +657,16 @@ impl Chain {
             }
         }
         self.silent = peak == 0.0;
+    }
 
-        // nothing sounds and no slot has anything to play or to glide: the slots are skipped
-        let resting = self.silent
+    // nothing sounds and no slot has anything to play or to glide (the knobs of the block set): the slots are
+    // skipped
+    fn rests(&self) -> bool {
+        #[cfg(test)]
+        if self.restless {
+            return false;
+        }
+        self.silent
             && self.order[..self.count].iter().all(|&kind| {
                 let slot = &self.slots[kind];
                 !slot.live
@@ -660,10 +679,7 @@ impl Chain {
                         && slot.dry.step_done()
                         && slot.wet.step_done()
                         && slot.direct.step_done())
-            });
-        #[cfg(test)]
-        let resting = resting && !self.restless;
-        self.resting = resting;
+            })
     }
 
     // a unit that renders nothing in this block is left as a block of silence leaves it: the LFO of a chorus goes
@@ -687,15 +703,13 @@ impl Chain {
     }
 
     // the knobs the routes move in this block, for `route` to set (the modulation calls no unit: a unit that
-    // traps leaves it whole)
+    // traps leaves it whole); at rest too, as a block rendered works them out: the lines through their pole, the
+    // glides from where they were, the LFOs, a knob a macro moves in the silence
     fn modulate(&mut self) {
         self.sets.clear();
         self.set_at = 0;
-        // (the macros glide on at rest too)
         self.modulation.render_macros(self.frame, self.frames);
-        if self.resting {
-            self.cursor = self.count;
-        } else if !self.modulation.idle() {
+        if !self.modulation.idle() {
             // (a slot that fades out, off or out of the order to come, plays no more: its lines go to 0 with it;
             // one that waits for the order to come is not in the chain yet: its lines start as it fades in from a
             // wire; one that is late mixes nothing in until it has its late input)
@@ -736,16 +750,26 @@ impl Chain {
     pub fn resume(&mut self) {
         if self.step == EVENTS {
             self.take();
+            self.modulate();
+            self.step = ROUTES;
+        }
+        if self.step == ROUTES {
+            // (the knobs set before the units rest: an idle unit takes one at once, as before a block of silence;
+            // one that a knob wakes renders the block)
+            self.route();
+            self.resting = self.rests();
+            #[cfg(test)]
+            if self.resting {
+                self.rests += 1;
+            }
             self.rested = 0;
             self.step = REST;
         }
         if self.step == REST {
             self.rest();
-            self.modulate();
-            self.step = ROUTES;
-        }
-        if self.step == ROUTES {
-            self.route();
+            if self.resting {
+                self.cursor = self.count;
+            }
             self.step = STAGES;
         }
         while self.cursor < self.count {

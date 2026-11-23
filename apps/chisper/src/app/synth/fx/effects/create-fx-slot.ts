@@ -8,8 +8,9 @@ export type FxSlot = ReturnType<typeof createFxSlot>;
 
 // The slot of an effect in the chain (common/chain: one worklet node with one core for every effect, the master
 // gain and the limiter). In the core a slot is: its input → the effect → mixed with the input (late by the latency
-// of the effect, so the mix doesn't comb filter) by the law of its kind (equal power: echoes and a reverb add up
-// like unrelated sounds; linear: a distortion is the dry signal reshaped, in time with it; inside: a chorus and a
+// of the effect, so the mix doesn't comb filter) by the law of its kind (equal power: a reverb adds up like an
+// unrelated sound; the echoes of the delay by the law measured of them, the wet gain sin²(π mix / 2) and the dry
+// one 1 - wet²; linear: a distortion is the dry signal reshaped, in time with it; inside: a chorus and a
 // compressor mix the dry signal themselves, their wet one is out of phase with it), its gains gliding. A slot that
 // doesn't play (out of the chain, bypassed, not ready) passes its input and its effect is forgotten once it has
 // faded out: a stale tail never comes back.

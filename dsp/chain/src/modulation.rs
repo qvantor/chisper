@@ -10,9 +10,14 @@
 //! the EQ in octaves), added to the knob as it glides. A change of a line (a route, a knob, a new note) glides
 //! from where the line was in GLIDE: no step; a line gone (its routes, or its slot stops playing) goes to 0 so,
 //! and the chain adds a line for as long as there is one: a slot that fades out takes its offset down with it.
+//! The time of the delay and the offsets of its channels (`SMOOTHED`) are lines through a one-pole instead (of
+//! delay::TIME_SMOOTHING, as the Audio Unit follows the LFOs on its time): worked out at the points, exact over the
+//! line of the target between two (`smooth`), linear between them, no glide (the pole makes none); one gone goes
+//! to 0 through it, no more once within delay::NEAR_SAMPLES of a sample of it.
 
 use alloc::{vec, vec::Vec};
 
+use dsp_core::blocks::smooth;
 use dsp_core::envelope::{envelope_value, EnvelopeParams};
 use dsp_core::finite;
 use dsp_core::glided::glide_length;
@@ -21,9 +26,9 @@ use dsp_core::macros::{levels_of, Macros};
 // the sources: ENV 1–3, VELO, LFO 1–4, MACRO 1–4 (those of the voices: MOD_SOURCES of the app)
 use dsp_core::sources::{is_lfo, is_macro, SOURCES};
 pub use dsp_core::sources::{ENVELOPES, LFO_SOURCE, MACRO_SOURCE};
-use jsmath::{log2, max, min, pow, sqrt};
+use jsmath::{exp, log2, max, min, pow, sqrt};
 
-use crate::chain::equal_power;
+use crate::chain::gains;
 use crate::delay;
 use crate::eq;
 use crate::units::{law, Law, DELAY as DELAY_SLOT, EQ as EQ_SLOT, MAX_PARAMS, SLOTS};
@@ -73,6 +78,9 @@ const KNOB_LINES: [(u32, usize, Map); 12] = [
     (EQ_SLOT, eq::G2, Map::Linear),
 ];
 
+/// the lines through the one-pole of the time of the delay: its time, the offsets of its channels
+const SMOOTHED: [usize; 3] = [LINE_TIME, LINE_PAN, LINE_PAN + 1];
+
 /// the switches of the units with lines, no knob a route moves (the app routes no switch): set at every block, the
 /// mode of the delay would change and a type of the EQ start its fade again and again
 const SWITCHES: [(u32, usize); 3] = [(DELAY_SLOT, delay::MODE), (EQ_SLOT, eq::T1), (EQ_SLOT, eq::T2)];
@@ -114,16 +122,15 @@ struct Group {
 
 // how a knob maps to what its line is added to: as it is, the octaves of a frequency of the EQ (its knob glides in
 // octaves: an offset in Hz of the new knob over the knob on its way there went under 0 Hz), the offset of a channel
-// of a pan, a gain of a mix
+// of a pan, the dry or the wet gain of a mix by its law
 #[derive(Clone, Copy, PartialEq)]
 enum Map {
     Linear,
     Octaves,
     PanLeft,
     PanRight,
-    Dry,
-    Wet,
-    DryLinear,
+    Dry(Law),
+    Wet(Law),
 }
 
 fn mapped(map: Map, value: f64) -> f64 {
@@ -133,9 +140,8 @@ fn mapped(map: Map, value: f64) -> f64 {
         Map::Octaves => log2(min(max(value, eq::MIN_FREQ), eq::MAX_FREQ)),
         Map::PanLeft => max(0.0, value),
         Map::PanRight => max(0.0, -value),
-        Map::Dry => equal_power(value).0,
-        Map::Wet => equal_power(value).1,
-        Map::DryLinear => 1.0 - value,
+        Map::Dry(law) => gains(law, value).0,
+        Map::Wet(law) => gains(law, value).1,
     }
 }
 
@@ -150,6 +156,45 @@ struct Line {
     done: f64,
     idle: bool,
     values: Vec<f64>,
+}
+
+// a line through a one-pole of `tau` samples (`pole`: exp(-SEGMENT / tau); `step`: of a sample, from the last
+// point of a block to the first of the next), at 0 within `near`: the target and the value at its last point, the
+// frame of it, the pole of the last other length (the short last segment of a block: the same every block)
+#[derive(Clone, Copy)]
+struct Smoothing {
+    tau: f64,
+    pole: f64,
+    step: f64,
+    near: f64,
+    input: f64,
+    value: f64,
+    at: f64,
+    other: (f64, f64),
+}
+
+impl Smoothing {
+    // the value at a point (the frame `at`, after the last one) of the target `x` there, its input a line from the
+    // last point
+    fn next(&mut self, x: f64, at: f64) -> f64 {
+        let length = at - self.at;
+        if length > 0.0 {
+            let pole = if length == SEGMENT as f64 {
+                self.pole
+            } else if length == 1.0 {
+                self.step
+            } else {
+                if self.other.0 != length {
+                    self.other = (length, exp(-length / self.tau));
+                }
+                self.other.1
+            };
+            self.value = smooth(self.value, self.input, x, length, self.tau, Some(pole));
+        }
+        self.input = x;
+        self.at = at;
+        self.value
+    }
 }
 
 // a knob of a unit a route moves: its value of the last block (NaN: none set)
@@ -178,6 +223,7 @@ pub struct Modulation {
     // knobs that lost their routes, or whose slot stopped: back at their base in the next block
     back: Vec<(usize, usize)>,
     lines: [Line; LINES],
+    smoothings: [Smoothing; SMOOTHED.len()],
     knobs: [[Group; KNOBS]; LFOS],
     // the knobs of each LFO its routes move (a bit a knob) and those of them a macro moves (without a note too)
     lfo_knobs: [u8; LFOS],
@@ -251,6 +297,20 @@ impl Modulation {
                 idle: true,
                 values: Vec::new(),
             }),
+            smoothings: {
+                let tau = delay::TIME_SMOOTHING * sample_rate;
+                [Smoothing {
+                    tau,
+                    pole: exp(-(SEGMENT as f64) / tau),
+                    step: exp(-1.0 / tau),
+                    // (the lines of the delay in seconds)
+                    near: delay::NEAR_SAMPLES / sample_rate,
+                    input: 0.0,
+                    value: 0.0,
+                    at: 0.0,
+                    other: (f64::NAN, 0.0),
+                }; SMOOTHED.len()]
+            },
             knobs: [[Group::default(); KNOBS]; LFOS],
             lfo_knobs: [0; LFOS],
             macro_knobs: [0; LFOS],
@@ -358,13 +418,9 @@ impl Modulation {
                     group,
                     last: f64::NAN,
                 }),
-                Law::Linear => {
-                    line(LINE_MIX + 2 * slot, Map::DryLinear);
-                    line(LINE_MIX + 2 * slot + 1, Map::Linear);
-                }
-                Law::EqualPower => {
-                    line(LINE_MIX + 2 * slot, Map::Dry);
-                    line(LINE_MIX + 2 * slot + 1, Map::Wet);
+                mixed => {
+                    line(LINE_MIX + 2 * slot, Map::Dry(mixed));
+                    line(LINE_MIX + 2 * slot + 1, Map::Wet(mixed));
                 }
             }
         } else {
@@ -748,7 +804,13 @@ impl Modulation {
             let base = Self::base_of(index, bases);
             let played = (group.is_some(), base, self.epoch);
             let map = self.lines[index].map;
+            let smoothed = SMOOTHED.iter().position(|&line| line == index);
             if played != self.lines[index].played {
+                if let (Some(k), true) = (smoothed, self.lines[index].idle) {
+                    // (from 0, a sample before the block)
+                    let start = &mut self.smoothings[k];
+                    (start.input, start.value, start.at) = (0.0, 0.0, frame - 1.0);
+                }
                 self.lines[index].played = played;
                 self.lines[index].idle = false;
                 self.lines[index].from = f64::NAN;
@@ -764,22 +826,49 @@ impl Modulation {
                 }
                 None => 0.0,
             };
-            let mut previous = offset(self, 0);
             let mut values = core::mem::take(&mut self.lines[index].values);
-            values[0] = previous;
-            for j in 1..self.points.len() {
-                let value = offset(self, j);
-                let (a, b) = (self.points[j - 1], self.points[j]);
-                let step = (value - previous) / (b - a) as f64;
-                for i in a + 1..=b {
-                    values[i] = previous + step * (i - a) as f64;
+            // (a line of the time: each point through its pole, in a loop of its own; the others as they were)
+            let smoothing = match smoothed {
+                Some(k) => {
+                    let mut smoothing = self.smoothings[k];
+                    let mut previous = smoothing.next(offset(self, 0), frame + self.points[0] as f64);
+                    values[0] = previous;
+                    for j in 1..self.points.len() {
+                        let (a, b) = (self.points[j - 1], self.points[j]);
+                        let value = smoothing.next(offset(self, j), frame + b as f64);
+                        let step = (value - previous) / (b - a) as f64;
+                        for i in a + 1..=b {
+                            values[i] = previous + step * (i - a) as f64;
+                        }
+                        previous = value;
+                    }
+                    self.smoothings[k] = smoothing;
+                    Some(smoothing)
                 }
-                previous = value;
-            }
+                None => {
+                    let mut previous = offset(self, 0);
+                    values[0] = previous;
+                    for j in 1..self.points.len() {
+                        let value = offset(self, j);
+                        let (a, b) = (self.points[j - 1], self.points[j]);
+                        let step = (value - previous) / (b - a) as f64;
+                        for i in a + 1..=b {
+                            values[i] = previous + step * (i - a) as f64;
+                        }
+                        previous = value;
+                    }
+                    None
+                }
+            };
             let line = &mut self.lines[index];
-            // (a line gone is no more once a block of it was all 0: the block its glide ends in still has it)
-            let over = group.is_none() && line.done >= glide;
-            if line.done < glide {
+            // (a line gone is no more once a block of it was all 0: the block its glide ends in still has it; one
+            // through its pole once within `near` of 0)
+            let over = group.is_none()
+                && match smoothing {
+                    Some(smoothing) => smoothing.value.abs() < smoothing.near,
+                    None => line.done >= glide,
+                };
+            if smoothing.is_none() && line.done < glide {
                 if line.from.is_nan() {
                     line.from = line.last - values[0];
                 }
