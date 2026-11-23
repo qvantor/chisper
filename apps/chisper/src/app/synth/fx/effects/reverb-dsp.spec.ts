@@ -84,6 +84,9 @@ const render = (
 
 const frame = (seconds: number) => Math.round(seconds * SAMPLE_RATE);
 
+// the first echo of the tail at the top of the size, a hall: its shortest line, 6.1 times its base (dsp/reverb)
+const HALL_ECHO = 0.0271 * 6.1;
+
 // an octave around `freq` (2 bandpasses), or a lowpass below it
 const filtered = (data: Float32Array, type: 'bandpass' | 'lowpass', freq: number) => {
   const filters = [0, 1].map(() =>
@@ -188,20 +191,23 @@ describe('the reverb', () => {
       expect(highs / (2 * HF_RATIO)).toBeLessThan(1.2);
     });
 
-    // the tail is tapped after the decay gain: the first echo of a line is attenuated too
-    it('a short decay is short from the first echo, also in a large room', () => {
-      const short = render({ size: 1, decay: 0.1 }, 0.5).mono;
-      const longer = render({ size: 1, decay: 0.3 }, 0.5).mono;
+    // the tail is tapped after the decay gain: the first echo of a line is attenuated too (the windows from the
+    // first echo of the hall)
+    it('a short decay is short from the first echo, also in a hall', () => {
+      const short = render({ size: 1, decay: 0.1 }, HALL_ECHO + 0.5).mono;
+      const longer = render({ size: 1, decay: 0.3 }, HALL_ECHO + 0.5).mono;
+      const gap = (from: number, to: number) =>
+        levelDb(longer, HALL_ECHO + from, HALL_ECHO + to) - levelDb(short, HALL_ECHO + from, HALL_ECHO + to);
       expect(rt60(short)).toBeLessThan(0.13);
-      expect(levelDb(longer, 0.04, 0.14) - levelDb(short, 0.04, 0.14)).toBeGreaterThan(8);
-      expect(levelDb(longer, 0.14, 0.24) - levelDb(short, 0.14, 0.24)).toBeGreaterThan(30);
+      expect(gap(0, 0.1)).toBeGreaterThan(8);
+      expect(gap(0.1, 0.2)).toBeGreaterThan(30);
     });
 
-    // the first echoes of a large room already passed the highshelf once
+    // the first echoes of a hall already passed the highshelf once
     it('hi damp darkens the tail from its start', () => {
       const brightness = (damp: number) => {
-        const { mono } = render({ size: 1, damp }, 0.1);
-        const level = (freq: number) => levelDb(filtered(mono, 'bandpass', freq), 0, 0.1);
+        const { mono } = render({ size: 1, damp }, HALL_ECHO + 0.1);
+        const level = (freq: number) => levelDb(filtered(mono, 'bandpass', freq), HALL_ECHO, HALL_ECHO + 0.1);
         return level(8000) - level(500);
       };
       expect(brightness(20000) - brightness(2000)).toBeGreaterThan(5);
@@ -226,36 +232,83 @@ describe('the reverb', () => {
     });
 
     // the allpass in every line multiplies the echoes on every pass
-    it('a large room gets a dense tail within 120 ms', () => {
-      const { L } = render({ size: 1, depth: 0 }, 0.15);
-      const start = frame(0.12);
-      const window = L.slice(start, start + frame(0.02));
+    // normalized echo density (Abel & Huang) of 20 ms from `seconds`: about 1 for a gaussian, i.e. a fully dense
+    // tail
+    const density = (data: Float32Array, seconds: number) => {
+      const window = data.slice(frame(seconds), frame(seconds) + frame(0.02));
       const sd = Math.sqrt(window.reduce((sum, value) => sum + value * value, 0) / window.length);
-      // normalized echo density (Abel & Huang): about 1 for a gaussian, i.e. a fully dense tail
-      const density = window.filter((value) => Math.abs(value) > sd).length / window.length / 0.3173;
-      expect(density).toBeGreaterThan(0.85);
+      return window.filter((value) => Math.abs(value) > sd).length / window.length / 0.3173;
+    };
+
+    it('a large room gets a dense tail within 120 ms', () => {
+      expect(density(render({ size: 0.5, depth: 0 }, 0.15).L, 0.12)).toBeGreaterThan(0.85);
+    });
+
+    // The top of the size is a hall (the Hall of the Audio Unit: reverb-measured.spec.ts): its lines 6.1 times
+    // their base, the first echo of the tail after the shortest of them (165 ms), nothing of it before; dense half
+    // a second on; under a steady sound as loud as the room of the middle of the knob (its level is raised by
+    // what its lines lose a pass, 12 dB at most: not at a decay far shorter than them)
+    it('the top of the size is a hall: a tail that starts late, as dense and as loud', () => {
+      const { L } = render({ size: 1, depth: 0, er: 0, pre: 0 }, 0.8);
+      const first = L.findIndex((value) => Math.abs(value) > 1e-4);
+      expect(first).toBeGreaterThan(frame(HALL_ECHO));
+      expect(first).toBeLessThan(frame(HALL_ECHO + 0.04));
+      expect(density(L, 0.6)).toBeGreaterThan(0.85);
+      const steady = (size: number, decay: number) =>
+        levelDb(render({ size, decay, er: 0 }, 2.5, noise(2.5)).mono, 1.5, 2.5);
+      [2, 3, 8].forEach((decay) => expect(Math.abs(steady(1, decay) - steady(0.5, decay))).toBeLessThan(2));
+    });
+
+    it('hi damp at its top damps nothing: the highs ring as the mids', () => {
+      const { mono } = render({ decay: 2, damp: 20000 }, 2.3);
+      const ratio = rt60(filtered(mono, 'bandpass', 8000)) / rt60(filtered(mono, 'bandpass', 1000));
+      expect(ratio).toBeGreaterThan(0.9);
+      expect(ratio).toBeLessThan(1.1);
     });
   });
 
   describe('param changes', () => {
-    // the gain and the shelves of a line come from the same values: no pass gains, also while gliding
+    // The tail of `from` rings (noise for `burst` s), the knobs go to `to` at `at`: no 30 ms of the 0.3 s after is
+    // louder than the 30 ms before (`lows`: under 120 Hz too)
+    const ringsNoLouder = (
+      from: Partial<ReverbDspParams>,
+      to: Partial<ReverbDspParams>,
+      { burst = 0.05, at = 0.15, lows = true } = {}
+    ) => {
+      const { mono } = render(from, at + 0.35, noise(burst), [{ at, params: to }]);
+      (lows ? [mono, filtered(mono, 'lowpass', 120)] : [mono]).forEach((data) => {
+        const before = levelDb(data, at - 0.03, at);
+        for (let t = at; t < at + 0.3; t += 0.01) {
+          expect(levelDb(data, t, t + 0.03)).toBeLessThan(before + 0.5);
+        }
+      });
+    };
+
+    // the gain and the shelves of a line come from the same values: no pass gains, also while gliding (rooms, a
+    // tail dense 0.15 s on: the lines of the top of the size are those of a hall, below)
     it.each([
-      ['decay 0.2 → 20 s with bass 4', { size: 1, decay: 0.2, bass: 4 }, { decay: 20 }],
-      ['decay 0.1 → 20 s with bass 4', { size: 1, decay: 0.1, bass: 4 }, { decay: 20 }],
-      ['bass 0.25 → 4', { size: 1, decay: 0.5, bass: 0.25 }, { bass: 4 }],
-      ['size 1 → 0.15', { size: 1, decay: 9, bass: 1.5 }, { size: 0.15, decay: 0.6, bass: 1 }],
+      ['decay 0.2 → 20 s with bass 4', { size: 0.5, decay: 0.2, bass: 4 }, { decay: 20 }],
+      ['decay 0.1 → 20 s with bass 4', { size: 0.5, decay: 0.1, bass: 4 }, { decay: 20 }],
+      ['bass 0.25 → 4', { size: 0.5, decay: 0.5, bass: 0.25 }, { bass: 4 }],
+      // (the lines of 0.63: 1.5 times their base)
+      ['size 0.63 → 0.15', { size: 0.63, decay: 9, bass: 1.5 }, { size: 0.15, decay: 0.6, bass: 1 }],
     ] as [string, Partial<ReverbDspParams>, Partial<ReverbDspParams>][])(
       '%s: the ringing tail never gets louder',
-      (_, from, to) => {
-        const { mono } = render(from, 0.5, noise(0.05), [{ at: 0.15, params: to }]);
-        const lows = filtered(mono, 'lowpass', 120);
-        [mono, lows].forEach((data) => {
-          const before = levelDb(data, 0.12, 0.15);
-          for (let t = 0.15; t < 0.45; t += 0.01) {
-            expect(levelDb(data, t, t + 0.03)).toBeLessThan(before + 0.5);
-          }
-        });
-      }
+      (_, from, to) => ringsNoLouder(from, to)
+    );
+
+    // The level of the tail of a hall (raised by what its long lines lose a pass) goes into the lines with the
+    // sound: a tail that rings keeps the level it went in at (at their output a shorter decay or a larger room took
+    // it 4 to 8 dB up). The lines filled by half a second of noise, the knobs turned once it is gone; the mono
+    // alone (the lows of a hall vary 3 dB from 30 ms to 30 ms with no knob turned)
+    it.each([
+      ['decay 8 → 1 s', { size: 1, decay: 8 }, { decay: 1 }],
+      ['decay 8 → 0.5 s', { size: 1, decay: 8 }, { decay: 0.5 }],
+      ['size 1 → 0.15', { size: 1, decay: 9, bass: 1.5 }, { size: 0.15, decay: 0.6, bass: 1 }],
+      ['size 0.5 → 1', { size: 0.5, decay: 3 }, { size: 1 }],
+    ] as [string, Partial<ReverbDspParams>, Partial<ReverbDspParams>][])(
+      '%s in a hall: the ringing tail never gets louder',
+      (_, from, to) => ringsNoLouder(from, to, { burst: 0.5, at: 1, lows: false })
     );
 
     it('a shorter decay ends the tail quickly', () => {
@@ -367,10 +420,10 @@ describe('the reverb', () => {
 
     it('renders a silence until its longest path has drained, then skips the blocks', () => {
       // the predelay at its most, the last early reflection, the diffusers and the longest line of the
-      // largest room: 0.561 s, 211 blocks at 48 kHz after the block of a sound (one too quiet to ring on)
-      const { idle } = render({}, 1, (at) => 2e-10 * impulse(at));
-      expect(idle.indexOf(true)).toBe(211);
-      expect(idle.slice(211).every(Boolean)).toBe(true);
+      // largest hall: 0.908 s, 338 blocks at 48 kHz after the block of a sound (one too quiet to ring on)
+      const { idle } = render({}, 1.5, (at) => 2e-10 * impulse(at));
+      expect(idle.indexOf(true)).toBe(338);
+      expect(idle.slice(338).every(Boolean)).toBe(true);
     });
 
     it('clear forgets the tail at once, the next sound rings at the params as they are then', () => {

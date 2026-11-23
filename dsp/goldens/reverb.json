@@ -1,6 +1,6 @@
 {
   "44.1 kHz, blocks of 1000": {
-    "sha256": "6af8e16de974d63452d82efc8751f78614cf15ec148101cf54deea9748a1b567",
+    "sha256": "df448b2e8d5ee656a4259f47343f5f9c224aaecfb584f8ebdc0548c9b86508c2",
     "at": 1052,
     "head": [
       -0.00031532254070043564,
@@ -14,7 +14,7 @@
     ]
   },
   "a predelay glide": {
-    "sha256": "4482562a9149cf26f2b91752380ccfd5d4e3c3b68fff00b317de1ceb28797864",
+    "sha256": "5cd17614574da94c78c81788d2810eb8439146359917ebe8810b866b78c3672c",
     "at": 1145,
     "head": [
       -0.00000788338093116181,
@@ -28,7 +28,7 @@
     ]
   },
   "drained to idle, woken by new input": {
-    "sha256": "a95050fec6c7dc4f4f262c960bcb2a3e27684a418d6b42cc2dc3383d0aa10fc1",
+    "sha256": "e7b23e36be03cef1e5b5d7d364f9fc212cdc8ed940cbaf0205d70159010c0530",
     "at": 1145,
     "head": [
       -0.00000788338093116181,
@@ -42,7 +42,7 @@
     ]
   },
   "era 70s, a loud burst": {
-    "sha256": "de4340323ff8d2071a443810b6c60106c0ea33c9a0f1b87230b48e3b603cacf8",
+    "sha256": "28dc138926dfe6aa1b13a40d5e9efe59d3ae34619ad97126cca9fe2de665c8ef",
     "at": 1145,
     "head": [
       -0.000002016903863477637,
@@ -56,7 +56,7 @@
     ]
   },
   "era 80s, a loud burst": {
-    "sha256": "846cdce41487f64670c775df39664aef94c9c947de8ab28b31c57c42b4c6158c",
+    "sha256": "826bd40ec4ba68c65778ee0e643d72bfd5eb63e8ec73b58eb1fce4d227c6397d",
     "at": 1145,
     "head": [
       -0.00000788338093116181,
@@ -70,7 +70,7 @@
     ]
   },
   "era now, a loud burst": {
-    "sha256": "1879e9cf45d0ef3878e358ccaf717d2ba1d66289c7a48aa69a77ab4bfb1c7adb",
+    "sha256": "bdf6530ca2401889c34e739128947db6d6d4cbbd6f9e82a67007d8a992e5e64c",
     "at": 1145,
     "head": [
       -0.00016207722364924848,
@@ -84,7 +84,7 @@
     ]
   },
   "size moved by an envelope every block": {
-    "sha256": "f128e4655b3135ead70dc0acd87755ab5a9669d5dfc5c433c66aab423f8331ac",
+    "sha256": "952927ec7181353f2e1fb586778a5c772717f0f953cddf4f944f7fc5fc1b4c8c",
     "at": 1214,
     "head": [
       -0.00002507695353415329,
@@ -98,7 +98,7 @@
     ]
   },
   "the largest room, the longest decay, all bass": {
-    "sha256": "4ec371b1127076e27cf59cdbcd2f911b8831b83656f218b890354ff8024fc02e",
+    "sha256": "e87c4ae02c07e98b1d37bd2eba880bc9e27deb559c6ed9e82e4f00aab1b94c2d",
     "at": 1269,
     "head": [
       -0.00001728811730572488,
@@ -112,7 +112,7 @@
     ]
   },
   "the smallest room, the shortest decay": {
-    "sha256": "24e5336c69c4394c379b7ede5a8916b06d9b22c93b7d0019769fee3b4c32f60f",
+    "sha256": "7d7e7f60d7153c58557ce5490bcf897fb8995e6539e9022bf8a3777bb0c43e65",
     "at": 1021,
     "head": [
       -0.0000010603376949802623,

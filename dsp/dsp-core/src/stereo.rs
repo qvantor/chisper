@@ -33,6 +33,13 @@ impl StereoBiquad {
         coefficients_into(&mut self.c, Some(ty), frequency, q, gain, sample_rate);
     }
 
+    /// it passes its input as it is and holds nothing of what came before: a wire
+    pub fn is_wire(&self) -> bool {
+        let [b0, b1, b2, a1, a2] = self.c;
+        let still = |z: F64x2| z.lo() == 0.0 && z.hi() == 0.0;
+        b0 == 1.0 && b1 == a1 && b2 == a2 && still(self.z1) && still(self.z2)
+    }
+
     /// one sample of both channels
     #[inline(always)]
     pub fn process(&mut self, input: F64x2) -> F64x2 {
@@ -92,6 +99,11 @@ impl QuadBiquad {
     pub fn set(&mut self, lane: usize, ty: FilterType, frequency: f64, q: f64, gain: f64, sample_rate: f64) {
         let mut c = [0.0; 5];
         coefficients_into(&mut c, Some(ty), frequency, q, gain, sample_rate);
+        self.set_coefficients(lane, &c);
+    }
+
+    /// the coefficients of lane `lane` as they are (b0, b1, b2, a1, a2): a section the caller designed
+    pub fn set_coefficients(&mut self, lane: usize, c: &[f64; 5]) {
         for k in 0..5 {
             self.values[k][lane] = c[k] as f32;
             self.c[k] = F32x4::load(&self.values[k]);

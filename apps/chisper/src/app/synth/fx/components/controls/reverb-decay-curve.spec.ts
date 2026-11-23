@@ -30,10 +30,21 @@ describe('decayCurve', () => {
     expect(at(curve, 5000)).toBeCloseTo(2, 1);
   });
 
+  // (a shelf of the first order: a gentle tilt, a decade under hi damp a little of it already)
   it('the highs fall off above hi damp', () => {
     const curve = decayCurve({ ...params, damp: 1000 }, 48000);
-    expect(at(curve, 100)).toBeCloseTo(2, 1);
+    expect(at(curve, 100)).toBeGreaterThan(1.9);
+    expect(at(curve, 100)).toBeLessThanOrEqual(2);
     expect(at(curve, 15000)).toBeCloseTo(2 * HF_RATIO, 1);
     curve.slice(1).forEach((value, i) => expect(value).toBeLessThanOrEqual(curve[i] + 1e-9));
+  });
+
+  it('hi damp at its top damps nothing', () => {
+    const curve = decayCurve({ ...params, damp: 20000 }, 48000);
+    expect(at(curve, 1000)).toBeCloseTo(2);
+    expect(at(curve, 15000)).toBeCloseTo(2);
+    const partly = decayCurve({ ...params, damp: 14000 }, 48000);
+    expect(at(partly, 15000)).toBeGreaterThan(2 * HF_RATIO + 0.3);
+    expect(at(partly, 15000)).toBeLessThan(1.8);
   });
 });

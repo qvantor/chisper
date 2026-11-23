@@ -1,5 +1,12 @@
 import { biquad } from '@chisper/math';
-import { lineDecay, lineFactor, meanLoopLength, XOVER } from '../../effects/reverb-decay';
+import {
+  dampingShelf,
+  hfRatio,
+  lineDecay,
+  lineFactor,
+  meanLoopLength,
+  XOVER,
+} from '../../effects/reverb-decay';
 
 export interface DecayParams {
   size: number;
@@ -41,10 +48,10 @@ export const decayCurve = (
   out = new Float64Array(POINTS)
 ) => {
   const length = meanLoopLength(lineFactor(size, decay));
-  const { gain, lowDb, highDb } = lineDecay(length, decay, bass);
+  const { gain, lowDb, highDb } = lineDecay(length, decay, bass, hfRatio(damp));
   const passDb = 20 * Math.log10(gain);
   const low = biquad.coefficients('lowshelf', { frequency: XOVER, Q: 0, gain: lowDb }, sampleRate);
-  const high = biquad.coefficients('highshelf', { frequency: damp, Q: 0, gain: highDb }, sampleRate);
+  const high = dampingShelf(damp, highDb, sampleRate);
   const t = termsOf(sampleRate);
   for (let i = 0; i < POINTS; i++) {
     const db = passDb + magnitudeDb(low, t, i) + magnitudeDb(high, t, i);

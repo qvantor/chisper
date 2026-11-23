@@ -15,7 +15,7 @@ use alloc::{vec, vec::Vec};
 use core::cell::Cell;
 use dsp_core::biquad::FilterType;
 use dsp_core::filter_model::{self, Cell as GridCell, Coefs, LaneCoefs, LaneState, Layout, ModelType};
-use dsp_core::simd::{F32x4, U32x4};
+use dsp_core::simd::{transpose, F32x4, U32x4};
 use jsmath::{cos, exp, log2, max, pow, round, sin, sqrt, PI, SQRT2};
 
 /// the type of the filter: one of a BiquadFilterNode (None: an unknown index, a constant 1) or a model one
@@ -1139,19 +1139,6 @@ fn run_frozen(fade: &mut Fade, a: usize, b: usize, left: &mut [f32], right: &mut
             fade.model.state = channels_of(&lanes, 0);
         }
     }
-}
-
-// four rows of four into their columns (and back)
-#[inline(always)]
-fn transpose([a, b, c, d]: [F32x4; 4]) -> [F32x4; 4] {
-    let (ab, ab2) = (a.pick::<0, 4, 1, 5>(b), a.pick::<2, 6, 3, 7>(b));
-    let (cd, cd2) = (c.pick::<0, 4, 1, 5>(d), c.pick::<2, 6, 3, 7>(d));
-    [
-        ab.pick::<0, 1, 4, 5>(cd),
-        ab.pick::<2, 3, 6, 7>(cd),
-        ab2.pick::<0, 1, 4, 5>(cd2),
-        ab2.pick::<2, 3, 6, 7>(cd2),
-    ]
 }
 
 // A group of REFRESH samples from a refresh on (`rows`: those of each lane) through the sections of a layout: the

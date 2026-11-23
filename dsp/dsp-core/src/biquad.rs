@@ -43,6 +43,21 @@ fn normalize(out: &mut [f64; 5], b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2
     *out = [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0];
 }
 
+/// the lowshelf of the Cookbook inside (0, nyquist): `a` its gain (10^(dB/40)), the cosine of its frequency and its
+/// sine over √2 (Q = 0); for a caller that works the trigonometry of one frequency out once (the reverb)
+pub fn lowshelf_into(out: &mut [f64; 5], a: f64, cos: f64, sin_over_root2: f64) {
+    let k = 2.0 * sqrt(a) * sin_over_root2;
+    normalize(
+        out,
+        a * (a + 1.0 - (a - 1.0) * cos + k),
+        2.0 * a * (a - 1.0 - (a + 1.0) * cos),
+        a * (a + 1.0 - (a - 1.0) * cos - k),
+        a + 1.0 + (a - 1.0) * cos + k,
+        -2.0 * (a - 1.0 + (a + 1.0) * cos),
+        a + 1.0 + (a - 1.0) * cos - k,
+    )
+}
+
 /// BiquadFilterNode coefficients as defined by the Web Audio API spec (Audio EQ Cookbook), the edge cases at 0
 /// Hz, at nyquist and for Q <= 0 included; `ty` None: an unknown type (a constant 1). Every value is worked out
 /// only where its type reads it: the Math of jsmath has no side effects, the bits are those of the TS
@@ -166,17 +181,7 @@ pub fn coefficients_into(
             if f <= 0.0 {
                 return constant(out, 1.0);
             }
-            let cos = cos(w0);
-            let k = 2.0 * sqrt(a) * (sin(w0) / SQRT2);
-            normalize(
-                out,
-                a * (a + 1.0 - (a - 1.0) * cos + k),
-                2.0 * a * (a - 1.0 - (a + 1.0) * cos),
-                a * (a + 1.0 - (a - 1.0) * cos - k),
-                a + 1.0 + (a - 1.0) * cos + k,
-                -2.0 * (a - 1.0 + (a + 1.0) * cos),
-                a + 1.0 + (a - 1.0) * cos - k,
-            )
+            lowshelf_into(out, a, cos(w0), sin(w0) / SQRT2)
         }
         Some(FilterType::Highshelf) => {
             let a = a();

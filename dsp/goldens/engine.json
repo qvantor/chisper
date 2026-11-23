@@ -1,6 +1,6 @@
 {
   "a chord through every effect, released into their tails": {
-    "sha256": "70953d67b494a14b347f1e199204158d46d2889d40c2172c1b22eaab231e5eec",
+    "sha256": "9836df22f128c35553cd539b33f590ccf22e0443cc07565792839f23c0084527",
     "at": 114,
     "head": [
       1.0718520085980631e-14,
@@ -14,7 +14,7 @@
     ]
   },
   "a preset switch: the output fades, the voices end, the tails are forgotten, a new chord": {
-    "sha256": "961dc35a8224f595ca3da424f4e2e6663d3c0437562f1a491193b5435a346a0a",
+    "sha256": "ff573aaad28847a89cd4b20e057144713f7ba1368770840280eed527624ce067",
     "at": 113,
     "head": [
       0.0008254479616880417,
@@ -28,7 +28,7 @@
     ]
   },
   "at 96 kHz without the limiter: the render of an export": {
-    "sha256": "7d077b4e34aef9588213adb0fe6f5f30a48862513d0153a8af56353fb8103421",
+    "sha256": "e4ba6cc6caa96d3f2d494a2fcb2c30cfdda26e323e95ef3bb3e36f87ede597f2",
     "at": 2,
     "head": [
       -5.381529809723052e-15,
@@ -56,7 +56,7 @@
     ]
   },
   "the knobs of the effects follow the note and the LFOs under the voices": {
-    "sha256": "fe0dfbdfa9a8bc6796faf410a856be85487dcc43b0330d9444a6d51e7df2d64f",
+    "sha256": "6a750d38e84912d41c1108836c7a25d2e16569602862f5d4e3bc2c2449dd1002",
     "at": 106,
     "head": [
       -5.190562420116307e-15,
