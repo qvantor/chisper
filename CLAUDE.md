@@ -129,7 +129,8 @@ time).
   and missing keys mean defaults. A new field changes every preset hash: DB presets get it by
   `scripts/presets/rehash.mjs --apply` on production before the deploy, not legacy code, then `netlify api purgeCache`
   after it (the CDN holds the presets of before). An optional section that leaves out its defaults keeps the hashes
-  (`mac`, the levels of the macros: a level of 0 is not written, an empty section is none).
+  (`mac`, the levels and the names of the macros: a level of 0 and an empty name are not written, an empty section is
+  none).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), `EQ_TYPES`
   (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
   a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
@@ -456,7 +457,11 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   shapes as 2048-point tables, `lfo/lfo-curve.ts` shared by main thread, worklets and specs, mirrored in `lfo.rs`),
   `modulation.ts` (routes `<source>:<knob>`, targets in `modulation-targets.ts`, at most 64 routes and 4 per knob;
   the levels of MACRO 1–4, `$macros`, `setMacro(id, level, at?, source?)`: every move with its time in `$macroMoves`,
-  which the synth tells the node, the routes stay; snapshot `mac`, a plugin of its own). `synth/macros/` (not
+  which the synth tells the node, the routes stay (only a hand moves one yet: `at`, the sources `midi`/`track` and
+  `MACRO_CC` of the schema wait for a MIDI input and the automation of the track); their names as typed, `$macroNames`, `setMacroName`: the field
+  under a macro with routes, the label of its routes on the knobs, `sourceLabel`; snapshot `mac`, a plugin of its own,
+  `n1`–`n4` only of a macro with routes, trimmed; the server refuses a profane one, `profaneMacroName`).
+  `synth/macros/` (not
   `macro`: babel-plugin-macros takes an import that ends with /macro for a macro).
 - `transport.ts` — tempo and beats on the context clock; MIDI Clock can lead it (`transport/midi-clock.ts`).
   Tempo divisions are in `libs/preset-schema/src/tempo.ts`; seconds of divisions are worked out on the main thread.

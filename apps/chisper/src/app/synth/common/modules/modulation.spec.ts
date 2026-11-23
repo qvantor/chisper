@@ -1,5 +1,5 @@
-import { MOD_SOURCES } from '@chisper/preset-schema';
-import { applySnapshot, getSnapshot } from '../../../app';
+import { MOD_SOURCES, presetDataSchema } from '@chisper/preset-schema';
+import { $snapshotChanges, applySnapshot, getSnapshot } from '../../../app';
 import { createModulation } from '../../../../test-utils/models';
 import { recordAnalytics } from '../../../../test-utils/analytics';
 import { MOD_TARGETS } from '../modulation/modulation-targets';
@@ -332,25 +332,87 @@ describe('the macros', () => {
     applySnapshot({ mac: { m1: 1.5, m2: -0.5, m3: 'x' as unknown as number, m4: 0.75 } });
     expect($macros.value).toEqual([1, 0, 0, 0.75]);
   });
+});
 
-  it('swaps two macros: their levels and their routes', () => {
-    const module = createModulation();
-    const [{ $macros, $routes }, { setMacro, addRoute, swapMacros }] = module;
-    setMacro('macro1', 0.25);
-    setMacro('macro2', 0.75);
+describe('the names of the macros', () => {
+  it('are none by default; a name is kept as typed, the snapshot has it trimmed', () => {
+    const [{ $macroNames }, { setMacroName, addRoute }] = createModulation();
+    expect($macroNames.value).toEqual(['', '', '', '']);
+    addRoute('macro2', 'osc1.wave');
+    setMacroName('macro2', '  Wobble  Depth ');
+    expect($macroNames.value).toEqual(['', '  Wobble  Depth ', '', '']);
+    expect(getSnapshot()['mac']).toEqual({ n2: 'Wobble Depth' });
+  });
+
+  it('are saved only of a macro with routes, not empty; one that lost its last keeps its name for a route again', () => {
+    const [{ $macroNames }, { setMacroName, addRoute, removeRoute, setOff }] = createModulation();
+    const changes: string[] = [];
+    $snapshotChanges.subscribe((name) => changes.push(name));
+    setMacroName('macro1', 'Bright');
+    setMacroName('macro3', '   ');
+    addRoute('macro3', 'filter.cutoff');
+    // a name without routes is not in the preset: no change of it
+    expect(getSnapshot()['mac']).toEqual({});
+    expect(changes.filter((name) => name === 'mac')).toEqual([]);
     addRoute('macro1', 'osc1.wave');
-    addRoute('macro2', 'filter.cutoff', -0.5);
-    addRoute('env1', 'osc1.gain');
-    const moves = movesOf(module);
-    swapMacros('macro1', 'macro2');
-    expect($macros.value).toEqual([0.75, 0.25, 0, 0]);
-    expect($routes.value).toEqual([
-      { source: 'macro2', target: 'osc1.wave', amount: 0.5 },
-      { source: 'macro1', target: 'filter.cutoff', amount: -0.5 },
-      { source: 'env1', target: 'osc1.gain', amount: 0.5 },
-    ]);
-    expect(moves).toEqual([{ levels: [0.75, 0.25, 0, 0] }]);
-    swapMacros('macro3', 'macro3');
-    expect(moves).toHaveLength(1);
+    expect(getSnapshot()['mac']).toEqual({ n1: 'Bright' });
+    // a route switched off is still one
+    setOff('macro1', 'osc1.wave', true);
+    expect(getSnapshot()['mac']).toEqual({ n1: 'Bright' });
+    removeRoute('macro1', 'osc1.wave');
+    expect(getSnapshot()['mac']).toEqual({});
+    expect($macroNames.value[0]).toBe('Bright');
+    addRoute('macro1', 'lfo1.rate');
+    expect(getSnapshot()['mac']).toEqual({ n1: 'Bright' });
+    expect(changes.filter((name) => name === 'mac')).toHaveLength(3);
+  });
+
+  it('are saved within 20 characters, an emoji at the cut left out whole: a preset takes the state', () => {
+    const [, { setMacroName, addRoute }] = createModulation();
+    addRoute('macro1', 'osc1.wave');
+    addRoute('macro2', 'osc1.gain');
+    setMacroName('macro1', `  ${'Wobble '.repeat(4)}`);
+    setMacroName('macro2', `${'x'.repeat(19)}\u{1F3B9}y`);
+    const snapshot = getSnapshot();
+    expect(snapshot['mac']).toEqual({ n1: 'Wobble Wobble Wobble', n2: 'x'.repeat(19) });
+    expect(presetDataSchema.safeParse(snapshot).success).toBe(true);
+  });
+
+  it('round trip through the snapshot with the levels; a missing key, an empty name and odd values are none', () => {
+    const [{ $macroNames, $macros }, { setMacro, setMacroName, addRoute }] = createModulation();
+    addRoute('macro1', 'osc1.wave');
+    addRoute('macro4', 'filter.cutoff');
+    setMacro('macro4', 0.5);
+    setMacroName('macro1', 'Bright');
+    setMacroName('macro4', 'Air');
+    const snapshot = getSnapshot();
+    expect(snapshot['mac']).toEqual({ m4: 0.5, n1: 'Bright', n4: 'Air' });
+    // a preset without names takes the names away
+    applySnapshot({});
+    expect($macroNames.value).toEqual(['', '', '', '']);
+    applySnapshot(snapshot);
+    expect($macroNames.value).toEqual(['Bright', '', '', 'Air']);
+    expect($macros.value).toEqual([0, 0, 0, 0.5]);
+    applySnapshot({
+      mod: { 'macro1:osc1.wave': 0.5 },
+      mac: {
+        n1: ` ${'x'.repeat(30)} `,
+        n2: 5 as unknown as string,
+        n3: null as unknown as string,
+        n4: '',
+      },
+    });
+    expect($macroNames.value).toEqual(['x'.repeat(20), '', '', '']);
+  });
+
+  it('a name typed is a use, not one of a preset; its words are never sent', () => {
+    const [, { setMacroName }] = createModulation();
+    const analytics = recordAnalytics();
+    applySnapshot({ mod: { 'macro2:osc1.wave': 0.5 }, mac: { n2: 'Bright' } });
+    expect(analytics.features()).toEqual([]);
+    setMacroName('macro2', 'Brighter');
+    setMacroName('macro2', 'Brighter');
+    expect(analytics.features()).toEqual(['macro_name:macro2']);
+    expect(JSON.stringify(analytics.events)).not.toContain('Bright');
   });
 });

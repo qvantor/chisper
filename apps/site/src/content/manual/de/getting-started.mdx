@@ -3,7 +3,7 @@ title: 'Chisper benutzen: Anleitung zum Online-Synthesizer für Anfänger'
 h1: 'Erste Schritte mit Chisper'
 description: 'Spiel den kostenlosen Online-Synthesizer mit Computertastatur, MIDI-Keyboard oder Touch, lade Presets, lerne die Oberfläche kennen, teile Sounds ohne Konto.'
 nav: 'Erste Schritte'
-updated: 2026-11-23
+updated: 2026-11-24
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -125,7 +125,7 @@ die Pfeile weiter: Ein Preset mit Clip spielt seinen eigenen, eines ohne den Cli
 
 ## Was ist wo auf dem Bildschirm?
 
-<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='Der ganze Bildschirm von Chisper auf einem Computer mit nummerierten Bereichen: die Kopfzeile; Sub, die Oszillatoren, Noise und das Filter in der oberen Reihe; darunter die Hüllkurven, LFOs, die Anschlagstärke und Voicing; unten die Tasten'>
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'macros', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='Der ganze Bildschirm von Chisper auf einem Computer mit nummerierten Bereichen: die Kopfzeile; Sub, die Oszillatoren, Noise und das Filter in der oberen Reihe; darunter die Makros, die Hüllkurven, LFOs, die Anschlagstärke und Voicing; unten die Tasten'>
 
 1. **Logo**: öffnet diese Website in einem neuen Tab. Der Synth spielt in seinem eigenen weiter.
 2. **Spektrum**: die Frequenzen, die gerade aus dem Synth kommen, tiefe links, hohe rechts.
@@ -162,15 +162,17 @@ die Pfeile weiter: Ein Preset mit Clip spielt seinen eigenen, eines ohne den Cli
     lauter, darunter leiser (eine Linie alle 24 dB und bei 100 Hz, 1 kHz und 10 kHz). Drive hebt die Kurve so weit,
     wie ein lauter Klang lauter herauskommt, und macht die obersten Höhen weicher.
 
-11. **ENV 1–3**: [Hüllkurven](/de/anleitung/modulation-huellkurven-lfo/). ENV 1 ist die Lautstärke jeder Note.
-12. **LFO 1–4**: [LFOs](/de/anleitung/modulation-huellkurven-lfo/), die jeden Regler bewegen, auf den du sie
+11. **Macros**: [MACRO 1–4](/de/anleitung/modulation-huellkurven-lfo/), vier eigene Regler. Zieh den Tab rechts
+    neben einem auf beliebige Regler: Ein Dreh bewegt sie alle.
+12. **ENV 1–3**: [Hüllkurven](/de/anleitung/modulation-huellkurven-lfo/). ENV 1 ist die Lautstärke jeder Note.
+13. **LFO 1–4**: [LFOs](/de/anleitung/modulation-huellkurven-lfo/), die jeden Regler bewegen, auf den du sie
     ziehst.
-13. **VELO**: was die Anschlagstärke einer Note bewirkt.
-14. **Voicing**: **Poly** und wie viele Noten gleichzeitig spielen (1 bis 12, Standard 8), **Legato** und
+14. **VELO**: was die Anschlagstärke einer Note bewirkt.
+15. **Voicing**: **Poly** und wie viele Noten gleichzeitig spielen (1 bis 12, Standard 8), **Legato** und
     **Portamento**.
-15. **Pitch-Rad** und die Oktave der Computertastatur.
-16. **Keys**: das Bildschirmklavier.
-17. **Clip**: der Loop der Piano Roll. Ein Klick öffnet die Piano Roll über dem Synth, ▶ spielt den Clip.
+16. **Pitch-Rad** und die Oktave der Computertastatur.
+17. **Keys**: das Bildschirmklavier.
+18. **Clip**: der Loop der Piano Roll. Ein Klick öffnet die Piano Roll über dem Synth, ▶ spielt den Clip.
 
 </InterfaceMap>
 
@@ -305,8 +307,8 @@ und **CLIP** und zwei Modi:
 
 - **Keys** (Standard): eine kleine Live-Ansicht des Synths über zwei Tastenreihen, C4 über C3, je eine Oktave im
   Hochformat und zwei im Querformat. Jede Reihe hat ihre eigenen Oktavtasten; das Pitch-Rad sitzt an der Seite.
-- **Synth**: die Bereiche des Synths untereinander (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO, Voicing) zum
-  Durchscrollen; **CLIP** öffnet die Piano Roll im Vollbild.
+- **Synth**: die Bereiche des Synths untereinander (Sub, Osc 1, Osc 2, Noise, Filter, Macros, ENV, LFO, VELO, Voicing)
+  zum Durchscrollen; **CLIP** öffnet die Piano Roll im Vollbild.
 
 Auf iPhone und iPad spielt der Sound auch dann, wenn der Lautlos-Schalter an ist.
 
@@ -314,8 +316,8 @@ Auf iPhone und iPad spielt der Sound auch dann, wenn der Lautlos-Schalter an ist
 
 - [Was ist Wavetable-Synthese?](/de/lernen/was-ist-wavetable-synthese/): wie eine Tabelle aus Wellen, der Regler
   **Wave** und Bewegung einen Sound ergeben, mit drei Dingen zum Hören.
-- [Modulation: Hüllkurven, LFOs und Anschlagstärke](/de/anleitung/modulation-huellkurven-lfo/): Lass jeden Regler
-  sich von selbst bewegen.
+- [Modulation: Hüllkurven, LFOs, Makros und Anschlagstärke](/de/anleitung/modulation-huellkurven-lfo/): Lass jeden
+  Regler sich von selbst bewegen.
 - [Wavetables](/de/anleitung/wavetables/): die Bibliothek, eigene Tabellen aus WAV- und Audiodateien, eine Welle
   zeichnen.
 - [MIDI-Keyboards, Chromebooks und iPads](/de/anleitung/midi-keyboard/): Einrichtung, synchron aus einer DAW

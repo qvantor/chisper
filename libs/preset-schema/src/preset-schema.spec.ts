@@ -3,6 +3,7 @@ import { presetHash } from './hash';
 import { isProfane, profaneDescription, profaneWord } from './profanity';
 import { divisionIndex } from './tempo';
 import {
+  cutName,
   ENVELOPE_CURVES,
   ENVELOPE_DIVISIONS,
   fxSnapSchema,
@@ -10,6 +11,7 @@ import {
   listPresetsQuerySchema,
   MACRO_CC,
   MACRO_KEYS,
+  MACRO_NAME_KEYS,
   MACROS,
   MOD_SOURCES,
   nameKey,
@@ -17,6 +19,7 @@ import {
   presetIdSchema,
   presetOpenedRequestSchema,
   PRESET_DEFAULTS,
+  profaneMacroName,
   savedPresetInfoSchema,
   savePresetRequestSchema,
   SUB_DEFAULTS,
@@ -989,6 +992,50 @@ describe('the macros', () => {
       mac: { m2: 0.1235, m4: 1 },
       mod: { 'macro3:filter.cutoff': -0.5 },
     });
+  });
+
+  it('have names saved as n1–n4: trimmed, whitespace collapsed, 20 characters at most, an empty one left out', () => {
+    // (a name is saved of a macro with routes)
+    const mod = { 'macro1:osc1.wave': 0.5, 'macro2:osc1.gain': 0.5, 'macro3:filter.cutoff': 0.5 };
+    expect(Object.values(MACRO_NAME_KEYS)).toEqual(['n1', 'n2', 'n3', 'n4']);
+    expect(
+      normalizePreset({ mod, mac: { n1: ' Bright ', n2: 'Wobble \t Depth', n3: '', n4: '  ' } }).mac
+    ).toEqual({
+      n1: 'Bright',
+      n2: 'Wobble Depth',
+    });
+    // a section of names alone, the levels of 0 left out beside them
+    expect(normalizePreset({ mod, mac: { m1: 0, n3: 'Air' } }).mac).toEqual({ n3: 'Air' });
+    // twenty characters once trimmed
+    expect(normalizePreset({ mod, mac: { n2: ` ${'x'.repeat(20)} ` } }).mac).toEqual({ n2: 'x'.repeat(20) });
+    expect(presetDataSchema.safeParse({ mac: { n2: 'x'.repeat(21) } }).success).toBe(false);
+    expect(presetDataSchema.safeParse({ mac: { n1: 1 } }).success).toBe(false);
+    expect(presetDataSchema.safeParse({ mac: { n1: null } }).success).toBe(false);
+  });
+
+  it('keep the name of a macro with routes only, one switched off too; without names nor levels no section', () => {
+    expect(
+      normalizePreset({
+        mod: { 'macro2:osc1.wave': { a: 0.5, off: true } },
+        mac: { m1: 0.5, n1: 'Bright', n2: 'Wobble', n4: 'Air' },
+      }).mac
+    ).toEqual({ m1: 0.5, n2: 'Wobble' });
+    expect(normalizePreset({ mod: { 'env1:osc1.wave': 0.5 }, mac: { n1: 'Bright' } }).mac).toBeUndefined();
+  });
+
+  it('a name of the snapshot is cut to its length, not after half of a character of two code units', () => {
+    expect(cutName('  Wobble \t Depth  ', 20)).toBe('Wobble Depth');
+    expect(cutName(`${'x'.repeat(18)}🎹`, 20)).toBe(`${'x'.repeat(18)}🎹`);
+    expect(cutName(`${'x'.repeat(19)}🎹`, 20)).toBe('x'.repeat(19));
+  });
+
+  it('a name of a macro the profanity filter refuses is told', () => {
+    const mod = { 'macro1:osc1.wave': 0.5, 'macro3:filter.cutoff': 0.5 };
+    expect(profaneMacroName(normalizePreset({ mod, mac: { n1: 'Bright', n3: 'Assorted shit' } }))).toBe(true);
+    expect(profaneMacroName(normalizePreset({ mod, mac: { n1: 'Bright', m2: 0.5 } }))).toBe(false);
+    // (a name of a macro without routes is not in the preset: no one sees it)
+    expect(profaneMacroName(normalizePreset({ mod, mac: { n2: 'Assorted shit' } }))).toBe(false);
+    expect(profaneMacroName(normalizePreset({}))).toBe(false);
   });
 
   it('have CC 20–23 of MIDI, 14 bits with the LSB 32 after', () => {

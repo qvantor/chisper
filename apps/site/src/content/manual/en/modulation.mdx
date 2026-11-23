@@ -22,7 +22,8 @@ moves every knob you dragged it onto.
 
 The sources are the tabs of the bottom row of the synth, each with a color of its own:
 
-- **MACRO 1** to **MACRO 4** (bottom left, one under another): four macros, each tab next to its knob.
+- **MACRO 1** to **MACRO 4** (bottom left, one under another): four macros, each knob with its tab at its right, in
+  the color of the macro.
 - **ENV 1**, **ENV 2**, **ENV 3** (right of the macros): three envelopes. ENV 1 is also the volume of every note.
 - **LFO 1** to **LFO 4** (bottom centre): four LFOs.
 - **VELO** (bottom right, beside Voicing): the velocity of each note.
@@ -239,8 +240,13 @@ route, then turn the knob of the macro: all of them move at once, each as far as
   the knob's value at 0% and half above at 100%.
 - The levels of the macros are saved in the preset. Every macro starts at 0%.
 
-The tab of a macro shows its number (in a wide column, MACRO and the number); its dot counts its routes, as on the
-other tabs.
+The tab of a macro shows its number (in a wide column, MACRO and the number); a white dot on its corner counts the
+routes of the macro and is gone while it has none. The selected one is lit, with a soft glow.
+
+Once a macro has a route, a field under it holds its name: click it and type one, up to 20 characters (Enter or
+Escape leaves the field). While it is empty it shows MACRO 1 (2, 3, 4) in grey. The name is saved in the preset, and
+the menu of every knob the macro moves shows its route under that name. A macro with no routes has no field: its
+name comes back with a new route while the page stays open, but the preset doesn't keep it.
 
 ## Three exercises
 

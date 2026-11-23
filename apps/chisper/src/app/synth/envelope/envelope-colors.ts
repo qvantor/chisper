@@ -1,4 +1,4 @@
-import { ModSource } from '@chisper/preset-schema';
+import { isMacro, MACROS, ModSource, normalizeName } from '@chisper/preset-schema';
 
 // the color of each source of the modulation: its tab, and the arcs and the amount dots of the knobs it
 // modulates. The envelopes green, blue and violet, the velocity gold, the LFOs rust, plum, cyan and pink: any two of
@@ -35,3 +35,7 @@ export const SOURCE_LABELS: Record<ModSource, string> = {
   macro3: 'MACRO 3',
   macro4: 'MACRO 4',
 };
+
+// the label of a source: the name a macro was given (its names in the order of MACROS), else its own (MACRO 1)
+export const sourceLabel = (source: ModSource, macroNames: readonly string[]) =>
+  (isMacro(source) && normalizeName(macroNames[MACROS.indexOf(source)] ?? '')) || SOURCE_LABELS[source];

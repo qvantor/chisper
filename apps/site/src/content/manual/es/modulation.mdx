@@ -23,8 +23,8 @@ giro mueve todas las perillas a las que lo arrastraste.
 
 Las fuentes son las pestañas de la fila inferior del sintetizador, cada una con su propio color:
 
-- **MACRO 1** a **MACRO 4** (abajo a la izquierda, uno debajo de otro): cuatro macros, cada pestaña junto a su
-  perilla.
+- **MACRO 1** a **MACRO 4** (abajo a la izquierda, uno debajo de otro): cuatro macros, cada perilla con su pestaña
+  a la derecha, del color del macro.
 - **ENV 1**, **ENV 2**, **ENV 3** (a la derecha de los macros): tres envolventes. ENV 1 es además el volumen de
   cada nota.
 - **LFO 1** a **LFO 4** (abajo en el centro): cuatro LFO.
@@ -257,8 +257,13 @@ cantidad. La perilla va de 0 a 100 %, el nivel del macro de 0 a 1.
   cantidad por debajo del valor de la perilla al 0 % y la mitad por encima al 100 %.
 - Los niveles de los macros se guardan en el preset. Todos los macros empiezan en 0 %.
 
-La pestaña de un macro muestra su número (en una columna ancha, MACRO y el número); su punto cuenta sus rutas,
-como en las demás pestañas.
+La pestaña de un macro muestra su número (en una columna ancha, MACRO y el número); un punto blanco en su esquina
+cuenta las rutas del macro y no aparece mientras no tiene ninguna. La seleccionada se ilumina, con un brillo suave.
+
+En cuanto un macro tiene una ruta, aparece debajo un recuadro con su nombre: haz clic y escribe uno, de hasta 20
+caracteres (Enter o Escape salen del recuadro). Mientras está vacío muestra MACRO 1 (2, 3, 4) en gris. El nombre se
+guarda en el preset, y el menú de cada perilla que mueve el macro muestra su ruta con ese nombre. Un macro sin rutas
+no tiene recuadro: su nombre vuelve con una nueva ruta mientras la página sigue abierta, pero el preset no lo guarda.
 
 ## Tres ejercicios
 

@@ -22,7 +22,8 @@ du spielst. Ein Makro ist ein eigener Regler: Ein Dreh bewegt alle Regler, auf d
 
 Die Quellen sind die Tabs in der unteren Reihe des Synths, jeder in seiner eigenen Farbe:
 
-- **MACRO 1** bis **MACRO 4** (unten links, untereinander): vier Makros, jeder Tab neben seinem Regler.
+- **MACRO 1** bis **MACRO 4** (unten links, untereinander): vier Makros, jeder Regler mit seinem Tab rechts daneben,
+  in der Farbe des Makros.
 - **ENV 1**, **ENV 2**, **ENV 3** (rechts der Makros): drei Hüllkurven. ENV 1 ist außerdem die Lautstärke jeder
   Note.
 - **LFO 1** bis **LFO 4** (unten in der Mitte): vier LFOs.
@@ -253,8 +254,14 @@ eigene Stärke reicht. Der Regler geht von 0 bis 100 %, der Pegel des Makros von
   Stärke unter dem Wert des Reglers und bei 100 % die halbe darüber.
 - Die Pegel der Makros werden im Preset gespeichert. Jedes Makro startet bei 0 %.
 
-Der Tab eines Makros zeigt seine Nummer (in einer breiten Spalte MACRO und die Nummer); sein Punkt zählt seine
-Routen, wie bei den anderen Tabs.
+Der Tab eines Makros zeigt seine Nummer (in einer breiten Spalte MACRO und die Nummer); ein weißer Punkt an seiner
+Ecke zählt die Routen des Makros und fehlt, solange es keine hat. Der ausgewählte leuchtet, mit einem sanften Schein.
+
+Sobald ein Makro eine Route hat, steht darunter ein Feld mit seinem Namen: Klick hinein und tipp einen ein, bis zu 20
+Zeichen (Enter oder Escape verlässt das Feld). Solange es leer ist, zeigt es grau MACRO 1 (2, 3, 4). Der Name wird im
+Preset gespeichert, und das Menü jedes Reglers, den das Makro bewegt, zeigt seine Route unter diesem Namen. Ein Makro
+ohne Routen hat kein Feld: Sein Name kehrt mit einer neuen Route zurück, solange die Seite offen bleibt, aber das
+Preset behält ihn nicht.
 
 ## Drei Übungen
 

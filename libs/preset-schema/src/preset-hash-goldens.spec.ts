@@ -225,6 +225,15 @@ const PRESETS: Record<string, unknown> = {
     mac: { m1: 0.5, m2: 0, m4: 1 },
     mod: { 'macro1:osc1.wave': 0.5, 'macro4:delay.time': { a: -0.25, bi: true }, 'macro2:lfo1.rate': 0.75 },
   },
+  // empty names: no section (the hash of the preset without macros)
+  'empty macro names': { mac: { n1: '', n3: '   ' } },
+  // the name of a macro without routes: no section
+  'a macro name without routes': { mac: { n2: 'Wobble' } },
+  // the names of macros, a level of one, routes of them
+  'macro names': {
+    mac: { m2: 0.25, n1: '  Bright ', n2: 'Wobble  Depth' },
+    mod: { 'macro1:filter.cutoff': 0.5, 'macro2:lfo1.rate': 0.75 },
+  },
 };
 
 const PRESET_HASHES: Record<string, string> = {
@@ -239,6 +248,9 @@ const PRESET_HASHES: Record<string, string> = {
   'the macros at 0': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
   'no macros': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
   macros: '0ae91c703e91fa0bfdbd0517469bf8e6d23982af9d6a315383b9b957d6efb559',
+  'empty macro names': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
+  'a macro name without routes': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
+  'macro names': '1892d21859b5257edcd06fea22d874de01b06ed32cfe9da037de7a95ddff1cf0',
 };
 
 // not presets: the schema rejects them
@@ -265,6 +277,8 @@ const INVALID: Record<string, unknown> = {
   'a macro past 1': { mac: { m2: 1.5 } },
   'a negative macro': { mac: { m1: -0.1 } },
   'a macro that is no number': { mac: { m3: 'half' } },
+  'a macro name past 20 characters': { mac: { n2: 'x'.repeat(21) } },
+  'a macro name that is no text': { mac: { n4: 4 } },
   'a fifth macro': { mod: { 'macro5:osc1.wave': 0.5 } },
   'a route object without a flag': { mod: { 'env1:osc1.wave': { a: 0.5 } } },
   'five sources on a knob': {
@@ -328,6 +342,16 @@ describe('the hashes of presets', () => {
     expect(PRESET_HASHES['the macros at 0']).toBe(PRESET_HASHES['empty']);
     expect(normalizePreset({ mac: { m1: 0 } })).not.toHaveProperty('mac.m1');
     expect(normalizePreset(PRESETS['macros']).mac).toEqual({ m1: 0.5, m4: 1 });
+  });
+
+  it('empty names of the macros and those without routes leave out their section; a name is trimmed, its whitespace collapsed', () => {
+    expect(PRESET_HASHES['empty macro names']).toBe(PRESET_HASHES['empty']);
+    expect(PRESET_HASHES['a macro name without routes']).toBe(PRESET_HASHES['empty']);
+    expect(normalizePreset(PRESETS['macro names']).mac).toEqual({
+      m2: 0.25,
+      n1: 'Bright',
+      n2: 'Wobble Depth',
+    });
   });
 
   it('a filter type of a newer client is the default one', () => {

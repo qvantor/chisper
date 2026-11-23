@@ -195,6 +195,35 @@ describe('useKnobModulation of the macros', () => {
     expect(live()).toBe(false);
   });
 
+  it('a route of a macro is labelled by its name (none: MACRO n); a name typed renders the knobs it moves alone', () => {
+    const { modulation, wrapper } = setup();
+    act(() => {
+      modulation[1].addRoute('macro3', 'osc1.wave');
+      modulation[1].addRoute('lfo1', 'osc1.wave');
+      modulation[1].addRoute('macro1', 'filter.cutoff');
+    });
+    let renders = 0;
+    const wave = renderHook(() => useKnobModulation('osc1.wave'), { wrapper }).result;
+    const cutoff = renderHook(
+      () => {
+        renders += 1;
+        return useKnobModulation('filter.cutoff');
+      },
+      { wrapper }
+    ).result;
+    const labels = () => wave.current.modulations?.map(({ label }) => label);
+    expect(labels()).toEqual(['LFO 1', 'MACRO 3']);
+    act(() => modulation[1].setMacroName('macro3', '  Wobble  '));
+    expect(labels()).toEqual(['LFO 1', 'Wobble']);
+    act(() => modulation[1].setMacroName('macro3', '   '));
+    expect(labels()).toEqual(['LFO 1', 'MACRO 3']);
+    // (the names of the other macros render no other knob)
+    const before = renders;
+    act(() => modulation[1].setMacroName('macro3', 'Air'));
+    expect(renders).toBe(before);
+    expect(cutoff.current.modulations?.[0].label).toBe('MACRO 1');
+  });
+
   it('a route of a macro on a centered knob is bipolar', () => {
     const { modulation, wrapper } = setup();
     act(() => modulation[1].addRoute('macro1', 'filter.gain'));

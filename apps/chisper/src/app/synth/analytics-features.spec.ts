@@ -24,7 +24,7 @@ const setup = async () => {
 type Models = Awaited<ReturnType<typeof setup>>;
 
 // everything a user may turn on: OSC 2, a table, noise, sub, unison, a warp mode, a filter type, effects, ENV 2, an
-// LFO, a route, the voicing
+// LFO, routes, the name of a macro, the voicing
 const turnEverythingOn = ({
   osc1,
   osc2,
@@ -51,6 +51,8 @@ const turnEverythingOn = ({
   envelopes[1].setEnvelopeValue('env2', 'attack', 0.2);
   lfos[1].setLfoValue('lfo3', 'rate', 2);
   modulation[1].addRoute('lfo1', 'osc1.wave');
+  modulation[1].addRoute('macro2', 'filter.cutoff');
+  modulation[1].setMacroName('macro2', 'Bright');
   synth[1].setMaxVoices(1);
   synth[1].setLegato(true);
   synth[1].setPortamento(0.1);
@@ -96,6 +98,8 @@ describe('feature_used', () => {
       'env:env2',
       'lfo:lfo3',
       'route:lfo1',
+      'route:macro2',
+      'macro_name:macro2',
       'voicing:mono',
       'voicing:legato',
       'voicing:portamento',
@@ -128,7 +132,8 @@ describe('feature_used', () => {
     expect(models.noise[0].$active.value).toBe(true);
     expect(models.fx[0].$effects.value.reverb.added).toBe(true);
     expect(models.filter[0].$filterType.value).toBe('highpass');
-    expect(models.modulation[0].$routes.value).toHaveLength(1);
+    expect(models.modulation[0].$routes.value).toHaveLength(2);
+    expect(models.modulation[0].$macroNames.value).toEqual(['', 'Bright', '', '']);
     expect(models.synth[0].$maxVoices.value).toBe(1);
     expect(features()).toEqual([]);
   });

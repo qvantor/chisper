@@ -633,15 +633,33 @@ const lfoSectionSchema = z
   .object({ l1: lfoSchema, l2: lfoSchema, l3: lfoSchema, l4: lfoSchema })
   .prefault({});
 
+// trimmed, whitespace collapsed (the names of presets, clips and macros)
+export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+// a name normalized and cut to `max`, not after half of a character of two code units (an emoji)
+export const cutName = (text: string, max: number) => {
+  const name = normalizeName(text).slice(0, max);
+  const last = name.charCodeAt(name.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? name.slice(0, -1) : name;
+};
+
 // the macros MACRO 1–4: sources of the routes after the LFOs, a knob each with a level 0..1 (the same for every
-// voice and the effects, with a note or without one). Their levels in the preset: mac: { m1, m2, m3, m4 }, a level
-// of 0 left out and the section too when every one is 0 (the presets of before keep their hashes)
+// voice and the effects, with a note or without one), and a name a user gives one that has routes. In the preset:
+// mac: { m1, m2, m3, m4, n1, n2, n3, n4 }, the levels and the names; a level of 0, an empty name and the name of a
+// macro without routes left out, the section too when nothing is left (the presets of before keep their hashes)
 export const MACROS = ['macro1', 'macro2', 'macro3', 'macro4'] as const;
 export type MacroId = (typeof MACROS)[number];
 export const MACRO_KEYS: Record<MacroId, string> = { macro1: 'm1', macro2: 'm2', macro3: 'm3', macro4: 'm4' };
+export const MACRO_NAME_KEYS = {
+  macro1: 'n1',
+  macro2: 'n2',
+  macro3: 'n3',
+  macro4: 'n4',
+} as const satisfies Record<MacroId, string>;
+// the longest name of a macro (a line under its knob)
+export const MACRO_NAME_MAX_LENGTH = 20;
 export const isMacro = (source: string): source is MacroId => (MACROS as readonly string[]).includes(source);
-// the MIDI CC of each macro, for a MIDI input, the files of the track and the automation of a clip: CC 20–23 (none
-// of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32)
+// the MIDI CC of each macro, kept for a MIDI input, the files of the track and the automation of a clip (nothing reads
+// them yet): CC 20–23 (none of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32)
 export const MACRO_CC: Record<MacroId, { msb: number; lsb: number }> = {
   macro1: { msb: 20, lsb: 52 },
   macro2: { msb: 21, lsb: 53 },
@@ -649,14 +667,25 @@ export const MACRO_CC: Record<MacroId, { msb: number; lsb: number }> = {
   macro4: { msb: 23, lsb: 55 },
 };
 const macroLevel = range(0, 1).optional();
+// trimmed, whitespace collapsed (empty: none)
+const macroName = z.string().transform(normalizeName).pipe(z.string().max(MACRO_NAME_MAX_LENGTH)).optional();
 const macSchema = z
-  .object({ m1: macroLevel, m2: macroLevel, m3: macroLevel, m4: macroLevel })
+  .object({
+    m1: macroLevel,
+    m2: macroLevel,
+    m3: macroLevel,
+    m4: macroLevel,
+    n1: macroName,
+    n2: macroName,
+    n3: macroName,
+    n4: macroName,
+  })
   .optional()
   .transform((mac) => {
-    const set = Object.entries(mac ?? {}).filter(([, level]) => level !== undefined && level !== 0);
-    return set.length > 0
-      ? (Object.fromEntries(set) as Partial<Record<'m1' | 'm2' | 'm3' | 'm4', number>>)
-      : undefined;
+    const set = Object.entries(mac ?? {}).filter(
+      ([, value]) => value !== undefined && value !== 0 && value !== ''
+    );
+    return set.length > 0 ? (Object.fromEntries(set) as NonNullable<typeof mac>) : undefined;
   })
   // (an optional key of the preset: none is no key)
   .optional();
@@ -797,21 +826,35 @@ export const fxSnapSchema = z.preprocess(
   })
 );
 
-// keys match snapshot plugin model names (voicing is saved with the `v` prefix)
+// keys match snapshot plugin model names (voicing is saved with the `v` prefix). The name of a macro without routes
+// (one switched off is one) is left out: the synth keeps it, hidden, for a route again
 const presetData = <F extends z.ZodType>(filter: F) =>
-  z.object({
-    osc1: oscillatorSchema(true),
-    osc2: oscillatorSchema(false),
-    noise: noiseSchema,
-    sub: subSchema,
-    filter,
-    env: envSchema,
-    lfo: lfoSectionSchema,
-    mod: modSchema,
-    mac: macSchema,
-    v: voicingSchema,
-    fx: fxSchema,
-  });
+  z
+    .object({
+      osc1: oscillatorSchema(true),
+      osc2: oscillatorSchema(false),
+      noise: noiseSchema,
+      sub: subSchema,
+      filter,
+      env: envSchema,
+      lfo: lfoSectionSchema,
+      mod: modSchema,
+      mac: macSchema,
+      v: voicingSchema,
+      fx: fxSchema,
+    })
+    .overwrite((data) => {
+      const { mac, mod } = data;
+      const unrouted = MACROS.filter(
+        (id) =>
+          mac?.[MACRO_NAME_KEYS[id]] !== undefined &&
+          !Object.keys(mod).some((key) => key.startsWith(`${id}:`))
+      );
+      if (!mac || unrouted.length === 0) return data;
+      const named = { ...mac };
+      unrouted.forEach((id) => delete named[MACRO_NAME_KEYS[id]]);
+      return { ...data, mac: Object.keys(named).length > 0 ? named : undefined };
+    });
 
 // a preset to open (of the server, of a tab, of a newer client maybe)
 export const presetDataSchema = presetData(filterSchema);
@@ -829,10 +872,12 @@ export const NOISE_DEFAULTS: PresetData['noise'] = PRESET_DEFAULTS.noise;
 // the knobs of the sub in it
 export const SUB_DEFAULTS: PresetData['sub'] = PRESET_DEFAULTS.sub;
 
-export const PRESET_NAME_MAX_LENGTH = 40;
+// a name of a macro of the preset the profanity filter refuses (one that opens shows it under its knob; the names
+// are the only text of `mac`)
+export const profaneMacroName = ({ mac }: Pick<PresetData, 'mac'>) =>
+  Object.values(mac ?? {}).some((value) => typeof value === 'string' && isProfane(value));
 
-// trimmed, whitespace collapsed (the names of presets and clips)
-export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+export const PRESET_NAME_MAX_LENGTH = 40;
 
 // trimmed, whitespace collapsed; names are unique case-insensitively (see nameKey)
 export const presetNameSchema = z

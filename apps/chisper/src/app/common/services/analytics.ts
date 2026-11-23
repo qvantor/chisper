@@ -50,6 +50,7 @@ export type Feature =
   | 'lfo'
   | 'route'
   | 'macro'
+  | 'macro_name'
   | 'voicing'
   | 'track'
   | 'preset'

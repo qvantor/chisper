@@ -137,6 +137,7 @@ const MAP_SECTIONS = {
   'Osc 2': 'osc2',
   Noise: 'noise',
   Filter: 'filter',
+  Macros: 'macros',
   'ENV 1': 'env',
   'LFO 1': 'lfo',
   VELO: 'velo',
