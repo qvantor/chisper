@@ -78,6 +78,15 @@ const EqIcon = () => (
   </Icon>
 );
 
+// the response of a resonant low pass over the line of the sound as it is (faint): flat, a bump at the cutoff, then
+// down steeply
+const FilterIcon = () => (
+  <Icon>
+    <path d='M-1 12 H25' opacity='0.35' />
+    <path d='M-1 12 H8 C11.5 12 12 6 14 6 C16 6 16.5 12 18 17 L21 25' />
+  </Icon>
+);
+
 // shown in the effects list
 export const FX_ICONS: Record<FxType, React.ComponentType> = {
   distortion: DistortionIcon,
@@ -86,4 +95,5 @@ export const FX_ICONS: Record<FxType, React.ComponentType> = {
   compressor: CompressorIcon,
   reverb: ReverbIcon,
   eq: EqIcon,
+  fxfilter: FilterIcon,
 };

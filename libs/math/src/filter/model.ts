@@ -179,6 +179,15 @@ export const driveLevel = (drive: number, amplitude = 1) => {
     (4 / Math.PI) * (a * sines2 - c * a * a * a * sines4 + ((2 * DRIVE_UT) / 3) * Math.cos(t));
   return fundamental / amplitude;
 };
+// what Drive (0..1) keeps of the power of a response at a point (cos θ), as the chart draws it: the level of a sine of
+// full scale through its curve (driveLevel) and, while it is over 0, the average of two samples of its antialiasing,
+// (1 + cos θ) / 2; 1 at 0
+export const driveGain2 = (drive: number): ((cos: number) => number) => {
+  if (drive <= 0) return () => 1;
+  const level = driveLevel(drive);
+  const level2 = level * level;
+  return (cos) => level2 * 0.5 * (1 + cos);
+};
 
 // --- the analog prototype ---
 
@@ -851,6 +860,30 @@ const ladderDesign = (
     droop: droopOf(s.D2),
     fat: fatFactor(r, v),
   };
+};
+
+// the droop b with `db` more of it (dB at (f/fs)² = 1): more_droop of the core (filter_model.rs), droopOf of a D2 `db`
+// over that of b (its exp(-D2 ln 10 / 90) is 1 - 3 b (1 - b): no logarithm)
+const moreDroop = (b: number, db: number) => {
+  const ab = (1 - (1 - 3 * (b * (1 - b))) * Math.exp(-db * (Math.LN10 / 90))) / 3;
+  return 0.5 - Math.sqrt(0.25 - ab);
+};
+
+// the droop of the FX Filter of the reference over that of the filter of a voice (dB at (f/fs)² = 1): of a section
+// (a state variable filter or a one-pole: a 24 dB type has two), of a ladder (fx_droop of dsp/chain/src/fxfilter.rs,
+// fitted on dsp/measurements/fxfilter.json)
+const FX_SECTION_DROOP = 18;
+const FX_LADDER_DROOP = 32;
+export const fxFilterDroop = (type: ModelFilterType) => {
+  const s = MODEL_STRUCTURES[type];
+  if (s.kind === 'ladder') return FX_LADDER_DROOP;
+  return s.kind === 'svf' && (s.second || s.pole) ? 2 * FX_SECTION_DROOP : FX_SECTION_DROOP;
+};
+
+// the design of a type as the FX Filter plays it: that of a voice with its droop
+export const fxFilterDesign = (type: ModelFilterType, knobs: ModelKnobs, sampleRate: number): ModelDesign => {
+  const design = modelDesign(type, knobs, sampleRate);
+  return { ...design, droop: moreDroop(design.droop, fxFilterDroop(type)) };
 };
 
 // --- the response of a design ---

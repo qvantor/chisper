@@ -32,10 +32,15 @@ export const POINTS = 192;
 
 const OCTAVES = Math.log2(RIGHT_HZ / LEFT_HZ);
 
-export const freqX = (hz: number, [width]: Size) =>
-  PAD_X + ((width - 2 * PAD_X) * Math.log2(number.thresholds(hz, LEFT_HZ, RIGHT_HZ) / LEFT_HZ)) / OCTAVES;
-export const xFreq = (px: number, [width]: Size) =>
-  number.thresholds(LEFT_HZ * 2 ** ((OCTAVES * (px - PAD_X)) / (width - 2 * PAD_X)), LEFT_HZ, RIGHT_HZ);
+// the x of a frequency and the frequency at an x, past the edges of the screen too (a knob that goes beyond them:
+// the cutoff of the FX Filter)
+export const freqXOpen = (hz: number, [width]: Size) =>
+  PAD_X + ((width - 2 * PAD_X) * Math.log2(hz / LEFT_HZ)) / OCTAVES;
+export const xFreqOpen = (px: number, [width]: Size) =>
+  LEFT_HZ * 2 ** ((OCTAVES * (px - PAD_X)) / (width - 2 * PAD_X));
+// ... held to the screen
+export const freqX = (hz: number, size: Size) => freqXOpen(number.thresholds(hz, LEFT_HZ, RIGHT_HZ), size);
+export const xFreq = (px: number, size: Size) => number.thresholds(xFreqOpen(px, size), LEFT_HZ, RIGHT_HZ);
 export const dbY = (db: number, [, height]: Size) =>
   PAD_Y + ((height - 2 * PAD_Y) * (DB_TOP - number.thresholds(db, -DB_TOP, DB_TOP))) / (2 * DB_TOP);
 export const yDb = (px: number, [, height]: Size) =>

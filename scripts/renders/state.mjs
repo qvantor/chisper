@@ -109,7 +109,7 @@ export const editedState = (initFile, oscs, slots = [], noise = null, fx = null)
   if (fx)
     set(get(doc, 'FXRack0'), 'FX', {
       array: fx.map(({ module, type, params = {}, kept = {} }) => {
-        // (a param that is a name, the Type of a reverb, is written as it is)
+        // (a param that is a name, the Type of a reverb or of a filter, is written as it is)
         const floats = (values) =>
           Object.entries(values).map(([key, value]) => [
             key,

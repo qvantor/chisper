@@ -5,6 +5,7 @@ import { CompressorControls } from './compressor-controls';
 import { DelayControls } from './delay-controls';
 import { DistortionControls } from './distortion-controls';
 import { EqControls } from './eq-controls';
+import { FxFilterControls } from './fxfilter-controls';
 import { ReverbControls } from './reverb-controls';
 import { FxControlsProps } from './types';
 
@@ -17,6 +18,7 @@ export const FX_CONTROLS: Record<FxType, React.ComponentType<FxControlsProps>> =
   compressor: CompressorControls,
   reverb: ReverbControls,
   eq: EqControls,
+  fxfilter: FxFilterControls,
 };
 
 export { ParamHandle } from './param-handle';

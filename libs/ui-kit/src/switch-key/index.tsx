@@ -9,6 +9,7 @@ import { keepFocus } from '../common/utils';
 
 export {
   AnchorIcon,
+  BandPassIcon,
   ContiguousIcon,
   DottedIcon,
   FollowIcon,
@@ -17,6 +18,8 @@ export {
   IconSvg,
   LegatoIcon,
   LoopIcon,
+  LowPassIcon,
+  NotchPeakIcon,
   OneShotIcon,
   PulseIcon,
   QuantizeIcon,
@@ -268,7 +271,7 @@ const Plate = styled.div`
     letter-spacing: 1px;
   }
 
-  &.stack ${Key}, &.fill ${Key} {
+  &.stack ${Key}, &.fill ${Key}, &.column ${Key}, &.grid ${Key} {
     flex: 1 1;
     min-width: 0;
     padding: 0;
@@ -305,21 +308,41 @@ const Plate = styled.div`
     border-top: ${LINE};
   }
 
-  &.column ${Key} {
-    flex: 1 1;
-    min-width: 0;
-    padding: 0;
+  /* two keys a row, every row as high (the categories of a filter): its height is the one given, a line between
+     the keys of a row and over every row but the first */
+  &.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-rows: 1fr;
   }
 
-  /* its icons as large as its keys let them (up to 26 px) */
-  &.column ${Content} {
+  &.grid > ${Wrap} {
+    min-width: 0;
+    height: auto;
+  }
+
+  &.grid > ${Wrap}:nth-child(odd) {
+    border-left: none;
+  }
+
+  &.grid > ${Wrap}:nth-child(n + 3) {
+    border-top: ${LINE};
+  }
+
+  /* their icons as large as their keys let them (up to 26 px, two a row 20) */
+  &.column ${Content}, &.grid ${Content} {
     height: 100%;
   }
 
-  &.column ${Content} svg {
+  &.column ${Content} svg,
+  &.grid ${Content} svg {
     width: auto;
     height: min(64%, 26px);
     aspect-ratio: 1;
+  }
+
+  &.grid ${Content} svg {
+    height: min(64%, 20px);
   }
 
   /* all of it off (a bypassed effect): faded as a whole, as the switch of a mode is */
@@ -345,6 +368,8 @@ interface KeysProps {
   fill?: boolean;
   // one key over another, every one as high (the shapes of the sub): its height is the one given
   column?: boolean;
+  // two keys a row, every row as high (the categories of the FX Filter): its height is the one given
+  grid?: boolean;
   className?: string;
 }
 
@@ -353,6 +378,7 @@ export const SwitchKeys = ({
   stack = false,
   fill = false,
   column = false,
+  grid = false,
   disabled = false,
   disabledHint,
   className,
@@ -364,7 +390,7 @@ export const SwitchKeys = ({
     <Plate
       role='group'
       aria-disabled={disabled || undefined}
-      className={cls(className, { stack, fill, column })}
+      className={cls(className, { stack, fill, column, grid })}
       style={fill ? { flex: `${React.Children.toArray(children).length} 1 0` } : undefined}
       {...props}
     >

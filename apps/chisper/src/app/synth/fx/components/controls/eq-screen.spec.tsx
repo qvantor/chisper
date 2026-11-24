@@ -105,6 +105,15 @@ describe('EqScreen', () => {
     expect(setParam).not.toHaveBeenCalledWith('g2', expect.anything());
   });
 
+  it('a point dragged up and down leaves its frequency as the knob has it (between the steps of the grip)', () => {
+    const { setParam } = setup({ params: { ...params, t1: EQ_PEAK, f1: 1234.5, g1: 0 } });
+    pointer('pointerdown', grip(1), { clientX: 100, clientY: 100 });
+    pointer('pointermove', document, { clientX: 100, clientY: 100 + (dbY(6, SIZE) - dbY(0, SIZE)) });
+    pointer('pointerup', document);
+    expect(setParam).toHaveBeenCalledWith('g1', 6);
+    expect(setParam).not.toHaveBeenCalledWith('f1', expect.anything());
+  });
+
   it('the wheel over a point its resonance, the keys move it, a double click its gain to 0 dB', () => {
     const { setParam } = setup({ params: { ...params, t1: EQ_PEAK, g1: 9, q1: 50 } });
     act(() => {

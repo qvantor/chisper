@@ -47,7 +47,8 @@ const withTables = (osc1, osc2) => ({
 // (a saw an octave down), LFO 2 on its Coarse, LFO 4 on its level (the marks of its knobs); the compressor added
 // (three bands, down and up: its meter draws while its panel shows), LFO 3 on its threshold; the chorus added,
 // LFO 4 on its cutoff; the EQ added (a peak and a high shelf), LFO 2 on the frequency of the peak and LFO 4 on the
-// gain of the shelf (the lines of its bands, the curves of its screen)
+// gain of the shelf (the lines of its bands, the curves of its screen); the filter added (MG Low 24, its channels
+// apart), LFO 1 on its cutoff and LFO 3 on its resonance (the lines of its knobs, the curves of its screen)
 const withLfos = {
   ...heavy.snapshot,
   sub: { a: true, sh: 'saw', o: -1 },
@@ -56,6 +57,7 @@ const withLfos = {
     compressor: { a: true, on: true, mix: 1, multi: 1, below: 0.5, ratio: 8 },
     chorus: { a: true, on: true, mix: 0.5, rate: 0.5, depth: 3, fb: 0.3 },
     eq: { a: true, on: true, mix: 1, t1: 1, f1: 800, q1: 60, g1: 6, t2: 0, f2: 6000, g2: -3 },
+    fxfilter: { a: true, on: true, mix: 1, type: 3, cutoff: 2000, res: 40, drive: 20, pan: 35 },
   },
   lfo: {
     l1: { rate: 0.25 },
@@ -80,6 +82,8 @@ const withLfos = {
     'lfo4:sub.level': 0.3,
     'lfo2:eq.f1': { a: 0.2, bi: true },
     'lfo4:eq.g2': 0.3,
+    'lfo1:fxfilter.cutoff': { a: 0.25, bi: true },
+    'lfo3:fxfilter.res': 0.2,
   },
 };
 const withoutEffects = {

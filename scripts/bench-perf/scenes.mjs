@@ -311,6 +311,14 @@ const FX_MATRIX = {
     knobs: ['f1', 'q1', 'g1', 'f2', 'q2', 'g2', 'level', 'mix'],
     values: { t1: 1, f1: 400, q1: 50, g1: 6, t2: 0, f2: 6000, g2: -4 },
   },
+  fxfilter: {
+    rest: [
+      { type: 5, cutoff: 1500, res: 20 },
+      { type: 3, cutoff: 900, res: 70, drive: 40, var: 30, pan: 30 },
+    ],
+    knobs: ['cutoff', 'res', 'drive', 'var', 'pan', 'level', 'mix'],
+    values: { type: 3, cutoff: 1200, res: 50, drive: 30 },
+  },
 };
 const fxCases = () =>
   Object.entries(FX_MATRIX).flatMap(([type, { rest, knobs, values }]) => [

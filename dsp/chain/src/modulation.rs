@@ -31,7 +31,10 @@ use jsmath::{exp, log2, max, min, pow, sqrt};
 use crate::chain::gains;
 use crate::delay;
 use crate::eq;
-use crate::units::{law, Law, DELAY as DELAY_SLOT, EQ as EQ_SLOT, MAX_PARAMS, SLOTS};
+use crate::fxfilter;
+use crate::units::{
+    law, Law, DELAY as DELAY_SLOT, EQ as EQ_SLOT, FXFILTER as FXFILTER_SLOT, MAX_PARAMS, SLOTS,
+};
 
 /// a target: slot · 32 + the key of a param of its unit, MIX_KEY its mix; from LFO_TARGET on lfo · LFO_KEYS + a knob of
 /// an LFO (the routes of the note to its LFOs)
@@ -48,42 +51,60 @@ pub const NOTE: usize = 7 + ENVELOPES * 8;
 pub const LFO_STATE: usize = 9;
 
 /// the lines: the knobs of the units that are lines (`KNOB_LINES`: of the delay, the frequency, the resonance and
-/// the gain of each band of the EQ), then the dry and the wet gain of each slot
+/// the gain of each band of the EQ, the cutoff, the resonance, Drive, Var and Pan of the filter), then the dry and the
+/// wet gain of each slot
 pub const LINE_TIME: usize = 0;
 pub const LINE_FB: usize = 1;
 pub const LINE_PAN: usize = 2;
 pub const LINE_FREQ: usize = 4;
 pub const LINE_Q: usize = 5;
 pub const LINE_EQ: usize = 6;
+pub const LINE_FXFILTER: usize = 12;
 pub const LINE_MIX: usize = KNOB_LINES.len();
 pub const LINES: usize = LINE_MIX + 2 * SLOTS;
 // (`LINE_EQ` is the row of the frequency of band 1: a line added before the rows of the EQ would shift them)
 const _: () = assert!(KNOB_LINES[LINE_EQ].0 == EQ_SLOT && KNOB_LINES[LINE_EQ].1 == eq::F1);
+const _: () =
+    assert!(KNOB_LINES[LINE_FXFILTER].0 == FXFILTER_SLOT && KNOB_LINES[LINE_FXFILTER].1 == fxfilter::CUTOFF);
 
 /// the knobs of the units that are lines, a line each in this order (the pan of the delay two: the offset of each
 /// channel): the slot, the key, how a knob maps to its line. The lines of a slot are its `Moves` (those of the EQ
-/// by band: the frequency in octaves, the resonance, the gain)
-const KNOB_LINES: [(u32, usize, Map); 12] = [
+/// by band: the frequency in octaves, the resonance, the gain; of the filter its LINED knobs, the cutoff in octaves)
+const KNOB_LINES: [(u32, usize, Map); 17] = [
     (DELAY_SLOT, delay::TIME, Map::Linear),
     (DELAY_SLOT, delay::FB, Map::Linear),
     (DELAY_SLOT, delay::PAN, Map::PanLeft),
     (DELAY_SLOT, delay::PAN, Map::PanRight),
     (DELAY_SLOT, delay::FREQ, Map::Linear),
     (DELAY_SLOT, delay::Q, Map::Linear),
-    (EQ_SLOT, eq::F1, Map::Octaves),
+    (EQ_SLOT, eq::F1, Map::Octaves(eq::MIN_FREQ, eq::MAX_FREQ)),
     (EQ_SLOT, eq::Q1, Map::Linear),
     (EQ_SLOT, eq::G1, Map::Linear),
-    (EQ_SLOT, eq::F2, Map::Octaves),
+    (EQ_SLOT, eq::F2, Map::Octaves(eq::MIN_FREQ, eq::MAX_FREQ)),
     (EQ_SLOT, eq::Q2, Map::Linear),
     (EQ_SLOT, eq::G2, Map::Linear),
+    (
+        FXFILTER_SLOT,
+        fxfilter::CUTOFF,
+        Map::Octaves(fxfilter::MIN_FREQ, fxfilter::MAX_FREQ),
+    ),
+    (FXFILTER_SLOT, fxfilter::RES, Map::Linear),
+    (FXFILTER_SLOT, fxfilter::DRIVE, Map::Linear),
+    (FXFILTER_SLOT, fxfilter::VAR, Map::Linear),
+    (FXFILTER_SLOT, fxfilter::PAN, Map::Linear),
 ];
 
 /// the lines through the one-pole of the time of the delay: its time, the offsets of its channels
 const SMOOTHED: [usize; 3] = [LINE_TIME, LINE_PAN, LINE_PAN + 1];
 
 /// the switches of the units with lines, no knob a route moves (the app routes no switch): set at every block, the
-/// mode of the delay would change and a type of the EQ start its fade again and again
-const SWITCHES: [(u32, usize); 3] = [(DELAY_SLOT, delay::MODE), (EQ_SLOT, eq::T1), (EQ_SLOT, eq::T2)];
+/// mode of the delay would change and a type of the EQ or the filter start its fade again and again
+const SWITCHES: [(u32, usize); 4] = [
+    (DELAY_SLOT, delay::MODE),
+    (EQ_SLOT, eq::T1),
+    (EQ_SLOT, eq::T2),
+    (FXFILTER_SLOT, fxfilter::TYPE),
+];
 
 const SEGMENT: usize = 32;
 const LOG: u32 = 1;
@@ -120,13 +141,13 @@ struct Group {
     count: usize,
 }
 
-// how a knob maps to what its line is added to: as it is, the octaves of a frequency of the EQ (its knob glides in
-// octaves: an offset in Hz of the new knob over the knob on its way there went under 0 Hz), the offset of a channel
-// of a pan, the dry or the wet gain of a mix by its law
+// how a knob maps to what its line is added to: as it is, the octaves of a frequency within its range (of a band of
+// the EQ, the cutoff of the filter: its knob glides in octaves, an offset in Hz of the new knob over the knob on its
+// way there went under 0 Hz), the offset of a channel of a pan, the dry or the wet gain of a mix by its law
 #[derive(Clone, Copy, PartialEq)]
 enum Map {
     Linear,
-    Octaves,
+    Octaves(f64, f64),
     PanLeft,
     PanRight,
     Dry(Law),
@@ -136,8 +157,8 @@ enum Map {
 fn mapped(map: Map, value: f64) -> f64 {
     match map {
         Map::Linear => value,
-        // (within the knob, as the band takes it)
-        Map::Octaves => log2(min(max(value, eq::MIN_FREQ), eq::MAX_FREQ)),
+        // (within the knob, as the unit takes it)
+        Map::Octaves(low, high) => log2(min(max(value, low), high)),
         Map::PanLeft => max(0.0, value),
         Map::PanRight => max(0.0, -value),
         Map::Dry(law) => gains(law, value).0,

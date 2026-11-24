@@ -94,6 +94,12 @@ const WASM_CORES = [
     create: 'createEqWasm',
   },
   {
+    core: 'fxfilter',
+    within: 'chain',
+    facade: 'src/app/synth/fx/effects/fxfilter-wasm',
+    create: 'createFxFilterWasm',
+  },
+  {
     core: 'wavetable-osc',
     facade: 'src/app/synth/common/wavetable/wavetable-osc-wasm',
     create: 'createOscScope, createTableStoreWasm, createVoiceSharedWasm, createVoiceWasm',
@@ -658,12 +664,20 @@ const createCases = (dsp) => {
   };
   // a chain with `kinds` playing (the knobs of the heavy patch), `moved`: by the LFOs
   const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
-  // the slots by kind (a tree before the EQ reads the first five: its slot is never in its order), the effects of
-  // the cases of every effect (the same in a tree before the EQ: its own cases compare it)
-  const SLOT_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
+  // the slots by kind (a tree before the EQ or the filter reads the first ones: their slots are never in its order),
+  // the effects of the cases of every effect (the same in a tree before them: their own cases compare them)
+  const SLOT_KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq', 'fxfilter'];
   const CHAIN_KINDS = SLOT_KINDS.slice(0, 5);
   // the EQ of the cases: a peak of band 1 and a high shelf of band 2 (both bands render)
   const EQ = { t1: 1, f1: 400, q1: 50, g1: 6, t2: 0, f2: 6000, q2: 60, g2: -4, level: 0.5 };
+  // the filter of the cases: MG Low 24 driven, resonant (its saturating sections, the curve of Drive), all wet; its
+  // keys in the order of the core
+  const FXFILTER = { type: 3, cutoff: 1200, res: 50, drive: 30, var: 0, pan: 50, level: 0.5, mix: 1 };
+  // a filter of FXFILTER but `params` alone
+  const fxfilterOf =
+    (params = {}) =>
+    () =>
+      dsp.createFxFilterWasm(dsp.wasm.fxfilter, RATE, { params: { ...FXFILTER, ...params } }).process;
   // the state of a chain of `kinds` in this order, `moved`: its knobs by LFOs (of `period` seconds)
   const chainStateOf = (kinds, moved = false, period = 0.31) => {
     const neutral = {
@@ -676,8 +690,9 @@ const createCases = (dsp) => {
       },
       reverb: { ...REVERB, decay: 3 },
       eq: EQ,
+      fxfilter: FXFILTER,
     };
-    const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3, eq: 1 };
+    const mixes = { distortion: 1, chorus: 0.5, delay: 0.3, compressor: 1, reverb: 0.3, eq: 1, fxfilter: 1 };
     const target = (kind, key) =>
       SLOT_KINDS.indexOf(kind) * 32 + (key === 'mix' ? 31 : Object.keys(neutral[kind]).indexOf(key));
     const lfo = {
@@ -763,6 +778,11 @@ const createCases = (dsp) => {
     eq: [
       ['eq', 'f1', 4, 1.5, 21.53, 20000, 'log'],
       ['eq', 'g2', 5, 12, -24, 24],
+    ],
+    // (the cutoff swept by an LFO: the designs of its cells; the resonance by another: a design a span)
+    fxfilter: [
+      ['fxfilter', 'cutoff', 4, 1.5, 8.176, 22050, 'log'],
+      ['fxfilter', 'res', 5, 30, 0, 100],
     ],
   };
   const chainOf =
@@ -1113,6 +1133,25 @@ const createCases = (dsp) => {
         'chain eq': chainOf(['eq'], input),
         'chain eq, lfos': chainOf(['eq'], input, true),
       }),
+    // the filter alone: MG Low 24 driven and resonant (FXFILTER), Low 12 of the plain sections, the channels apart
+    // (Pan), at rest; in a chain its cutoff alone under an LFO (`fx fxfilter, cutoff lfo`: the cells of its designs)
+    // and with its resonance (`fx fxfilter, lfos`: a design a span)
+    ...(dsp.wasm.fxfilter && {
+      'fxfilter ladder24 drive': effect(fxfilterOf(), input),
+      'fxfilter low12': effect(fxfilterOf({ type: 5, res: 20, drive: 0 }), input),
+      'fxfilter low12 pan': effect(fxfilterOf({ type: 5, res: 20, drive: 0, pan: 25 }), input),
+      'fxfilter at rest': effect(fxfilterOf(), new Float32Array(RATE)),
+    }),
+    ...(dsp.wasm.fxfilter &&
+      dsp.wasm.chain && {
+        'fx fxfilter, cutoff lfo': chainOf(['fxfilter'], input, [OWN_ROUTES.fxfilter[0]], false),
+        'fx fxfilter pan, cutoff lfo': chainOf(
+          ['fxfilter'],
+          input,
+          [OWN_ROUTES.fxfilter[0], ['fxfilter', 'pan', 5, 30, 0, 100]],
+          false
+        ),
+      }),
     // the delay of the chain core alone: its echoes held (a copy and a pass of lanes), then its Time on the way;
     // a sound from an odd sample (the first sample of every block the second of a pair of its bandpass)
     ...(dsp.wasm.delay && {
@@ -1141,7 +1180,8 @@ const createCases = (dsp) => {
       // cost of one against the others, and what LFOs add to it
       'fx none': chainOf([], input, false, false),
       ...Object.fromEntries(
-        SLOT_KINDS.filter((kind) => kind !== 'eq' || dsp.wasm.eq).flatMap((kind) => [
+        // (a kind after those of the chain of every tree: where the tree has its core)
+        SLOT_KINDS.filter((kind) => CHAIN_KINDS.includes(kind) || dsp.wasm[kind]).flatMap((kind) => [
           [`fx ${kind}`, chainOf([kind], input, false, false)],
           [`fx ${kind}, lfos`, chainOf([kind], input, OWN_ROUTES[kind], false)],
           [`fx ${kind}, lfo mix`, chainOf([kind], input, [[kind, 'mix', 4, 0.4, 0, 1]], false)],

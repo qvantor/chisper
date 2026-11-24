@@ -21,7 +21,7 @@ export const en = {
     // ./index.ts)
     lead: 'Chisper is a **free wavetable synthesizer** that runs in the browser on a computer, a Chromebook or a phone: **no download, no account**.',
     details:
-      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a **noise oscillator**, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, chorus, delay, a compressor, reverb and an EQ. Plug in a MIDI keyboard or play the computer keyboard, and record what you play in the **piano roll**.',
+      '**Two wavetable oscillators** with **supersaw unison** of up to 8 voices, a **noise oscillator**, a filter in every voice, three envelopes and four LFOs you drag onto **any knob**, distortion, a filter effect, chorus, delay, a compressor, reverb and an EQ. Plug in a MIDI keyboard or play the computer keyboard, and record what you play in the **piano roll**.',
     listen: 'Hear it',
     screenshotAlt:
       'The Chisper synth playing chords: the waves of both oscillators, the dots of the envelopes and the LFO, the filter and the spectrum moving',
@@ -112,9 +112,9 @@ export const en = {
       more: 'Modulation: envelopes, LFOs, velocity',
     },
     effects: {
-      h2: 'Effects: distortion, chorus, delay, compressor, reverb, EQ',
+      h2: 'Effects: distortion, filter, chorus, delay, compressor, reverb, EQ',
       text: [
-        'Finish the sound inside the synth: distortion (soft or hard clip, oversampled), a chorus (four voices moved by an LFO that can follow the tempo, for the width of pads and supersaws), a delay (normal or ping-pong, with a band filter in its feedback and a Haas stereo offset), a compressor (one band, or three bands pressed down and lifted for the dense sound of modern basses), an algorithmic reverb of 16 lines and an EQ of two bands (a shelf, a peak or a cut each: the lows cleaned up, the mids scooped, air on top). Drag them into any order; each has its own Mix and presets. A limiter on the master keeps the output from clipping.',
+        'Finish the sound inside the synth: distortion (soft or hard clip, oversampled), a filter on the whole sound (the types of the filter of a voice, with Drive and a Pan that moves the cutoffs of the left and the right channel apart: sweeps under an LFO or a macro), a chorus (four voices moved by an LFO that can follow the tempo, for the width of pads and supersaws), a delay (normal or ping-pong, with a band filter in its feedback and a Haas stereo offset), a compressor (one band, or three bands pressed down and lifted for the dense sound of modern basses), an algorithmic reverb of 16 lines and an EQ of two bands (a shelf, a peak or a cut each: the lows cleaned up, the mids scooped, air on top). Drag them into any order; each has its own Mix and presets. A limiter on the master keeps the output from clipping.',
       ],
     },
     playing: {

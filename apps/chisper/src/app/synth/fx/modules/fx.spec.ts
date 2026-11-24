@@ -1,5 +1,5 @@
 import { mapValues } from 'lodash';
-import { divisionIndex, FX_MIX_PARAM, FX_PARAMS, FX_TYPES, FxType } from '@chisper/preset-schema';
+import { divisionIndex, FX_MIX_PARAM, FX_ORDER, FX_PARAMS, FX_TYPES, FxType } from '@chisper/preset-schema';
 import { applySnapshot, getSnapshot } from '../../../app';
 import {
   chainNode,
@@ -86,6 +86,7 @@ const DISTORTION_DEFAULTS = mapValues(FX_PARAMS.distortion, (param) => param.def
 const COMPRESSOR_DEFAULTS = mapValues(FX_PARAMS.compressor, (param) => param.default);
 const CHORUS_DEFAULTS = mapValues(FX_PARAMS.chorus, (param) => param.default);
 const EQ_DEFAULTS = mapValues(FX_PARAMS.eq, (param) => param.default);
+const FXFILTER_DEFAULTS = mapValues(FX_PARAMS.fxfilter, (param) => param.default);
 const defaultReverb = () => ({ mix: FX_MIX_PARAM.default, params: REVERB_DEFAULTS });
 
 describe('fx', () => {
@@ -105,6 +106,7 @@ describe('fx', () => {
       compressor: { params: NEUTRAL_PARAMS.compressor, mix: 1, active: false },
       reverb: { params: NEUTRAL_PARAMS.reverb, mix: 0.3, active: false },
       eq: { params: NEUTRAL_PARAMS.eq, mix: 1, active: false },
+      fxfilter: { params: NEUTRAL_PARAMS.fxfilter, mix: 1, active: false },
     });
     expect(state.routes).toEqual([]);
     expect(state.note).toBeNull();
@@ -416,6 +418,7 @@ describe('fx', () => {
         compressor: 'ready',
         reverb,
         eq: 'ready',
+        fxfilter: 'ready',
       });
     expect(chain('loading')).toEqual(['reverb', 'delay']);
     expect(chain('ready')).toEqual(['reverb', 'delay']);
@@ -426,13 +429,45 @@ describe('fx', () => {
   it('move reorders the effects', () => {
     const { model, actions } = setup();
     actions.move(0, 0);
-    expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
-    actions.move(4, 0);
-    expect(model.$order.value).toEqual(['reverb', 'distortion', 'chorus', 'delay', 'compressor', 'eq']);
-    actions.move(1, 2);
-    expect(model.$order.value).toEqual(['reverb', 'chorus', 'distortion', 'delay', 'compressor', 'eq']);
+    expect(model.$order.value).toEqual([
+      'distortion',
+      'fxfilter',
+      'chorus',
+      'delay',
+      'compressor',
+      'reverb',
+      'eq',
+    ]);
     actions.move(5, 0);
-    expect(model.$order.value).toEqual(['eq', 'reverb', 'chorus', 'distortion', 'delay', 'compressor']);
+    expect(model.$order.value).toEqual([
+      'reverb',
+      'distortion',
+      'fxfilter',
+      'chorus',
+      'delay',
+      'compressor',
+      'eq',
+    ]);
+    actions.move(1, 3);
+    expect(model.$order.value).toEqual([
+      'reverb',
+      'fxfilter',
+      'chorus',
+      'distortion',
+      'delay',
+      'compressor',
+      'eq',
+    ]);
+    actions.move(6, 0);
+    expect(model.$order.value).toEqual([
+      'eq',
+      'reverb',
+      'fxfilter',
+      'chorus',
+      'distortion',
+      'delay',
+      'compressor',
+    ]);
   });
 
   it('a move of effects that are not in the chain tells it nothing', async () => {
@@ -455,11 +490,12 @@ describe('fx', () => {
   });
 
   describe('distortion', () => {
-    it('is first in the chain by default', async () => {
+    it('is first in the chain by default, the filter after it', async () => {
       const { model, actions, posted } = await ready();
-      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+      expect(model.$order.value).toEqual([...FX_ORDER]);
+      expect(FX_ORDER).toEqual(['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
       FX_TYPES.forEach((type) => actions.setAdded(type, true));
-      expect(posted('order').pop()).toEqual([0, 1, 2, 3, 4, 5]);
+      expect(posted('order').pop()).toEqual(FX_ORDER.map((type) => SLOT[type]));
       expect(posted('active')).toEqual(FX_TYPES.map((_, slot) => [slot, true]));
     });
 
@@ -826,7 +862,7 @@ describe('fx', () => {
       const { actions, posted } = await ready();
       actions.setAdded('delay', true);
       actions.setAdded('reverb', true);
-      actions.move(4, 0);
+      actions.move(5, 0);
       actions.setAdded('delay', false);
       expect(posted('order')).toEqual([
         [SLOT.delay],
@@ -1134,7 +1170,7 @@ describe('fx', () => {
       actions.setMix('delay', 0.5);
       actions.setParam('delay', 'fb', 0.2);
       expect(getSnapshot()['fx']).toEqual({
-        o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+        o: ['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
         distortion: { a: false, on: true, mix: 1, ...DISTORTION_DEFAULTS },
         chorus: { a: false, on: true, mix: 0.5, ...CHORUS_DEFAULTS },
         compressor: { a: false, on: true, mix: 1, ...COMPRESSOR_DEFAULTS },
@@ -1152,6 +1188,7 @@ describe('fx', () => {
         },
         reverb: { a: false, on: true, mix: 0.3, ...REVERB_DEFAULTS },
         eq: { a: false, on: true, mix: 1, ...EQ_DEFAULTS },
+        fxfilter: { a: false, on: true, mix: 1, ...FXFILTER_DEFAULTS },
       });
     });
 
@@ -1193,7 +1230,7 @@ describe('fx', () => {
 
     it('round-trips the reverb, falsy values included, missing keys are defaults', () => {
       const { model, actions } = setup();
-      actions.move(4, 0);
+      actions.move(5, 0);
       actions.setAdded('reverb', true);
       actions.setOn('reverb', false);
       actions.setMix('reverb', 0);
@@ -1201,7 +1238,7 @@ describe('fx', () => {
       actions.setParam('reverb', 'decay', 12);
       const snapshot = getSnapshot();
       expect(snapshot['fx']).toMatchObject({
-        o: ['reverb', 'distortion', 'chorus', 'delay', 'compressor', 'eq'],
+        o: ['reverb', 'distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'eq'],
         reverb: { a: true, on: false, mix: 0 },
       });
 
@@ -1209,7 +1246,15 @@ describe('fx', () => {
       actions.setOn('reverb', true);
       actions.move(1, 0);
       applySnapshot(snapshot);
-      expect(model.$order.value).toEqual(['reverb', 'distortion', 'chorus', 'delay', 'compressor', 'eq']);
+      expect(model.$order.value).toEqual([
+        'reverb',
+        'distortion',
+        'fxfilter',
+        'chorus',
+        'delay',
+        'compressor',
+        'eq',
+      ]);
       expect(model.$effects.value.reverb).toEqual({
         added: true,
         on: false,
@@ -1285,15 +1330,34 @@ describe('fx', () => {
     it('drops unknown and duplicate effects from the order, a missing one takes its default place', () => {
       const { model } = setup();
       applySnapshot({ fx: { o: ['phaser', 'reverb', 'delay', 'delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
-      // a snapshot from before the distortion, the chorus, the compressor and the EQ: the first two in front of the
-      // delay, the third of the reverb, the EQ last
+      expect(model.$order.value).toEqual([
+        'distortion',
+        'fxfilter',
+        'chorus',
+        'compressor',
+        'reverb',
+        'delay',
+        'eq',
+      ]);
+      // a snapshot from before the distortion, the filter, the chorus, the compressor and the EQ: the first three in
+      // front of the delay, the fourth of the reverb, the EQ last
       applySnapshot({ fx: { o: ['delay', 'reverb'] } });
-      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+      expect(model.$order.value).toEqual([...FX_ORDER]);
       applySnapshot({ fx: { o: ['delay'] } });
-      expect(model.$order.value).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+      expect(model.$order.value).toEqual([...FX_ORDER]);
       applySnapshot({ fx: { o: [] } });
-      expect(model.$order.value).toEqual([...FX_TYPES]);
+      expect(model.$order.value).toEqual([...FX_ORDER]);
+      // (one before the filter: it before the first that comes after it by default, the reverb here)
+      applySnapshot({ fx: { o: ['reverb', 'distortion', 'chorus', 'delay', 'compressor', 'eq'] } });
+      expect(model.$order.value).toEqual([
+        'fxfilter',
+        'reverb',
+        'distortion',
+        'chorus',
+        'delay',
+        'compressor',
+        'eq',
+      ]);
     });
 
     it('round-trips the distortion, falsy values included, missing keys are defaults', () => {
@@ -1345,16 +1409,16 @@ describe('fx', () => {
       LFO_TARGET + (lfo - 1) * LFO_KEYS + LFO_KNOBS.indexOf(knob);
 
     it('the targets of the core: a slot every 32, its params by their keys, its mix the last; the LFOs after', () => {
-      expect([TARGET_KEYS, MIX_KEY, LFO_TARGET]).toEqual([32, 31, 192]);
+      expect([TARGET_KEYS, MIX_KEY, LFO_TARGET]).toEqual([32, 31, 224]);
       expect(target('distortion', 'drive')).toBe(1);
       expect(target('chorus', 'rate')).toBe(32);
       expect(target('delay', 'time')).toBe(64);
       expect(target('compressor', 'thresh')).toBe(97);
       expect(target('reverb', 'size')).toBe(130);
       expect(target('eq', 'f1')).toBe(161);
-      expect(lfoTarget(1, 'rate')).toBe(192);
-      expect(lfoTarget(2, 'rate')).toBe(200);
-      expect(lfoTarget(4, 'phase')).toBe(220);
+      expect(lfoTarget(1, 'rate')).toBe(224);
+      expect(lfoTarget(2, 'rate')).toBe(232);
+      expect(lfoTarget(4, 'phase')).toBe(252);
     });
 
     it('gives the chain the routes of an LFO without a note, with those of the note to the knobs of the LFOs', async () => {
@@ -1365,7 +1429,7 @@ describe('fx', () => {
       expect(told.setRoutes).toHaveBeenLastCalledWith([
         { target: 130, source: LFO2, amount: 0.5, min: 0, max: 1 },
         {
-          target: 200,
+          target: 232,
           source: ENV2,
           amount: expect.closeTo(0.25 * Math.log2(3200), 9),
           min: 1 / 32,
@@ -1395,7 +1459,7 @@ describe('fx', () => {
       expect(told.setRoutes).toHaveBeenLastCalledWith([
         { target: 130, source: 8, amount: 0.5, min: 0, max: 1 },
         expect.objectContaining({ source: LFO2 }),
-        expect.objectContaining({ target: 200, source: 11, scale: 'log' }),
+        expect.objectContaining({ target: 232, source: 11, scale: 'log' }),
       ]);
     });
 
@@ -1441,7 +1505,7 @@ describe('fx', () => {
       expect(told.setRoutes).toHaveBeenLastCalledWith([
         { target: 130, source: LFO2, amount: 0.5, min: 0, max: 1 },
         // 32 bar to 1/128 at 120 (1/256 is shorter than 10 ms there)
-        expect.objectContaining({ target: 200, min: 1 / 64, max: 64, scale: 'log' }),
+        expect.objectContaining({ target: 232, min: 1 / 64, max: 64, scale: 'log' }),
       ]);
     });
 
@@ -1648,7 +1712,9 @@ describe('fx', () => {
         );
         targets.forEach((id) => expect(id).toBeLessThan(LFO_TARGET));
         // a mix for each
-        expect(targets.filter((id) => id % TARGET_KEYS === MIX_KEY)).toEqual([31, 63, 95, 127, 159, 191]);
+        expect(targets.filter((id) => id % TARGET_KEYS === MIX_KEY)).toEqual([
+          31, 63, 95, 127, 159, 191, 223,
+        ]);
       });
 
       it('every knob of every LFO has a target after those of the slots, 8 an LFO', () => {
@@ -1660,10 +1726,10 @@ describe('fx', () => {
         expect(own.target).toBe(65);
         expect(lfoKnobs).toHaveLength(4 * LFO_KNOBS.length);
         expect(knobs.map((route) => route.target)).toEqual(
-          [0, 1, 2, 3].flatMap((lfo) => LFO_KNOBS.map((_, knob) => 192 + lfo * 8 + knob))
+          [0, 1, 2, 3].flatMap((lfo) => LFO_KNOBS.map((_, knob) => 224 + lfo * 8 + knob))
         );
         expect(lfoKnobs[LFO_KNOBS.length * 2 + 3]).toBe('lfo3.smooth');
-        expect(knobs[LFO_KNOBS.length * 2 + 3].target).toBe(211);
+        expect(knobs[LFO_KNOBS.length * 2 + 3].target).toBe(243);
       });
 
       it('an effect that does not play contributes no route', () => {
@@ -1687,7 +1753,7 @@ describe('fx', () => {
         const env: ModRoute = { source: 'env1', target: 'reverb.size', amount: 0.5 };
         const targets = (routes: ModRoute[], ...types: FxType[]) =>
           chainRoutes(routes, effects(), playing(...types), {}, 120).map((route) => route.target);
-        expect(targets([knob, lfo], 'reverb')).toEqual([130, 200]);
+        expect(targets([knob, lfo], 'reverb')).toEqual([130, 232]);
         // an envelope reads no LFO
         expect(targets([knob, env], 'reverb')).toEqual([130]);
         // the LFO moves a knob of an effect that doesn't play

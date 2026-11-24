@@ -25,6 +25,7 @@ use dsp_core::io::StereoIo;
 pub mod chain;
 pub mod delay;
 pub mod eq;
+pub mod fxfilter;
 pub mod modulation;
 pub mod units;
 
@@ -380,14 +381,7 @@ pub extern "C" fn chain_layout() -> usize {
         modulation::MACRO_SOURCE as f64,
         dsp_core::macros::MACROS as f64,
     ];
-    for kind in [
-        units::DISTORTION,
-        units::CHORUS,
-        units::DELAY,
-        units::COMPRESSOR,
-        units::REVERB,
-        units::EQ,
-    ] {
+    for kind in 0..units::SLOTS as u32 {
         values.push(kind as f64);
         values.push(units::key_names(kind).1 as f64);
         values.push(match law(kind) {

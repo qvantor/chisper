@@ -58,6 +58,7 @@ export { Lamp, LampLight } from './lamp';
 export {
   ActionKey,
   AnchorIcon,
+  BandPassIcon,
   ContiguousIcon,
   DottedIcon,
   FollowIcon,
@@ -66,6 +67,8 @@ export {
   IconSvg,
   LegatoIcon,
   LoopIcon,
+  LowPassIcon,
+  NotchPeakIcon,
   OneShotIcon,
   PulseIcon,
   QuantizeIcon,

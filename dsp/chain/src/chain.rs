@@ -24,9 +24,9 @@ use dsp_core::squared_mix;
 use jsmath::{cos, max, sin, PI};
 
 use crate::modulation::{
-    Bases, Modulation, LINE_EQ, LINE_FB, LINE_FREQ, LINE_MIX, LINE_PAN, LINE_Q, LINE_TIME,
+    Bases, Modulation, LINE_EQ, LINE_FB, LINE_FREQ, LINE_FXFILTER, LINE_MIX, LINE_PAN, LINE_Q, LINE_TIME,
 };
-use crate::units::{law, Law, Moves, Unit, DELAY, EQ, LIMITER, MAX_METER, MAX_PARAMS, SLOTS};
+use crate::units::{law, Law, Moves, Unit, DELAY, EQ, FXFILTER, LIMITER, MAX_METER, MAX_PARAMS, SLOTS};
 
 /// the events: the params of a slot (a: the slot, b: the bits of the keys, the values by key), its mix (a, b),
 /// whether it plays (a, b: not 0), the order (a: how many slots, the values: which), the master gain (a), the
@@ -823,6 +823,11 @@ impl Chain {
         } else if kind == EQ as usize {
             Moves {
                 eq: core::array::from_fn(|knob| line(LINE_EQ + knob)),
+                ..Moves::default()
+            }
+        } else if kind == FXFILTER as usize {
+            Moves {
+                filter: core::array::from_fn(|knob| line(LINE_FXFILTER + knob)),
                 ..Moves::default()
             }
         } else {

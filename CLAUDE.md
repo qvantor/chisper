@@ -137,8 +137,9 @@ time).
   (`mac`, the levels and the names of the macros: a level of 0 and an empty name are not written, an empty section is
   none).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), `EQ_TYPES`
-  (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
-  a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
+  (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), `FX_FILTER_TYPES` (raise `FX_PARAMS.fxfilter.type.max`;
+  `TYPES` of `fxfilter.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`: a new effect goes last; its
+  place in a chain by default is `FX_ORDER`), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
   `voice-modules.spec` holds them), `WARP_MODES` (the modes of `warp.rs` by their index; `warp-model.spec` holds the
   order), `MOD_SOURCES` (the index of a source in both cores: 0–2 ENV, 3 VELO, 4–7 LFO, 8–11 MACRO;
   `dsp-core/src/sources.rs` for both, `isLfoSource`/`isMacroSource` of `chain-params.ts`), `CHAIN_EVENT` (`SET_MACROS` 8 last).
@@ -242,7 +243,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   worklet and a render take it). In the core (`chain.rs`): events queued by frame (one without a time is never
   taken before one with a time sent before it), a slot per effect in the order
   (`Law`: equal power, linear for the distortion and the EQ, the one of the echoes for the delay (measured: the wet
-  gain sin²(mix · π / 2), the dry one 1 - wet²), inside for the chorus and the compressor; the dry signal late by
+  gain sin²(mix · π / 2), the dry one 1 - wet²), inside for the chorus, the compressor and the filter; the dry signal late by
   the latency of the effect; gains glide 10 ms; a slot that is off is a wire and its effect forgotten once faded;
   a slot whose effect is late crosses between its input as it is and the late one as it starts and stops; one that
   sounds and leaves the order fades out where it is, the new order waits for it), the mute (with a time: its fade
@@ -264,13 +265,14 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - FX (`synth/fx/`): effects are defined in `FX_REGISTRY` (`fx/effects/`) with params/ranges from `FX_PARAMS` of
   `libs/preset-schema`; a definition gives its params as the core takes them (`core()`: a knob in BPM at the tempo,
   the era of the reverb as the values of its stage; `CHAIN_KEYS` of `chain-params.ts` is their order in the crate).
-  `createFxSlot` is what the fx model tells the chain of an effect (params, mix, whether it plays). Default order
-  `FX_TYPES` (distortion, chorus, delay, compressor, reverb, eq), `FX_KINDS` of `chain-params.ts` mirrors it (it can't
-  import the schema). A new effect type = a registry entry + its preset schema + a `Unit` of `dsp/chain/src/units.rs`
+  `createFxSlot` is what the fx model tells the chain of an effect (params, mix, whether it plays). The slots
+  `FX_TYPES` (distortion, chorus, delay, compressor, reverb, eq, fxfilter), `FX_KINDS` of `chain-params.ts` mirrors it
+  (it can't import the schema); the default order `FX_ORDER` (the filter after the distortion; a preset without an
+  effect gets it before the first one that comes after it there: `normalizeFxOrder`). A new effect type = a registry entry + its preset schema + a `Unit` of `dsp/chain/src/units.rs`
   (no crate, bundle, facade or processor of its own), its kind last (`LIMITER` = `SLOTS` after it; a chain of
   another count of kinds is another ABI: the null test renders the scenes of the chain of a reference with its own
   facades). Reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip antialiased on top:
-  `scripts/distortion-adaa/` holds the measurements and the tables), chorus, compressor, delay and EQ are units of
+  `scripts/distortion-adaa/` holds the measurements and the tables), chorus, compressor, delay, EQ and filter are units of
   the chain core.
 - Delay (`dsp/chain/src/delay.rs`, measured: `dsp/measurements/delay.json`, `delay-measured.spec.ts`; the knobs of
   the Audio Unit as ours: `delayOfAudioUnit` of `test-utils/delay-render.ts`): a line a channel, a bandpass (the
@@ -347,6 +349,24 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   32 samples, its coefficients lines between; a band that renders nothing (a shelf or a peak at 0 dB, the gain of a
   pass) is not rendered. Its screen (`eq-screen.tsx`) draws on a canvas (`useLiveDraw`). Deliberate differences: its
   Mix (the reference has none), its knobs glide.
+- FX Filter (`fxfilter` of the schema and the app, not `filter`: those are the routes of the filter of a voice;
+  `dsp/chain/src/fxfilter.rs`, measured: `dsp/measurements/fxfilter.json`, `--only=fxfilter,fxfilter-routes`,
+  `fxfilter-measured.spec.ts`): the FX Filter of the Audio Unit, its types of Normal (MG Low, Low, High 6..24, Band,
+  Peak, Notch 12, 24: `FX_FILTER_TYPES`, the first 18 of `MODEL_FILTER_TYPES`), the filter of a voice on the sum (its
+  responses, Drive and FAT are those of `filter-types.json`) with more droop of the highs (`fx_droop`: 18 dB at
+  (f/fs)² = 1 a section, 32 a ladder; one 2-tap droop a filter, so over 12 kHz a type of two sections droops 1–2 dB
+  less than the reference: deliberate). Its sections and spans are those of the voice (`model_spans`, below): at Pan
+  50 the lanes of a voice alone, past it two filters mixed in the lanes (`LaneCoefs::mixed`: the left channel's in 0
+  and 2, the right one's in 1 and 3; `spans::<true>`). Its laws: the cutoff in Hz (the knob of the reference the note
+  136.8 v, 8.176 Hz..22.05 kHz; a route in octaves of that travel, as the reference's of 136.8 semitones), Pan the
+  cutoff of the left channel up and of the right one down by 32 x³ semitones (x = (50 - Pan) / 50), the level 4 v² of
+  the dry and the wet signal, the mix inside (`Law::Inside`: wet sin²(π mix / 2), dry 1 - wet², no latency), a fresh
+  one MG Low 6 at 425 Hz all wet. The knobs glide 3.3 ms (the voice's), the cutoff in octaves; the cutoff, Res, Drive,
+  Var and Pan are lines of the routes read at the end of each span (32 samples, the points of the lines), the level and
+  the mix once a block; a change of type crossfades 10 ms (one during a fade waits). Its screen (`fxfilter-screen.tsx`:
+  the response of each channel, `fxFilterDesign` of math, on a canvas; a grip dragged across for the cutoff and up
+  and down for the resonance) and its type browser by category. In the URL snapshot a type no one has is the default
+  one (`index` of `ParamRange`).
 - Without AudioWorklet or wasm SIMD, or when the module of the engine fails, no effect and no sound; until `ready`
   nothing plays. One effect failing in the core leaves the others playing.
 - Knob modulation of the effects is in the core (`dsp/chain/src/modulation.rs`; the envelopes and the LFOs of the
@@ -468,8 +488,11 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   one before (`span_end`: in its few refreshes, or none, it went the way of a whole span at once). A voice on a line
   next to another, or alone: the same bits (the cargo test
   `the_lines_of_voices_in_the_lanes_are_those_of_each_alone`); `moves the cutoff of … without a noise` of
-  `wavetable-osc-dsp.spec.ts` holds the noise. The loops of a voice alone stay functions of their own (`NO_INLINE` of
-  `scripts/wasm.mjs`: inlined next to the design of a span they are a third slower); so do those of voices at rest
+  `wavetable-osc-dsp.spec.ts` holds the noise. The slot of a model type, the designs a node keeps, the spans
+  of two filters in the lanes (`take_spans`) and the loops of a stereo signal are `dsp-core/src/model_spans.rs`, the
+  filter of the chain runs on them too (the pairs and groups of voices stay in `filter.rs`). The loops of a voice alone
+  stay functions of their own (`NO_INLINE` of `scripts/wasm.mjs`: inlined next to the design of a span they are a
+  third slower); so do those of voices at rest
   (`still_pair`, `still_group`: in the loops of the lines their coefficients went through memory, a chord 3 % slower;
   `scope chord filter …` of the perf suite). The type lists
   (`FILTER_TYPES` of the schema, `VOICE_FILTER_TYPES` of `voice-options.ts`, `MODEL_FILTER_TYPES` of math) only grow,

@@ -2,7 +2,7 @@
 //! the knobs rest, a glide, a line and a change of type move it without a click, silence rests it
 
 use super::*;
-use crate::tests::{bits, noise};
+use crate::tests::{bits, blocks_of, noise, sine};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -55,17 +55,6 @@ fn render(
         at += count;
     }
     out
-}
-
-fn blocks_of(length: usize) -> impl FnMut() -> usize {
-    move || length
-}
-
-fn sine(hz: f64, frames: usize, level: f64) -> [Vec<f32>; 2] {
-    let left: Vec<f32> = (0..frames)
-        .map(|i| (level * sin(2.0 * PI * hz * i as f64 / RATE)) as f32)
-        .collect();
-    [left.clone(), left]
 }
 
 // the cookbook (Audio EQ Cookbook, R. Bristow-Johnson) of a band: [b0, b1, b2, a0, a1, a2]
@@ -244,7 +233,7 @@ fn worst_apart(a: &[f32], b: &[f32]) -> f64 {
 #[test]
 fn the_knobs_move_as_designs_at_every_sample() {
     let frames = 24000;
-    let input = sine(110.0, frames, 0.5);
+    let input = sine(110.0, frames, 0.5, RATE);
     let start = params(&[
         (T1, 1.0),
         (F1, 80.0),
@@ -431,7 +420,7 @@ fn a_band_nothing_moves_is_not_redesigned() {
 // the level: a gain of 4 v², gliding
 #[test]
 fn the_level_is_four_times_its_square() {
-    let input = sine(1000.0, 8000, 0.25);
+    let input = sine(1000.0, 8000, 0.25, RATE);
     for (knob, gain) in [(0.25, 0.25), (0.5, 1.0), (1.0, 4.0), (0.0, 0.0)] {
         let mut eq = Eq::new(RATE, &params(&[(LEVEL, knob)]));
         let out = render(&mut eq, &input, &mut blocks_of(128), |_, _| {}, None);
@@ -451,7 +440,7 @@ fn the_level_is_four_times_its_square() {
         },
         None,
     );
-    assert!(roughness(&out[0], 2048) < roughness(&sine(1500.0, 8000, 1.0)[0], 0));
+    assert!(roughness(&out[0], 2048) < roughness(&sine(1500.0, 8000, 1.0, RATE)[0], 0));
 }
 
 // an idle EQ designs only the bands what is set is of (a route on the level sets it every block, the EQ idle while
@@ -484,7 +473,7 @@ fn an_idle_eq_designs_only_the_bands_it_is_set() {
         (G2, -6.0),
         (LEVEL, 1.0),
     ]);
-    let input = sine(1000.0, 4096, 0.25);
+    let input = sine(1000.0, 4096, 0.25, RATE);
     let out = render(&mut eq, &input, &mut blocks_of(128), |_, _| {}, None);
     let fresh = render(
         &mut Eq::new(RATE, &set),
@@ -501,7 +490,7 @@ fn an_idle_eq_designs_only_the_bands_it_is_set() {
 #[test]
 fn silence_rests_it() {
     let frames = 3 * 48000;
-    let mut input = sine(60.0, frames, 0.5);
+    let mut input = sine(60.0, frames, 0.5, RATE);
     for channel in input.iter_mut() {
         channel[24000..96000].fill(0.0);
     }
@@ -620,7 +609,7 @@ fn a_channel_silent_alone_never_comes_near_a_denormal() {
 #[test]
 fn a_non_finite_block_is_forgotten() {
     let mut eq = Eq::new(RATE, &params(&[(T1, 1.0), (G1, 12.0)]));
-    let mut input = sine(300.0, 1024, 0.5);
+    let mut input = sine(300.0, 1024, 0.5, RATE);
     input[0][700] = f32::NAN;
     let out = render(&mut eq, &input, &mut blocks_of(128), |_, _| {}, None);
     assert!(out[0][640..768].iter().all(|value| *value == 0.0));

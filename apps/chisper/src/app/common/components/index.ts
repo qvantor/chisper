@@ -29,6 +29,6 @@ export {
 export { ChoiceKeys } from './choice-keys';
 export type { Choice } from './choice-keys';
 export { GroupLabel, PopoverGroup, PopoverNote, SectionPopover } from './section-popover';
-export { FileSelect, isFolder, SelectProgress } from './file-select';
+export { BrowserKey, FileSelect, isFolder, SelectProgress } from './file-select';
 export { SourceAlert } from './source-alert';
 export type { FileOption } from './file-select';

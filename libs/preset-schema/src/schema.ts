@@ -80,20 +80,30 @@ export const isWebFilterType = (type: string): type is WebFilterType =>
 export const isFilterType = (type: unknown): type is FilterType =>
   (FILTER_TYPES as readonly unknown[]).includes(type);
 
-// effects of the fx rack, the order is the default chain order
-export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'] as const;
+// effects of the fx rack, each the slot of its index in the chain core (a new one is appended: FX_KINDS of the app)
+export const FX_TYPES = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq', 'fxfilter'] as const;
 export type FxType = (typeof FX_TYPES)[number];
+// the default order of the chain: the filter after the distortion (a filter shapes what a distortion makes)
+export const FX_ORDER: readonly FxType[] = [
+  'distortion',
+  'fxfilter',
+  'chorus',
+  'delay',
+  'compressor',
+  'reverb',
+  'eq',
+];
 
 // known types only, no duplicates (presets from a newer client may contain effect types this one doesn't
 // know); a missing type (saved before it existed) takes its default place: before the first effect that
-// comes after it in FX_TYPES, at the end if none does
+// comes after it in FX_ORDER, at the end if none does
 export const normalizeFxOrder = (order: readonly unknown[]): FxType[] => {
   const known = order.filter(
     (type, i): type is FxType => FX_TYPES.includes(type as FxType) && order.indexOf(type) === i
   );
-  return FX_TYPES.reduce<FxType[]>((result, type, index) => {
+  return FX_ORDER.reduce<FxType[]>((result, type, index) => {
     if (result.includes(type)) return result;
-    const next = result.findIndex((item) => FX_TYPES.indexOf(item) > index);
+    const next = result.findIndex((item) => FX_ORDER.indexOf(item) > index);
     return next === -1 ? [...result, type] : [...result.slice(0, next), type, ...result.slice(next)];
   }, known);
 };
@@ -103,6 +113,9 @@ export interface ParamRange {
   max: number;
   default: number;
   int?: boolean;
+  // an index into a list that only grows (the types of the filter): in a url snapshot one past it (of a newer
+  // client) is the default, not the last one
+  index?: boolean;
 }
 
 // numeric fx params: knob ranges in the app, validation and defaults of presets
@@ -118,6 +131,7 @@ export const FX_MIX_PARAMS: Record<FxType, ParamRange> = {
   compressor: { ...FX_MIX_PARAM, default: 1 },
   reverb: FX_MIX_PARAM,
   eq: { ...FX_MIX_PARAM, default: 1 },
+  fxfilter: { ...FX_MIX_PARAM, default: 1 },
 };
 export const FX_PARAMS = {
   // waveshaper, 4× oversampled
@@ -244,6 +258,25 @@ export const FX_PARAMS = {
     // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top)
     level: { min: 0, max: 1, default: 0.5 },
   },
+  // the FX Filter of the Audio Unit (dsp/measurements/fxfilter.json): the filter of a voice on the sum, its knobs,
+  // laws and defaults those of the reference (MG Low 6 at 425 Hz)
+  fxfilter: {
+    // the type, an index into FX_FILTER_TYPES of the app (0: MG Low 6 … the types of Normal); new types are
+    // appended only
+    type: { min: 0, max: 17, default: 0, int: true, index: true },
+    // Hz (the knob of the reference: the note 136.8 v, 8.176 Hz..22.05 kHz)
+    cutoff: { min: 8.176, max: 22050, default: 425 },
+    // %
+    res: { min: 0, max: 100, default: 0 },
+    drive: { min: 0, max: 100, default: 0 },
+    // % of FAT: a gain into the sections of 1 + 4 Res FAT (none on Low 6, High 6 and the notches)
+    var: { min: 0, max: 100, default: 0 },
+    // % (50: none): the cutoff of the left channel up and of the right one down by 32 x³ semitones, x =
+    // (50 - pan) / 50
+    pan: { min: 0, max: 100, default: 50 },
+    // the output knob: × 4 knob² (0 dB at the middle, +12 dB at the top), of the dry and the wet signal
+    level: { min: 0, max: 1, default: 0.5 },
+  },
 };
 
 const range = (min: number, max: number) => z.number().finite().min(min).max(max);
@@ -252,11 +285,12 @@ const paramRange = ({ min, max, default: value, int }: ParamRange) =>
   (int ? intRange(min, max) : range(min, max)).default(value);
 // legacy url params skip presetDataSchema: wrong types fall back to the default, numbers are clamped
 // (and rounded for int params, the strict schema rejects fractions)
-const lenientParamRange = ({ min, max, default: value, int }: ParamRange) =>
+const lenientParamRange = ({ min, max, default: value, int, index }: ParamRange) =>
   z
     .number()
     .finite()
     .transform((num) => {
+      if (index && (Math.round(num) < min || Math.round(num) > max)) return value;
       const clamped = Math.min(max, Math.max(min, num));
       return int ? Math.round(clamped) : clamped;
     })
@@ -765,7 +799,7 @@ const fxSchema = z
       .array(z.string().max(64))
       .max(32)
       .transform(normalizeFxOrder)
-      .prefault([...FX_TYPES]),
+      .prefault([...FX_ORDER]),
     distortion: z
       .object(
         fxEffectShape(FX_PARAMS.distortion, FX_MIX_PARAMS.distortion, paramRange, (value) =>
@@ -804,6 +838,13 @@ const fxSchema = z
         fxEffectShape(FX_PARAMS.eq, FX_MIX_PARAMS.eq, paramRange, (value) => z.boolean().default(value))
       )
       .prefault({}),
+    fxfilter: z
+      .object(
+        fxEffectShape(FX_PARAMS.fxfilter, FX_MIX_PARAMS.fxfilter, paramRange, (value) =>
+          z.boolean().default(value)
+        )
+      )
+      .prefault({}),
   })
   .prefault({});
 
@@ -824,6 +865,7 @@ export const fxSnapSchema = z.preprocess(
     compressor: lenientFxEffect(FX_PARAMS.compressor, FX_MIX_PARAMS.compressor),
     reverb: lenientFxEffect(FX_PARAMS.reverb, FX_MIX_PARAMS.reverb),
     eq: lenientFxEffect(FX_PARAMS.eq, FX_MIX_PARAMS.eq),
+    fxfilter: lenientFxEffect(FX_PARAMS.fxfilter, FX_MIX_PARAMS.fxfilter),
   })
 );
 

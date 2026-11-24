@@ -8,6 +8,7 @@ import { compressor } from './compressor';
 import { delay } from './delay';
 import { reverb } from './reverb';
 import { eq } from './eq';
+import { fxfilter } from './fxfilter';
 
 export const FX_REGISTRY: Record<FxType, FxDefinition> = {
   distortion,
@@ -16,10 +17,11 @@ export const FX_REGISTRY: Record<FxType, FxDefinition> = {
   compressor,
   reverb,
   eq,
+  fxfilter,
 };
 
 // the mix of each effect, applied by createFxSlot: the same knob, the default of the effect (the distortion, the
-// compressor and the EQ all wet)
+// compressor, the EQ and the filter all wet)
 export const MIX_PARAMS: Record<FxType, FxParamDef> = mapValues(FX_MIX_PARAMS, (mix) => ({
   ...mix,
   label: 'Mix',
