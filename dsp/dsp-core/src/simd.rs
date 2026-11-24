@@ -653,6 +653,20 @@ impl F64x2 {
     }
 }
 
+/// four lanes of four values the other way: lane k of value j is lane j of value k (four rows of four into their
+/// columns, and back: four samples of four lines as four lines of four samples)
+#[inline(always)]
+pub fn transpose([a, b, c, d]: [F32x4; 4]) -> [F32x4; 4] {
+    let (ab_low, ab_high) = (a.pick::<0, 4, 1, 5>(b), a.pick::<2, 6, 3, 7>(b));
+    let (cd_low, cd_high) = (c.pick::<0, 4, 1, 5>(d), c.pick::<2, 6, 3, 7>(d));
+    [
+        ab_low.pick::<0, 1, 4, 5>(cd_low),
+        ab_low.pick::<2, 3, 6, 7>(cd_low),
+        ab_high.pick::<0, 1, 4, 5>(cd_high),
+        ab_high.pick::<2, 3, 6, 7>(cd_high),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::F64x2;

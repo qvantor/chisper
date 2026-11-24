@@ -167,7 +167,7 @@ impl Chorus {
             sample_rate,
             values: core::array::from_fn(|key| Smoothed::new(kept(key, params[key]), GLIDE, sample_rate)),
             gains: Gains::default(),
-            lines: Rows::new(longest + 4.0),
+            lines: Rows::new(4, longest + 4.0),
             phase: 0.0,
             at: SEGMENT,
             from: [0.0; 4],

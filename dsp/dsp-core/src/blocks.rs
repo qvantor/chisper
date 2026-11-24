@@ -1,6 +1,6 @@
 //! The sample-by-sample blocks of the effects (the dsp.ts of the app they came from)
 
-use crate::simd::{F32x4, F64x2, TINY};
+use crate::simd::{transpose, F32x4, F64x2, TINY};
 use crate::{int32, power_of_two_above};
 use alloc::{vec, vec::Vec};
 use jsmath::{exp, floor, max, round};
@@ -95,9 +95,9 @@ impl Lines<4> {
     }
 }
 
-/// Four delay lines in f32, each a ring of its own (`Lines<4>` keeps their samples side by side), so four samples
-/// in a row of a line are one load: its reads and writes go four samples of time in the lanes (read4, write4)
-/// where those of `Lines<4>` go four lines. A read is the one of `Lines::read`, sample by sample: the same place,
+/// Delay lines in f32 (`rows` of them: four, or one read four samples at a time), each a ring of its own
+/// (`Lines<4>` keeps their samples side by side), so four samples in a row of a line are one load: its reads and
+/// writes go four samples of time in the lanes (read4, write4) where those of `Lines<4>` go four lines. A read is the one of `Lines::read`, sample by sample: the same place,
 /// the same hermite, the same bits. The lines are written together (`advance`); the first GUARD samples of a ring
 /// are kept after its end too, so the taps of a read never wrap
 pub struct Rows {
@@ -111,10 +111,10 @@ pub struct Rows {
 const GUARD: usize = 8;
 
 impl Rows {
-    pub fn new(max_delay: f64) -> Rows {
+    pub fn new(rows: usize, max_delay: f64) -> Rows {
         let size = power_of_two_above(max_delay + 4.0);
         Rows {
-            buffer: vec![0.0; 4 * (size + GUARD)],
+            buffer: vec![0.0; rows * (size + GUARD)],
             stride: size + GUARD,
             size,
             mask: size as i32 - 1,
@@ -176,12 +176,15 @@ impl Rows {
             floor_hi.lo() as i32,
             floor_hi.hi() as i32,
         ];
-        let at = |j: i32| {
-            let sample =
-                |k: usize| self.buffer[row * self.stride + (i[k].wrapping_add(j) & self.mask) as usize];
-            F32x4::new(sample(0), sample(1), sample(2), sample(3))
+        // the four taps of each sample in a row of the ring (its guard: none wraps), then the taps of a kind of
+        // the four samples side by side: the same samples as one by one
+        let line = &self.buffer[row * self.stride..(row + 1) * self.stride];
+        let taps = |k: usize| {
+            let from = (i[k].wrapping_sub(1) & self.mask) as usize;
+            F32x4::load(&line[from..from + 4])
         };
-        hermite4(at(-1), at(0), at(1), at(2), t)
+        let [prev, x0, x1, next] = transpose([taps(0), taps(1), taps(2), taps(3)]);
+        hermite4(prev, x0, x1, next, t)
     }
 
     /// line `row` at four samples in a row, the first `back` writes before now, their delays a line: `delay` of the
@@ -192,7 +195,14 @@ impl Rows {
     /// samples one by one, each its lane with the same `back` to the first)
     #[inline(always)]
     pub fn read4_line(&self, row: usize, back: usize, delay: f64, slope: f32) -> F32x4 {
-        let at = (self.index - back as i32) as f64 - delay;
+        self.read4_at(row, -(back as i32), delay, slope)
+    }
+
+    /// read4_line of four samples in a row whose first is `offset` writes from now (ahead of it, or back): what
+    /// a pass over a chunk reads of a line before it writes it (the reverb)
+    #[inline(always)]
+    pub fn read4_at(&self, row: usize, offset: i32, delay: f64, slope: f32) -> F32x4 {
+        let at = (self.index + offset) as f64 - delay;
         let whole = floor(at);
         let i = whole as i32;
         let t = F32x4::splat((at - whole) as f32) - F32x4::splat(slope) * F32x4::new(0.0, 1.0, 2.0, 3.0);
@@ -218,17 +228,15 @@ impl Rows {
         let whole = t.floor();
         let t = t - whole;
         let moved = whole.lanes();
-        let at = |j: i32| {
-            let sample = |k: usize| {
-                let place = i
-                    .wrapping_add(k as i32)
-                    .wrapping_add(moved[k] as i32)
-                    .wrapping_add(j);
-                self.buffer[row * self.stride + (place & self.mask) as usize]
-            };
-            F32x4::new(sample(0), sample(1), sample(2), sample(3))
+        // (the four taps of each sample in a row of the ring, its guard after it: the same samples as one by one)
+        let line = &self.buffer[row * self.stride..(row + 1) * self.stride];
+        let taps = |k: usize| {
+            let place = i.wrapping_add(k as i32).wrapping_add(moved[k] as i32);
+            let from = (place.wrapping_sub(1) & self.mask) as usize;
+            F32x4::load(&line[from..from + 4])
         };
-        hermite4(at(-1), at(0), at(1), at(2), t)
+        let [prev, x0, x1, next] = transpose([taps(0), taps(1), taps(2), taps(3)]);
+        hermite4(prev, x0, x1, next, t)
     }
 
     /// four samples in a row of line `row`, the first `ahead` writes from now (what is too small to sound as 0)
@@ -563,7 +571,7 @@ mod tests {
     fn rows_read_and_write_as_four_lines_do() {
         let mut next = noise(5);
         let (mut lines, mut allpasses) = (Lines::<4>::new(300.0), Lines::<4>::new(300.0));
-        let (mut rows, mut turned) = (Rows::new(300.0), Rows::new(300.0));
+        let (mut rows, mut turned) = (Rows::new(4, 300.0), Rows::new(4, 300.0));
         let bits = |values: [f32; 4]| values.map(f32::to_bits);
         let mut glide: [f64; 4] = [40.3, 7.0, 150.9, 299.0];
         for group in 0..3000 {
@@ -627,7 +635,7 @@ mod tests {
 
     #[test]
     fn rows_hold_no_denormals() {
-        let mut rows = Rows::new(64.0);
+        let mut rows = Rows::new(4, 64.0);
         rows.write4(1, 0, F32x4::new(1e-30, -1e-39, 0.5, -1e-26));
         rows.write(4, F32x4::splat(1e-38));
         rows.write1(2, 5, 1e-40);
@@ -752,7 +760,7 @@ mod tests {
     // stay within their own or a delay crosses one, and a lane is the same whichever of its four asks
     #[test]
     fn a_line_of_delays_reads_what_the_delays_do() {
-        let mut rows = Rows::new(4000.0);
+        let mut rows = Rows::new(4, 4000.0);
         let mut seed = 5u32;
         let mut noise = || {
             seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -793,7 +801,7 @@ mod tests {
                 // the samples of the four after a write each: their lanes as they were
                 let mut later = Rows {
                     buffer: rows.buffer.clone(),
-                    ..Rows::new(4000.0)
+                    ..Rows::new(4, 4000.0)
                 };
                 later.index = rows.index;
                 for back in 1..4 {

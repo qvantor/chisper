@@ -292,6 +292,31 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   the taps as it has them (its meter, posted as the one of the compressor is, only while watched:
   `meter-report.ts` in the worklet, `createFxMeter` on the main thread), between two posts the main thread moves
   the LFO on at its rate (`chorusTaps` of `chorus-params.ts` mirrors `targets` of the core).
+- Reverb (`dsp/reverb`, measured: `dsp/measurements/reverb.json`, `reverb-measured.spec.ts`): the 16 lines of an
+  FDN (each through an allpass, a low shelf at 300 Hz and a damping shelf of the first order), early reflections,
+  input diffusion, the input stage of the eras. Not the algorithm of the Audio Unit: its laws where the knobs had
+  no room for them. Size scales the reflections 0.3..1.5 and the lines as them up to the middle of the knob, to 6.1
+  at its top (`size_factor`: the long lines of its Hall, a tail that starts late); the tail of longer lines is
+  raised to be as loud (`tail_level`, 12 dB at most, given to the sound as it goes into the lines: a tail that
+  rings keeps its level when a knob changes it); the low shelf of a pass is ±60 dB at most (`MAX_LOW_SHELF`: the
+  lines of the top of Size at the shortest Decay lose hundreds of dB a pass, a shelf of as many in f32 had its
+  poles on the unit circle or past it, a tail that grew or never drained); Damp over 8 kHz damps less, nothing at
+  20 kHz (`hf_ratio`). A
+  Hall of the Audio Unit maps to knobs of ours by `hallReverb` of `test-utils/hall-reverb.ts` (Size 25, 50, 75
+  fitted on a chord of saws, its decay and dampings by the measured laws; its Wet by the equal power of the slot):
+  the spectrum of the chord within 3 dB and its tail within 1.5 dB at Wet 30, 3.5 dB at Wet 60 (two renders of
+  the Hall itself are 2 dB apart there: its echoes are sparse and modulated, ours dense). In a silence the reverb
+  of the Audio Unit sleeps and woken by the signal it answers otherwise: the stand keeps a tone of 25 Hz under
+  every sample. The passes of a block (`process`): the input stage a sample at a time in doubles, then four samples
+  in the lanes (a tap of the reflections, a line: `Rows::read4_at`, the delay of the first of a group in doubles,
+  the shares of the next three in f32) or four lines (the shelves of a quad, `transpose`); a sample alone is its
+  lane of its group (the cargo test of the chunks). The TS tables of the chart: `reverb-decay.ts`. The built-in
+  presets (`reverb-presets.ts`) are fitted to factory presets of the Audio Unit (`dsp/measurements/reverb-presets.json`,
+  its 29 measured: `--only=reverb-presets`; `reverb-presets-measured.spec.ts` holds each to its counterpart, the
+  nearest of its kind by the measures, not by the name): every knob but the depth on the energy of each octave over
+  time, the width, the density and the first sound; their mix is ours (a factory preset is a touch under a track).
+  Small room, Bright room and Vintage plate have none. The scenes and the measures of a response:
+  `test-utils/reverb-scenes.ts`.
 - EQ (`dsp/chain/src/eq.rs`, measured: `dsp/measurements/eq.json`, `eq-measured.spec.ts`; the laws found by
   `scripts/eq-fit/fit.mjs`): the one of the Audio Unit, two bands of the Audio EQ Cookbook (band 1 a low shelf, a peak
   or a highpass, band 2 a high shelf, a peak or a lowpass) as state variable filters in lanes of doubles. Its design
@@ -384,8 +409,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   reads the levels of its pitch); a bend of a < 0 on a ramp at 0.9 and 1 is within 8 dB a third of an octave of it
   (its harmonics a comb from 5 kHz on).
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub, filter types, warp; `compressor`, `chorus` and `eq` for the
-  effects). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub, filter types, warp; `compressor`, `chorus`, `eq` and
+  `reverb` for the effects). Aliasing −70 dB, spurs −80 dB.
 - The filter of a voice (`filter.rs`): the types of a BiquadFilterNode (a TPT SVF, bit for bit as before) and the
   model types of the AU (`dsp-core/src/filter_model.rs`, measured: `filter-types.json`, `filter-types-measured.spec.ts`;
   the resonance by the cutoff: `filter-resonance.json`, `filter-resonance-measured.spec.ts`):

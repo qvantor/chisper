@@ -37,6 +37,13 @@
 // - eq.json: the EQ of its effect rack on an impulse of ours: the response of each band by its type, frequency,
 //   resonance and gain (a grid, a sweep of the resonance), its defaults, the law of the level, its knobs out of
 //   their ranges, at another rate
+// - reverb.json: the reverb of its effect rack on an impulse of ours, a quiet tone under it (asleep it answers
+//   otherwise): RT60 by octave, the level, the first echoes and their density of the Hall by its Size, its decay,
+//   its dampings, the other types at their defaults, the law of Wet, and a chord of saws through it (the level and
+//   the third octaves of windows of it: the scenes ours is held to)
+// - reverb-presets.json: the factory presets of its reverb (the files of Effect Chains/Reverb/Factory) measured as
+//   reverb.json: the impulse all wet, the gains of their own Wet, the chord at it (the built-in presets of ours are
+//   fitted to them)
 // - filter-types.json: Filter 1 of a voice, the types of Normal and the EQ ones of Misc: the response of each by
 //   the cutoff and the resonance (a multisine of our table through it), the EQ ones by DB +/-, the law and the
 //   saturation of Drive, FAT and the saturation of a resonance on sines at the cutoff
@@ -47,15 +54,23 @@
 //   sine by it, the aliasing of a saw at C6 and C7, the knob automated every sample (how it follows), the harmonics of
 //   Bend - and Bend +/- at D2 and D4 to 16 kHz (how bright a frame squeezed at its wrap stays)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,eq,filter-types,filter-resonance,warp`
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,eq,reverb,reverb-presets,filter-types,filter-resonance,warp`
 // renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 import { downloadTables, fileName, readEnv } from '../bench-common.mjs';
 import { analyze, frameOf, PITCHES, sawFrame, SIZE, TABLES } from '../bench-osc/sound.mjs';
-import { editedState, noisesFolder, tables, writeSample, writeTable } from './state.mjs';
+import {
+  editedState,
+  fxPresetParams,
+  noisesFolder,
+  reverbPresetsFolder,
+  tables,
+  writeSample,
+  writeTable,
+} from './state.mjs';
 
 const require = createRequire(import.meta.url);
 const FFT = require('fft.js');
@@ -2614,6 +2629,421 @@ if (runs('eq')) {
     console.log('dsp/measurements: eq', JSON.stringify({ level: result.level }));
   } finally {
     stands.forEach((stand) => stand.remove());
+  }
+}
+
+// --- reverb ---
+// the tools of the renders of the reverb (reverb, reverb-presets): a stand of the rack (`tag`), the impulse and the
+// tone under it, the measures of a response, the chord of the scenes and its windows
+const reverbTools = (tag) => {
+  const R = RACK_RATE;
+  const stand = rackStand(tag);
+  const { sampleOf } = stand;
+  const round = (v, digits = 2) => (Number.isFinite(v) ? +v.toFixed(digits) : null);
+  const dB = (energy) => 10 * Math.log10(energy + 1e-30);
+  // a sample through the rack with a reverb of the plain params `reverb` (null: an empty rack, the dry signal)
+  const play = (sample, reverb) =>
+    stand.play(sample, reverb === null ? null : { module: 'FXReverb', type: 6, params: reverb });
+  // A quiet tone under every sample, from its start: in a silence the reverb sleeps, and woken by the signal it
+  // answers otherwise (an impulse into a sleeping Hall: a tail 18 dB louder, none at all over Size 60; the other
+  // types nothing). 25 Hz, under every band read here
+  const TONE = 1e-4;
+  const withTone = (x) => x.map((value, i) => value + TONE * Math.sin((2 * Math.PI * 25 * i) / R));
+  const SECONDS = 9;
+  const impulse = new Float64Array(SECONDS * R);
+  impulse[Math.round(0.3 * R)] = 0.5;
+  // (an FFT of each length, made once: a long one takes a while to make)
+  const ffts = new Map();
+  const fftOf = (n) => {
+    if (!ffts.has(n)) ffts.set(n, new FFT(n));
+    return ffts.get(n);
+  };
+  // the signal of `x` in each [lo, hi] Hz of `ranges` (the bins of one FFT of all of it)
+  const bands = (x, ranges) => {
+    let n = 1;
+    while (n < x.length) n <<= 1;
+    const fft = fftOf(n);
+    const input = new Float64Array(n);
+    input.set(x);
+    const spectrum = fft.createComplexArray();
+    fft.realTransform(spectrum, input);
+    fft.completeSpectrum(spectrum);
+    const back = fft.createComplexArray();
+    return ranges.map(([lo, hi]) => {
+      const bins = spectrum.slice();
+      for (let k = 0; k < n; k++) {
+        const f = (Math.min(k, n - k) * R) / n;
+        if (f < lo || f > hi) bins[2 * k] = bins[2 * k + 1] = 0;
+      }
+      fft.inverseTransform(back, bins);
+      return Float64Array.from({ length: x.length }, (_, i) => back[2 * i]);
+    });
+  };
+  const band = (x, lo, hi) => bands(x, [[lo, hi]])[0];
+  // RT60 (s) of the fall from -5 to -25 dB of the energy left (Schroeder) from `from`
+  const rt60 = (x, from) => {
+    const left = new Float64Array(x.length - from);
+    let sum = 0;
+    for (let i = x.length - 1; i >= from; i--) left[i - from] = sum += x[i] * x[i];
+    const at = (level) => left.findIndex((e) => dB(e / left[0]) < level);
+    const [a, b] = [at(-5), at(-25)];
+    return b > 0 ? ((b - a) / R) * 3 : NaN;
+  };
+  const energy = (x, from, to) => {
+    let sum = 0;
+    for (let i = Math.max(0, Math.round(from)); i < Math.min(x.length, Math.round(to)); i++)
+      sum += x[i] * x[i];
+    return sum;
+  };
+  // the octaves RT60 is read in: [centre, from, to] Hz
+  const OCTAVES = [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map((c) => [
+    c,
+    c / Math.SQRT2,
+    Math.min(20000, c * Math.SQRT2),
+  ]);
+  // the measures of the response to the impulse (the dry one at `at`, of energy `dryEnergy`): RT60 by octave, the
+  // energy of all of it against the dry impulse, the first echo after the direct sound (ms), the first sound (ms),
+  // the level every `LEVELS` s (50 ms, dB against the dry impulse), side against mid over 0.2..1 s
+  const LEVELS = [0, 0.05, 0.1, 0.2, 0.5, 1, 2, 4];
+  const measure = ([l, r], at, dryEnergy) => {
+    const [hl, hr] = [band(l, 40, 21000), band(r, 40, 21000)];
+    const mono = Float64Array.from(hl, (x, i) => (x + hr[i]) / 2);
+    let top = 0;
+    for (let i = at - 8; i < hl.length; i++) top = Math.max(top, Math.abs(hl[i]), Math.abs(hr[i]));
+    const loud = (i, share) => Math.max(Math.abs(hl[i]), Math.abs(hr[i])) > top * share;
+    let first = at - 8;
+    while (first < hl.length && !loud(first, 0.02)) first++;
+    let echo = at + Math.round(0.002 * R);
+    while (echo < hl.length && !loud(echo, 0.25)) echo++;
+    let side = 0;
+    let mid = 0;
+    for (let i = at + Math.round(0.2 * R); i < at + R; i++) {
+      side += ((hl[i] - hr[i]) / 2) ** 2;
+      mid += ((hl[i] + hr[i]) / 2) ** 2;
+    }
+    return {
+      rt60: bands(
+        mono,
+        OCTAVES.map(([, lo, hi]) => [lo, hi])
+      ).map((octave) => round(rt60(octave, at + Math.round(0.1 * R)))),
+      energy: round(dB((energy(hl, at - 8, hl.length) + energy(hr, at - 8, hr.length)) / dryEnergy), 1),
+      first: round(((first - at) / R) * 1000, 1),
+      echo: round(((echo - at) / R) * 1000, 1),
+      levels: LEVELS.map((t) =>
+        round(
+          dB(
+            (energy(hl, at + t * R, at + (t + 0.05) * R) + energy(hr, at + t * R, at + (t + 0.05) * R)) /
+              dryEnergy
+          ),
+          1
+        )
+      ),
+      side: round(dB(side / (mid + 1e-30)), 1),
+    };
+  };
+  // the echoes of a response: its first `count` samples over a quarter of its peak, 0.2 ms apart at least:
+  // [ms after the impulse, left, right] against the dry impulse
+  const echoes = ([l, r], at, dryPeak, count = 12) => {
+    let top = 0;
+    for (let i = at - 8; i < at + 2 * R; i++) top = Math.max(top, Math.abs(l[i]), Math.abs(r[i]));
+    const found = [];
+    for (let i = at - 8; i < at + 2 * R && found.length < count; i++)
+      if (Math.max(Math.abs(l[i]), Math.abs(r[i])) > top / 4) {
+        found.push([round(((i - at) / R) * 1000, 1), round(l[i] / dryPeak, 3), round(r[i] / dryPeak, 3)]);
+        i += 8;
+      }
+    return found;
+  };
+  // how dense the echoes are `seconds` after the impulse: the share of the samples of 20 ms over their standard
+  // deviation, against that of a noise (0.3173)
+  const density = ([l], at, seconds) => {
+    const [from, to] = [at + Math.round((seconds - 0.01) * R), at + Math.round((seconds + 0.01) * R)];
+    const deviation = Math.sqrt(energy(l, from, to) / (to - from));
+    let over = 0;
+    for (let i = from; i < to; i++) if (Math.abs(l[i]) > deviation) over++;
+    return round(over / (to - from) / 0.3173);
+  };
+  // The scenes: a chord of saws (C3, G3, E4, 0.2..2 s) through the Hall, what a window of 4096 samples around
+  // each `SCENE_TIMES` s holds: its level (dB of the mean square of both channels, the sample at full scale 0 dB)
+  // and the share of the third octaves from 50 Hz in the spectrum of its mid (dB of their sum, Hann)
+  const SCENE_TIMES = [0.35, 0.9, 1.5, 1.9, 2.2, 2.6, 3.1, 3.8, 4.6, 5.5];
+  const WINDOW = 4096;
+  const BANDS = 25;
+  const NOTES = [130.8128, 195.9977, 329.6276];
+  const chord = () => {
+    const x = new Float64Array(6 * R);
+    for (const f of NOTES)
+      for (let h = 1; h * f < 16000; h++)
+        for (let i = Math.round(0.2 * R); i < Math.round(2.03 * R); i++) {
+          const t = i / R;
+          const gate = Math.min(1, (t - 0.2) / 0.005, (2.03 - t) / 0.03);
+          x[i] += ((0.12 * gate) / h) * Math.sin(2 * Math.PI * h * f * t);
+        }
+    return x;
+  };
+  const windowsOf = ([l, r], delay, gain) => {
+    const fft = new FFT(WINDOW);
+    return SCENE_TIMES.map((t) => {
+      const from = Math.round(t * R) + delay - WINDOW / 2;
+      let square = 0;
+      const mid = new Float64Array(WINDOW);
+      for (let i = 0; i < WINDOW; i++) {
+        const [a, b] = [(l[from + i] ?? 0) / gain, (r[from + i] ?? 0) / gain];
+        square += (a * a + b * b) / 2;
+        mid[i] = ((a + b) / 2) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / WINDOW));
+      }
+      const bins = fft.createComplexArray();
+      fft.realTransform(bins, mid);
+      const bands = new Float64Array(BANDS);
+      let total = 0;
+      // (from 43 Hz: the tone of the stand is under it)
+      for (let k = 4; k < WINDOW / 2; k++) {
+        const e = bins[2 * k] ** 2 + bins[2 * k + 1] ** 2;
+        total += e;
+        const b = Math.floor(3 * Math.log2((k * R) / WINDOW / 50) + 0.5);
+        if (b >= 0 && b < BANDS) bands[b] += e;
+      }
+      return [
+        round(dB(square / WINDOW), 1),
+        ...Array.from(bands, (e) => round(dB(e / (total + 1e-30) + 1e-9), 1)),
+      ];
+    });
+  };
+  // the impulse played dry: the sample of its peak, the peak, the energy over 40 Hz the measures are read against
+  const dryImpulse = async (click) => {
+    const [dry] = await play(click, null);
+    let at = 0;
+    for (let i = 0; i < dry.length; i++) if (Math.abs(dry[i]) > Math.abs(dry[at])) at = i;
+    return { dry, at, dryPeak: dry[at], dryEnergy: 2 * energy(band(dry, 40, 21000), at - 8, at + 400) };
+  };
+  // the gains of a render `x` of Wet as the sum of those at 0 (`zero`) and 100 (`full`), [dry, wet], and what is
+  // left of it (dB): least squares over 2 s from the impulse
+  const wetGains = (x, zero, full, at) => {
+    const sums = { dd: 0, dw: 0, ww: 0, xd: 0, xw: 0 };
+    const to = at + 2 * R;
+    for (let i = at - 8; i < to; i++) {
+      sums.dd += zero[i] * zero[i];
+      sums.dw += zero[i] * full[i];
+      sums.ww += full[i] * full[i];
+      sums.xd += x[i] * zero[i];
+      sums.xw += x[i] * full[i];
+    }
+    const det = sums.dd * sums.ww - sums.dw * sums.dw;
+    const a = (sums.xd * sums.ww - sums.xw * sums.dw) / det;
+    const b = (sums.xw * sums.dd - sums.xd * sums.dw) / det;
+    let rest = 0;
+    let all = 0;
+    for (let i = at - 8; i < to; i++) {
+      rest += (x[i] - a * zero[i] - b * full[i]) ** 2;
+      all += x[i] * x[i];
+    }
+    return [a, b, dB(rest / all)];
+  };
+  // the stand plays a sample late and quieter: by its dry render (its first sample over a hundredth of the peak
+  // against that of the source; the levels of both over 0.5..1.5 s)
+  const standOf = (dry, source) => {
+    const onset = (x) => {
+      let top = 0;
+      for (const value of x) top = Math.max(top, Math.abs(value));
+      return x.findIndex((value) => Math.abs(value) > top / 100);
+    };
+    const delay = onset(band(dry, 40, 21000)) - onset(source);
+    const gain = Math.sqrt(energy(dry, delay + 0.5 * R, delay + 1.5 * R) / energy(source, 0.5 * R, 1.5 * R));
+    return { delay, gain };
+  };
+  return {
+    ...{ R, stand, sampleOf, round, dB, play, withTone, impulse, bands, band, energy, OCTAVES, LEVELS },
+    ...{ measure, echoes, density, SCENE_TIMES, NOTES, chord, windowsOf, dryImpulse, wetGains, standOf },
+  };
+};
+
+if (runs('reverb')) {
+  const tools = reverbTools('reverb');
+  const { R, stand, sampleOf, round, play, withTone, impulse, OCTAVES, LEVELS } = tools;
+  const { measure, echoes, density, SCENE_TIMES, NOTES, chord, windowsOf, dryImpulse, wetGains, standOf } =
+    tools;
+  const HALL = { kParamWet: 100, kParamType: 'kHall' };
+  try {
+    const click = sampleOf('impulse', [withTone(impulse)]);
+    const { at, dryPeak, dryEnergy } = await dryImpulse(click);
+    const measured = async (reverb) => measure(await play(click, reverb), at, dryEnergy);
+    const sweep = (key, values, base = HALL) =>
+      Promise.all(
+        values.map(async (value) => ({ [key]: value, ...(await measured({ ...base, [key]: value })) }))
+      );
+    // every type at its defaults (no Type: the first of its list)
+    const types = Promise.all(
+      [null, 'kHall', 'kVintage', 'kSpace', 'kAbyss'].map(async (type) => ({
+        type,
+        ...(await measured(type ? { kParamWet: 100, kParamType: type } : { kParamWet: 100 })),
+      }))
+    );
+    const hall = play(click, HALL).then((wet) => ({
+      ...measure(wet, at, dryEnergy),
+      echoes: echoes(wet, at, dryPeak),
+      density: [0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2].map((t) => [t, density(wet, at, t)]),
+    }));
+    const size = Promise.all(
+      [0, 10, 25, 37.5, 50, 62.5, 75, 90, 100].map(async (value) => {
+        const wet = await play(click, { ...HALL, kParamSize: value });
+        return { kParamSize: value, ...measure(wet, at, dryEnergy), echoes: echoes(wet, at, dryPeak, 6) };
+      })
+    );
+    const decay = sweep('kParamDelay', [0, 10, 20, 30, 40, 50, 75, 100, 150, 250]);
+    const lowDamp = sweep('kParamFreq', [0, 15, 30, 50, 75, 100]);
+    const highDamp = sweep('kParamFreqB', [0, 15, 35, 50, 75, 100]);
+    const predelay = sweep('kParamPreDelay', [0, 0.01, 0.05, 0.1, 0.33]);
+    const width = sweep('kParamWidth', [0, 20, 50, 100]);
+    const feedback = sweep('kParamFeedback', [0, 50, 100]);
+    const level = sweep('kParamLevelOut', [0.3, 0.5, 0.75, 1]);
+    // off the axes of the sweeps: do the laws of Size, of the decay and of the damping multiply
+    const cross = Promise.all(
+      [
+        { kParamSize: 25, kParamDelay: 50 },
+        { kParamSize: 25, kParamDelay: 10 },
+        { kParamSize: 75, kParamDelay: 50 },
+        { kParamSize: 75, kParamDelay: 10 },
+        { kParamSize: 25, kParamFreqB: 75 },
+        { kParamSize: 75, kParamFreqB: 75 },
+        { kParamSize: 75, kParamFreq: 50 },
+      ].map(async (params) => ({ ...params, ...(await measured({ ...HALL, ...params })) }))
+    );
+    // the law of Wet: a render at Wet w as the sum of those at 0 and at 100, [w, the gain of the dry one, of the
+    // wet one, what is left of it (dB)]
+    const wetLaw = Promise.all([play(click, { ...HALL, kParamWet: 0 }), play(click, HALL)]).then(
+      ([[zero], [full]]) =>
+        Promise.all(
+          [10, 30, 50, 60, 80].map(async (wet) => {
+            const [x] = await play(click, { ...HALL, kParamWet: wet });
+            const [a, b, rest] = wetGains(x, zero, full, at);
+            return [wet, round(a, 4), round(b, 4), round(rest, 0)];
+          })
+        )
+    );
+    const result = {
+      about:
+        'The reverb of the effect rack of the Audio Unit (FXReverb, an item of type 6) on samples of ours played by its noise oscillator (one-shot, 44.1 kHz, rendered at 44.1 kHz), a tone of 25 Hz at 1e-4 under each from its start: in a silence the reverb sleeps, and woken by the signal alone it answers otherwise. Its plain params: kParamType (kHall, kVintage, kSpace, kAbyss; none: the first type), kParamSize 0..100, kParamDelay (the decay) 0..250, kParamFreq (the damping of the lows) and kParamFreqB (of the highs) 0..100, kParamPreDelay (s), kParamWidth, kParamFeedback, kParamLevelOut 0..1, kParamWet 0..100; one not written is at its default (Hall: Size about 35, the decay about 30, FreqB 35, Freq 0, Width 20, LevelOut 0.5). An impulse of 0.5 at 0.3 s, all wet, a measure of it: rt60 (s) of the octaves `octaves` (the fall of the energy left from -5 to -25 dB, from 0.1 s after the impulse, times 3: of 9 s, so a decay over about 12 s is cut short), energy (dB, all of the response against the dry impulse, over 40 Hz), first (ms, the first sample over 2 % of its peak), echo (ms, the first sample over a quarter of its peak from 2 ms on: the first echo after the direct sound), levels (dB against the dry impulse, 50 ms from each of `levelTimes` s), side (dB against the mid, 0.2..1 s). types: every type at its defaults. hall: the Hall at its defaults, echoes [ms, left, right] (the first samples over a quarter of the peak, against the dry impulse: the lines of the Hall are a sixth of an octave apart, left and right in turn), density [s, the share of the samples of 20 ms over their standard deviation against that of a noise]. size, decay, lowDamp, highDamp, predelay, width, feedback, level: the Hall by one param. cross: by two. wet: [Wet, the gain of the dry signal, of the wet one, the rest in dB] of a render at Wet as the sum of those at 0 and 100: the wet gain is s = sin²(Wet/100 · π/2), the dry one 1 - s². scenes: a chord of saws (`chord`: the notes in Hz, each the sum of its harmonics under 16 kHz at 0.12 / h, sines from t = 0, a gate from 0.2 s (5 ms up) to 2.03 s (30 ms down), 6 s) through the Hall at {size, wet}, rows of the windows of 4096 samples around `sceneTimes` s: [level (dB of the mean square of both channels, the sample at full scale 0 dB), the share of each of 25 third octaves from 50 Hz in the spectrum of the mid (Hann, bins from 43 Hz), dB]; dry: the same of the empty rack. scripts/renders/run.mjs --only=reverb',
+      rate: R,
+      octaves: OCTAVES.map(([centre]) => centre),
+      levelTimes: LEVELS,
+      types: await types,
+      hall: await hall,
+      size: await size,
+      decay: await decay,
+      lowDamp: await lowDamp,
+      highDamp: await highDamp,
+      predelay: await predelay,
+      width: await width,
+      feedback: await feedback,
+      level: await level,
+      cross: await cross,
+      wet: await wetLaw,
+    };
+    // (a sample after another: every render of the impulse is done)
+    const source = chord();
+    const saws = sampleOf('chord', [withTone(source)]);
+    const dryChord = await play(saws, null);
+    const { delay, gain } = standOf(dryChord[0], source);
+    const scenes = await Promise.all(
+      [
+        [25, 30],
+        [50, 30],
+        [75, 30],
+        [50, 60],
+      ].map(async ([sceneSize, wet]) => ({
+        size: sceneSize,
+        wet,
+        windows: windowsOf(
+          await play(saws, { kParamType: 'kHall', kParamSize: sceneSize, kParamWet: wet }),
+          delay,
+          gain
+        ),
+      }))
+    );
+    Object.assign(result, {
+      chord: NOTES,
+      sceneTimes: SCENE_TIMES,
+      stand: { delay, gain: round(gain, 4) },
+      dry: windowsOf(dryChord, delay, gain),
+      scenes,
+    });
+    writeRows(join(out, 'reverb.json'), result);
+    console.log(
+      'dsp/measurements: reverb',
+      JSON.stringify({ hall: result.hall.rt60, wet: result.wet, stand: result.stand })
+    );
+  } finally {
+    stand.remove();
+  }
+}
+
+// --- the factory presets of the reverb ---
+if (runs('reverb-presets')) {
+  const tools = reverbTools('reverb-presets');
+  const { R, stand, sampleOf, round, dB, play, withTone, impulse, bands, energy, OCTAVES, LEVELS } = tools;
+  const { measure, density, SCENE_TIMES, NOTES, chord, windowsOf, dryImpulse, wetGains, standOf } = tools;
+  const folder = reverbPresetsFolder();
+  const presets = readdirSync(folder)
+    .filter((file) => !file.startsWith('.'))
+    .sort()
+    .map((file) => ({ name: parse(file).name, params: fxPresetParams(join(folder, file)) }));
+  const DENSITY_TIMES = [0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2];
+  // the energy of each octave of a response over `from`..the end
+  const octaveEnergies = ([l, r], from) => {
+    const mono = Float64Array.from(l, (x, i) => (x + r[i]) / 2);
+    return bands(
+      mono,
+      OCTAVES.map(([, lo, hi]) => [lo, hi])
+    ).map((x) => energy(x, from, x.length));
+  };
+  try {
+    const click = sampleOf('impulse', [withTone(impulse)]);
+    const { dry, at, dryEnergy } = await dryImpulse(click);
+    const dryOctaves = octaveEnergies([dry, dry], at - 8);
+    const rows = await Promise.all(
+      presets.map(async ({ name, params }) => {
+        const [full, zero, own] = await Promise.all([
+          play(click, { ...params, kParamWet: 100 }),
+          play(click, { ...params, kParamWet: 0 }),
+          play(click, params),
+        ]);
+        const [a, b, rest] = wetGains(own[0], zero[0], full[0], at);
+        return {
+          name,
+          params,
+          ...measure(full, at, dryEnergy),
+          octaves: octaveEnergies(full, at - 8).map((e, k) => round(dB(e / dryOctaves[k]), 1)),
+          density: DENSITY_TIMES.map((t) => [t, density(full, at, t)]),
+          gains: [round(a, 4), round(b, 4), round(rest, 0)],
+        };
+      })
+    );
+    // (a sample after another: every render of the impulse is done)
+    const source = chord();
+    const saws = sampleOf('chord', [withTone(source)]);
+    const dryChord = await play(saws, null);
+    const { delay, gain } = standOf(dryChord[0], source);
+    const scenes = await Promise.all(
+      presets.map(async ({ params }) => windowsOf(await play(saws, params), delay, gain))
+    );
+    writeRows(join(out, 'reverb-presets.json'), {
+      about:
+        'The factory presets of the reverb of the Audio Unit (Effect Chains/Reverb/Factory: `params` their plain params, the others at their defaults; kParamType none: the first type, Plate) in its effect rack, rendered and measured as reverb.json (its stand: the noise oscillator plays samples of ours one-shot at 44.1 kHz, a tone of 25 Hz at 1e-4 under each). The impulse all wet (Wet 100): rt60, energy, first, echo, levels and side as in reverb.json; octaves (dB, the energy of each octave of `octaves` of the response against that of the dry impulse); density [s, the share of the samples of 20 ms over their standard deviation against that of a noise]. gains: [the gain of the dry signal, of the wet one, the rest in dB] of its render at its own Wet as the sum of those at Wet 0 and 100. scene: the chord of reverb.json through it at its own Wet, the windows of reverb.json at `sceneTimes`; dry: the same of the empty rack. scripts/renders/run.mjs --only=reverb-presets',
+      rate: R,
+      octaves: OCTAVES.map(([centre]) => centre),
+      levelTimes: LEVELS,
+      sceneTimes: SCENE_TIMES,
+      chord: NOTES,
+      stand: { delay, gain: round(gain, 4) },
+      dry: windowsOf(dryChord, delay, gain),
+      presets: rows.map((row, i) => ({ ...row, scene: scenes[i] })),
+    });
+    console.log(
+      'dsp/measurements: reverb-presets',
+      JSON.stringify(rows.map(({ name, rt60 }) => [name, rt60[4]]))
+    );
+  } finally {
+    stand.remove();
   }
 }
 

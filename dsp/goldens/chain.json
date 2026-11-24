@@ -1,6 +1,6 @@
 {
   "192 kHz, blocks of 37": {
-    "sha256": "23862b77b27117c98535d98a59d7c0c7a863e0cd912c26b908a8f8170f5f8931",
+    "sha256": "ba77eed22e657c1f33cbf71beb6e2f77886a7215c357aa260422fa35db1ee8be",
     "at": 402,
     "head": [
       2.107982571050021e-13,
@@ -14,7 +14,7 @@
     ]
   },
   "96 kHz, blocks of 1000": {
-    "sha256": "8f108dc5eeec75489b514b8d0394aeab7b27665ff8d323b19c53fa3719e47fcd",
+    "sha256": "6db0f72ab1a6007aced090a77263f97fbc3da2a695a2dbd0c49338c416f71914",
     "at": 210,
     "head": [
       6.370985553352804e-13,
@@ -28,7 +28,7 @@
     ]
   },
   "another order, without the limiter": {
-    "sha256": "da9a3b7589a5bc84685905864ae1b6de1db8cc8f04475fdb38a1f3928cfa7465",
+    "sha256": "c1ae10ee824b51c5b7d39de26f43a8e0820fb20ee1b7b9b2d3a9d982b7167a56",
     "at": 2,
     "head": [
       1.3755497609013734e-11,
@@ -42,7 +42,7 @@
     ]
   },
   "events at their frames": {
-    "sha256": "c41f4043a51f01d5ea2cf98eb77017e7ed9c9b67e270dc2a64404c1988678024",
+    "sha256": "bb93778154bf68f7e63242a592dae54e7e1bdf2a3463389632fa29f2b93e2ecd",
     "at": 113,
     "head": [
       0.23447692394256592,
@@ -56,7 +56,7 @@
     ]
   },
   "every effect in the default order": {
-    "sha256": "7fc3b82f00ca65928a2c4d49727b079069f6fecdce981991b17038aff2de6c2b",
+    "sha256": "9614f6ae2201b5079f60b332f8f14ad9873e421cf7e43c4be3211158f70f1de3",
     "at": 114,
     "head": [
       2.7170531449738355e-12,
@@ -70,7 +70,7 @@
     ]
   },
   "slots switched, moved and mixed as it plays, the master and the mute": {
-    "sha256": "26719b2841e0cc346848d7cfe95873fcea942d94e967f59ae6878f8a20585c0a",
+    "sha256": "aa5877d0ca7fa94942498fe73f30a14e4f272205702ad46c0a144eac8b3d3692",
     "at": 114,
     "head": [
       1.5460827063051852e-11,
@@ -84,7 +84,7 @@
     ]
   },
   "the knobs moved by a note and its LFOs": {
-    "sha256": "2d8594a6ff2382237df65e4987db5e5f184999d7eca0df570fa1b5e9f6660c88",
+    "sha256": "ae377a1c05279fa1f02ee394bafcee2854e7a1336b27a1d084cd2983d02a19d4",
     "at": 114,
     "head": [
       2.195015870454231e-12,

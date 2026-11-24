@@ -23,6 +23,52 @@ export const tables = () => {
 // the folder of its noise samples (`relativePathToNoiseSample` is under it): beside the tables, in Samples
 export const noisesFolder = () => tables().replace(/Tables\/?$/, 'Samples/Factory Non-Tonal/Noises');
 
+// the folder of the factory presets of its reverb (a file each): beside the tables, in Effect Chains
+export const reverbPresetsFolder = () => tables().replace(/Tables\/?$/, 'Effect Chains/Reverb/Factory');
+
+// a value of CBOR as plain JS: a number of any width, a name, a map as an object, an array
+const plain = (value) => {
+  if (value === null || typeof value !== 'object') return value;
+  if ('map' in value) return Object.fromEntries(value.map.map(([k, v]) => [k.text ?? k, plain(v)]));
+  if ('array' in value) return value.array.map(plain);
+  if ('f16' in value) {
+    const n = value.f16;
+    const [sign, exponent, fraction] = [n >> 15 ? -1 : 1, (n >> 10) & 31, n & 1023];
+    if (exponent === 0) return sign * 2 ** -14 * (fraction / 1024);
+    return exponent === 31
+      ? fraction
+        ? NaN
+        : sign * Infinity
+      : sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+  }
+  if ('f32' in value) return value.f32;
+  if ('f64' in value) return value.f64;
+  if ('uint' in value) return value.uint;
+  if ('neg' in value) return -1 - value.neg;
+  if ('text' in value) return value.text;
+  return value;
+};
+
+// the plain params of the effect `module` (FXReverb…) of a preset of an effect (its file: the container of a state,
+// its modules the effect alone), as numbers and names; {} where they are all at their defaults
+export const fxPresetParams = (file, module = 'FXReverb') => {
+  const bytes = readFileSync(file);
+  const length = Number(bytes.readBigUInt64LE(9));
+  const doc = plain(decode(zlib.zstdDecompressSync(bytes.subarray(17 + length + 8))));
+  const find = (node) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node[module]) return node[module];
+    for (const child of Object.values(node)) {
+      const found = find(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  const effect = find(doc);
+  if (!effect) throw new Error(`no ${module} in ${file}`);
+  return effect.plainParams && effect.plainParams !== 'default' ? effect.plainParams : {};
+};
+
 // a small unsigned integer of CBOR as the states have it (one of 24 and up is encoded on a byte of its own)
 const uint = (n) => (n < 24 ? n : { uint: n, info: 24 });
 
@@ -61,7 +107,12 @@ export const editedState = (initFile, oscs, slots = [], noise = null, fx = null)
   if (fx)
     set(get(doc, 'FXRack0'), 'FX', {
       array: fx.map(({ module, type, params = {}, kept = {} }) => {
-        const floats = (values) => Object.entries(values).map(([key, value]) => [key, { f32: value }]);
+        // (a param that is a name, the Type of a reverb, is written as it is)
+        const floats = (values) =>
+          Object.entries(values).map(([key, value]) => [
+            key,
+            typeof value === 'string' ? value : { f32: value },
+          ]);
         const plain = floats(params);
         return {
           map: [

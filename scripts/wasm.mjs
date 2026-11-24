@@ -35,8 +35,10 @@ const CORES = [
   // 203.4 KB with a fade cut with its segment where the levels jump (render_cuts_warped); 204.3 KB with a table
   // under a still map read in one loop (render11_mapped: a voice held on PWM 6 % faster, on Bend + 2 %); 206.3 KB with
   // the macros of the node as sources of the routes of the voices and of the chain (Macros, the levels that wait
-  // for their frames: Shared::set_macros, render_macros; the levels of the chain at the points: level_at)
-  { crate: 'engine', name: 'engine', budget: 206600 },
+  // for their frames: Shared::set_macros, render_macros; the levels of the chain at the points: level_at); 207.4 KB
+  // with the passes of the reverb four samples at a time (its early reflections, its shelves, its output: a
+  // quarter less time) and the laws of a hall at the top of its Size and its Damp
+  { crate: 'engine', name: 'engine', budget: 207700 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
