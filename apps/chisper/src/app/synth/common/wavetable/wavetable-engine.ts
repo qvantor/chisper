@@ -4,7 +4,7 @@ import { workletUrl } from '../../fx/effects/load-worklet';
 import type { EngineHost } from '../engine/engine-host';
 import type { EngineReport } from '../engine/engine-params';
 import type { LfosState } from '../lfo/lfo-curve';
-import { isLfoSource } from '../../fx/effects/fx-modulation';
+import { isLfoSource, MacrosState } from '../chain/chain-params';
 import type {
   BuilderFailedMessage,
   BuilderPortMessage,
@@ -388,6 +388,9 @@ export const createWavetableEngine = (
     // the LFOs of every voice from `state.at` on (their tables only when they changed), while a voice reads one
     // (the LFOs as they are first, once one does); a node made later (ready, Retry) takes the last ones at once
     setLfos: (state: LfosState) => engine.lfos.take(state),
+    // the levels of the macros of the node (null: that macro as it is) from `state.at` on, for the voices and the
+    // chain alike (the synth tells them; the routes stay as they are); a node made later takes the last ones at once
+    setMacros: (state: MacrosState) => engine.macros.set(state),
     // the events of this task to the node now (the specs)
     flush,
     // the tables whose latest version the store hasn't acknowledged yet (a note meanwhile plays the previous

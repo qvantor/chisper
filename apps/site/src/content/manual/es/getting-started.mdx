@@ -3,7 +3,7 @@ title: 'Cómo usar Chisper: primeros pasos con el sintetizador online'
 h1: 'Primeros pasos con Chisper'
 description: 'Guía para principiantes: toca el sintetizador online con el teclado del ordenador, un teclado MIDI o la pantalla, abre presets y comparte tu sonido sin cuenta.'
 nav: 'Primeros pasos'
-updated: 2026-11-23
+updated: 2026-11-24
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -126,7 +126,7 @@ reproduciendo: un preset con clip toca el suyo, uno sin clip toca el del piano r
 
 ## ¿Qué hay en la pantalla?
 
-<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='La pantalla completa de Chisper en un ordenador con sus partes numeradas: la cabecera; el sub, los osciladores, el ruido y el filtro en la fila de arriba; las envolventes, los LFO, la velocidad y las voces debajo; las teclas abajo del todo'>
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'macros', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='La pantalla completa de Chisper en un ordenador con sus partes numeradas: la cabecera; el sub, los osciladores, el ruido y el filtro en la fila de arriba; los macros, las envolventes, los LFO, la velocidad y las voces debajo; las teclas abajo del todo'>
 
 1. **Logo**: abre este sitio en una pestaña nueva. El sintetizador sigue sonando en la suya.
 2. **Espectro**: las frecuencias que salen del sintetizador en este momento, los graves a la izquierda y los agudos
@@ -162,14 +162,16 @@ reproduciendo: un preset con clip toca el suyo, uno sin clip toca el del piano r
     por encima más fuerte, por debajo más suave (una línea cada 24 dB y en 100 Hz, 1 kHz y 10 kHz). Drive sube la
     curva tanto como un sonido fuerte sale más fuerte, y suaviza lo más alto de los agudos.
 
-11. **ENV 1–3**: [envolventes](/es/manual/modulacion-envolventes-lfo/). ENV 1 es el volumen de cada nota.
-12. **LFO 1–4**: [LFO](/es/manual/modulacion-envolventes-lfo/) que mueven cualquier perilla sobre la que los
+11. **Macros**: [MACRO 1–4](/es/manual/modulacion-envolventes-lfo/), cuatro perillas tuyas. Arrastra la pestaña a
+    la derecha de una a las perillas que quieras: un solo giro las mueve todas.
+12. **ENV 1–3**: [envolventes](/es/manual/modulacion-envolventes-lfo/). ENV 1 es el volumen de cada nota.
+13. **LFO 1–4**: [LFO](/es/manual/modulacion-envolventes-lfo/) que mueven cualquier perilla sobre la que los
     arrastres.
-13. **VELO**: lo que hace la velocidad de una nota.
-14. **Voicing**: **Poly** y cuántas notas suenan a la vez (de 1 a 12, 8 por defecto), **Legato** y **Portamento**.
-15. **Rueda de pitch** y la octava del teclado del ordenador.
-16. **Keys**: el piano en pantalla.
-17. **Clip**: el loop del piano roll. Un clic abre el piano roll sobre el sintetizador; ▶ reproduce el clip.
+14. **VELO**: lo que hace la velocidad de una nota.
+15. **Voicing**: **Poly** y cuántas notas suenan a la vez (de 1 a 12, 8 por defecto), **Legato** y **Portamento**.
+16. **Rueda de pitch** y la octava del teclado del ordenador.
+17. **Keys**: el piano en pantalla.
+18. **Clip**: el loop del piano roll. Un clic abre el piano roll sobre el sintetizador; ▶ reproduce el clip.
 
 </InterfaceMap>
 
@@ -305,7 +307,7 @@ completa de un ordenador). Su cabecera tiene los mismos presets, **Save** y **Sh
 - **Keys** (por defecto): una pequeña vista en vivo del sintetizador sobre dos filas de teclas, C4 encima de C3, de
   una octava cada una con el móvil en vertical y de dos en horizontal. Cada fila tiene sus propios botones de
   octava; la rueda de pitch está al lado.
-- **Synth**: las partes del sintetizador una debajo de otra (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO,
+- **Synth**: las partes del sintetizador una debajo de otra (Sub, Osc 1, Osc 2, Noise, Filter, Macros, ENV, LFO, VELO,
   Voicing) para recorrerlas deslizando; **CLIP** abre el piano roll a pantalla completa.
 
 En un iPhone o un iPad el sonido se oye incluso con el interruptor de silencio activado.
@@ -314,8 +316,8 @@ En un iPhone o un iPad el sonido se oye incluso con el interruptor de silencio a
 
 - [¿Qué es la síntesis wavetable?](/es/aprende/que-es-la-sintesis-wavetable/): cómo una tabla de ondas, la perilla
   **Wave** y el movimiento crean un sonido, con tres cosas que oír.
-- [Modulación: envolventes, LFO y velocidad](/es/manual/modulacion-envolventes-lfo/): haz que cualquier perilla se
-  mueva sola.
+- [Modulación: envolventes, LFO, macros y velocidad](/es/manual/modulacion-envolventes-lfo/): haz que cualquier
+  perilla se mueva sola.
 - [Wavetables](/es/manual/wavetables/): la biblioteca, tablas propias a partir de archivos WAV y de audio, y cómo
   dibujar una onda.
 - [Teclados MIDI, Chromebooks e iPads](/es/manual/teclado-midi/): configuración, tocar desde un DAW sincronizado,

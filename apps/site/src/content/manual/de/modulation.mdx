@@ -1,28 +1,31 @@
 ---
 title: 'Synthesizer-Modulation erklärt: LFO, ADSR-Hüllkurve, Anschlagstärke'
-h1: 'Modulation: Hüllkurven, LFOs und Anschlagstärke'
-description: 'Modulation per Drag-and-drop: Hüllkurve, LFO oder Anschlagstärke auf jeden Regler, ADSR mit Kurven, LFO mit Tempo-Sync, Sidechain, eigene Formen, 64 Routen.'
+h1: 'Modulation: Hüllkurven, LFOs, Makros und Anschlagstärke'
+description: 'Modulation per Drag-and-drop: Hüllkurve, LFO, Makro oder Anschlagstärke auf jeden Regler, ADSR mit Kurven, LFO mit Tempo-Sync, Sidechain, 64 Routen.'
 nav: 'Modulation'
-updated: 2026-11-21
+updated: 2026-11-23
 preset: zesty-drive-bass
 image: modulation-drag
 ---
 
 Modulation lässt einen Regler sich von selbst bewegen. In Chisper ziehst du den Tab einer Quelle (einer Hüllkurve,
-ENV 1–3, eines LFO, LFO 1–4, oder der Anschlagstärke der Noten, VELO) per Drag-and-drop auf einen beliebigen
-Regler; der Regler bewegt sich dann bei jeder Note mit dieser Quelle, nach oben oder um seinen eigenen Wert herum,
+ENV 1–3, eines LFO, LFO 1–4, eines Makros, MACRO 1–4, oder der Anschlagstärke der Noten, VELO) per Drag-and-drop auf
+einen beliebigen Regler; der Regler bewegt sich dann mit dieser Quelle, nach oben oder um seinen eigenen Wert herum,
 so weit, wie die eingestellte Stärke reicht. Ein Preset fasst bis zu 64 solcher Routen, vier auf einem Regler.
 
 Hüllkurven formen jede Note vom Moment des Drückens bis nach dem Loslassen: ein Pluck, ein Anschwellen, ein
 Filter-Sweep. LFOs wiederholen eine Form immer wieder, frei oder im Takt des Tempos: Vibrato, ein Wobble, ein
 Sidechain-Pumpen, ein Gate. Die Anschlagstärke gibt jeder Note ihren eigenen Pegel, lauter oder heller, je fester
-du spielst.
+du spielst. Ein Makro ist ein eigener Regler: Ein Dreh bewegt alle Regler, auf die du es gezogen hast.
 
 ## Die Quellen
 
 Die Quellen sind die Tabs in der unteren Reihe des Synths, jeder in seiner eigenen Farbe:
 
-- **ENV 1**, **ENV 2**, **ENV 3** (unten links): drei Hüllkurven. ENV 1 ist außerdem die Lautstärke jeder Note.
+- **MACRO 1** bis **MACRO 4** (unten links, untereinander): vier Makros, jeder Regler mit seinem Tab rechts daneben,
+  in der Farbe des Makros.
+- **ENV 1**, **ENV 2**, **ENV 3** (rechts der Makros): drei Hüllkurven. ENV 1 ist außerdem die Lautstärke jeder
+  Note.
 - **LFO 1** bis **LFO 4** (unten in der Mitte): vier LFOs.
 - **VELO** (unten rechts, neben Voicing): die Anschlagstärke jeder Note.
 
@@ -56,7 +59,8 @@ Ziehst du eine Quelle auf einen Regler, der sie schon hat, ändert sich nichts; 
   Quelle ihn bringt.
 - Ein kleiner Punkt oben links am Regler hat ein Segment für jede seiner Routen, unter einem kleinen Sinuszeichen.
 - Während Noten klingen, wandert eine zweite, blassere Markierung um den Regler: dorthin, wo alle seine Routen ihn
-  gerade hinstellen. Regler der Effekte bewegen sich mit einem LFO weiter, auch wenn keine Note gehalten wird.
+  gerade hinstellen. Regler der Effekte bewegen sich mit einem LFO weiter, auch wenn keine Note gehalten wird, und
+  ein Regler, den ein Makro bewegt, zeigt jederzeit, wo er steht.
 
 ## Stärke (Amount), unipolar und bipolar
 
@@ -72,7 +76,7 @@ Eine Route ist entweder:
 - **Bipolar** (**Bi**): Der Regler schwingt um seinen Wert, die halbe Stärke darüber und die halbe darunter. Genau
   richtig für Vibrato oder ein Panning, das nach links und rechts wandert.
 
-Ein LFO, den du auf einen Regler mit einem um null zentrierten Bereich ziehst (**Pan**, **Pitch**, **Fine**,
+Ein LFO oder ein Makro, das du auf einen Regler mit einem um null zentrierten Bereich ziehst (**Pan**, **Pitch**, **Fine**,
 **Crs** des Subs, Gain des Filters, Gain eines EQ-Typs mit 0 dB in seiner Mitte, Gain eines Bands des EQ, **L**,
 **M** und **H** des Kompressors), startet bipolar; jede andere Route startet unipolar.
 
@@ -113,9 +117,9 @@ entfernt alle seine Routen. Ein Regler ohne Routen sagt *Drag a source tab here 
 - **Effekte**: jeder Regler und der Mix jedes Effekts (Drive, Tone und Level der Distortion; Time, Feedback, Freq,
   Q und Pan des Delays; die Regler des Chorus, des Kompressors und des EQ; die Regler und Fader des Reverbs). Ihre
   Schalter nehmen keine an, auch nicht die Typen der Bänder des EQ.
-- **LFO 1–4**: Rate, Delay, Rise, Smooth und Phase, bewegt von einer Hüllkurve oder der Anschlagstärke. Ein LFO
-  kann keinen LFO bewegen.
-- Die Regler der Hüllkurven, von VELO, **Oct** und die Schalter nehmen keine Routen an.
+- **LFO 1–4**: Rate, Delay, Rise, Smooth und Phase, bewegt von einer Hüllkurve, der Anschlagstärke oder einem
+  Makro. Ein LFO kann keinen LFO bewegen.
+- Die Regler der Hüllkurven, von VELO und der Makros, **Oct** und die Schalter nehmen keine Routen an.
 
 ## ADSR-Hüllkurven: ENV 1, ENV 2, ENV 3
 
@@ -237,6 +241,27 @@ Die Computertastatur und das Bildschirmklavier spielen jede Note mit Anschlagst�
 spielen, nimm ein [MIDI-Keyboard](/de/anleitung/midi-keyboard/).
 
 </Note>
+
+## Makros: MACRO 1 bis MACRO 4
+
+Ein Makro ist ein Regler, der viele dreht. Zieh den Tab eines Makros auf jeden Regler, den es bewegen soll, stell
+die Stärke jeder Route ein und dreh dann den Regler des Makros: Alle bewegen sich zugleich, jeder so weit, wie seine
+eigene Stärke reicht. Der Regler geht von 0 bis 100 %, der Pegel des Makros von 0 bis 1.
+
+- Ein Makro wirkt auch ohne gehaltene Note, auch auf die Effekte, und eine klingende Note folgt dem Dreh weich.
+- Es bewegt auch die Regler der LFOs: Ein Makro auf **Rate** macht einen Wobble schneller oder langsamer.
+- Bei 0 % bewegt eine unipolare Route nichts, bei 100 % die ganze Stärke. Eine bipolare liegt bei 0 % die halbe
+  Stärke unter dem Wert des Reglers und bei 100 % die halbe darüber.
+- Die Pegel der Makros werden im Preset gespeichert. Jedes Makro startet bei 0 %.
+
+Der Tab eines Makros zeigt seine Nummer (in einer breiten Spalte MACRO und die Nummer); ein weißer Punkt an seiner
+Ecke zählt die Routen des Makros und fehlt, solange es keine hat. Der ausgewählte leuchtet, mit einem sanften Schein.
+
+Sobald ein Makro eine Route hat, steht darunter ein Feld mit seinem Namen: Klick hinein und tipp einen ein, bis zu 20
+Zeichen (Enter oder Escape verlässt das Feld). Solange es leer ist, zeigt es grau MACRO 1 (2, 3, 4). Der Name wird im
+Preset gespeichert, und das Menü jedes Reglers, den das Makro bewegt, zeigt seine Route unter diesem Namen. Ein Makro
+ohne Routen hat kein Feld: Sein Name kehrt mit einer neuen Route zurück, solange die Seite offen bleibt, aber das
+Preset behält ihn nicht.
 
 ## Drei Übungen
 

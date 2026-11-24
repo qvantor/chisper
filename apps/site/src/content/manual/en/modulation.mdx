@@ -1,26 +1,30 @@
 ---
 title: 'Synth Modulation: Envelopes, LFOs and Velocity on Any Knob'
-h1: 'Modulation: envelopes, LFOs and velocity'
-description: 'Drag an envelope, an LFO or velocity onto any knob of Chisper: ADSR with curves, tempo-synced LFOs, sidechain pumps, drawn LFO shapes, 64 routes.'
+h1: 'Modulation: envelopes, LFOs, macros and velocity'
+description: 'Drag an envelope, an LFO, a macro or velocity onto any knob of Chisper: ADSR with curves, tempo-synced LFOs, sidechain pumps, drawn LFO shapes, 64 routes.'
 nav: 'Modulation'
-updated: 2026-11-21
+updated: 2026-11-23
 preset: zesty-drive-bass
 image: modulation-drag
 ---
 
 Modulation makes a knob move by itself. In Chisper you drag the tab of a source (an envelope, ENV 1–3, an LFO,
-LFO 1–4, or the velocity of the notes, VELO) onto any knob; the knob then moves with that source on every note,
-up or around its own value, as far as the amount you set. A preset holds up to 64 such routes, four on one knob.
+LFO 1–4, a macro, MACRO 1–4, or the velocity of the notes, VELO) onto any knob; the knob then moves with that
+source, up or around its own value, as far as the amount you set. A preset holds up to 64 such routes, four on one
+knob.
 
 Envelopes shape each note from the moment you press it to after you let go: a pluck, a swell, a filter sweep. LFOs
 repeat a shape over and over, free or in time with the tempo: vibrato, a wobble, a sidechain pump, a gate. Velocity
-gives every note its own level, louder or brighter the harder you play.
+gives every note its own level, louder or brighter the harder you play. A macro is a knob of your own: one turn
+moves every knob you dragged it onto.
 
 ## The sources
 
 The sources are the tabs of the bottom row of the synth, each with a color of its own:
 
-- **ENV 1**, **ENV 2**, **ENV 3** (bottom left): three envelopes. ENV 1 is also the volume of every note.
+- **MACRO 1** to **MACRO 4** (bottom left, one under another): four macros, each knob with its tab at its right, in
+  the color of the macro.
+- **ENV 1**, **ENV 2**, **ENV 3** (right of the macros): three envelopes. ENV 1 is also the volume of every note.
 - **LFO 1** to **LFO 4** (bottom centre): four LFOs.
 - **VELO** (bottom right, beside Voicing): the velocity of each note.
 
@@ -50,7 +54,8 @@ Dropping a source onto a knob that already has it changes nothing; drag its dot 
 - The route of the selected tab is an arc in its color, from the value of the knob to where the source takes it.
 - A small dot at the top left of the knob has a slice for each of its routes, under a little sine sign.
 - While notes sound, a second, paler mark moves around the knob: where all its routes put it right now. Knobs of
-  the effects keep moving with an LFO even with no note held.
+  the effects keep moving with an LFO even with no note held, and a knob a macro moves shows where it is at any
+  moment.
 
 ## Amount, unipolar and bipolar
 
@@ -65,7 +70,7 @@ A route is either:
 - **Bipolar** (**Bi**): the knob swings around its value, half the amount above and half below. Right for
   vibrato or a pan that moves left and right.
 
-An LFO dropped onto a knob whose range is centred on zero (**Pan**, **Pitch**, **Fine**, the sub's **Crs**, the
+An LFO or a macro dropped onto a knob whose range is centred on zero (**Pan**, **Pitch**, **Fine**, the sub's **Crs**, the
 Gain of the filter, the Gain of an EQ type, 0 dB in its middle, the Gain of a band of the EQ, the **L**, **M** and
 **H** of the compressor) starts bipolar; every other route starts unipolar.
 
@@ -105,9 +110,9 @@ routes says *Drag a source tab here to add a modulation*.
 - **Effects**: every knob and the Mix of each effect (Drive, Tone and Level of the distortion; Time, Feedback,
   Freq, Q and Pan of the delay; the knobs of the chorus, of the compressor and of the EQ; the knobs and faders of
   the reverb). Their switches take none, the types of the bands of the EQ too.
-- **LFO 1–4**: Rate, Delay, Rise, Smooth and Phase, moved by an envelope or the velocity. An LFO can't move an
-  LFO.
-- The knobs of the envelopes, of VELO, **Oct** and the switches take no routes.
+- **LFO 1–4**: Rate, Delay, Rise, Smooth and Phase, moved by an envelope, the velocity or a macro. An LFO can't
+  move an LFO.
+- The knobs of the envelopes, of VELO and of the macros, **Oct** and the switches take no routes.
 
 ## Envelopes: ENV 1, ENV 2, ENV 3
 
@@ -222,6 +227,26 @@ The computer keyboard and the on-screen piano play every note at velocity 100. T
 [MIDI keyboard](/manual/midi-keyboard-setup/).
 
 </Note>
+
+## Macros: MACRO 1 to MACRO 4
+
+A macro is one knob that turns many. Drag the tab of a macro onto every knob it should move, set the amount of each
+route, then turn the knob of the macro: all of them move at once, each as far as its own amount. The knob goes from
+0 to 100%, the level of the macro from 0 to 1.
+
+- A macro works with no note held too, the effects as well, and a note that sounds follows the turn smoothly.
+- It moves the knobs of the LFOs too: a macro on **Rate** speeds a wobble up or slows it down.
+- At 0% a unipolar route moves nothing, at 100% it moves the whole amount. A bipolar one is half its amount below
+  the knob's value at 0% and half above at 100%.
+- The levels of the macros are saved in the preset. Every macro starts at 0%.
+
+The tab of a macro shows its number (in a wide column, MACRO and the number); a white dot on its corner counts the
+routes of the macro and is gone while it has none. The selected one is lit, with a soft glow.
+
+Once a macro has a route, a field under it holds its name: click it and type one, up to 20 characters (Enter or
+Escape leaves the field). While it is empty it shows MACRO 1 (2, 3, 4) in grey. The name is saved in the preset, and
+the menu of every knob the macro moves shows its route under that name. A macro with no routes has no field: its
+name comes back with a new route while the page stays open, but the preset doesn't keep it.
 
 ## Three exercises
 

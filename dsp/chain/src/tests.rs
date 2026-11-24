@@ -4,9 +4,13 @@
 use alloc::{vec, vec::Vec};
 
 use crate::chain::*;
-use crate::modulation::{Bases, Modulation, KEYS, LFO_SOURCE, LFO_STATE, LINE_EQ, MIX_KEY, NOTE};
+use crate::modulation::{
+    Bases, Modulation, KEYS, LFO_SOURCE, LFO_STATE, LFO_TARGET, LINE_EQ, MACRO_SOURCE, MIX_KEY, NOTE,
+};
 use crate::units::*;
 use crate::{delay, eq};
+use dsp_core::lfo::RATE;
+use dsp_core::sources::VELO;
 
 const BLOCK: usize = 128;
 
@@ -968,6 +972,164 @@ fn a_route_moves_a_knob_of_a_unit_once_a_block() {
     let after = render(&mut chain, &input, |_, _| {});
     unit.set(1 << distortion::LEVEL, &[0.0; MAX_PARAMS], true);
     same(&after, &through(&mut unit, &input), "the level back");
+}
+
+// a macro on a knob of a unit, without a note: the event of its level is taken at its frame (the first block at
+// it or after it) and the level glides there in 10 ms, the unit set to the knob moved once a block as by hand; a
+// level that is not a number leaves its macro
+#[test]
+fn a_macro_moves_a_knob_of_a_unit_without_a_note_from_the_block_of_its_level_gliding_there() {
+    let rate = 48000.0;
+    let input = signal(13, 40 * BLOCK, 0.4);
+    let mut chain = chain_of(rate, &[DISTORTION], 1.0, false);
+    chain.push(event(CLEAR, 0.0, 0.0, &[]));
+    let mut routes = Vec::new();
+    route(
+        &mut routes,
+        DISTORTION as usize * KEYS + distortion::LEVEL,
+        MACRO_SOURCE + 1,
+        -12.0,
+        -24.0,
+        12.0,
+    );
+    write(&mut chain, &routes);
+    chain.written(routes.len()).0.set_routes(&routes);
+    let nan = f64::NAN;
+    // MACRO 2 to 1 at frame 1000 (the block at 1024), then MACRO 1 alone (MACRO 2 as it is) at 2000
+    let mut level = event(SET_MACROS, 0.0, 0.0, &[nan, 1.0, nan, nan]);
+    level.at = 1000.0;
+    chain.push(level);
+    let mut other = event(SET_MACROS, 0.0, 0.0, &[0.5, nan, nan, nan]);
+    other.at = 2000.0;
+    chain.push(other);
+    let out = render(&mut chain, &input, |_, _| {});
+
+    let mut unit = Unit::new(DISTORTION, rate, &params()[0]).unwrap();
+    let mut macro2 = dsp_core::glided::Glided::new(0.0);
+    let mut alone = [Vec::new(), Vec::new()];
+    let mut last = f64::NAN;
+    for block in 0..40 {
+        if block == 8 {
+            macro2.glide(1.0, dsp_core::glided::glide_length(rate));
+        }
+        macro2.render(0, BLOCK);
+        let level = if macro2.constant {
+            macro2.value()
+        } else {
+            macro2.values[0] as f64
+        };
+        let value = 0.0 + -12.0 * level;
+        if value != last {
+            last = value;
+            let mut values = [0.0; MAX_PARAMS];
+            values[distortion::LEVEL] = value;
+            unit.set(1 << distortion::LEVEL, &values, true);
+        }
+        let part = block * BLOCK..(block + 1) * BLOCK;
+        let piece = through(
+            &mut unit,
+            &[input[0][part.clone()].to_vec(), input[1][part].to_vec()],
+        );
+        alone[0].extend_from_slice(&piece[0]);
+        alone[1].extend_from_slice(&piece[1]);
+    }
+    assert_eq!(last, -12.0);
+    same(&out, &alone, "the level moved by MACRO 2");
+}
+
+// a macro on Rate of an LFO, without a note (its runner free: no point before its first one, tD -inf): the LFO
+// at the rate moved, finite (an LFO of 10 Hz an octave up is the one of 20 Hz)
+#[test]
+fn a_macro_moves_the_rate_of_an_lfo_without_a_note() {
+    let rate = 48000.0;
+    let frames = 100 * BLOCK;
+    let input = [vec![0.5f32; frames], vec![0.5f32; frames]];
+    let run = |period: f64, macro_on_rate: bool| {
+        let mut chain = chain_of(rate, &[DISTORTION], 0.5, false);
+        chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        // a sine on the clock (free), its table the default one
+        let mut values = vec![0.0; 4 * LFO_STATE];
+        for lfo in 0..4 {
+            values[lfo * LFO_STATE..(lfo + 1) * LFO_STATE]
+                .copy_from_slice(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, period, 0.0]);
+        }
+        chain.written(0).0.set_lfos(0.0, true, &values);
+        let mut routes = Vec::new();
+        route(
+            &mut routes,
+            DISTORTION as usize * KEYS + MIX_KEY,
+            LFO_SOURCE,
+            0.6,
+            0.0,
+            1.0,
+        );
+        routes[6] = 1.0;
+        if macro_on_rate {
+            // MACRO 4 on Rate of LFO 1, log: an octave at 1
+            route(&mut routes, LFO_TARGET + RATE, MACRO_SOURCE + 3, 1.0, 0.01, 100.0);
+            routes[12] = 1.0;
+            chain.push(event(SET_MACROS, 1.0, 0.0, &[f64::NAN, f64::NAN, f64::NAN, 1.0]));
+        }
+        chain.written(0).0.set_routes(&routes);
+        render(&mut chain, &input, |_, _| {})
+    };
+    let moved = run(0.1, true);
+    let twice = run(0.05, false);
+    let still = run(0.1, false);
+    assert!(moved[0].iter().chain(&moved[1]).all(|value| value.is_finite()));
+    let worst = (0..frames).fold(0.0f32, |worst, i| worst.max((moved[0][i] - twice[0][i]).abs()));
+    assert!(worst < 1e-4, "{worst}");
+    assert!((0..frames).any(|i| (moved[0][i] - still[0][i]).abs() > 0.01));
+}
+
+// a route of the note on a knob of an LFO (VELO on Rate of LFO 1, log: an octave at 1) moves it while there is a
+// note; without one the knob is its own: the bits of the chain without the route (only a macro moves it then)
+#[test]
+fn a_route_of_the_note_moves_a_knob_of_an_lfo_only_with_a_note() {
+    let rate = 48000.0;
+    let frames = 100 * BLOCK;
+    let input = [vec![0.5f32; frames], vec![0.5f32; frames]];
+    let run = |period: f64, noted: bool, velo_on_rate: bool| {
+        let mut chain = chain_of(rate, &[DISTORTION], 0.5, false);
+        chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        // a sine on the clock (free), its table the default one
+        let mut values = vec![0.0; 4 * LFO_STATE];
+        for lfo in 0..4 {
+            values[lfo * LFO_STATE..(lfo + 1) * LFO_STATE]
+                .copy_from_slice(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, period, 0.0]);
+        }
+        chain.written(0).0.set_lfos(0.0, true, &values);
+        let mut routes = Vec::new();
+        route(
+            &mut routes,
+            DISTORTION as usize * KEYS + MIX_KEY,
+            LFO_SOURCE,
+            0.6,
+            0.0,
+            1.0,
+        );
+        routes[6] = 1.0;
+        if velo_on_rate {
+            route(&mut routes, LFO_TARGET + RATE, VELO, 1.0, 0.01, 100.0);
+            routes[12] = 1.0;
+        }
+        chain.written(0).0.set_routes(&routes);
+        if noted {
+            chain.written(0).0.set_note(true, &note(0.0, 0.0, 1.0));
+        }
+        render(&mut chain, &input, |_, _| {})
+    };
+    let moved = run(0.1, true, true);
+    let twice = run(0.05, true, false);
+    let still = run(0.1, true, false);
+    let worst = (0..frames).fold(0.0f32, |worst, i| worst.max((moved[0][i] - twice[0][i]).abs()));
+    assert!(worst < 1e-4, "{worst}");
+    assert!((0..frames).any(|i| (moved[0][i] - still[0][i]).abs() > 0.01));
+    same(
+        &run(0.1, false, true),
+        &run(0.1, false, false),
+        "no note: the knob its own",
+    );
 }
 
 // a switch of a unit with lines (the mode of the delay, the types of the bands of the EQ) is no knob a route moves:

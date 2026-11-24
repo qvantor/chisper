@@ -6,6 +6,7 @@ import {
   Observable,
   pairwise,
   skip,
+  startWith,
   Subject,
   throttleTime,
 } from 'rxjs';
@@ -72,7 +73,7 @@ import {
 } from './input-controller';
 import { Envelopes, envelopeSeconds, EnvelopesModule, VelocityKnobs } from './envelopes';
 import type { LfoModule, LfoRanges } from './lfos';
-import { ModRoute, ModulationModule } from './modulation';
+import { MacroMove, ModRoute, ModulationModule } from './modulation';
 import type { NoiseModel, NoiseModule } from './noise';
 import type { SubModel, SubModule } from './sub';
 import { OscillatorModel, OscillatorModule } from './oscillator';
@@ -1283,7 +1284,7 @@ export const synth = ({
   transport: [{ $tempo }],
   envelopes: [{ $envelopes, $velocity }],
   lfo,
-  modulation: [{ $routes }],
+  modulation: [{ $routes, $macros, $macroMoves }],
   oscillator: oscillators,
   noise: [noise],
   sub: [sub],
@@ -1326,8 +1327,9 @@ export const synth = ({
       onCount: () => $voicesCount.next(voicing.voicesCount),
     };
     const voicing = new Voicing(voicingContext);
-    // the LFOs of the last note on the main thread (the marks of the knobs, the chart of an LFO)
-    const noteLfos = noteLfosOf(clock.sampleRate, lfo, $fxNote, $routes);
+    // the LFOs of the last note on the main thread (the marks of the knobs, the chart of an LFO), their knobs moved
+    // by the macros as they are
+    const noteLfos = noteLfosOf(clock.sampleRate, lfo, $fxNote, $routes, () => $macros.value);
 
     return {
       $maxVoices,
@@ -1413,6 +1415,11 @@ export const synth = ({
             throttleTime(BEND_INTERVAL, clock.scheduler, { leading: true, trailing: true })
           )
           .subscribe((cents) => wavetables.setBend(cents)),
+        // the macros of the node (the voices and the chain read them): their levels of now, then every move at its
+        // time; the routes stay as they are
+        $macroMoves
+          .pipe(startWith<MacroMove>({ levels: [...$macros.value] }))
+          .subscribe(({ levels, at }) => wavetables.setMacros({ levels, at })),
         // the playing notes follow the knobs (the base of the params of each oscillator)
         ...oscillators.map(([{ $params }], osc) =>
           $params.pipe(pairwise()).subscribe(([previous, params]) =>

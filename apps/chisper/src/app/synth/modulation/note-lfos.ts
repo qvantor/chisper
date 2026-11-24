@@ -3,20 +3,23 @@ import { LFOS } from '@chisper/preset-schema';
 import type { LfoModule } from '../common/modules/lfos';
 import type { ModRoute } from '../common/modules/modulation';
 import { lfoKnobRoutes } from '../common/modulation/modulation-targets';
-import { createNoteLfos, FxNote, NoteLfos } from '../fx/effects/fx-modulation';
+import { createNoteLfos, FxNote, MacroLevels, NoteLfos } from '../fx/effects/fx-modulation';
 
 // the LFOs of the last note on the main thread (the marks of the knobs, the dot of the chart of an LFO): on the
-// LFOs of the lfo model, from the start of the last note ($fxNote), their knobs moved by the routes of the note to
-// them (within their divisions at the tempo in BPM). The synth model holds them: they follow it and the routes while it lives (its subscriptions)
+// LFOs of the lfo model, from the start of the last note ($fxNote), their knobs moved by the routes of the note and
+// of the macros (`macros`: their levels of now) to them (within their divisions at the tempo in BPM). The synth model
+// holds them: they follow it and the routes while it lives (its subscriptions)
 export const noteLfosOf = (
   sampleRate: number,
   [{ globals, $ranges }]: LfoModule,
   $fxNote: Observable<FxNote | null>,
-  $routes: Observable<ModRoute[]>
+  $routes: Observable<ModRoute[]>,
+  macros?: MacroLevels
 ) => {
   const lfos: NoteLfos = createNoteLfos(
     sampleRate,
-    LFOS.map((id) => globals[id])
+    LFOS.map((id) => globals[id]),
+    macros
   );
   const follow = () => [
     $fxNote.subscribe((note) => lfos.follow(note)),

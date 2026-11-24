@@ -580,6 +580,43 @@ describe('the voices of one node', () => {
     expect(quiet.every(({ left }) => left.every((value) => value === 0))).toBe(true);
   });
 
+  it('plays the macros of what its voices share: a level from the first block at its frame, a glide of 10 ms', () => {
+    // MACRO 2 takes the gain down to 0 at 1, MACRO 1 (null: as it is) moves nothing
+    const routes = [{ source: 9, param: 'gain1', amount: -1, min: 0, max: 1 }];
+    const on = (voice: number): VoiceEvent => ({
+      kind: 'on',
+      voice,
+      options: note({ routes, phrase: voice, envelopes: [FLAT, FLAT, FLAT] }),
+      params: {},
+    });
+    const play = (tell: (shared: ReturnType<typeof node>['shared'], frame: number) => void, blocks = 12) => {
+      const { voices, shared } = node();
+      voices.apply([on(1)]);
+      const out = Array.from({ length: blocks }, (_, block) => {
+        tell(shared, block * BLOCK);
+        return render(voices, block * BLOCK).left;
+      });
+      voices.free();
+      return out;
+    };
+    const plain = play(() => undefined);
+    // at once: silent from the first block
+    const silent = play((shared, frame) => frame === 0 && shared.setMacros([null, 1, null, null], 0, true));
+    expect(silent.every((left) => left.every((value) => value === 0))).toBe(true);
+    // sent at block 2 for frame 600: the blocks before 640 as without it, then down to 0 in 480 samples
+    const timed = play((shared, frame) => frame === 2 * BLOCK && shared.setMacros([0.5, 1, null, null], 600));
+    expect(timed.slice(0, 5)).toEqual(plain.slice(0, 5));
+    expect(timed.slice(5, 9).some((left, i) => left.some((value, k) => value !== plain[5 + i][k]))).toBe(
+      true
+    );
+    expect(timed.slice(9).every((left) => left.every((value) => value === 0))).toBe(true);
+    // (the gain a line: never under 0 of its share, no step over the glide)
+    const level = timed
+      .slice(5, 9)
+      .flatMap((left, i) => Array.from(left, (value, k) => value / (plain[5 + i][k] || 1)));
+    expect(Math.min(...level)).toBeGreaterThanOrEqual(-1e-6);
+  });
+
   it('the pitch bend of the node at rest, or one that is not finite: the same bits as none', () => {
     const play = (events: VoiceEvent[]) => {
       const { voices } = node();

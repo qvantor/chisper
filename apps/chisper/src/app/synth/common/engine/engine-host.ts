@@ -1,6 +1,7 @@
 import { BehaviorSubject } from 'rxjs';
 import { captureEngineFailure, captureWorkerError, errorMessage } from '../../../common/services/analytics';
 import type { FxStatus } from '../../fx/effects/types';
+import { MACROS, MacrosState } from '../chain/chain-params';
 import { createLfoFeed, LfosState } from '../lfo/lfo-curve';
 import { EngineMessage, EngineOptions, EngineReport, LfoReader } from './engine-params';
 
@@ -61,7 +62,8 @@ export type LoadEngine = () => Promise<MakeEngine> | null;
 // Everything is told to the node in messages: `post`. The LFOs are told it once (`lfos.take`, by the LFO model
 // alone) for the voices and the chain: a half only says whether it reads one. They go to the node only while one of
 // them reads an LFO and only for the halves that do (`lfos.use`: a state is a table of 8 KB the audio thread takes
-// in; a half that starts to read gets the last ones); a node made later starts with the last ones
+// in; a half that starts to read gets the last ones); a node made later starts with the last ones. So are the levels
+// of the macros (`macros.set`, by the synth), to both halves always (four numbers)
 export const createEngineHost = (loadEngine: LoadEngine, kind: EngineKind = 'live') => {
   const what = kind === 'live' ? 'The engine worklet' : 'The engine of the render';
   const reporter = REPORTERS[kind];
@@ -79,6 +81,8 @@ export const createEngineHost = (loadEngine: LoadEngine, kind: EngineKind = 'liv
 
   const readers = new Set<LfoReader>();
   const feed = createLfoFeed((lfos) => post({ lfos, readers: [...readers] }));
+  // the levels of the macros as the last ones sent have them (a node made later starts with them)
+  const macros = new Array<number>(MACROS).fill(0);
 
   const setStatus = (status: FxStatus) => {
     $status.next(status);
@@ -127,6 +131,7 @@ export const createEngineHost = (loadEngine: LoadEngine, kind: EngineKind = 'liv
         );
         const lfos = feed.initial();
         if (lfos) options.lfos = lfos;
+        if (macros.some((level) => level !== 0)) options.macros = [...macros];
         // (a node dropped earlier, failed then retried, must not fail or tell the current one)
         const current: EngineLink = make(options, {
           report: (report) => {
@@ -182,6 +187,15 @@ export const createEngineHost = (loadEngine: LoadEngine, kind: EngineKind = 'liv
       },
       // a state of the LFOs, told once (the LFO model through the wavetable engine): for every half that reads one
       take: (state: LfosState) => feed.take(state),
+    },
+    macros: {
+      // levels of the macros (null: that macro as it is) for both halves, from `state.at` on
+      set: (state: MacrosState) => {
+        state.levels.forEach((level, k) => {
+          if (level !== null && k < MACROS) macros[k] = level;
+        });
+        post({ macros: state });
+      },
     },
     // loads a failed module again (nothing to do in any other status)
     retry: () => {

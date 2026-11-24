@@ -1,4 +1,11 @@
-import { LFO_KNOBS, LFO_SOURCE, ROUTE_SCALES } from '../../common/chain/chain-params';
+import {
+  isLfoSource,
+  isMacroSource,
+  LFO_KNOBS,
+  LFO_SOURCE,
+  MACRO_SOURCE,
+  ROUTE_SCALES,
+} from '../../common/chain/chain-params';
 import { EnvelopeParams, envelopeValue } from '../../common/envelope/envelope-curve';
 import {
   createLfoGlobal,
@@ -11,7 +18,8 @@ import {
 
 // the modulation of the fx knobs: there is one fx for the whole synth, so its knobs follow the envelopes and the
 // LFOs of the last note pressed (in legato its phrase: a note of the phrase doesn't start them again; the LFOs run
-// without a note too, on their clocks). Shared by the main thread and the fx worklets: no other imports
+// without a note too, on their clocks) and the macros (with a note or without). Shared by the main thread and the fx
+// worklets: no other imports
 
 // the envelopes of the last note (read when it was pressed), the seconds of the context they started at and
 // were released at (null: the key is held); a note that started them again on a voice that sounds (mono):
@@ -30,7 +38,8 @@ export interface FxNote {
 export type FxScale = (typeof ROUTE_SCALES)[number];
 
 // a route to a knob of an effect or of an LFO (lfo2.rate: the routes of the note to the knobs of its LFOs): `source`
-// (an envelope, the velocity after them, an LFO after it: MOD_SOURCES.indexOf) moves `param` by amount × its level
+// (an envelope, the velocity after them, an LFO after it, a macro after the LFOs: MOD_SOURCES.indexOf) moves `param`
+// by amount × its level
 // (bipolar: amount × (level - ½)), in the units of the param in its scale (octaves for a log one: the knob ×
 // 2^(amount × level)); clamped to the range of the knob (the Phase of an LFO goes around the cycle)
 export interface FxRoute {
@@ -55,14 +64,19 @@ export interface FxModulation {
 export { LFO_SOURCE };
 const LFO_COUNT = 4;
 
-// `source` reads an envelope (else the velocity, VELO, the same all along the note, or an LFO)
+// `source` reads an envelope (else the velocity, VELO, the same all along the note, an LFO or a macro)
 export const isEnvelope = (note: FxNote, source: number) => source < note.envelopes.length;
-export const isLfoSource = (source: number) => source >= LFO_SOURCE;
+
+// the levels of the macros as they are now (MACRO 1–4, within 0..1: the modulation model has them)
+export type MacroLevels = () => readonly number[];
+const NO_MACROS: MacroLevels = () => [];
+// the level of macro source `source` among `levels`
+const macroLevel = (levels: readonly number[], source: number) => levels[source - MACRO_SOURCE] ?? 0;
 
 // the level of source `source` (an envelope, VELO) of the note t seconds after its start: each route sums amount ×
-// level, the marks of the knobs show it
+// level, the marks of the knobs show it (an LFO or a macro: 0, not of the note)
 export const noteLevel = (note: FxNote, source: number, t: number) => {
-  if (!isEnvelope(note, source)) return isLfoSource(source) ? 0 : (note.velo ?? 0);
+  if (!isEnvelope(note, source)) return source < LFO_SOURCE ? (note.velo ?? 0) : 0;
   const released = note.release === null ? Infinity : note.release - note.start;
   return envelopeValue(note.envelopes[source], t, released, note.from?.[source]);
 };
@@ -145,18 +159,22 @@ export const lfoKnobOf = (param: string) => {
 // the LFOs of the last note, as the voices run them (the main thread: the marks of the knobs and the dot of the
 // chart; an fx worklet: its knobs): their states (setLfos), a runner of each from the start of the envelopes of the
 // note (a note that started them again, mono: again from there; no note: on the clock, their Delay and Rise
-// passed), its knobs moved by the routes of the note to them (setRoutes: of the envelopes and VELO). level() steps
-// a runner to a frame in points of 32 samples at most. The LFOs of the main thread run on those of the lfo model
+// passed), its knobs moved by the routes of the note to them (setRoutes: of the envelopes, VELO and the macros, the
+// levels of `macros`; without a note only those of the macros move a knob, as the chain has it). level() steps a
+// runner to a frame in points of 32 samples at most. The LFOs of the main thread run on those of the lfo model
 // (`globals`: it sets their states)
 export const createNoteLfos = (
   sampleRate: number,
-  globals: LfoGlobal[] = Array.from({ length: LFO_COUNT }, createLfoGlobal)
+  globals: LfoGlobal[] = Array.from({ length: LFO_COUNT }, createLfoGlobal),
+  macros: MacroLevels = NO_MACROS
 ) => {
   const runners = Array.from({ length: LFO_COUNT }, () => createLfoRunner(sampleRate));
   runners.forEach((runner) => runner.free());
   let note: FxNote | null = null;
-  // the routes of the knobs of each LFO, by knob
-  let knobs: [keyof LfoMods, FxRoute[]][][] = globals.map(() => []);
+  // the routes of the knobs of each LFO, by knob, and whether a macro moves the knob; whether one moves a knob of
+  // each LFO (it moves without a note)
+  let knobs: [keyof LfoMods, FxRoute[], boolean][][] = globals.map(() => []);
+  let macroed: boolean[] = globals.map(() => false);
 
   // the knobs of LFO `lfo` the routes of the note move at t (seconds of the context), into one object per LFO (the
   // runner reads it at once: no garbage a point), of one shape: a knob no route moves is undefined (a delete would
@@ -171,20 +189,28 @@ export const createNoteLfos = (
   const modsOf = globals.map((global, lfo) => (t: number): LfoMods => {
     const mods = moved[lfo];
     const routes = knobs[lfo];
-    const played = note as FxNote;
+    const levels = macros();
     for (let k = 0; k < routes.length; k++) {
-      const [knob, list] = routes[k];
+      const [knob, list, macro] = routes[k];
+      // (without a note a knob no macro moves is its own)
+      if (!note && !macro) {
+        mods[knob] = undefined;
+        continue;
+      }
       const base =
         knob === 'rate' ? 1 / global.period(t) : knob === 'phase' ? global.phase(t) : global.knobs(t)[knob];
       let sum = 0;
-      for (let r = 0; r < list.length; r++)
-        sum += routeTerm(list[r], noteLevel(played, list[r].source, t - played.start));
+      for (let r = 0; r < list.length; r++) {
+        const { source } = list[r];
+        if (isMacroSource(source)) sum += routeTerm(list[r], macroLevel(levels, source));
+        else if (note) sum += routeTerm(list[r], noteLevel(note, source, t - note.start));
+      }
       const value = movedBy(base, sum, list[0]);
       mods[knob] = knob === 'phase' ? frac(value) : clampTo(value, list[0]);
     }
     return mods;
   });
-  const mods = (lfo: number) => (note && knobs[lfo].length > 0 ? modsOf[lfo] : undefined);
+  const mods = (lfo: number) => ((note ? knobs[lfo].length > 0 : macroed[lfo]) ? modsOf[lfo] : undefined);
 
   return {
     globals,
@@ -209,7 +235,14 @@ export const createNoteLfos = (
         if (!match || isLfoSource(route.source)) return;
         (byKnob[Number(match[1]) - 1][match[2]] ??= []).push(route);
       });
-      knobs = byKnob.map((lfo) => Object.entries(lfo) as [keyof LfoMods, FxRoute[]][]);
+      knobs = byKnob.map((lfo) =>
+        Object.entries(lfo).map(([knob, list]): [keyof LfoMods, FxRoute[], boolean] => [
+          knob as keyof LfoMods,
+          list,
+          list.some(({ source }) => isMacroSource(source)),
+        ])
+      );
+      macroed = knobs.map((lfo) => lfo.some(([, , macro]) => macro));
       moved.forEach((mods) => {
         mods.rate = mods.delay = mods.rise = mods.smooth = mods.phase = undefined;
       });

@@ -203,6 +203,25 @@ describe('createNoteLfos', () => {
     expect(lfos.level(0, at(2.25))).toBeCloseTo(0.25, 5);
   });
 
+  it('a macro moves its knobs without a note too, at its level; without a note the routes of the note move none', () => {
+    const levels = [0, 1, 0, 0];
+    const lfos = createNoteLfos(RATE_48, undefined, () => levels);
+    lfos.setLfos({ at: 0, instantly: true, lfos: [lfo(), lfo(), lfo(), lfo()] });
+    const plain = setup();
+    // MACRO 2 on Rate of LFO 1 (an octave at 1: twice as fast), ENV 2 on Rate of LFO 2
+    lfos.setRoutes([
+      { param: 'lfo1.rate', source: 9, amount: 1, min: 1 / 32, max: 100, scale: 'log' },
+      { param: 'lfo2.rate', source: 1, amount: 1, min: 1 / 32, max: 100, scale: 'log' },
+    ]);
+    // (on its clock at its first point: no point before it, no step; from there 1 Hz faster)
+    expect(lfos.level(0, at(0.2))).toBeCloseTo(0.2, 4);
+    expect(lfos.level(0, at(0.3))).toBeCloseTo(0.4, 4);
+    expect(lfos.level(1, at(0.3))).toBeCloseTo(plain.level(1, at(0.3)), 6);
+    // a level of 0: at the rate of its knob again, from where it is
+    levels[1] = 0;
+    expect(lfos.level(0, at(0.4))).toBeCloseTo(0.5, 4);
+  });
+
   it('the routes of the note move its knobs: ENV 2 on Rate (an octave: twice as fast)', () => {
     const lfos = setup();
     const flat = { attack: 0, hold: 0, decay: 0, sustain: 1, release: 0 };

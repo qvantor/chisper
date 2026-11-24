@@ -108,6 +108,7 @@ export const CHAIN_EVENT = {
   mute: 5,
   unmute: 6,
   clear: 7,
+  macros: 8,
 } as const;
 
 // the targets of the routes in the core (modulation.rs): slot · KEYS + the key of a param of its effect, MIX_KEY the
@@ -120,8 +121,22 @@ export const chainTarget = (kind: FxKind, key: string) =>
   FX_KINDS.indexOf(kind) * TARGET_KEYS + (key === 'mix' ? MIX_KEY : CHAIN_KEYS[kind].indexOf(key));
 export const LFO_KEYS = 8;
 export const LFO_KNOBS = ['rate', 'delay', 'rise', 'smooth', 'phase'] as const;
-// the sources: ENV 1–3, VELO, LFO 1–4 (MOD_SOURCES)
+// the sources: ENV 1–3, VELO, LFO 1–4, MACRO 1–4 (MOD_SOURCES)
 export const LFO_SOURCE = 4;
+export const MACRO_SOURCE = 8;
+export const MACROS = 4;
+// a source is an LFO (the macros come after them), a macro
+export const isLfoSource = (source: number) => source >= LFO_SOURCE && source < MACRO_SOURCE;
+export const isMacroSource = (source: number) => source >= MACRO_SOURCE && source < MACRO_SOURCE + MACROS;
+
+// the levels of the macros as both halves of the engine take them (macros.rs of dsp-core): MACROS of them within
+// 0..1 (null: that macro as it is), from the first block at `at` (seconds of the context) or after it (absent: the
+// next block), in the order sent; `instantly`: there at once (a node made again). Each glides to its level in 10 ms
+export interface MacrosState {
+  levels: readonly (number | null)[];
+  at?: number;
+  instantly?: boolean;
+}
 export const ROUTE_SCALES = ['linear', 'log', 'pow'] as const;
 
 // a route as the core takes it: `source` moves the knob `target` by amount × its level (bipolar: amount × (level -
@@ -200,6 +215,7 @@ export interface ChainMessage {
   routes?: ChainRoute[];
   note?: ChainNote | null;
   lfos?: LfosState;
+  macros?: MacrosState;
   // [kind, watched]
   meter?: [number, boolean];
   // the unit of a stage that failed made again (a kind, LIMITER_STAGE)

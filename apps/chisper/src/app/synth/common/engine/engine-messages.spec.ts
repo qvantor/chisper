@@ -1,4 +1,5 @@
 import { chainState, slotOf } from '../../../../test-utils/chain-render';
+import { chainTarget } from '../chain/chain-params';
 import { expectSameBits } from '../../../../test-utils/parity';
 import { seeded, storeWith } from '../../../../test-utils/voice-dsp';
 import { wasmCore } from '../../../../test-utils/wasm';
@@ -144,6 +145,42 @@ describe('the engine of a node', () => {
       none.engine.free();
     });
 
+    it('the macros of its options are those of its voices and of its chain at once; none: 0 (the shared outlives a node)', () => {
+      // MACRO 1 takes the gain of the oscillator down to 0, the mix of the distortion to dry
+      const routed = on(1, {
+        routes: [{ source: 8, param: 'gain1', amount: -1, min: 0, max: 1, scale: 'linear' }],
+      });
+      const state = chainState(
+        ['distortion'],
+        1,
+        {},
+        {
+          routes: [{ target: chainTarget('distortion', 'mix'), source: 8, amount: -1, min: 0, max: 1 }],
+        }
+      );
+      const rendered = (options: EngineOptions, shared = createVoiceSharedWasm(scope)) => {
+        const { store } = storeWith({ saw: [saw, sine] }, scope);
+        const { engine } = createNodeEngine(scope, RATE, { unlimited: true, ...options }, store, shared);
+        const output = render(engine, 8);
+        engine.free();
+        return output;
+      };
+      expect(peak(rendered({ events: [routed], macros: [1, 0, 0, 0] }))).toBe(0);
+      expect(peak(rendered({ events: [routed] }))).toBeGreaterThan(0);
+      // (a shared of a node with the macro at 1 before: the next one without macros has them at 0)
+      const shared = createVoiceSharedWasm(scope);
+      rendered({ events: [routed], macros: [1, 0, 0, 0] }, shared);
+      expect(peak(rendered({ events: [routed] }, shared))).toBeGreaterThan(0);
+      // the chain: the distortion of its state moved by MACRO 1 from the first blocks
+      const played = on(2);
+      expect(
+        differ(
+          rendered({ events: [played], state, macros: [1, 0, 0, 0] }),
+          rendered({ events: [played], state })
+        )
+      ).toBe(true);
+    });
+
     it('each voice apart with `tap`', () => {
       const { engine } = nodeEngine({ events: [on(1), on(2)], tap: true });
       render(engine, 1);
@@ -228,6 +265,40 @@ describe('the engine of a node', () => {
       render(engine, 1);
       meters.due(RATE, RATE);
       expect(reports.filter((report) => report.meter)).toHaveLength(1);
+      engine.free();
+    });
+
+    it('the levels of the macros go to both halves from the frame of their time (none: the next block), as they are sent', () => {
+      const { engine, shared, take } = taking();
+      const voices = jest.spyOn(shared, 'setMacros');
+      const chain = jest.spyOn(engine.chain, 'setMacros');
+      take({ macros: { levels: [0.5, null, null, null], at: 0.01 } });
+      take({ macros: { levels: [null, 1, null, null], at: 0.0100001 } });
+      take({ macros: { levels: [0, 0, 0, 0] } });
+      take({ macros: { levels: [1, 1, 1, 1], instantly: true } });
+      const calls = [
+        [[0.5, null, null, null], 480, false],
+        [[null, 1, null, null], 481, false],
+        [[0, 0, 0, 0], 0, false],
+        [[1, 1, 1, 1], 0, true],
+      ];
+      expect(voices.mock.calls).toEqual(calls);
+      expect(chain.mock.calls).toEqual(calls);
+      engine.free();
+    });
+
+    it('a half that can not take the levels of the macros loses only them: the other half and the events take theirs', () => {
+      const { engine, shared, errors, take } = taking();
+      const thrown = new Error('macros');
+      jest.spyOn(shared, 'setMacros').mockImplementation(() => {
+        throw thrown;
+      });
+      const chain = jest.spyOn(engine.chain, 'setMacros');
+      const apply = jest.spyOn(engine.voices, 'apply');
+      take({ macros: { levels: [0.5, null, null, null] }, events: [on(1)] });
+      expect(errors).toEqual([thrown]);
+      expect(chain).toHaveBeenCalledTimes(1);
+      expect(apply).toHaveBeenCalledTimes(1);
       engine.free();
     });
 

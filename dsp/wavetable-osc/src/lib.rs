@@ -15,7 +15,7 @@ extern crate alloc;
 use wasm_rt as _;
 
 // (the envelopes, the LFOs and the glides are of dsp-core: the chain runs them for the knobs of the effects)
-pub use dsp_core::{envelope, glided, lfo};
+pub use dsp_core::{envelope, glided, lfo, macros, sources};
 
 pub mod filter;
 pub mod modulation;
@@ -763,6 +763,17 @@ pub unsafe extern "C" fn osc_shared_lfos(shared: *mut Shared, at: f64, instantly
     (*shared).set_lfos(at, instantly != 0, &command()[..lfo::LFOS * LFO_STATE]);
 }
 
+/// the levels of the macros of the voices in the command buffer (`macros::MACROS` values within 0..1, one that is
+/// not a number leaves its macro) from the first block that starts at frame `at` or after it (0: the next block);
+/// `instantly` (not 0): there at once, no glide (a node made again)
+///
+/// # Safety
+/// `shared` comes from osc_shared_new and was not freed
+#[no_mangle]
+pub unsafe extern "C" fn osc_shared_macros(shared: *mut Shared, at: f64, instantly: u32) {
+    (*shared).set_macros(at, instantly != 0, &command()[..macros::MACROS]);
+}
+
 /// VoiceStats into the command buffer (the peak cost starts again)
 ///
 /// # Safety
@@ -846,6 +857,8 @@ pub unsafe extern "C" fn osc_voice_process(
     frames: usize,
 ) -> i32 {
     let shared = &mut *shared;
+    // (the macros of the block, once for the voices of the shared)
+    shared.render_macros(frame, frames, (*voice).sample_rate());
     // the io out of the shared while the voice borrows it
     let buffer = core::mem::take(&mut shared.params);
     let mut output = core::mem::take(&mut shared.output);

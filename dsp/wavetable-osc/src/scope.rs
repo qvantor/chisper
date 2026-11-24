@@ -355,6 +355,7 @@ impl Scope {
         self.mixed = false;
         core::slice::from_raw_parts_mut(into, 2 * n).fill(0.0);
         self.bend.render(0, n);
+        shared.render_macros(frame, n, self.rate);
         self.resume(store, shared);
     }
 

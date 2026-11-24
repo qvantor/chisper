@@ -3,14 +3,14 @@ import { styled } from 'styled-components';
 import cls from 'classnames';
 import { distinctUntilChanged, map } from 'rxjs';
 import { MdDragIndicator } from 'react-icons/md';
-import { isLfo, ModSource } from '@chisper/preset-schema';
+import { ModSource } from '@chisper/preset-schema';
 import { startModDrag, theme } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import { ModRoute } from '../common/modules/modulation';
 import { useEnvelopes, useModulation } from '../common/modules';
-import { centered } from '../common/modulation/modulation-targets';
+import { bipolarByDefault } from '../common/modulation/modulation-targets';
 import { FilterContext } from '../filter/modules';
-import { SOURCE_COLORS, SOURCE_LABELS } from '../envelope/envelope-colors';
+import { SOURCE_COLORS, SOURCE_LABELS, sourceLabel } from '../envelope/envelope-colors';
 
 // the whole header (a plain one): a segmented control on its grey, as high as the other headers
 const Root = styled.div`
@@ -94,6 +94,87 @@ const Grip = styled(MdDragIndicator)`
   color: ${theme.colors.primaryMediumContrast};
 `;
 
+type TabAttributes = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'id' | 'onSelect'>;
+
+interface SourceTabProps<S extends ModSource> extends TabAttributes {
+  id: S;
+  // it is the selected source (the knobs show its routes): a white key with the grip
+  selected: boolean;
+  // the section shows it while another source is selected: a translucent key
+  shown?: boolean;
+  // selected (or dropped on a knob)
+  onSelect: (id: S) => void;
+  // the knobs its source goes to (all by default): the others don't light up while it is dragged
+  accepts?: (target: string) => boolean;
+}
+
+// the number of the routes of `source`
+const routeCount = (source: ModSource, routes: ModRoute[]) =>
+  routes.filter((route) => route.source === source).length;
+
+// the number of the routes of a source: a route added or removed renders, not an amount
+export const useRouteCount = (id: ModSource) => {
+  const [{ $routes }] = useModulation();
+  const $count = React.useMemo(
+    () =>
+      $routes.pipe(
+        map((routes) => routeCount(id, routes)),
+        distinctUntilChanged()
+      ),
+    [$routes, id]
+  );
+  return useObservable($count, routeCount(id, $routes.value));
+};
+
+// what a tab of a source does whatever it looks like (a tab of a header, the plate of a macro), its handlers: a click
+// selects it, a press drags it onto a knob (under its label: the name of a macro given one), which assigns its
+// source to it at +50% (an LFO or a macro bipolar on a knob centered on 0: Var of an EQ type by the type of the
+// filter) and selects it, the knobs show the new route at once
+export const useSourceTab = <S extends ModSource>(
+  id: S,
+  onSelect: (id: S) => void,
+  accepts?: (target: string) => boolean
+) => {
+  const [{ $macroNames }, { addRoute }] = useModulation();
+  const filter = React.useContext(FilterContext)?.[0];
+  return {
+    onClick: () => onSelect(id),
+    onPointerDown: (e: React.PointerEvent) =>
+      startModDrag(e, {
+        label: sourceLabel(id, $macroNames.value),
+        color: SOURCE_COLORS[id],
+        accepts,
+        onDrop: (target) => {
+          addRoute(id, target, undefined, bipolarByDefault(id, target, filter?.$filterType.value));
+          onSelect(id);
+        },
+      }),
+  };
+};
+
+// the tab of a source (useSourceTab): the dot has the number of the routes of its source, the grip of the selected
+// one tells it
+const SourceTab = <S extends ModSource>({
+  id,
+  selected,
+  shown,
+  onSelect,
+  accepts,
+  ...attributes
+}: SourceTabProps<S>) => {
+  const count = useRouteCount(id);
+  const handlers = useSourceTab(id, onSelect, accepts);
+  return (
+    <Tab type='button' {...attributes} {...handlers} className={cls({ selected, shown: shown && !selected })}>
+      <Dot aria-hidden data-testid='route-count' style={{ background: SOURCE_COLORS[id] }}>
+        {count || null}
+      </Dot>
+      {SOURCE_LABELS[id]}
+      {selected && <Grip aria-hidden data-testid='env-grip' />}
+    </Tab>
+  );
+};
+
 interface Props<S extends ModSource> {
   // the accessible name of the tabs
   label: string;
@@ -107,64 +188,29 @@ interface Props<S extends ModSource> {
   accepts?: (target: string) => boolean;
 }
 
-// the number of the routes of each source, in their order
-const routeCounts = (sources: readonly ModSource[], routes: ModRoute[]) =>
-  sources.map((id) => routes.filter(({ source }) => source === id).length);
-const sameCounts = (a: number[], b: number[]) => a.every((count, i) => count === b[i]);
-
-// the tabs of sources in the header of a section, ENV 1 | ENV 2 | ENV 3, VELO or LFO 1 | … | LFO 4: the selected one
-// (of every source, the tabs of the other sections too) is the source the knobs show the routes of. A tab dragged
-// onto a knob assigns its source to it at +50% (an LFO bipolar on a knob centered on 0: Var of an EQ type by the type
-// of the filter) and selects it, the knobs show the new route at once (a click selects it), the grip of the selected
-// one tells it. The dot of a tab has the number of the routes of its source: a route added or removed renders the
-// tabs, not an amount
+// the tabs of sources in the header of a section, ENV 1 | ENV 2 | ENV 3, VELO or LFO 1 | … | LFO 4 (SourceTab each):
+// the selected one (of every source, the tabs of the other sections too) is the source the knobs show the routes of
 export const SourceTabs = <S extends ModSource>({ label, sources, shown, onSelect, accepts }: Props<S>) => {
   const [{ $selected }, { select: selectSource }] = useEnvelopes();
-  const [{ $routes }, { addRoute }] = useModulation();
-  const filter = React.useContext(FilterContext)?.[0];
   const selected = useBehaviorSubject($selected);
-  const $counts = React.useMemo(
-    () =>
-      $routes.pipe(
-        map((routes) => routeCounts(sources, routes)),
-        distinctUntilChanged(sameCounts)
-      ),
-    [$routes, sources]
-  );
-  const counts = useObservable($counts, routeCounts(sources, $routes.value));
   const select = (id: S) => {
     selectSource(id);
     onSelect?.(id);
   };
   return (
     <Root role='tablist' aria-label={label}>
-      {sources.map((id, i) => (
-        <Tab
+      {sources.map((id) => (
+        <SourceTab
           key={id}
-          type='button'
+          id={id}
           role='tab'
           // the tab of what the section shows: one of each tablist
           aria-selected={shown === undefined || id === shown}
-          className={cls({ selected: id === selected, shown: id === shown && id !== selected })}
-          onClick={() => select(id)}
-          onPointerDown={(e) =>
-            startModDrag(e, {
-              label: SOURCE_LABELS[id],
-              color: SOURCE_COLORS[id],
-              accepts,
-              onDrop: (target) => {
-                addRoute(id, target, undefined, isLfo(id) && centered(target, filter?.$filterType.value));
-                select(id);
-              },
-            })
-          }
-        >
-          <Dot aria-hidden data-testid='route-count' style={{ background: SOURCE_COLORS[id] }}>
-            {counts[i] || null}
-          </Dot>
-          {SOURCE_LABELS[id]}
-          {id === selected && <Grip aria-hidden data-testid='env-grip' />}
-        </Tab>
+          selected={id === selected}
+          shown={id === shown}
+          onSelect={select}
+          accepts={accepts}
+        />
       ))}
     </Root>
   );

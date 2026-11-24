@@ -2,6 +2,7 @@
 // pool of the mix tables
 use crate::envelope::EnvelopeParams;
 use crate::glided::Glided;
+use crate::macros::Macros;
 use crate::scope::{bend_into, Scope, SET};
 use crate::shared::{Shared, PARAMS};
 use crate::store::{EntryRef, Store, FRAME_GUARD};
@@ -1240,6 +1241,172 @@ fn the_gain_of_a_voice_follows_an_lfo_of_the_shared_from_its_note_on() {
     }
 }
 
+// --- the macros of the shared ---
+
+// the gain of a voice of a frame of 0.5 moved by MACRO 1 (amount 0.5 up from a gain of 0.5), rendered block by block
+// with the macros of the shared (as a scope renders them); `tell` before each block
+fn macro_gain(frames: usize, mut tell: impl FnMut(usize, &mut Shared)) -> Vec<f32> {
+    use crate::modulation::VoiceRoute;
+    use crate::targets::{target, GAIN, OSC};
+    let mut store = Store::default();
+    constant_frames(&mut store, 1.0, &[0.5]);
+    let mut shared = Shared::default();
+    let osc = OscOptions {
+        table: 1,
+        unison: 1.0,
+        phase: 0.0,
+        phase_rand: 0.0,
+        random: [0.0; 8],
+        shape: UnisonShape::default(),
+        warp_mode: 0,
+        warp: 0.0,
+    };
+    let route = VoiceRoute {
+        source: 8.0,
+        param: target(OSC, 0, GAIN),
+        amount: 0.5,
+        min: 0.0,
+        max: 1.0,
+        scale: 0,
+        bipolar: false,
+    };
+    let mut voice = Voice::new(
+        RATE,
+        VoiceOptions {
+            osc: [Some(osc), None],
+            routes: vec![route],
+            ..note()
+        },
+        &mut shared,
+    );
+    voice.attach(&mut store, &mut shared);
+    let mut out = vec![0.0f32; frames];
+    let mut right = vec![0.0f32; frames];
+    for frame in (0..frames).step_by(128) {
+        tell(frame, &mut shared);
+        shared.render_macros(frame as f64, 128, RATE);
+        let params: [&[f32]; PARAMS] = [
+            &[100.0],
+            &[1.0],
+            &[0.0],
+            &[0.0],
+            &[0.0],
+            &[0.5],
+            &[0.5],
+            &[0.0],
+            &[0.0],
+            &[0.0],
+            &[1.0],
+            &[0.5],
+        ];
+        voice.process(
+            frame as f64,
+            &params,
+            &[0.0],
+            &mut out[frame..frame + 128],
+            &mut right[frame..frame + 128],
+            &mut store,
+            &mut shared,
+        );
+    }
+    voice.end(&mut store, &mut shared);
+    out
+}
+
+#[test]
+fn a_level_of_a_macro_wakes_the_routes_of_a_voice_from_the_first_block_at_its_frame_and_glides_there() {
+    let nan = f64::NAN;
+    // 0.5 at once, then 1 from frame 1000 on (sent at frame 512: it waits) and MACRO 2 alone (MACRO 1 as it is)
+    let out = macro_gain(4096, |frame, shared| {
+        if frame == 0 {
+            shared.set_macros(0.0, true, &[0.5, nan, nan, nan]);
+        }
+        if frame == 512 {
+            shared.set_macros(1000.0, false, &[1.0, nan, nan, nan]);
+            shared.set_macros(1100.0, false, &[nan, 0.25, nan, nan]);
+        }
+    });
+    // a gain of 0.5 + 0.5 × 0.5 until the block at 1024, the first one at 1000 or after it (the routes quiet: the
+    // level taken woke them), then a line to 0.5 + 0.5 in 10 ms
+    let glide = (RATE * 0.01) as usize;
+    assert!(
+        out[..1024].iter().all(|value| *value == 0.375),
+        "{:?}",
+        &out[1000..1030]
+    );
+    assert!(out[1024 + glide + 32..].iter().all(|value| *value == 0.5));
+    let most = 0.125 / glide as f64 * 1.01;
+    for i in 1024..1024 + glide + 32 {
+        let step = (out[i] - out[i - 1]) as f64;
+        assert!(
+            (0.0..=most).contains(&step),
+            "{i}: {} after {}",
+            out[i],
+            out[i - 1]
+        );
+    }
+}
+
+#[test]
+fn the_levels_of_the_macros_wait_in_their_order_one_of_now_after_one_with_a_frame_before_it() {
+    let nan = f64::NAN;
+    let mut shared = Shared::default();
+    let level = |shared: &Shared, k: usize| shared.macros.level(k, 0);
+    // 1 at frame 300, then 0.5 of now (after it: not before a frame one came with), 0.25 at 200 (before both)
+    shared.set_macros(300.0, false, &[1.0, nan, nan, nan]);
+    shared.set_macros(0.0, false, &[0.5, nan, nan, nan]);
+    shared.set_macros(200.0, false, &[nan, 0.25, nan, nan]);
+    let epoch = shared.macro_epoch;
+    shared.render_macros(128.0, 128, RATE);
+    assert_eq!(
+        (level(&shared, 0), level(&shared, 1), shared.macro_epoch),
+        (0.0, 0.0, epoch)
+    );
+    shared.render_macros(256.0, 128, RATE);
+    assert_eq!(shared.macro_epoch, epoch.wrapping_add(1));
+    assert!(shared.macros.levels[1].gliding() && !shared.macros.levels[0].gliding());
+    // (the same block again: rendered once)
+    shared.render_macros(256.0, 128, RATE);
+    shared.render_macros(384.0, 128, RATE);
+    // 300 and the one of now in the block at 384: the last one glides on
+    assert!(shared.macros.levels[0].gliding());
+    for block in 4..12 {
+        shared.render_macros(block as f64 * 128.0, 128, RATE);
+    }
+    assert_eq!((level(&shared, 0), level(&shared, 1)), (0.5, 0.25));
+    // instantly: there at once, those that wait forgotten
+    shared.set_macros(10000.0, false, &[0.0, nan, nan, nan]);
+    shared.set_macros(0.0, true, &[nan, nan, 1.0, nan]);
+    for block in 12..100 {
+        shared.render_macros(block as f64 * 128.0, 128, RATE);
+    }
+    assert_eq!(
+        core::array::from_fn::<f64, 4, _>(|k| level(&shared, k)),
+        [0.5, 0.25, 1.0, 0.0]
+    );
+}
+
+#[test]
+fn past_the_room_of_the_queue_the_first_level_that_waits_is_taken_at_once() {
+    let nan = f64::NAN;
+    let mut shared = Shared::default();
+    shared.render_macros(0.0, 128, RATE);
+    for k in 1..=65 {
+        shared.set_macros(10000.0 + k as f64, false, &[k as f64 / 65.0, nan, nan, nan]);
+    }
+    // (the first one taken to make room: it glides from the next block, the others wait)
+    shared.render_macros(128.0, 128, RATE);
+    assert!(shared.macros.levels[0].gliding());
+    for block in 2..10 {
+        shared.render_macros(block as f64 * 128.0, 128, RATE);
+    }
+    assert_eq!(shared.macros.level(0, 0), 1.0 / 65.0);
+    for block in 78..120 {
+        shared.render_macros(block as f64 * 128.0, 128, RATE);
+    }
+    assert_eq!(shared.macros.level(0, 0), 1.0);
+}
+
 // --- a route on the pitch (Semi, Fine) ---
 
 #[test]
@@ -1305,6 +1472,7 @@ fn the_routes_on_the_pitch_add_their_offsets_to_the_detune_within_their_bounds()
                 envelopes: &levels,
                 velocity: &velocity,
                 lfos: &[],
+                macros: &Macros::default(),
             };
             modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
             [PITCH1, FINE1].map(|param| modulation.moved(param).expect("moved").to_vec())

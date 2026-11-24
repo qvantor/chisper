@@ -325,6 +325,15 @@ describe('createLfoRunner', () => {
     expect(runner.at(4800, lfo)).toBeCloseTo(sine(frac(0.1 + 0.1 / 0.25)), 5);
   });
 
+  it('without a note a route of Rate runs it faster from its first point on, no point before it (finite)', () => {
+    const lfo = lfoOf({ anchor: { time: 0, phase: 0, period: 0.5 } });
+    const runner = createLfoRunner(RATE);
+    runner.free();
+    let level = NaN;
+    for (let f = 0; f <= 4800; f += 32) level = runner.point(f, lfo, { rate: 4 });
+    expect(level).toBeCloseTo(sine(frac((4800 / RATE) * 4)), 5);
+  });
+
   it('steps to a later frame in points of 32 samples at most, a frame before the last one gives its level', () => {
     const lfo = lfoOf({ smooth: 0.01 });
     const stepped = createLfoRunner(RATE);

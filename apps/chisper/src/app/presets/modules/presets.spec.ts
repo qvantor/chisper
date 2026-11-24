@@ -690,8 +690,10 @@ describe('presets model', () => {
     const { synthCore, modulation, lfos, transport } = createSynth(DEFAULT_WAVETABLE_PATH);
     createFx(synthCore, modulation, lfos, transport);
 
-    // every snapshot model is registered: nothing is filled in by the schema
-    expect(getSnapshot()).toEqual(normalizePreset({}));
+    // every snapshot model is registered: nothing is filled in by the schema (the macros at 0 are an empty mac,
+    // which the schema leaves out: the hash of Init is that of the presets without macros)
+    expect(getSnapshot()).toEqual({ ...normalizePreset({}), mac: {} });
+    expect(presetHash(getSnapshot())).toBe(presetHash({}));
   });
 
   it('marks the preset dirty when params change and clean when they return', () => {

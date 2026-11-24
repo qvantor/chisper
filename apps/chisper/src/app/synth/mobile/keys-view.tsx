@@ -121,7 +121,8 @@ export const KeysView = ({ portrait, screen }: { portrait: boolean; screen: Synt
       ) : (
         <MiniSynth
           className={panelClassName}
-          width={portrait ? 900 : 2000}
+          // (in landscape a row of the sections: each as wide as before the column of the macros)
+          width={portrait ? 900 : 2140}
           fitHeight={!portrait}
           // (in portrait its rows follow its width, at most the share of the view of its max-height)
           maxHeight={portrait ? MINI_SHARE * height : undefined}

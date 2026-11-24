@@ -183,6 +183,16 @@ describe('POST /api/presets', () => {
     expect(mockSql.find(Q.insert)[0].text).toContain('RETURNING id, name, clip_id AS "clipId"');
   });
 
+  it('saves the names of its macros, trimmed', async () => {
+    mockSql.respond(Q.insert, [{ id: ID, name: 'My Pad', clipId: null }]);
+    const named = { ...data, mac: { n1: ' Bright  Air ' }, mod: { 'macro1:filter.cutoff': 0.5 } };
+    const { status } = await save({ name: 'My Pad', data: named, turnstileToken: 't' });
+    expect(status).toBe(201);
+    const [hash, , stored] = mockSql.find(Q.insert)[0].values;
+    expect((stored as JsonValue).json).toMatchObject({ mac: { n1: 'Bright Air' } });
+    expect(hash).toBe(presetHash(named));
+  });
+
   it('rejects a clip that is not saved with 400', async () => {
     mockSql.respond(Q.insert, pgError('23503', 'presets_clip_id_fkey'));
     const { status, body } = await save({ name: 'My Pad', data, turnstileToken: 't', clipId: CLIP_ID });
@@ -368,6 +378,18 @@ describe('POST /api/presets', () => {
     const { status, body } = await save({ name: 'fuck', data, turnstileToken: 't' });
     expect(status).toBe(400);
     expect(body).toEqual({ error: 'Please choose another name' });
+  });
+
+  it('rejects profane names of macros with 400: whoever opens the preset sees them', async () => {
+    const named = {
+      ...data,
+      mac: { n1: 'Bright', n2: 'Assorted shit' },
+      mod: { 'macro1:osc1.wave': 0.5, 'macro2:filter.cutoff': 0.5 },
+    };
+    const { status, body } = await save({ name: 'My Pad', data: named, turnstileToken: 't' });
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: 'Please choose other names of the macros' });
+    expect(mockSql.queries).toHaveLength(0);
   });
 
   it('rejects bodies over 20 KB with 413', async () => {
@@ -573,6 +595,14 @@ describe('PUT /api/presets/:id', () => {
     [
       'a profane description',
       { name: 'New name', data, editToken: EDIT_TOKEN, info: { description: 'shit' } },
+    ],
+    [
+      'a profane name of a macro',
+      {
+        name: 'New name',
+        data: { ...data, mac: { n3: 'fuck' }, mod: { 'macro3:osc1.wave': 0.5 } },
+        editToken: EDIT_TOKEN,
+      },
     ],
     ['an unknown tag', { name: 'New name', data, editToken: EDIT_TOKEN, info: { tags: ['loud'] } }],
     ['a clip id that is not a uuid', { name: 'New name', data, editToken: EDIT_TOKEN, clipId: 'clip' }],

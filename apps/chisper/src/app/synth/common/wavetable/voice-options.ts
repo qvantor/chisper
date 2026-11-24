@@ -285,8 +285,8 @@ export interface StoreFreedMessage {
 }
 
 // a route of a note: `source` (0: ENV 1, 1: ENV 2, 2: ENV 3, 3: VELO, the velocity after the envelopes, 4–7: LFO
-// 1–4; MOD_SOURCES.indexOf) moves `param` (a param of the voice, 'cutoff'…, or a knob of an LFO, 'lfo2.rate': no
-// LFO goes there) by amount × its level (0..1; bipolar: amount × (level - ½)), in the units of the param in its
+// 1–4, 8–11: MACRO 1–4, the levels of the node; MOD_SOURCES.indexOf) moves `param` (a param of the voice, 'cutoff'…,
+// or a knob of an LFO, 'lfo2.rate': no LFO goes there) by amount × its level (0..1; bipolar: amount × (level - ½)), in the units of the param in its
 // scale: linear, log (octaves: the base × 2^(amount × level)), pow (a share of the travel of the knob, max ·
 // share⁴: the times of the LFOs); the base plus every route is clamped to min..max, the range of the knob (the
 // Phase of an LFO goes around the cycle: not clamped). Rate of an LFO is its frequency (Hz, 1 / the period)

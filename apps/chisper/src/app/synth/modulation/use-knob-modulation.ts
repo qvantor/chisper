@@ -3,21 +3,33 @@ import { BehaviorSubject, combineLatest, distinctUntilChanged, map } from 'rxjs'
 import { HandleModulation, HandleProps } from '@chisper/ui-kit';
 import { useBehaviorSubject, useObservable } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
-import { ENVELOPES, isLfo, MOD_SOURCES, ModSource } from '@chisper/preset-schema';
+import { ENVELOPES, isLfo, isMacro, MacroId, MACROS, MOD_SOURCES, ModSource } from '@chisper/preset-schema';
 import { knobFull, ModRoute, ModulationContext, routesFull } from '../common/modules/modulation';
 import { EnvelopesContext } from '../common/modules/envelopes';
 import { SynthContext } from '../common/modules/synth';
 import { SynthCoreContext } from '../common/modules/synth-core';
 import { FxContext } from '../fx/modules/fx';
 import { amountInUnits, MOD_TARGETS, ModScale } from '../common/modulation/modulation-targets';
-import { LFO_SOURCE, noteLevel } from '../fx/effects/fx-modulation';
-import { SOURCE_COLORS, SOURCE_LABELS } from '../envelope/envelope-colors';
+import { isLfoSource, LFO_SOURCE } from '../common/chain/chain-params';
+import { noteLevel } from '../fx/effects/fx-modulation';
+import { SOURCE_COLORS, sourceLabel } from '../envelope/envelope-colors';
 
 const NO_ROUTES = new BehaviorSubject<ModRoute[]>([]);
+const NO_NAMES = new BehaviorSubject<string[]>([]);
+const NO_LABELS = new BehaviorSubject('');
 const NOT_LIVE = new BehaviorSubject(false);
 const LIVE = new BehaviorSubject(true);
 // without the envelopes model (a spec of a section) the tab the model starts with
 const FIRST_TAB = new BehaviorSubject<ModSource>(ENVELOPES[0]);
+
+// the labels of the macros of a key (macro1,macro3), one a line (a name has no line break: its whitespace is
+// collapsed)
+const labelsOf = (key: string, names: readonly string[]) =>
+  key &&
+  key
+    .split(',')
+    .map((id) => sourceLabel(id as MacroId, names))
+    .join('\n');
 
 const sign = (value: number) => (value > 0 ? '+' : value < 0 ? '-' : '');
 
@@ -52,9 +64,11 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
   const selected = useBehaviorSubject($selected);
   // the live mark of the knob (the sum of its routes): the level of each source in the last note (as the fx
   // follow it), while voices sound: only a knob with routes renders, when the first voice starts and the last
-  // one ends. The knob of an effect an LFO moves moves without a note too (the LFOs of the fx run on their
-  // clocks), while the effect is in the chain and on (else nothing moves it: without the fx model, a spec of a
-  // section, always); a route switched off moves nothing
+  // one ends. The knob of an effect an LFO or a macro moves moves without a note too (the LFOs of the fx run on
+  // their clocks), while the effect is in the chain and on (else nothing moves it: without the fx model, a spec of
+  // a section, always); the route of a macro on any other knob always (its level is the node's: the mark shows
+  // where the knob is, without a note too), the other routes of that knob while voices sound; a route switched off
+  // moves nothing
   const synth = React.useContext(SynthContext);
   const core = React.useContext(SynthCoreContext);
   const fx = React.useContext(FxContext)?.[0];
@@ -62,7 +76,8 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
   const own = routes.filter((route) => route.target === target && !route.off);
   const routed = own.length > 0;
   const knobTarget = MOD_TARGETS[target];
-  const effect = knobTarget?.kind === 'fx' && own.some(({ source }) => isLfo(source)) ? knobTarget.fx : null;
+  const noteless = own.some(({ source }) => isLfo(source) || isMacro(source));
+  const effect = knobTarget?.kind === 'fx' && noteless ? knobTarget.fx : null;
   const $live = React.useMemo(
     () =>
       effect && fx
@@ -86,19 +101,39 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
       ? !fx || (fx.$effects.value[effect].added && fx.$effects.value[effect].on)
       : routed && ($voices?.value ?? 0) > 0
   );
+  // the labels of the routes, a macro under its name: a name typed renders the knobs its macro moves, not the others.
+  // Its macros as a key: an amount moved or a route of another knob keeps the stream, a knob without one has none
+  const $macroNames = module?.[0].$macroNames ?? NO_NAMES;
+  const macrosOn = MACROS.filter((id) =>
+    routes.some((route) => route.target === target && route.source === id)
+  ).join(',');
+  const $macroLabels = React.useMemo(
+    () =>
+      macrosOn
+        ? $macroNames.pipe(
+            map((names) => labelsOf(macrosOn, names)),
+            distinctUntilChanged()
+          )
+        : NO_LABELS,
+    [$macroNames, macrosOn]
+  );
+  const macroLabels = useObservable($macroLabels, labelsOf(macrosOn, $macroNames.value));
+  const $macros = module?.[0].$macros;
   const level = React.useCallback(
     (source: ModSource) => () => {
+      // (the level of a macro is the model's: with a note or without, without the synth too)
+      if (isMacro(source)) return $macros?.value[MACROS.indexOf(source)] ?? null;
       if (!synth || !core) return null;
       const { audioCtx } = core[0];
       const index = MOD_SOURCES.indexOf(source);
-      if (index >= LFO_SOURCE) {
+      if (isLfoSource(index)) {
         return synth[0].noteLfos.level(index - LFO_SOURCE, audioCtx.currentTime * audioCtx.sampleRate);
       }
       const note = synth[0].$fxNote.value;
       if (!note) return null;
       return noteLevel(note, index, audioCtx.currentTime - note.start);
     },
-    [synth, core]
+    [synth, core, $macros]
   );
   const scale = knob?.scale;
   const [min, max] = knob?.range ?? [];
@@ -120,12 +155,12 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
         id: source,
         color: SOURCE_COLORS[source],
         amount,
-        label: SOURCE_LABELS[source],
+        label: sourceLabel(source, $macroNames.value),
         onChange: (value) => actions?.setAmount(source, target, value),
         onRemove: () => actions?.removeRoute(source, target),
         formatAmount: units && ((value) => formatAmount(value, units.scale, units.range)),
         level: level(source),
-        live,
+        live: live || (!effect && isMacro(source)),
         selected: source === selected,
         ...(bipolar && { bipolar }),
         onPolarity: (value) => actions?.setPolarity(source, target, value),
@@ -138,5 +173,6 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
       modulations,
       onClearModulations: () => actions?.removeRoutes(target),
     };
-  }, [module, actions, routes, target, scale, min, max, level, live, selected]);
+    // (macroLabels: the names of its macros changed)
+  }, [module, actions, routes, target, scale, min, max, level, live, selected, $macroNames, macroLabels]);
 };

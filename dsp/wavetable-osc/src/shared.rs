@@ -2,7 +2,9 @@
 //! render one after another), the pool of mix tables, the budget of mix builds per block, the legato phrases and
 //! the counters (VoiceStats, the perf build); and the params and outputs of the block the wrapper copies in and out
 
+use crate::glided::glide_length;
 use crate::lfo::{frac, Anchor, LfoGlobal, LfoState, KNOBS, LFOS, TABLE};
+use crate::macros::{levels_of, Macros, MACROS};
 use crate::store::{FRAME_GUARD, MAX_LEVEL_LENGTH};
 use crate::sub::SubPhase;
 use alloc::{vec, vec::Vec};
@@ -162,6 +164,16 @@ pub struct Shared {
     // out again
     pub lfos: [LfoGlobal; LFOS],
     pub lfo_epoch: u32,
+    // the macros of the node (the routes read them as sources 8–11), rendered once a block, the levels sent that
+    // wait for their frame (the frame, the levels: NaN leaves a macro; the
+    // first `waiting` of them, in the order they are due) and the latest frame one came with; a voice that sees
+    // another count of the levels taken wakes its routes
+    pub macros: Macros,
+    macros_glide: f64,
+    waiting_macros: [(f64, [f64; MACROS]); WAITING_MACROS],
+    waiting: usize,
+    macros_stamped: f64,
+    pub macro_epoch: u32,
     // the phase of the sub of the note started last (a note of Contiguous starts at it) and the serials of the subs
     pub sub: SubPhase,
     pub sub_serial: u64,
@@ -189,6 +201,12 @@ impl Default for Shared {
             upsamplers: Vec::new(),
             lfos: Default::default(),
             lfo_epoch: 0,
+            macros: Macros::default(),
+            macros_glide: 1.0,
+            waiting_macros: [(0.0, [0.0; MACROS]); WAITING_MACROS],
+            waiting: 0,
+            macros_stamped: 0.0,
+            macro_epoch: 0,
             sub: SubPhase::default(),
             sub_serial: 0,
             #[cfg(test)]
@@ -196,6 +214,10 @@ impl Default for Shared {
         }
     }
 }
+
+/// the levels of the macros that wait for their frames at most (the automation of a clip sent ahead: a point every
+/// few ms at most for TRACK_LEAD); one more and the first is taken at once
+const WAITING_MACROS: usize = 64;
 
 /// the values of a state of an LFO in the command buffer: mode, delay, rise, smooth, phase, the anchor (time,
 /// phase, period), a new table
@@ -241,6 +263,67 @@ impl Shared {
             self.lfos[lfo].set(finite(at), &state, instantly);
         }
         self.lfo_epoch = self.lfo_epoch.wrapping_add(1);
+    }
+
+    /// the levels of the macros (MACROS values: one that is not a number leaves its macro) from the first block that
+    /// starts at frame `at` or after it, in the order sent; 0: now, and now is not before a frame one came with
+    /// before it (as the events of the chain: the halves take them in the same blocks). `instantly`: there at once,
+    /// no glide, and those that wait are forgotten (a node made again: the levels of now; the shared outlives a node).
+    /// WAITING_MACROS wait at most: the first one is taken at once to make room
+    pub fn set_macros(&mut self, at: f64, instantly: bool, levels: &[f64]) {
+        let levels = levels_of(levels);
+        if instantly {
+            self.waiting = 0;
+            self.macros_stamped = 0.0;
+            self.take_macros(&levels, true, 1.0);
+            return;
+        }
+        let due = if at > 0.0 {
+            self.macros_stamped = max(self.macros_stamped, at);
+            at
+        } else {
+            self.macros_stamped
+        };
+        if self.waiting == WAITING_MACROS {
+            let (_, first) = self.waiting_macros[0];
+            self.take_macros(&first, false, self.macros_glide);
+            self.waiting_macros.copy_within(1.., 0);
+            self.waiting -= 1;
+        }
+        // (after those due by then: most often the last place)
+        let mut place = self.waiting;
+        while place > 0 && self.waiting_macros[place - 1].0 > due {
+            place -= 1;
+        }
+        self.waiting_macros.copy_within(place..self.waiting, place + 1);
+        self.waiting_macros[place] = (due, levels);
+        self.waiting += 1;
+    }
+
+    fn take_macros(&mut self, levels: &[f64; MACROS], instantly: bool, length: f64) {
+        if self.macros.set(levels, instantly, length) {
+            self.macro_epoch = self.macro_epoch.wrapping_add(1);
+        }
+    }
+
+    /// the macros of the block of `n` at `frame` (`rate` its sample rate): the levels due glide from it, the levels
+    /// of the block once for its voices (the next voice of the same block finds them rendered)
+    pub fn render_macros(&mut self, frame: f64, n: usize, rate: f64) {
+        if self.macros.rendered(frame) {
+            return;
+        }
+        self.macros_glide = glide_length(rate);
+        let mut taken = 0;
+        while taken < self.waiting && self.waiting_macros[taken].0 <= frame {
+            let (_, levels) = self.waiting_macros[taken];
+            self.take_macros(&levels, false, self.macros_glide);
+            taken += 1;
+        }
+        if taken > 0 {
+            self.waiting_macros.copy_within(taken..self.waiting, 0);
+            self.waiting -= taken;
+        }
+        self.macros.render(frame, n);
     }
 
     /// room for one phrase more: a voice joins its phrase without allocating (Voice::attach)

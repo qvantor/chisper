@@ -128,12 +128,15 @@ time).
   `libs/preset-schema` (unknown keys are stripped silently). `applySnap` must handle falsy values (`!== undefined`)
   and missing keys mean defaults. A new field changes every preset hash: DB presets get it by
   `scripts/presets/rehash.mjs --apply` on production before the deploy, not legacy code, then `netlify api purgeCache`
-  after it (the CDN holds the presets of before).
+  after it (the CDN holds the presets of before). An optional section that leaves out its defaults keeps the hashes
+  (`mac`, the levels and the names of the macros: a level of 0 and an empty name are not written, an empty section is
+  none).
 - **Append-only indexes**: `TEMPO_DIVISIONS`, `DISTORTION_MODES` (raise `FX_PARAMS.distortion.mode.max`), `EQ_TYPES`
   (raise `FX_PARAMS.eq.t1/t2.max`; `type_of` of `eq.rs`), the kinds of the chain (`FX_TYPES`, `FX_KINDS`, `units.rs`:
   a new effect goes last), the knob ids of `targets.rs` / `VOICE_MODULES` (a new module goes last;
   `voice-modules.spec` holds them), `WARP_MODES` (the modes of `warp.rs` by their index; `warp-model.spec` holds the
-  order).
+  order), `MOD_SOURCES` (the index of a source in both cores: 0–2 ENV, 3 VELO, 4–7 LFO, 8–11 MACRO;
+  `dsp-core/src/sources.rs` for both, `isLfoSource`/`isMacroSource` of `chain-params.ts`), `CHAIN_EVENT` (`SET_MACROS` 8 last).
 - **Analytics** (`common/services/analytics.ts`: PostHog Cloud EU, its slim SDK bundled, through `ANALYTICS_PATH`
   rewritten by `netlify.toml`): `feature_used` only from what a user does (a handler of the UI or an action it calls,
   never a state set by `applySnap`, a preset, an undo or a restore: `analytics-features.spec`); a failure the user
@@ -214,7 +217,10 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   clients are (the chain: its state; the wavetable engine: the worker of the store, the bend), tells them its status,
   what the node posts and when it is gone, and sends the LFOs once for the voices and the chain (the LFO model alone
   tells them, `lfos.take`; a half only says that it reads one, `lfos.use`: sent only while one of them does, a state
-  only to the halves that do: `readers`). `engine-messages.ts` is a node whoever runs it (the worklet, a render on the
+  only to the halves that do: `readers`) and the levels of the macros (`macros.set`, by the synth: a message `macros`
+  of `levels`, `at` and `instantly`, a level `null` leaves its macro; both halves take it in the same block, the first at its
+  frame, `dueFrame`: `Shared::set_macros` of the voices, the event `SET_MACROS` of the chain; a node made again starts
+  with them, `options.macros`). `engine-messages.ts` is a node whoever runs it (the worklet, a render on the
   main thread, the parity in Node): the engine of its options (`createNodeEngine`), what a message tells it
   (`takeEngineMessage`; `stop` and `probe` are the node's), its meters (`createEngineMeters`). `engine_process` tells what there is to read after a block (voices that started or ended,
   stages that failed, bytes the store freed): a block with nothing to tell is one call. A trap is of the half it
@@ -301,7 +307,9 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   last note, `dsp-core/src/{envelope,lfo}.rs` as the voices run them, worked out once for the chain and only while
   a route moves a knob of an effect that plays): a knob of a unit one value a block, the knobs of the delay, the
   frequencies, resonances and gains of the EQ and the mix of a slot as lines, an offset a sample added to the knob as
-  it glides (of a frequency of the EQ in octaves). The fx model sends the routes of the
+  it glides (of a frequency of the EQ in octaves). The macros move knobs without a note too (and the knobs of its
+  LFOs: without a note only the routes of a macro move them; a free runner adds nothing of a Rate moved before its
+  first point, `lfo.rs` and `createLfoRunner` alike). The fx model sends the routes of the
   effects that play as targets of the core (`chainRoutes`), the note and the LFO states only while a route reads
   them; `fx-modulation.ts` keeps the same sums on the main thread for the marks of the knobs and the charts.
 
@@ -321,7 +329,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `interleaves` of `filter.rs`, two pairs in one loop), `voice.rs`, `source.rs` (oscillators, noise and sub as
   slots of the trait `Source`, summed in that order), `timeline.rs` (AudioParam semantics),
   `envelope.rs`, `lfo.rs`, `modulation.rs` (routes), `filter.rs`, `velocity.rs`, `noise.rs`, `sub.rs`, `store.rs`,
-  `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous), `targets.rs` (knob ids), `warp.rs`.
+  `shared.rs` (phrases, LFOs, the phase of the last sub for Contiguous, the macros: rendered once a block, the levels
+  that wait for their frames, `macro_epoch` wakes the routes of the voices), `targets.rs` (knob ids), `warp.rs`.
   Options/messages: `voice-options.ts`, params: `wavetable-osc-params.ts`.
 - The sub (`sub.rs`): one voice, its own loop (the levels read as an oscillator reads them, `render11`/
   `render21_same` of `voice.rs`, kept out of `Voice::process`: `NO_INLINE` of `scripts/wasm.mjs`). Its shapes are
@@ -446,7 +455,14 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   and the limiter, then unmutes; held keys restart on the new preset.
 - `envelopes.ts` (ENV 1–3, velocity curve; curves shared via `envelope/envelope-curve.ts`), `lfos.ts` (LFO 1–4,
   shapes as 2048-point tables, `lfo/lfo-curve.ts` shared by main thread, worklets and specs, mirrored in `lfo.rs`),
-  `modulation.ts` (routes `<source>:<knob>`, targets in `modulation-targets.ts`, at most 64 routes and 4 per knob).
+  `modulation.ts` (routes `<source>:<knob>`, targets in `modulation-targets.ts`, at most 64 routes and 4 per knob;
+  the levels of MACRO 1–4, `$macros`, `setMacro(id, level, at?, source?)`: every move with its time in `$macroMoves`,
+  which the synth tells the node, the routes stay (only a hand moves one yet: `at`, the sources `midi`/`track` and
+  `MACRO_CC` of the schema wait for a MIDI input and the automation of the track); their names as typed, `$macroNames`, `setMacroName`: the field
+  under a macro with routes, the label of its routes on the knobs, `sourceLabel`; snapshot `mac`, a plugin of its own,
+  `n1`–`n4` only of a macro with routes, trimmed; the server refuses a profane one, `profaneMacroName`).
+  `synth/macros/` (not
+  `macro`: babel-plugin-macros takes an import that ends with /macro for a macro).
 - `transport.ts` — tempo and beats on the context clock; MIDI Clock can lead it (`transport/midi-clock.ts`).
   Tempo divisions are in `libs/preset-schema/src/tempo.ts`; seconds of divisions are worked out on the main thread.
 - `input-controller.ts` — the shared note bus (`$onPress`, `$onRelease`, `$bend`); sources: on-screen piano,

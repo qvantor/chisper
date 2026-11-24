@@ -14,6 +14,7 @@ import {
   presetIdSchema,
   presetNameSchema,
   presetOpenedRequestSchema,
+  profaneMacroName,
   savePresetRequestSchema,
   sortFeatures,
   tagsMatching,
@@ -117,6 +118,8 @@ const parsePresetBody = async <T extends { name: string; data: unknown; info?: P
   if (!parsed.success) throw invalidBody(parsed.error, 'Invalid preset');
   if (isProfane(parsed.data.name)) throw new HttpError(400, 'Please choose another name');
   const data = normalizePreset(parsed.data.data);
+  // the names of its macros are shown to whoever opens it
+  if (profaneMacroName(data)) throw new HttpError(400, 'Please choose other names of the macros');
   return { ...parsed.data, data, hash: presetHash(data) };
 };
 

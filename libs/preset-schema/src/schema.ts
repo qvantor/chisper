@@ -633,14 +633,72 @@ const lfoSectionSchema = z
   .object({ l1: lfoSchema, l2: lfoSchema, l3: lfoSchema, l4: lfoSchema })
   .prefault({});
 
+// trimmed, whitespace collapsed (the names of presets, clips and macros)
+export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+// a name normalized and cut to `max`, not after half of a character of two code units (an emoji)
+export const cutName = (text: string, max: number) => {
+  const name = normalizeName(text).slice(0, max);
+  const last = name.charCodeAt(name.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? name.slice(0, -1) : name;
+};
+
+// the macros MACRO 1–4: sources of the routes after the LFOs, a knob each with a level 0..1 (the same for every
+// voice and the effects, with a note or without one), and a name a user gives one that has routes. In the preset:
+// mac: { m1, m2, m3, m4, n1, n2, n3, n4 }, the levels and the names; a level of 0, an empty name and the name of a
+// macro without routes left out, the section too when nothing is left (the presets of before keep their hashes)
+export const MACROS = ['macro1', 'macro2', 'macro3', 'macro4'] as const;
+export type MacroId = (typeof MACROS)[number];
+export const MACRO_KEYS: Record<MacroId, string> = { macro1: 'm1', macro2: 'm2', macro3: 'm3', macro4: 'm4' };
+export const MACRO_NAME_KEYS = {
+  macro1: 'n1',
+  macro2: 'n2',
+  macro3: 'n3',
+  macro4: 'n4',
+} as const satisfies Record<MacroId, string>;
+// the longest name of a macro (a line under its knob)
+export const MACRO_NAME_MAX_LENGTH = 20;
+export const isMacro = (source: string): source is MacroId => (MACROS as readonly string[]).includes(source);
+// the MIDI CC of each macro, kept for a MIDI input, the files of the track and the automation of a clip (nothing reads
+// them yet): CC 20–23 (none of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32)
+export const MACRO_CC: Record<MacroId, { msb: number; lsb: number }> = {
+  macro1: { msb: 20, lsb: 52 },
+  macro2: { msb: 21, lsb: 53 },
+  macro3: { msb: 22, lsb: 54 },
+  macro4: { msb: 23, lsb: 55 },
+};
+const macroLevel = range(0, 1).optional();
+// trimmed, whitespace collapsed (empty: none)
+const macroName = z.string().transform(normalizeName).pipe(z.string().max(MACRO_NAME_MAX_LENGTH)).optional();
+const macSchema = z
+  .object({
+    m1: macroLevel,
+    m2: macroLevel,
+    m3: macroLevel,
+    m4: macroLevel,
+    n1: macroName,
+    n2: macroName,
+    n3: macroName,
+    n4: macroName,
+  })
+  .optional()
+  .transform((mac) => {
+    const set = Object.entries(mac ?? {}).filter(
+      ([, value]) => value !== undefined && value !== 0 && value !== ''
+    );
+    return set.length > 0 ? (Object.fromEntries(set) as NonNullable<typeof mac>) : undefined;
+  })
+  // (an optional key of the preset: none is no key)
+  .optional();
+
 // the modulation: a route moves a knob (a target of the app: osc1.wave, filter.cutoff, delay.time…) by its
 // source × amount, a share of the range of the knob in its scale (-1..1, a log knob in octaves: +0.5 on
 // Cutoff is about +5.5 octaves). Saved as { 'env2:osc1.wave': 0.5 }: one route per source and knob; a bipolar one
 // (around the knob, amount × (level - ½)) as { 'lfo1:filter.gain': { a: 0.5, bi: true } }, one switched off (kept,
-// moving nothing) with off: { a: 0.5, off: true }. The sources: the envelopes, the velocity (VELO), then the LFOs;
-// an index into MOD_SOURCES is the index of the source in the voice. The knobs of the LFOs take no LFO
-export type ModSource = EnvelopeId | 'velo' | LfoId;
-export const MOD_SOURCES: readonly ModSource[] = [...ENVELOPES, 'velo', ...LFOS];
+// moving nothing) with off: { a: 0.5, off: true }. The sources: the envelopes, the velocity (VELO), the LFOs, then
+// the macros (only appended to); an index into MOD_SOURCES is the index of the source in the voice and the chain.
+// The knobs of the LFOs take no LFO
+export type ModSource = EnvelopeId | 'velo' | LfoId | MacroId;
+export const MOD_SOURCES: readonly ModSource[] = [...ENVELOPES, 'velo', ...LFOS, ...MACROS];
 export const isLfo = (source: string): source is LfoId => (LFOS as readonly string[]).includes(source);
 // the target of a route moves a knob of an LFO (lfo2.rate): no LFO goes there
 export const isLfoKnob = (target: string) => /^lfo[1-4]\./.test(target);
@@ -648,7 +706,7 @@ export const isLfoKnob = (target: string) => /^lfo[1-4]\./.test(target);
 // knob (a full one takes none)
 export const MOD_ROUTES_MAX = 64;
 export const MOD_KNOB_SOURCES_MAX = 4;
-const modKeySchema = z.string().regex(/^(env[1-3]|velo|lfo[1-4]):[a-z][a-z0-9]*\.[a-z][a-z0-9]*$/);
+const modKeySchema = z.string().regex(/^(env[1-3]|velo|lfo[1-4]|macro[1-4]):[a-z][a-z0-9]*\.[a-z][a-z0-9]*$/);
 // an object has a flag: a route without one is its amount
 const modValueSchema = z.union([
   range(-1, 1),
@@ -768,20 +826,35 @@ export const fxSnapSchema = z.preprocess(
   })
 );
 
-// keys match snapshot plugin model names (voicing is saved with the `v` prefix)
+// keys match snapshot plugin model names (voicing is saved with the `v` prefix). The name of a macro without routes
+// (one switched off is one) is left out: the synth keeps it, hidden, for a route again
 const presetData = <F extends z.ZodType>(filter: F) =>
-  z.object({
-    osc1: oscillatorSchema(true),
-    osc2: oscillatorSchema(false),
-    noise: noiseSchema,
-    sub: subSchema,
-    filter,
-    env: envSchema,
-    lfo: lfoSectionSchema,
-    mod: modSchema,
-    v: voicingSchema,
-    fx: fxSchema,
-  });
+  z
+    .object({
+      osc1: oscillatorSchema(true),
+      osc2: oscillatorSchema(false),
+      noise: noiseSchema,
+      sub: subSchema,
+      filter,
+      env: envSchema,
+      lfo: lfoSectionSchema,
+      mod: modSchema,
+      mac: macSchema,
+      v: voicingSchema,
+      fx: fxSchema,
+    })
+    .overwrite((data) => {
+      const { mac, mod } = data;
+      const unrouted = MACROS.filter(
+        (id) =>
+          mac?.[MACRO_NAME_KEYS[id]] !== undefined &&
+          !Object.keys(mod).some((key) => key.startsWith(`${id}:`))
+      );
+      if (!mac || unrouted.length === 0) return data;
+      const named = { ...mac };
+      unrouted.forEach((id) => delete named[MACRO_NAME_KEYS[id]]);
+      return { ...data, mac: Object.keys(named).length > 0 ? named : undefined };
+    });
 
 // a preset to open (of the server, of a tab, of a newer client maybe)
 export const presetDataSchema = presetData(filterSchema);
@@ -799,10 +872,12 @@ export const NOISE_DEFAULTS: PresetData['noise'] = PRESET_DEFAULTS.noise;
 // the knobs of the sub in it
 export const SUB_DEFAULTS: PresetData['sub'] = PRESET_DEFAULTS.sub;
 
-export const PRESET_NAME_MAX_LENGTH = 40;
+// a name of a macro of the preset the profanity filter refuses (one that opens shows it under its knob; the names
+// are the only text of `mac`)
+export const profaneMacroName = ({ mac }: Pick<PresetData, 'mac'>) =>
+  Object.values(mac ?? {}).some((value) => typeof value === 'string' && isProfane(value));
 
-// trimmed, whitespace collapsed (the names of presets and clips)
-export const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ');
+export const PRESET_NAME_MAX_LENGTH = 40;
 
 // trimmed, whitespace collapsed; names are unique case-insensitively (see nameKey)
 export const presetNameSchema = z

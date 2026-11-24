@@ -8,6 +8,7 @@ import {
   TEMPO_DEFAULT,
   clipNameAllowed,
   clipNameSchema,
+  cutName,
   normalizeClip,
   normalizeName,
   tempoOf,
@@ -152,10 +153,7 @@ const textOf = (data: Uint8Array) => {
 // the name of a clip from a Track Name: its whitespace collapsed, cut to CLIP_NAME_MAX_LENGTH; none when it is
 // empty or one a clip can't be saved under (the profanity filter refuses it): the notes are imported all the same
 const clipNameOf = (text: string) => {
-  let name = normalizeName(text).slice(0, CLIP_NAME_MAX_LENGTH);
-  // not half of a character of two code units
-  const last = name.charCodeAt(name.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) name = name.slice(0, -1);
+  const name = cutName(text, CLIP_NAME_MAX_LENGTH);
   const parsed = clipNameSchema.safeParse(name);
   return parsed.success && parsed.data && clipNameAllowed(parsed.data) ? parsed.data : undefined;
 };

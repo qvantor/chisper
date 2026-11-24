@@ -3,7 +3,7 @@ title: 'How to Use Chisper: Getting Started with the Online Synth'
 h1: 'Getting started with Chisper'
 description: 'Play the free online synth with your computer keyboard, a MIDI keyboard or touch, open presets, learn the screen and save a sound to share, no account.'
 nav: 'Getting started'
-updated: 2026-11-23
+updated: 2026-11-24
 preset: biting-brass-keys
 image: synth-map
 ---
@@ -119,7 +119,7 @@ playing: a preset with a clip plays its own, one without it plays the clip of th
 
 ## What is on the screen?
 
-<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='The whole screen of Chisper on a computer with its parts numbered: the header; the sub, the oscillators, the noise and the filter in the top row; the envelopes, LFOs, velocity and voicing under them; the keys at the bottom'>
+<InterfaceMap parts={['logo', 'spectrum', 'screens', 'presets', 'master', 'sub', 'osc1', 'osc2', 'noise', 'filter', 'macros', 'env', 'lfo', 'velo', 'voicing', 'wheel', 'keys', 'clip']} alt='The whole screen of Chisper on a computer with its parts numbered: the header; the sub, the oscillators, the noise and the filter in the top row; the macros, envelopes, LFOs, velocity and voicing under them; the keys at the bottom'>
 
 1. **Logo**: opens this site in a new tab. The synth keeps playing in its own.
 2. **Spectrum**: the frequencies coming out of the synth right now, low on the left, high on the right.
@@ -154,14 +154,16 @@ playing: a preset with a clip plays its own, one without it plays the clip of th
     100 Hz, 1 kHz and 10 kHz). Drive raises the curve as much as a loud sound comes out louder, and softens the very
     top of the highs.
 
-11. **ENV 1–3**: [envelopes](/manual/modulation-envelopes-lfo/). ENV 1 is the volume of every note.
-12. **LFO 1–4**: [LFOs](/manual/modulation-envelopes-lfo/) that move any knob you drag them onto.
-13. **VELO**: what the velocity of a note does.
-14. **Voicing**: **Poly** and how many notes play at once (1 to 12, 8 by default), **Legato** and
+11. **Macros**: [MACRO 1–4](/manual/modulation-envelopes-lfo/), four knobs of your own. Drag the tab right of one
+    onto any knobs: one turn of it moves them all.
+12. **ENV 1–3**: [envelopes](/manual/modulation-envelopes-lfo/). ENV 1 is the volume of every note.
+13. **LFO 1–4**: [LFOs](/manual/modulation-envelopes-lfo/) that move any knob you drag them onto.
+14. **VELO**: what the velocity of a note does.
+15. **Voicing**: **Poly** and how many notes play at once (1 to 12, 8 by default), **Legato** and
     **Portamento**.
-15. **Pitch wheel** and the octave of the computer keyboard.
-16. **Keys**: the on-screen piano.
-17. **Clip**: the loop of the piano roll. A click opens the roll over the synth, ▶ plays the clip.
+16. **Pitch wheel** and the octave of the computer keyboard.
+17. **Keys**: the on-screen piano.
+18. **Clip**: the loop of the piano roll. A click opens the roll over the synth, ▶ plays the clip.
 
 </InterfaceMap>
 
@@ -290,7 +292,7 @@ header has the same presets, **Save** and **Share**, the screens **OSC**, **FX**
 
 - **Keys** (the default): a small live view of the synth over two rows of keys, C4 over C3, one octave each held
   upright and two on its side. Each row has octave keys of its own; the pitch wheel is at the side.
-- **Synth**: the parts of the synth one under the other (Sub, Osc 1, Osc 2, Noise, Filter, ENV, LFO, VELO,
+- **Synth**: the parts of the synth one under the other (Sub, Osc 1, Osc 2, Noise, Filter, Macros, ENV, LFO, VELO,
   Voicing) to scroll through; **CLIP** opens the piano roll on the whole screen.
 
 On an iPhone or iPad the sound plays even with the silent switch on.
@@ -299,7 +301,7 @@ On an iPhone or iPad the sound plays even with the silent switch on.
 
 - [What is wavetable synthesis?](/learn/what-is-wavetable-synthesis/): how a table of waves, the **Wave** knob and
   movement make a sound, with three things to hear.
-- [Modulation: envelopes, LFOs and velocity](/manual/modulation-envelopes-lfo/): make any knob move by itself.
+- [Modulation: envelopes, LFOs, macros and velocity](/manual/modulation-envelopes-lfo/): make any knob move by itself.
 - [Wavetables](/manual/wavetables/): the library, tables of your own from WAV and audio files, drawing a wave.
 - [MIDI keyboards, Chromebooks and iPads](/manual/midi-keyboard-setup/): setup, playing from a DAW in sync, latency
   and what to do when there is no sound.

@@ -1,3 +1,4 @@
+import { MACROS } from '../chain/chain-params';
 import type { EnvelopeParams } from '../envelope/envelope-curve';
 import { LFO_TABLE_SIZE, LfosState } from '../lfo/lfo-curve';
 import { CoreExports, createView } from '../wasm/wasm-core';
@@ -72,6 +73,7 @@ export interface OscExports extends CoreExports {
   osc_shared_stats: (shared: number) => void;
   osc_shared_lfo_table: (shared: number, lfo: number) => void;
   osc_shared_lfos: (shared: number, at: number, instantly: number) => void;
+  osc_shared_macros: (shared: number, at: number, instantly: number) => void;
   osc_io: (shared: number, frames: number) => number;
   osc_io_stride: (shared: number) => number;
   osc_io_lengths: (shared: number) => number;
@@ -334,6 +336,8 @@ export const WASM_MIX_BUDGET = 360000;
 // createVoiceShared in the core: the buffers, the mix tables, the budget and the counters of the voices of a scope
 export const createVoiceSharedWasm = (scope: OscScope) => {
   const handle = scope.exports.osc_shared_new();
+  // a level of a macro was sent
+  let macrosSet = false;
   return {
     handle,
     stats: (): VoiceStats => {
@@ -378,6 +382,16 @@ export const createVoiceSharedWasm = (scope: OscScope) => {
         )
       );
       scope.exports.osc_shared_lfos(handle, at, instantly ? 1 : 0);
+    },
+    // the levels of the macros of its voices from frame `at` on (0: the next block; null: that macro as it is;
+    // `instantly`: there at once, those that wait forgotten). Levels of 0 while none was ever set are what the core
+    // has: not sent (a core of before the macros, the null test, takes the nodes of this tree)
+    setMacros: (levels: readonly (number | null)[], at = 0, instantly = false) => {
+      if (!macrosSet && levels.every((level) => level === null || level === 0)) return;
+      macrosSet = true;
+      const command = scope.command();
+      for (let k = 0; k < MACROS; k++) command[k] = levels[k] ?? NaN;
+      scope.exports.osc_shared_macros(handle, at, instantly ? 1 : 0);
     },
     // (once no voice of it is left)
     free: () => scope.exports.osc_shared_free(handle),

@@ -157,3 +157,77 @@ describe('useKnobModulation of the LFOs', () => {
     expect([fine?.amount, fine?.bipolar, fine?.formatAmount?.(-0.25)]).toEqual([-0.25, true, '-25%']);
   });
 });
+
+describe('useKnobModulation of the macros', () => {
+  it('shows a knob where a macro moves it always, without a note too: the level of the macro of now', () => {
+    const { modulation, wrapper } = setup();
+    act(() => {
+      modulation[1].addRoute('macro2', 'osc1.wave', 0.5);
+      modulation[1].addRoute('env1', 'osc1.wave', 0.25);
+      modulation[1].setMacro('macro2', 0.25);
+    });
+    const { result } = renderHook(() => useKnobModulation('osc1.wave'), { wrapper });
+    const [envelope, macro] = result.current.modulations ?? [];
+    expect(macro).toMatchObject({ id: 'macro2', color: '#273a04', label: 'MACRO 2', live: true });
+    expect(macro.level?.()).toBe(0.25);
+    // (the other routes of the knob only while voices sound: an envelope without a note moves nothing)
+    expect(envelope).toMatchObject({ id: 'env1', live: false });
+    expect(envelope.level?.()).toBeNull();
+    act(() => modulation[1].setMacro('macro2', 1));
+    expect(macro.level?.()).toBe(1);
+  });
+
+  it('a macro on a knob of an effect moves it while the effect is in the chain and on, without a note too', () => {
+    const { modulation, wrapper: Inner } = setup();
+    const $chain = new BehaviorSubject<string[]>(['reverb']);
+    const $effects = new BehaviorSubject({ reverb: { added: true, on: true } });
+    const fx = [{ $chain, $effects }, {}] as never;
+    const wrapper = ({ children }: React.PropsWithChildren) => (
+      <Inner>
+        <FxContext.Provider value={fx}>{children}</FxContext.Provider>
+      </Inner>
+    );
+    act(() => modulation[1].addRoute('macro4', 'reverb.size'));
+    const { result } = renderHook(() => useKnobModulation('reverb.size'), { wrapper });
+    const live = () => result.current.modulations?.[0].live;
+    expect(live()).toBe(true);
+    act(() => $effects.next({ reverb: { added: true, on: false } }));
+    expect(live()).toBe(false);
+  });
+
+  it('a route of a macro is labelled by its name (none: MACRO n); a name typed renders the knobs it moves alone', () => {
+    const { modulation, wrapper } = setup();
+    act(() => {
+      modulation[1].addRoute('macro3', 'osc1.wave');
+      modulation[1].addRoute('lfo1', 'osc1.wave');
+      modulation[1].addRoute('macro1', 'filter.cutoff');
+    });
+    let renders = 0;
+    const wave = renderHook(() => useKnobModulation('osc1.wave'), { wrapper }).result;
+    const cutoff = renderHook(
+      () => {
+        renders += 1;
+        return useKnobModulation('filter.cutoff');
+      },
+      { wrapper }
+    ).result;
+    const labels = () => wave.current.modulations?.map(({ label }) => label);
+    expect(labels()).toEqual(['LFO 1', 'MACRO 3']);
+    act(() => modulation[1].setMacroName('macro3', '  Wobble  '));
+    expect(labels()).toEqual(['LFO 1', 'Wobble']);
+    act(() => modulation[1].setMacroName('macro3', '   '));
+    expect(labels()).toEqual(['LFO 1', 'MACRO 3']);
+    // (the names of the other macros render no other knob)
+    const before = renders;
+    act(() => modulation[1].setMacroName('macro3', 'Air'));
+    expect(renders).toBe(before);
+    expect(cutoff.current.modulations?.[0].label).toBe('MACRO 1');
+  });
+
+  it('a route of a macro on a centered knob is bipolar', () => {
+    const { modulation, wrapper } = setup();
+    act(() => modulation[1].addRoute('macro1', 'filter.gain'));
+    const { result } = renderHook(() => useKnobModulation('filter.gain'), { wrapper });
+    expect(result.current.modulations?.[0]).toMatchObject({ id: 'macro1', bipolar: true });
+  });
+});

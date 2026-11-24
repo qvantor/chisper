@@ -494,12 +494,16 @@ impl LfoBlock {
             );
             self.phase_d = lfo.clock(self.t_d);
         }
-        // (from the point before, not before tD; at the first point from tD)
+        // (from the point before, not before tD; at the first point from tD. A free runner has no tD, -inf: its
+        // first point has no point before it either, it adds nothing)
         if self.t_d != f64::INFINITY {
             if let Some(frequency) = mods[RATE] {
-                // (the base of the route in f32, as the routes read it)
-                let extra = frequency - (1.0 / lfo.period(t)) as f32 as f64;
-                self.delta += extra * (t - if previous > self.t_d { previous } else { self.t_d });
+                let from = if previous > self.t_d { previous } else { self.t_d };
+                if from.is_finite() {
+                    // (the base of the route in f32, as the routes read it)
+                    let extra = frequency - (1.0 / lfo.period(t)) as f32 as f64;
+                    self.delta += extra * (t - from);
+                }
             }
         }
         let clock = lfo.clock(t);
