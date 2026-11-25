@@ -42,8 +42,11 @@ const CORES = [
   // beside it for a knob that moves: 59 % faster at rest; that loop from an odd sample too and the pairs of its
   // bandpass kept through a new design; the time of the delay and the offsets of its channels through the one-pole
   // of the Audio Unit at the points of their lines: `Smoothing`, a loop of their own, in the loop of every line the
-  // lines of the EQ and of a mix were 5 % slower)
-  { crate: 'engine', name: 'engine', budget: 210100 },
+  // lines of the EQ and of a mix were 5 % slower); 216.3 KB with the FX Filter (a seventh slot, its unit: its
+  // knobs, Pan as two filters mixed in the lanes, the crossfade of a type, the level and the mix inside, the lines
+  // of its routes) on the spans of the model types of a filter in dsp-core (model_spans: the filter of a voice and
+  // of the chain run on them)
+  { crate: 'engine', name: 'engine', budget: 216600 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -102,9 +105,9 @@ const NO_INLINE = {
   engine: [
     '*Noise11render_into*',
     '*Sub11render_into*',
-    '*filter10model_span*',
-    '*filter10model_line*',
-    '*filter16model_line_plain*',
+    '*model_spans10model_span*',
+    '*model_spans10model_line*',
+    '*model_spans16model_line_plain*',
     '*warp11warp_phases*',
     '*voice12segment_warp*',
     '*voice18render_span_warped*',

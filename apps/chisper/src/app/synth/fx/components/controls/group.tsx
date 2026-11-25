@@ -4,7 +4,7 @@ import { styled, css } from 'styled-components';
 import { text10, theme } from '@chisper/ui-kit';
 
 // the space on both sides of a group and the line on its left
-const PADDING = 15;
+const PADDING = 10;
 const LINE = 1;
 
 // every group has the line on its left, ControlsFlow cuts off the line and the padding of the first group

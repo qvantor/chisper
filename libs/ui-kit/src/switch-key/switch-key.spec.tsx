@@ -4,9 +4,12 @@ import { cssColor, hoverSwitchKey, switchKeyTip } from '../common/test-utils';
 import { theme } from '../common/constants';
 import {
   ActionKey,
+  BandPassIcon,
   FollowIcon,
   HighPassIcon,
   LegatoIcon,
+  LowPassIcon,
+  NotchPeakIcon,
   QuantizeIcon,
   SelectIcon,
   SnapIcon,
@@ -79,6 +82,28 @@ describe('SwitchKey', () => {
     expect(more).toHaveLength(0);
     expect(path.getAttribute('d')).toMatch(/^M1\.5 13\.5c.*h6\.4$/);
     expect(path.getAttribute('fill')).toBe('none');
+  });
+
+  it('shows the response of each kind of filter on its key: one line across', () => {
+    render(
+      <>
+        <SwitchKey on icon={<LowPassIcon />} name='Low pass' />
+        <SwitchKey on={false} icon={<BandPassIcon />} name='Band pass' />
+        <SwitchKey on={false} icon={<NotchPeakIcon />} name='Notch & Peak' />
+      </>
+    );
+    const paths = ['Low pass', 'Band pass', 'Notch & Peak'].map((name) => {
+      const key = screen.getByRole('button', { name });
+      expect(key.textContent).toBe('');
+      const [path, ...more] = key.querySelectorAll('path');
+      expect(more).toHaveLength(0);
+      expect(path.getAttribute('fill')).toBe('none');
+      return path.getAttribute('d');
+    });
+    // flat from the left (the low pass at the top, the notch and peak in the middle), the band pass up from the bottom
+    expect(paths[0]).toMatch(/^M1\.5 4h/);
+    expect(paths[1]).toMatch(/^M1\.5 13\.5c/);
+    expect(paths[2]).toMatch(/^M1\.5 8h/);
   });
 
   it('shows a magnet on the key of snapping to the grid', () => {
@@ -177,6 +202,7 @@ describe('SwitchKeys', () => {
     expect(group.classList.contains('stack')).toBe(false);
     expect(group.classList.contains('fill')).toBe(false);
     expect(group.classList.contains('column')).toBe(false);
+    expect(group.classList.contains('grid')).toBe(false);
     expect(group.style.flexGrow).toBe('');
     expect(group.hasAttribute('aria-disabled')).toBe(false);
   });
@@ -218,6 +244,27 @@ describe('SwitchKeys', () => {
     expect(wraps.map((wrap) => getComputedStyle(wrap).borderTopStyle)).toEqual(['', 'solid', 'solid']);
     expect(wraps.map((wrap) => getComputedStyle(wrap).borderLeftStyle)).not.toContain('solid');
     // (a column takes no share of a strip)
+    expect(group.style.flexGrow).toBe('');
+  });
+
+  it('puts its keys two a row, every row as high, a line between the keys of a row and over the second row', () => {
+    render(
+      <SwitchKeys aria-label='Category' grid>
+        <SwitchKey on icon={<LowPassIcon />} name='Low pass' />
+        <SwitchKey on={false} icon={<HighPassIcon />} name='High pass' />
+        <SwitchKey on={false} icon={<BandPassIcon />} name='Band pass' />
+        <SwitchKey on={false} icon={<NotchPeakIcon />} name='Notch & Peak' />
+      </SwitchKeys>
+    );
+    const group = screen.getByRole('group', { name: 'Category' });
+    expect(group.classList.contains('grid')).toBe(true);
+    expect(getComputedStyle(group).display).toBe('grid');
+    expect(getComputedStyle(group).gridTemplateColumns).toBe('1fr 1fr');
+    const wraps = within(group)
+      .getAllByRole('button')
+      .map((key) => key.parentElement as HTMLElement);
+    expect(wraps.map((wrap) => getComputedStyle(wrap).borderLeftStyle)).toEqual(['', 'solid', '', 'solid']);
+    expect(wraps.map((wrap) => getComputedStyle(wrap).borderTopStyle)).toEqual(['', '', 'solid', 'solid']);
     expect(group.style.flexGrow).toBe('');
   });
 

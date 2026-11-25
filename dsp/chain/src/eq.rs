@@ -398,7 +398,8 @@ pub struct Eq {
     pub(crate) every: usize,
 }
 
-fn level_gain(knob: f64) -> f64 {
+/// the gain of a knob of the level: 4 v² (0 dB at a half; the EQ and the filter)
+pub(crate) fn level_gain(knob: f64) -> f64 {
     let knob = max(0.0, finite(knob));
     4.0 * (knob * knob)
 }

@@ -161,6 +161,18 @@ const EQ_DEFAULTS = {
   g2: 0,
   level: 0.5,
 };
+const FXFILTER_DEFAULTS = {
+  a: false,
+  on: true,
+  mix: 1,
+  type: 0,
+  cutoff: 425,
+  res: 0,
+  drive: 0,
+  var: 0,
+  pan: 50,
+  level: 0.5,
+};
 
 const reversed = (value: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(
@@ -583,14 +595,55 @@ describe('normalizePreset', () => {
   it('fills fx defaults: every effect in the order, none in the chain', () => {
     const { fx } = normalizePreset({ ...preset, fx: undefined });
     expect(fx).toEqual({
-      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+      o: ['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
       distortion: DISTORTION_DEFAULTS,
       chorus: CHORUS_DEFAULTS,
       delay: DELAY_DEFAULTS,
       compressor: COMPRESSOR_DEFAULTS,
       reverb: REVERB_DEFAULTS,
       eq: EQ_DEFAULTS,
+      fxfilter: FXFILTER_DEFAULTS,
     });
+  });
+
+  it('fills filter defaults for a preset saved before the filter, puts it after the distortion', () => {
+    expect(preset.fx).not.toHaveProperty('fxfilter');
+    const normalized = normalizePreset(preset).fx;
+    expect(normalized.fxfilter).toEqual(FXFILTER_DEFAULTS);
+    expect(normalized.o.indexOf('fxfilter')).toBe(normalized.o.indexOf('distortion') + 1);
+  });
+
+  it('keeps the filter params and accepts their limits, falsy ones included', () => {
+    [
+      { a: true, on: false, mix: 0, type: 0, cutoff: 8.176, res: 0, drive: 0, var: 0, pan: 0, level: 0 },
+      {
+        a: true,
+        on: true,
+        mix: 1,
+        type: 17,
+        cutoff: 22050,
+        res: 100,
+        drive: 100,
+        var: 100,
+        pan: 100,
+        level: 1,
+      },
+    ].forEach((fxfilter) =>
+      expect(normalizePreset({ ...preset, fx: { ...preset.fx, fxfilter } }).fx.fxfilter).toEqual(fxfilter)
+    );
+  });
+
+  it.each([
+    ['a type that is none', { type: 18 }],
+    ['a fractional type', { type: 0.5 }],
+    ['a cutoff under 8.176 Hz', { cutoff: 8 }],
+    ['a cutoff over 22.05 kHz', { cutoff: 22051 }],
+    ['a resonance past 100 %', { res: 101 }],
+    ['a negative Drive', { drive: -1 }],
+    ['Pan past its knob', { pan: 100.5 }],
+    ['a level past its knob', { level: 1.1 }],
+  ])('rejects a filter with %s', (_, fxfilter) => {
+    expect(() => normalizePreset({ ...preset, fx: { ...preset.fx, fxfilter } })).toThrow();
   });
 
   it('fills EQ defaults for a preset saved before the EQ, puts it last', () => {
@@ -650,7 +703,7 @@ describe('normalizePreset', () => {
     expect(preset.fx).not.toHaveProperty('chorus');
     const normalized = normalizePreset(preset).fx;
     expect(normalized.chorus).toEqual(CHORUS_DEFAULTS);
-    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
+    expect(normalized.o).toEqual(['distortion', 'fxfilter', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
   });
 
   it('keeps the chorus params and accepts their limits, falsy ones included', () => {
@@ -693,7 +746,7 @@ describe('normalizePreset', () => {
     expect(preset.fx).not.toHaveProperty('compressor');
     const normalized = normalizePreset(preset).fx;
     expect(normalized.compressor).toEqual(COMPRESSOR_DEFAULTS);
-    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
+    expect(normalized.o).toEqual(['distortion', 'fxfilter', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
   });
 
   it('keeps the compressor params and accepts their limits, falsy ones included', () => {
@@ -736,7 +789,7 @@ describe('normalizePreset', () => {
     const { reverb, ...fx } = preset.fx;
     expect(reverb).toBeDefined();
     const normalized = normalizePreset({ ...preset, fx: { ...fx, o: ['delay'] } }).fx;
-    expect(normalized.o).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+    expect(normalized.o).toEqual(['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
     expect(normalized.reverb).toEqual(REVERB_DEFAULTS);
     expect(normalized.delay).toEqual(preset.fx.delay);
   });
@@ -745,7 +798,7 @@ describe('normalizePreset', () => {
     expect(preset.fx).not.toHaveProperty('distortion');
     const normalized = normalizePreset(preset).fx;
     expect(normalized.distortion).toEqual(DISTORTION_DEFAULTS);
-    expect(normalized.o).toEqual(['distortion', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
+    expect(normalized.o).toEqual(['distortion', 'fxfilter', 'chorus', 'compressor', 'reverb', 'delay', 'eq']);
     expect(normalized.delay).toEqual(preset.fx.delay);
     expect(normalized.reverb).toEqual(preset.fx.reverb);
   });
@@ -801,19 +854,39 @@ describe('normalizePreset', () => {
 
   it('drops unknown and duplicate effects from the order, a missing one takes its default place', () => {
     const order = (o: string[]) => normalizePreset({ ...preset, fx: { ...preset.fx, o } }).fx.o;
+    // (the filter where a preset has it, last too)
+    expect(order(['reverb', 'distortion', 'fxfilter'])).toEqual([
+      'chorus',
+      'delay',
+      'compressor',
+      'reverb',
+      'distortion',
+      'fxfilter',
+      'eq',
+    ]);
     // e.g. a preset saved by a newer client with more effect types
     expect(order(['phaser', 'reverb', 'delay', 'delay'])).toEqual([
       'distortion',
+      'fxfilter',
       'chorus',
       'compressor',
       'reverb',
       'delay',
       'eq',
     ]);
-    expect(order([])).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+    expect(order([])).toEqual(['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
     // before the first effect that comes after it by default, at the end if none does
-    expect(order(['reverb'])).toEqual(['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq']);
+    expect(order(['reverb'])).toEqual([
+      'distortion',
+      'fxfilter',
+      'chorus',
+      'delay',
+      'compressor',
+      'reverb',
+      'eq',
+    ]);
     expect(order(['delay', 'distortion'])).toEqual([
+      'fxfilter',
       'chorus',
       'delay',
       'distortion',
@@ -822,6 +895,7 @@ describe('normalizePreset', () => {
       'eq',
     ]);
     expect(order(['reverb', 'distortion'])).toEqual([
+      'fxfilter',
       'chorus',
       'delay',
       'compressor',
@@ -830,6 +904,7 @@ describe('normalizePreset', () => {
       'eq',
     ]);
     expect(order(['reverb', 'compressor', 'chorus', 'delay', 'distortion'])).toEqual([
+      'fxfilter',
       'reverb',
       'compressor',
       'chorus',
@@ -839,6 +914,7 @@ describe('normalizePreset', () => {
     ]);
     // (the EQ where a preset has it, first too)
     expect(order(['eq', 'reverb', 'compressor', 'chorus', 'delay', 'distortion'])).toEqual([
+      'fxfilter',
       'eq',
       'reverb',
       'compressor',
@@ -1264,13 +1340,14 @@ describe('fxSnapSchema', () => {
 
   it.each([undefined, null, 'x', [], {}])('falls back to the defaults for %p', (snap) => {
     expect(fxSnapSchema.parse(snap)).toEqual({
-      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+      o: ['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
       distortion: DISTORTION_DEFAULTS,
       chorus: CHORUS_DEFAULTS,
       delay: defaults,
       compressor: COMPRESSOR_DEFAULTS,
       reverb: REVERB_DEFAULTS,
       eq: EQ_DEFAULTS,
+      fxfilter: FXFILTER_DEFAULTS,
     });
   });
 
@@ -1326,8 +1403,20 @@ describe('fxSnapSchema', () => {
       t2: 2,
       level: 0,
     };
-    const o = ['eq', 'reverb', 'compressor', 'delay', 'chorus', 'distortion'];
-    expect(fxSnapSchema.parse({ o, distortion, chorus, delay, compressor, reverb, eq })).toEqual({
+    const fxfilter = {
+      a: true,
+      on: false,
+      mix: 0,
+      type: 0,
+      cutoff: 8.176,
+      res: 0,
+      drive: 0,
+      var: 0,
+      pan: 0,
+      level: 0,
+    };
+    const o = ['eq', 'reverb', 'compressor', 'fxfilter', 'delay', 'chorus', 'distortion'];
+    expect(fxSnapSchema.parse({ o, distortion, chorus, delay, compressor, reverb, eq, fxfilter })).toEqual({
       o,
       distortion,
       chorus,
@@ -1335,6 +1424,7 @@ describe('fxSnapSchema', () => {
       compressor,
       reverb,
       eq,
+      fxfilter,
     });
   });
 
@@ -1345,6 +1435,7 @@ describe('fxSnapSchema', () => {
     const compressor = { multi: 0.6, thresh: 2, ratio: 0, attack: 'x', release: 5000, xlow: 1, low: -99 };
     const chorus = { rate: 99, sync: 0.6, d1: -3, d2: 'x', depth: 40, fb: 2, cut: 1, hpf: 7, level: NaN };
     const eq = { t1: 1.6, f1: 5, q1: 150, g1: -99, t2: 'x', f2: 30000, q2: -1, g2: 30, level: 2 };
+    const fxfilter = { type: 18, cutoff: 1, res: 150, drive: 'x', var: -5, pan: 200, level: NaN };
     expect(
       fxSnapSchema.parse({
         o: 'delay',
@@ -1354,9 +1445,10 @@ describe('fxSnapSchema', () => {
         compressor,
         reverb,
         eq,
+        fxfilter,
       })
     ).toEqual({
-      o: ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+      o: ['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
       distortion: { ...DISTORTION_DEFAULTS, mode: 1, drive: 12, level: -24 },
       chorus: { ...CHORUS_DEFAULTS, rate: 20, sync: 1, d1: 0, depth: 26, fb: 0.95, cut: 20, hpf: 1 },
       compressor: {
@@ -1371,7 +1463,12 @@ describe('fxSnapSchema', () => {
       delay: { ...defaults, time: 0.01, fb: 0.9, mode: 1, q: 3 },
       reverb: { ...REVERB_DEFAULTS, decay: 20, bass: 0.25, sep: 0, era: 2 },
       eq: { ...EQ_DEFAULTS, t1: 2, f1: 21.53, q1: 100, g1: -24, f2: 20000, q2: 0, g2: 24, level: 1 },
+      fxfilter: { ...FXFILTER_DEFAULTS, type: 0, cutoff: 8.176, res: 100, var: 0, pan: 100 },
     });
+    // (a type no one has, of a newer client: the default type, as the core takes it: MG Low 6)
+    expect(fxSnapSchema.parse({ fxfilter: { type: 40 } }).fxfilter.type).toBe(0);
+    expect(fxSnapSchema.parse({ fxfilter: { type: 16.6 } }).fxfilter.type).toBe(17);
+    expect(fxSnapSchema.parse({ fxfilter: { type: -0.4 } }).fxfilter.type).toBe(0);
     expect(fxSnapSchema.parse({ reverb: { era: 7 } }).reverb.era).toBe(2);
     expect(fxSnapSchema.parse({ reverb: { era: -3 } }).reverb.era).toBe(0);
     expect(fxSnapSchema.parse({ distortion: { mode: 5 } }).distortion.mode).toBe(1);

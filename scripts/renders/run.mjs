@@ -58,8 +58,12 @@
 //   Bend +/- and PWM by the knob (a sine and a cosine: the warped phase of each sample), the harmonics of a saw and a
 //   sine by it, the aliasing of a saw at C6 and C7, the knob automated every sample (how it follows), the harmonics of
 //   Bend - and Bend +/- at D2 and D4 to 16 kHz (how bright a frame squeezed at its wrap stays)
+// - fxfilter.json: the FX Filter of its effect rack on samples of ours (a multisine, sines, a burst): the response of
+//   each type of Normal by the cutoff and the resonance (those of the filter of a voice, more droop), a fresh one, Pan
+//   (the cutoff of each channel), the laws of the mix and the level, Drive, FAT, the ring of a resonance, a route of a
+//   macro on the cutoff (`fxfilter-routes`), LFO 1 on the cutoff (`fxfilter-lfo`)
 // Its knobs are 0..1: the times are 32 s · v⁵, the sustain v² (-12 dB at 0.5), the voices 1 + 15v.
-// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,delay,eq,reverb,reverb-presets,filter-types,filter-resonance,warp`
+// `--only=envelopes,unison,unison-modes,phases,frames,frame-fades,aliasing,spread,blend,noise,sub,compressor,chorus,delay,eq,reverb,reverb-presets,filter-types,filter-resonance,warp,fxfilter,fxfilter-routes,fxfilter-lfo`
 // renders some of them
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -201,15 +205,26 @@ const spectrum = (x) => {
   );
   return Float64Array.from({ length: N / 2 }, (_, k) => Math.hypot(bins[2 * k], bins[2 * k + 1]) / (N / 4));
 };
-// the complex amplitude of a tone of `frequency` in x over n samples from `from` (Hann): its amplitude and its
-// phase (degrees) against a sine from sample 0
-const tone = (x, frequency, from, n) => {
+// the Hann windows of `tone` by their length
+const windows = new Map();
+const windowOf = (n) => {
+  if (!windows.has(n))
+    windows.set(
+      n,
+      Float64Array.from({ length: n }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)))
+    );
+  return windows.get(n);
+};
+// the complex amplitude of a tone of `frequency` in x over n samples from `from` at `rate` (Hann): its amplitude and
+// its phase (degrees) against a sine from sample 0
+const tone = (x, frequency, from, n, rate = RATE) => {
+  const window = windowOf(n);
   let re = 0;
   let im = 0;
   let sum = 0;
   for (let i = 0; i < n; i++) {
-    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1));
-    const phase = (2 * Math.PI * frequency * (from + i)) / RATE;
+    const w = window[i];
+    const phase = (2 * Math.PI * frequency * (from + i)) / rate;
     re += x[from + i] * w * Math.sin(phase);
     im += x[from + i] * w * Math.cos(phase);
     sum += w;
@@ -1835,6 +1850,8 @@ const rackStand = (tag, rate = RACK_RATE, valid = () => true) => {
   let laneSample = null;
   let laneJobs = [];
   const played = new Map();
+  // `more`: the mod slots of the state (`slots` of editedState), parameters of the host set (`params`), the rest
+  // of a job of the host (`automation`, set every `step` samples: host.swift)
   const render = (sample, fx, more) => {
     if (laneSample !== sample.path) {
       const before = laneJobs;
@@ -3610,6 +3627,30 @@ const playFilter = async (name, state, note, filter, params = {}, agree = false)
 // the amplitude of a frequency over 0.5..1.5 s (Hann)
 const filterLevel = (x, f) => tone(x, f, FILTER_FROM, RATE).amplitude;
 const round = (v, digits = 2) => +v.toFixed(digits);
+// the harmonics of C1 read at a cutoff (Hz; 'max': 22.05 kHz) up to `top`: 40 from 1 to 733 (23.97 kHz) evenly in log
+// (`LOG_HARMONICS`), every one within ±`spread` of the cutoff
+const LOG_HARMONICS = [...new Set(Array.from({ length: 40 }, (_, i) => Math.round(733 ** (i / 39))))];
+const harmonicsAt = (cut, top = 733, spread = 0.35) => {
+  const hz = cut === 'max' ? 22050 : cut;
+  const f0 = noteHz(24);
+  const near = [];
+  for (
+    let h = Math.ceil(((1 - spread) * hz) / f0);
+    h <= Math.min(top, Math.floor(((1 + spread) * hz) / f0));
+    h++
+  )
+    near.push(h);
+  return [...new Set([...LOG_HARMONICS.filter((h) => h <= top), ...near])].sort((a, b) => a - b);
+};
+// the gain (dB) of the fundamental of a sine through a filter (y) against the dry render and its harmonics 2..7 (dB
+// under the fundamental): `level` the amplitude of harmonic k in a render
+const harmonicGains = (level, dry, y) => {
+  const fundamental = level(y, 1);
+  return [
+    round(20 * Math.log10(fundamental / level(dry, 1))),
+    [2, 3, 4, 5, 6, 7].map((k) => round(Math.max(-140, 20 * Math.log10(level(y, k) / fundamental)), 1)),
+  ];
+};
 // a sine (osc A on a table of one sine `state`, at the amplitude A Level²) through a filter: the gain of its
 // fundamental against the dry render and its harmonics 2..7 (dB under the fundamental); a dry render once a note
 // and amplitude (no two hosts writing one file); `agree` as playFilter's
@@ -3627,12 +3668,7 @@ const sineGainsOf = (state, agree = false) => {
       dryOf(note, amp, params),
       playFilter(`sine-${name}-${note}-${amp}`, state, note, filter, params, agree),
     ]);
-    const level = (x, k) => filterLevel(x, k * f);
-    const fundamental = level(y, 1);
-    return [
-      round(20 * Math.log10(fundamental / level(dry, 1))),
-      [2, 3, 4, 5, 6, 7].map((k) => round(Math.max(-140, 20 * Math.log10(level(y, k) / fundamental)), 1)),
-    ];
+    return harmonicGains((x, k) => filterLevel(x, k * f), dry, y);
   };
 };
 
@@ -3661,15 +3697,6 @@ if (runs('filter-types')) {
     return hs.map((h) =>
       round(Math.max(-120, 20 * Math.log10(filterLevel(y, h * F0) / filterLevel(dry, h * F0))))
     );
-  };
-  // the harmonics read at a cutoff: 40 from 1 to 733 (23.97 kHz) evenly in log, every one within ±35 % of the cutoff
-  const LOG = [...new Set(Array.from({ length: 40 }, (_, i) => Math.round(733 ** (i / 39))))];
-  const harmonicsAt = (cut) => {
-    const hz = cut === 'max' ? 22050 : cut;
-    const near = [];
-    for (let h = Math.ceil((0.65 * hz) / F0); h <= Math.min(733, Math.floor((1.35 * hz) / F0)); h++)
-      near.push(h);
-    return [...new Set([...LOG, ...near])].sort((a, b) => a - b);
   };
   const CUTS = [100, 300, 1000, 3000, 8000, 15000, 'max'];
   const RES = [0, 0.25, 0.5, 0.75, 1];
@@ -4152,4 +4179,445 @@ if (runs('warp')) {
     ),
   });
   console.log('dsp/measurements: warp', parts.join(', '));
+}
+
+// --- fxfilter ---
+// the filter of the effect rack (FXFilter, an item of type 8; by the manual it "operates identically to the per-voice
+// synth filter … as a master effect"): samples of ours at 44.1 kHz played by the noise oscillator (one-shot, osc A
+// off) through the rack, rendered at 48 kHz, the rate of filter-types.json (the noise oscillator resamples them alike
+// with and without the filter). Its plain params: kParamType (a code; none: its default type), kParamFreq (a knob),
+// kParamReso, kParamDrive, kParamVar, kParamStereo (Pan), kParamWet (%), kParamLevelOut (a knob)
+const FX_FILTER_CODES = {
+  'MG Low 6': 'MgL6',
+  'MG Low 12': 'MgL12',
+  'MG Low 18': 'MgL18',
+  'MG Low 24': 'MgL24',
+  'Low 6': 'L6',
+  'Low 12': 'L12',
+  'Low 18': 'L18',
+  'Low 24': 'L24',
+  'High 6': 'H6',
+  'High 12': 'H12',
+  'High 18': 'H18',
+  'High 24': 'H24',
+  'Band 12': 'B12',
+  'Band 24': 'B24',
+  'Peak 12': 'P12',
+  'Peak 24': 'P24',
+  'Notch 12': 'N12',
+  'Notch 24': 'N24',
+};
+if (runs('fxfilter')) {
+  const R = RACK_RATE;
+  const SECONDS = 1.6;
+  const LENGTH = Math.round(SECONDS * R);
+  // a multisine on C1 as the one of filter-types (Schroeder phases, the amplitude 0.09), its harmonics under the band
+  // of the resampler of the noise oscillator
+  const F0 = noteHz(24);
+  const TOP = Math.floor(21500 / F0);
+  const multisine = (() => {
+    const x = new Float64Array(LENGTH);
+    for (let h = 1; h <= TOP; h++) {
+      const w = (2 * Math.PI * h * F0) / R;
+      const phi = (Math.PI * h * (h - 1)) / TOP;
+      for (let i = 0; i < LENGTH; i++) x[i] += Math.cos(w * i + phi);
+    }
+    let peak = 0;
+    for (const v of x) peak = Math.max(peak, Math.abs(v));
+    return { x: Array.from(x, (v) => (0.09 * v) / peak), each: 0.09 / peak };
+  })();
+  // the harmonics read at a cutoff: those of filter-types up to TOP
+  const harmonicsOf = (cut, spread) => harmonicsAt(cut, TOP, spread);
+  const fxOf = (type, { cut, res = 0, drive = 0, v = 0, pan, wet = 100, level } = {}) => ({
+    module: 'FXFilter',
+    type: 8,
+    params: {
+      ...(type ? { kParamType: FX_FILTER_CODES[type] } : {}),
+      ...(cut === undefined ? {} : { kParamFreq: cut === 'max' ? 1 : filterKnobOf(cut) }),
+      kParamReso: res * 100,
+      kParamDrive: drive * 100,
+      kParamVar: v * 100,
+      kParamWet: wet,
+      ...(pan === undefined ? {} : { kParamStereo: pan }),
+      ...(level === undefined ? {} : { kParamLevelOut: level }),
+    },
+  });
+  // a stand at `rate`: the gains (dB against the empty rack, -120 at least) of the multisine through an effect at
+  // harmonics hs, of the `channels` (both unless said), read over 1 s from 0.5 s
+  const standAt = (tag, rate) => {
+    const stand = rackStand(tag, rate);
+    const ms = stand.sampleOf('multisine', [multisine.x]);
+    const dry = stand.play(ms, null);
+    const start = Math.round(0.5 * rate);
+    const level = (x, h) => tone(x, h * F0, start, rate, rate).amplitude;
+    // (the dry level of a harmonic of a channel, read once)
+    const dryLevels = new Map();
+    const dryLevel = (d, c, h) => {
+      const key = `${c}-${h}`;
+      if (!dryLevels.has(key)) dryLevels.set(key, level(d[c], h));
+      return dryLevels.get(key);
+    };
+    const gains = async (fx, hs, channels = [0, 1]) => {
+      const [d, y] = await Promise.all([dry, stand.play(ms, fx)]);
+      return channels.map((c) =>
+        hs.map((h) => round(Math.max(-120, 20 * Math.log10(level(y[c], h) / dryLevel(d, c, h)))))
+      );
+    };
+    return { stand, ms, dry, start, level, gains };
+  };
+  const at48 = standAt('fxf', RATE);
+  // (rendered after all of 48 kHz: hosts loading different samples at once play the sample of another)
+  let at44 = null;
+  const left = async (fx, hs) => (await at48.gains(fx, hs, [0]))[0];
+  const NORMAL = Object.keys(FX_FILTER_CODES);
+  const CUTS = [100, 300, 1000, 3000, 8000, 15000, 'max'];
+  const RES = [0, 0.25, 0.5, 0.75, 1];
+  // the dry level of a harmonic against the one of the sample: what the rack is given
+  const input = at48.dry.then(([d]) => dB(at48.level(d, 10) / multisine.each));
+  // a fresh filter (nothing written): its type and knobs by its response
+  const FRESH = [
+    ...new Set([...LOG_HARMONICS.filter((h) => h <= TOP), ...Array.from({ length: 120 }, (_, i) => i + 1)]),
+  ].sort((a, b) => a - b);
+  const fresh = at48.gains({ module: 'FXFilter', type: 8, params: {} }, FRESH);
+  // without kParamType, Wet 100 and the knobs written: its default type
+  const untyped = Promise.all(
+    [300, 3000].flatMap((cut) =>
+      [0, 0.75].map(async (res) => [cut, res, await left(fxOf(null, { cut, res }), harmonicsOf(cut))])
+    )
+  );
+  const responses = Promise.all(
+    NORMAL.flatMap((type) =>
+      CUTS.flatMap((cut) =>
+        RES.map(async (res) => [type, cut, res, await left(fxOf(type, { cut, res }), harmonicsOf(cut))])
+      )
+    )
+  );
+  // at 44.1 kHz: the knob is a frequency whatever the rate
+  const ratesOf = () =>
+    Promise.all(
+      ['Low 12', 'MG Low 24', 'High 12'].flatMap((type) =>
+        [300, 3000, 12000].flatMap((cut) =>
+          [0, 0.75].map(async (res) => [
+            type,
+            cut,
+            res,
+            (await at44.gains(fxOf(type, { cut, res }), harmonicsOf(cut), [0]))[0],
+          ])
+        )
+      )
+    );
+  // Pan (kParamStereo): Low 12 at Res 0.75, each channel
+  const PANS = [0, 10, 25, 40, 50, 60, 75, 90, 100];
+  const PAN_CUTS = [300, 1000, 5000];
+  const pan = Promise.all(
+    PAN_CUTS.flatMap((cut) =>
+      PANS.map(async (p) => [
+        cut,
+        p,
+        ...(await at48.gains(fxOf('Low 12', { cut, res: 0.75, pan: p }), harmonicsOf(cut, 0.6))),
+      ])
+    )
+  );
+  // Mix (kParamWet): a render at Wet w as a·(Wet 0) + b·(Wet 100), least squares over 1 s of the left channel, the
+  // rest of it (dB under the render); Wet 0 against the empty rack the same (a·dry)
+  const WETS = [0, 10, 25, 50, 75, 90, 100];
+  const mixFx = (wet) => fxOf('Low 12', { cut: 1000, res: 0.5, wet });
+  const fit = (y, a, b) => {
+    const s = at48.start;
+    let [aa, ab, bb, ya, yb, yy] = [0, 0, 0, 0, 0, 0];
+    for (let i = s; i < s + RATE; i++) {
+      const bi = b ? b[i] : 0;
+      aa += a[i] * a[i];
+      ab += a[i] * bi;
+      bb += bi * bi;
+      ya += y[i] * a[i];
+      yb += y[i] * bi;
+      yy += y[i] * y[i];
+    }
+    const det = aa * bb - ab * ab;
+    const [ka, kb] = b ? [(ya * bb - yb * ab) / det, (yb * aa - ya * ab) / det] : [ya / aa, 0];
+    let rest = 0;
+    for (let i = s; i < s + RATE; i++) rest += (y[i] - ka * a[i] - kb * (b ? b[i] : 0)) ** 2;
+    return [round(ka, 4), round(kb, 4), round(10 * Math.log10(Math.max(rest, 1e-30) / yy), 1)];
+  };
+  const mix = (async () => {
+    const [[y0], [y100], [d]] = await Promise.all([
+      at48.stand.play(at48.ms, mixFx(0)),
+      at48.stand.play(at48.ms, mixFx(100)),
+      at48.dry,
+    ]);
+    const rows = await Promise.all(
+      WETS.map(async (wet) => [wet, ...fit((await at48.stand.play(at48.ms, mixFx(wet)))[0], y0, y100)])
+    );
+    return { rows, dry: fit(y0, d) };
+  })();
+  // Level (kParamLevelOut): the gain of harmonic 3 through Low 12 open
+  const LEVELS = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1];
+  const level = Promise.all(
+    LEVELS.map(async (v) => [v, (await left(fxOf('Low 12', { cut: 'max', level: v }), [3]))[0]])
+  );
+  // sines of ours (44.1 kHz) through the filter: the gain of the fundamental against the empty rack and the
+  // harmonics 2..7 under it (dB), over 1 s from 0.5 s
+  const sines = new Map();
+  const sineOf = (f, amp) => {
+    const key = `${f.toFixed(2)}-${amp}`;
+    if (!sines.has(key))
+      sines.set(
+        key,
+        at48.stand.sampleOf(`sine-${key}`, [
+          Array.from({ length: LENGTH }, (_, i) => amp * Math.sin((2 * Math.PI * f * i) / R)),
+        ])
+      );
+    return sines.get(key);
+  };
+  const sineGains = async (f, amp, fx) => {
+    const sample = sineOf(f, amp);
+    const [[d], [y]] = await Promise.all([at48.stand.play(sample, null), at48.stand.play(sample, fx)]);
+    return harmonicGains((x, k) => tone(x, k * f, at48.start, RATE).amplitude, d, y);
+  };
+  // rows of the gains of sines of `f` ({ head, amp, fx }: the row starts with head), in their order, asked sample by
+  // sample (an amplitude a sample: renders of one sample run together, never back to one)
+  const sineRows = (f, rows) => {
+    const asked = new Map();
+    [...rows].sort((a, b) => a.amp - b.amp).forEach((row) => asked.set(row, sineGains(f, row.amp, row.fx)));
+    return Promise.all(rows.map(async (row) => [...row.head, ...(await asked.get(row))]));
+  };
+  const A3 = noteHz(57);
+  const DRIVES = Array.from({ length: 11 }, (_, i) => i / 10);
+  const AMPS = [0.01, 0.03, 0.1, 0.3, 0.5625, 1];
+  const driveLaw = Promise.all(
+    DRIVES.map(async (drive) => [
+      drive,
+      (await sineGains(A3, 0.001, fxOf('Low 12', { cut: 'max', drive })))[0],
+    ])
+  );
+  const driveCurves = sineRows(
+    A3,
+    ['Low 12', 'MG Low 12'].flatMap((type) =>
+      [0, 0.5, 1].flatMap((drive) =>
+        AMPS.map((amp) => ({ head: [type, drive, amp], amp, fx: fxOf(type, { cut: 'max', drive }) }))
+      )
+    )
+  );
+  // FAT and the saturation of a resonance: a sine at the cutoff (B5) by its amplitude
+  const B5 = noteHz(83);
+  const fat = sineRows(
+    B5,
+    ['Low 12', 'MG Low 12', 'MG Low 24', 'Band 12'].flatMap((type) =>
+      [0.5, 1].flatMap((res) =>
+        [0, 1].flatMap((v) =>
+          [0.03, 0.3, 1].map((amp) => ({
+            head: [type, res, v, amp],
+            amp,
+            fx: fxOf(type, { cut: B5, res, v }),
+          }))
+        )
+      )
+    )
+  );
+  // a ring: 50 ms of a noise at 0.1, then a silence; the level (dB of the mean square, both channels) every 50 ms
+  // from its end, by the type at Res 1 at 1 kHz
+  const ring = (async () => {
+    let seed = 1;
+    const noise = Array.from({ length: LENGTH }, (_, i) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return i < 0.05 * R ? 0.1 * (2 * (seed / 2147483648) - 1) : 0;
+    });
+    const sample = at48.stand.sampleOf('burst', [noise]);
+    return Promise.all(
+      ['Low 12', 'MG Low 24', 'Band 12'].map(async (type) => {
+        const [l, r] = await at48.stand.play(sample, fxOf(type, { cut: 1000, res: 1 }));
+        const end = Math.round(0.1 * RATE);
+        const n = Math.round(0.05 * RATE);
+        return [
+          type,
+          Array.from({ length: 24 }, (_, k) => {
+            let sum = 0;
+            for (let i = end + k * n; i < end + (k + 1) * n; i++) sum += l[i] ** 2 + r[i] ** 2;
+            return round(Math.max(-200, 10 * Math.log10(sum / (2 * n))), 1);
+          }),
+        ];
+      })
+    );
+  })();
+  try {
+    const result = {
+      about:
+        'The FX Filter of the effect rack of the Audio Unit (FXFilter, an item of type 8, alone in the rack; osc A ' +
+        'off, the noise oscillator plays samples of ours one-shot at 44.1 kHz, rendered at 48 kHz unless said). Its ' +
+        'plain params: kParamType (codes: `codes`), kParamFreq (a knob: written as the note 136.8 v of the voice ' +
+        'filter, `cut` in Hz), kParamReso, kParamDrive, kParamVar (%), kParamStereo (Pan, %), kParamWet (%), ' +
+        'kParamLevelOut (a knob); Wet 100 unless said. input: the dry level of a harmonic of the multisine against ' +
+        'the sample (dB). Gains: dB against the empty rack (-120 at least) at harmonics of 32.703 Hz: a multisine on ' +
+        'C1 (harmonics 1..`top` of one magnitude, Schroeder phases, the amplitude 0.09 in the sample), read over 1 s ' +
+        'from 0.5 s. fresh: [left, right] of a fresh filter at `freshHarmonics`. untyped: [cut, res, gains] ' +
+        'without kParamType. responses: [type, cut, res, gains] at `harmonics[cut]` (those of filter-types.json up ' +
+        'to `top`), Drive and Var 0. rates: the same at 44.1 kHz. pan: [cut, pan, left, right] Low 12 at Res 0.75 ' +
+        'at `panHarmonics[cut]`. mix: rows [wet, a, b, rest] a render at Wet as a·(Wet 0) + b·(Wet 100) (least ' +
+        'squares over 1 s of the left channel; rest dB under it), Low 12 at 1 kHz Res 0.5; dry [a, 0, rest] Wet 0 ' +
+        'as a·(the empty rack). level: [knob, dB] Low 12 open at harmonic 3. Sines (ours, 44.1 kHz): [gain of the ' +
+        'fundamental (dB), harmonics 2..7 under it (dB)]. driveLaw: [drive, gain] a sine of 220 Hz at 0.001 before ' +
+        'Low 12 open; driveCurves: [type, drive, amplitude, gain, harmonics] 220 Hz; fat: [type, res, var, ' +
+        'amplitude, gain, harmonics] a sine at the cutoff (987.8 Hz). routes: --only=fxfilter-routes. ring: ' +
+        '[type, dB every 50 ms] of the mean square after 50 ms of a noise at 0.1, ' +
+        'Res 1 at 1 kHz. scripts/renders/run.mjs --only=fxfilter',
+      rate: RATE,
+      f0: round(F0, 4),
+      top: TOP,
+      codes: FX_FILTER_CODES,
+      input: await input,
+      harmonics: Object.fromEntries(CUTS.map((cut) => [cut, harmonicsOf(cut)])),
+      panHarmonics: Object.fromEntries(PAN_CUTS.map((cut) => [cut, harmonicsOf(cut, 0.6)])),
+      freshHarmonics: FRESH,
+      fresh: await fresh,
+      untyped: await untyped,
+      responses: await responses,
+      rates: null,
+      pan: await pan,
+      mix: await mix,
+      level: await level,
+      driveLaw: await driveLaw,
+      driveCurves: await driveCurves,
+      fat: await fat,
+      ring: await ring,
+    };
+    at44 = standAt('fxf44', R);
+    result.rates = await ratesOf();
+    writeRows(join(out, 'fxfilter.json'), result);
+    console.log(
+      'dsp/measurements: fxfilter',
+      JSON.stringify({ input: result.input, level: result.level, mix: result.mix })
+    );
+  } finally {
+    at48.stand.remove();
+    at44?.stand.remove();
+  }
+}
+
+// --- fxfilter-routes ---
+// a route of Macro 1 (source 25) to kParamFreq of the FX Filter (the item 0 of the rack, param 3): a sine of 2 kHz
+// through Low 12 at Res 0 from the knob 0.5 (425 Hz), the macro still at 1 (a parameter of the host), the route by
+// `amount` (% of the travel of the knob, up or down): [amount, dB of the sine against its level in the sample, the
+// peak of |y| over a period at 0.5 s]; `wet`: the macro routed to kParamWet by -100 % (the dry sine); `dryLevel`: Wet 0 at Level 0.25 (whether the level is of the dry signal too). The macro
+// automated over a render moves no route of the rack in the host: no steps. Into fxfilter.json
+if (runs('fxfilter-routes')) {
+  const R = RACK_RATE;
+  const stand = rackStand('fxfr', RATE);
+  const length = Math.round(1.6 * R);
+  const sample = stand.sampleOf('sine', [
+    Array.from({ length }, (_, i) => 0.3 * Math.sin((2 * Math.PI * 2000 * i) / R)),
+  ]);
+  const fx = {
+    module: 'FXFilter',
+    type: 8,
+    params: { kParamType: FX_FILTER_CODES['Low 12'], kParamFreq: 0.5, kParamReso: 0, kParamWet: 100 },
+  };
+  const slot = (param, name, amount) => ({ source: 25, osc: 0, param, name, type: 'FXFilter', amount });
+  const period = RATE / 2000;
+  const levelAt = (y, t) => {
+    const end = Math.round(t * RATE);
+    let peak = 0;
+    for (let i = end - period; i < end; i++) peak = Math.max(peak, Math.abs(y[i]));
+    return round(20 * Math.log10(peak / 0.3));
+  };
+  try {
+    const AMOUNTS = [-30, -10, 0, 10, 20, 30, 50];
+    const routes = await Promise.all(
+      AMOUNTS.map(async (amount) => {
+        const slots = amount ? [slot(3, 'kParamFreq', amount)] : [];
+        const [y] = await stand.play(sample, fx, { slots, params: { 'Macro 1': 1 } });
+        return [amount, levelAt(y, 0.5)];
+      })
+    );
+    const [dry] = await stand.play(sample, fx, {
+      slots: [slot(1, 'kParamWet', -100)],
+      params: { 'Macro 1': 1 },
+    });
+    // the level of the dry signal: Wet 0 at Level 0.25 (-12 dB if the level is of the whole module, 0 of the wet one
+    // alone)
+    const [quiet] = await stand.play(sample, {
+      ...fx,
+      params: { ...fx.params, kParamWet: 0, kParamLevelOut: 0.25 },
+    });
+    const file = join(out, 'fxfilter.json');
+    const result = JSON.parse(readFileSync(file, 'utf8'));
+    result.routes = { rows: routes, wet: levelAt(dry, 0.5), dryLevel: levelAt(quiet, 0.5) };
+    writeRows(file, result);
+    console.log('dsp/measurements: fxfilter routes', JSON.stringify(result.routes));
+  } finally {
+    stand.remove();
+  }
+}
+
+// --- fxfilter-lfo ---
+// LFO 1 (its default shape: a triangle from 0 up, from the note) routed to kParamFreq of the FX Filter by `amount` % of
+// the travel of the knob: a sine of 2 kHz at 0.3 through Low 12 from the knob 0.5 (425 Hz) at each Res, LFO 1 at the
+// rates of the delay's (`divisions`: its knob, the Hz at 120 BPM); the level of the sine (dB against 0.3: the rms of a
+// period of it, centred, × √2) every 32 samples over a cycle from 1 s after the sine starts. Into fxfilter.json
+if (runs('fxfilter-lfo')) {
+  const R = RACK_RATE;
+  const stand = rackStand('fxfl', RATE, (channels) =>
+    channels.some((x) => x.some((value) => Math.abs(value) > 1e-3))
+  );
+  const SECONDS = 3;
+  const AMOUNT = 30;
+  const RES = [0, 0.5];
+  const DIVISIONS = [
+    ['1/4', 0.5, 2],
+    ['1/8', 0.58, 4],
+    ['1/16', 0.66, 8],
+    ['1/32', 0.74, 16],
+  ];
+  const sample = stand.sampleOf('sine', [
+    Array.from(
+      { length: Math.round(SECONDS * R) },
+      (_, i) => 0.3 * Math.sin((2 * Math.PI * 2000 * i) / R) * Math.min(1, i / 2000)
+    ),
+  ]);
+  const fx = (res) => ({
+    module: 'FXFilter',
+    type: 8,
+    params: { kParamType: FX_FILTER_CODES['Low 12'], kParamFreq: 0.5, kParamReso: res * 100, kParamWet: 100 },
+  });
+  const slots = [{ source: 6, osc: 0, param: 3, name: 'kParamFreq', type: 'FXFilter', amount: AMOUNT }];
+  const period = RATE / 2000;
+  try {
+    const [dry] = await stand.play(sample, null);
+    let S = 0;
+    while (Math.abs(dry[S]) < 1e-6) S++;
+    const cases = RES.flatMap((res) =>
+      DIVISIONS.map(([division, knob, hz]) => ({ res, division, knob, hz }))
+    );
+    const renders = await Promise.all(
+      cases.map(({ res, knob }) => stand.play(sample, fx(res), { slots, params: { 'LFO 1 Rate': knob } }))
+    );
+    const rows = [];
+    cases.forEach(({ hz }, index) => {
+      const [y] = renders[index];
+      const from = Math.round(1.0 * RATE);
+      for (let n = from; n < from + RATE / hz; n += 32) {
+        let sum = 0;
+        for (let k = -period / 2; k < period / 2; k++) sum += y[S + n + k] ** 2;
+        rows.push([index, n, round(20 * Math.log10(Math.sqrt((2 * sum) / period) / 0.3), 3)]);
+      }
+    });
+    const file = join(out, 'fxfilter.json');
+    const result = JSON.parse(readFileSync(file, 'utf8'));
+    if (!result.about.includes('--only=fxfilter-lfo'))
+      result.about = result.about.replace(
+        ' ring:',
+        ' lfo: --only=fxfilter-lfo, LFO 1 (a triangle from 0 up, from the note) on kParamFreq by `amount` % from the ' +
+          'knob 0.5, a sine of 2 kHz at 0.3 through Low 12 at the Res of each case; lfoRows: [case, the sample from ' +
+          'the start of the sine, dB of the sine against 0.3 (the rms of a period, centred)] every 32 samples over a ' +
+          'cycle from 1 s. ring:'
+      );
+    delete result.lfo;
+    delete result.lfoRows;
+    result.lfo = { amount: AMOUNT, knob: 0.5, cases };
+    result.lfoRows = rows;
+    writeRows(file, result);
+    console.log('dsp/measurements: fxfilter lfo', JSON.stringify(result.lfo));
+  } finally {
+    stand.remove();
+  }
 }

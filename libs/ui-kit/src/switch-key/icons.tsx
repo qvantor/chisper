@@ -161,6 +161,27 @@ export const HighPassIcon = () => (
   </Icon>
 );
 
+// a low pass: the high pass mirrored, flat up to its cutoff, the highs down its slope at the right
+export const LowPassIcon = () => (
+  <Icon>
+    <path d='M1.5 4h6.4c3.2 0 3.2 9.5 6.6 9.5' {...LINE} />
+  </Icon>
+);
+
+// a band pass: a hump at its cutoff, both sides down
+export const BandPassIcon = () => (
+  <Icon>
+    <path d='M1.5 13.5c3 0 4-9.5 6.5-9.5s3.5 9.5 6.5 9.5' {...LINE} />
+  </Icon>
+);
+
+// a peak and a notch: a flat response, a bump up, then a narrow dip down
+export const NotchPeakIcon = () => (
+  <Icon>
+    <path d='M1.5 8h1.6c1.6 0 1.6-5 3.1-5s1.5 5 3.1 5c.9 0 1 5.5 1.6 5.5s.7-5.5 1.6-5.5h2' {...LINE} />
+  </Icon>
+);
+
 // the shapes of the sub: one cycle each across the key
 export const SineIcon = () => (
   <Icon>

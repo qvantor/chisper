@@ -1,12 +1,9 @@
 import React from 'react';
-import { styled } from 'styled-components';
-import cls from 'classnames';
 import hexToRgba from 'hex-to-rgba';
 import {
   Deactivated,
   HandleModulation,
   liveKnob,
-  singlePointerTracker,
   theme,
   Tooltip,
   useCanvas,
@@ -14,7 +11,6 @@ import {
   useLiveDraw,
   ValueTooltip,
 } from '@chisper/ui-kit';
-import { number } from '@chisper/math';
 import { EQ_PASS, eqTypeOf } from '@chisper/math/eq';
 import { eq } from '../../effects/eq';
 import { EQ_BANDS, EqBandKeys } from '../../effects/eq-params';
@@ -29,8 +25,6 @@ import {
   curvePoints,
   DB_LINES,
   dbY,
-  FREQ_LABELS,
-  FREQ_LINES,
   freqX,
   POINTS,
   Size,
@@ -38,14 +32,13 @@ import {
 } from './eq-screen-geometry';
 import {
   FRAME_SIZE,
-  keyStep,
-  pointerScale,
+  FreqGrid,
+  PointGrip,
   SCREEN_COLOR,
   ScreenCanvas,
   ScreenFrame,
   ScreenLabels,
   ScreenPlot,
-  withinDef,
 } from './screen-grip';
 
 // css px of the screen
@@ -58,43 +51,8 @@ const SUM_FILL = hexToRgba(SCREEN_COLOR, 0.15);
 const DOT_RADIUS = 2.5;
 const BAND_LINE = 1;
 const LINE = 1.5;
-// of 100 % a step of the wheel moves the resonance by (a notch: 100)
-const WHEEL_STEP = 0.05;
 
 const { params: defs } = eq;
-
-// what stands still: a line at each frequency and dB of the grid, 0 dB brighter, the labels of the decades
-const Grid = React.memo(({ size }: { size: Size }) => (
-  <>
-    {FREQ_LINES.map((hz) => (
-      <rect
-        key={hz}
-        x={freqX(hz, size) - 0.5}
-        y='0'
-        width='1'
-        height={size[1]}
-        fill={theme.colors.white}
-        opacity='0.04'
-      />
-    ))}
-    {DB_LINES.map((db) => (
-      <rect
-        key={db}
-        x='0'
-        y={dbY(db, size) - 0.5}
-        width={size[0]}
-        height='1'
-        fill={theme.colors.white}
-        opacity={db === 0 ? 0.12 : 0.04}
-      />
-    ))}
-    {FREQ_LABELS.map(([hz, label]) => (
-      <text key={hz} x={freqX(hz, size) + 2} y={size[1] - 3}>
-        {label}
-      </text>
-    ))}
-  </>
-));
 
 // the knobs of the bands a frame draws: frequency, resonance, gain of each (the types switch, no route moves them);
 // the gain of a pass draws nothing: no travel, its routes draw no frame
@@ -180,38 +138,6 @@ const useCurves = (
   return canvas;
 };
 
-const GripRoot = styled.div`
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  margin: -8px 0 0 -8px;
-  touch-action: none;
-  outline: none;
-  cursor: move;
-
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 3px;
-    box-sizing: border-box;
-    border: 1.5px solid var(--band-color);
-    border-radius: 50%;
-    background: ${theme.colors.primaryDark};
-    transition: background 150ms;
-  }
-
-  &:hover::after,
-  &.active::after,
-  &:focus-visible::after {
-    background: var(--band-color);
-  }
-
-  &.disabled {
-    cursor: default;
-    pointer-events: none;
-  }
-`;
-
 interface GripProps extends BandKnobs {
   band: number;
   keys: EqBandKeys;
@@ -226,109 +152,29 @@ interface GripProps extends BandKnobs {
 // resonance: the point is on its curve); the wheel over it its resonance; the arrows move it, a double click sets
 // its gain (of a pass its resonance) to the default
 const EqGrip = React.memo(({ band, keys, size, setParam, onHold, disabled, ...knobs }: GripProps) => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [active, setActive] = React.useState(false);
-  const [trackPointer] = React.useState(singlePointerTracker);
   // the knob up and down
   const upDown = eqTypeOf(knobs.type) === EQ_PASS ? 'reso' : 'gain';
   const [x, y] = bandPoint(knobs, size);
-  // the values set last (a move sets only what changed)
-  const last = React.useRef<Partial<Record<EqParam, number>>>({});
-  const emit = (key: EqParam, value: number) => {
-    const next = withinDef(defs[key], value);
-    if (next === last.current[key]) return;
-    last.current[key] = next;
-    setParam(key, next);
-  };
-  const now = () => {
-    last.current = { [keys.freq]: knobs.freq, [keys.reso]: knobs.reso, [keys.gain]: knobs.gain };
-  };
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    now();
-    const scale = pointerScale(e.currentTarget);
-    const [fromX, fromY] = [e.clientX, e.clientY];
-    const tracked = trackPointer(
-      e,
-      (move) => {
-        emit(keys.freq, xFreq(x + (move.clientX - fromX) / scale, size));
-        emit(keys[upDown], bandUpDown(knobs.type, y + (move.clientY - fromY) / scale, size));
-      },
-      () => {
-        setActive(false);
-        onHold(null);
-      }
-    );
-    if (!tracked) return;
-    setActive(true);
-    onHold(band);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const across = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-    const along = { ArrowUp: 1, ArrowDown: -1 }[e.key];
-    if (!across && !along) return;
-    e.preventDefault();
-    now();
-    const knob = across ? 'freq' : upDown;
-    emit(keys[knob], keyStep(defs[keys[knob]], knobs[knob], across ?? along ?? 0));
-  };
-
-  // the wheel: the resonance (not passive: the page doesn't scroll under it). The value it moved to before the
-  // rounding goes on from one event to the next (a slow scroll of a trackpad moves it by less than a step of the knob
-  // an event: rounded each time it went up alone), forgotten once the knob is set to another value than it set
-  const wheeled = React.useRef<{ value: number; set: number | undefined } | null>(null);
-  React.useEffect(() => {
-    if (wheeled.current?.set !== knobs.reso) wheeled.current = null;
-  }, [knobs.reso]);
-  const resonance = React.useRef({ knobs, keys, emit, now });
-  resonance.current = { knobs, keys, emit, now };
-  React.useEffect(() => {
-    const node = ref.current;
-    if (!node || disabled) return undefined;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const { knobs, keys, emit, now } = resonance.current;
-      // (going on, what it set last is the knob, whether it has come back yet or not)
-      if (!wheeled.current) now();
-      const { min, max } = defs[keys.reso];
-      const value = number.thresholds(
-        (wheeled.current?.value ?? knobs.reso) - e.deltaY * WHEEL_STEP,
-        min,
-        max
-      );
-      emit(keys.reso, value);
-      wheeled.current = { value, set: last.current[keys.reso] };
-    };
-    node.addEventListener('wheel', onWheel, { passive: false });
-    return () => node.removeEventListener('wheel', onWheel);
-  }, [disabled]);
-
-  const { name: freqName, formatValue: formatFreq } = defs[keys.freq];
-  const { formatValue: formatUpDown, default: upDownDefault } = defs[keys[upDown]];
+  const param = (knob: 'freq' | 'reso' | 'gain') => ({
+    key: keys[knob],
+    def: defs[keys[knob]],
+    value: knobs[knob],
+  });
+  const { formatValue: formatFreq } = defs[keys.freq];
+  const { formatValue: formatUpDown } = defs[keys[upDown]];
   return (
-    <GripRoot
-      ref={ref}
-      className={cls({ active, disabled })}
-      style={{ left: x, top: y, '--band-color': BAND_COLORS[band] } as React.CSSProperties}
-      role='slider'
-      tabIndex={disabled ? -1 : 0}
-      aria-label={`Band ${band + 1}`}
-      aria-orientation='horizontal'
-      aria-valuemin={defs[keys.freq].min}
-      aria-valuemax={defs[keys.freq].max}
-      aria-valuenow={knobs.freq}
-      aria-valuetext={`${formatFreq?.(knobs.freq)}, ${formatUpDown?.(knobs[upDown])}`}
-      aria-disabled={disabled || undefined}
-      title={freqName}
-      {...(!disabled && {
-        onPointerDown,
-        onKeyDown,
-        onDoubleClick: () => {
-          now();
-          emit(keys[upDown], upDownDefault);
-        },
-      })}
+    <PointGrip
+      x={x}
+      y={y}
+      across={{ ...param('freq'), at: (px) => xFreq(px, size) }}
+      upDown={{ ...param(upDown), at: (px) => bandUpDown(knobs.type, px, size) }}
+      wheel={param('reso')}
+      color={BAND_COLORS[band]}
+      label={`Band ${band + 1}`}
+      valueText={`${formatFreq?.(knobs.freq)}, ${formatUpDown?.(knobs[upDown])}`}
+      setParam={setParam}
+      onHold={(held) => onHold(held ? band : null)}
+      disabled={disabled}
     />
   );
 });
@@ -372,7 +218,7 @@ export const EqScreen = ({ params, setParam, sampleRate, modulations, active }: 
         <ScreenPlot ref={plot}>
           {size[0] > 0 && (
             <ScreenLabels aria-hidden>
-              <Grid size={size} />
+              <FreqGrid size={size} dbLines={DB_LINES} dbY={dbY} />
             </ScreenLabels>
           )}
           <ScreenCanvas {...canvas} data-testid='eq-curves' aria-hidden />

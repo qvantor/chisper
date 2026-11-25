@@ -67,12 +67,8 @@ const responseOf = (type: string, props: FilterProps, sampleRate: number): ((p: 
       { cutoff: props.cutoff, resonance: props.resonance / 100, variation: (props.variation ?? 0) / 100 },
       sampleRate
     );
-    const drive = (props.drive ?? 0) / 100;
-    if (drive <= 0) return (p) => 10 * Math.log10(filterModel.designGain2At(design, p.cos1, p.sin1));
-    const level = filterModel.driveLevel(drive);
-    const level2 = level * level;
-    return (p) =>
-      10 * Math.log10(filterModel.designGain2At(design, p.cos1, p.sin1) * level2 * 0.5 * (1 + p.cos1));
+    const drive = filterModel.driveGain2((props.drive ?? 0) / 100);
+    return (p) => 10 * Math.log10(filterModel.designGain2At(design, p.cos1, p.sin1) * drive(p.cos1));
   }
   const coefficients = biquadCoefficients(type as BiquadFilterType, props, sampleRate);
   return (p) => magnitudeDb(coefficients, p);

@@ -14,7 +14,7 @@ export const es: Messages = {
     h1: 'Chisper: sintetizador wavetable gratis',
     lead: 'Chisper es un **sintetizador wavetable gratis** (de tablas de ondas) que funciona en el navegador, en el ordenador, un Chromebook o el móvil: **sin descargas ni cuenta**.',
     details:
-      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un **oscilador de ruido**, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, chorus, delay, compresor, reverb y EQ. Conecta un teclado MIDI o toca con el teclado del ordenador, y graba lo que tocas en el **piano roll**.',
+      '**Dos osciladores** con **unísono supersaw** de hasta 8 voces, un **oscilador de ruido**, un filtro en cada voz, tres envolventes y cuatro LFO que arrastras a **cualquier control**, distorsión, un filtro como efecto, chorus, delay, compresor, reverb y EQ. Conecta un teclado MIDI o toca con el teclado del ordenador, y graba lo que tocas en el **piano roll**.',
     listen: 'Escúchalo',
     screenshotAlt:
       'El sintetizador Chisper tocando acordes: se mueven las ondas de los dos osciladores, los puntos de las envolventes y del LFO, el filtro y el espectro',
@@ -107,9 +107,9 @@ export const es: Messages = {
       more: 'Modulación: envolventes, LFO, velocidad',
     },
     effects: {
-      h2: 'Efectos: distorsión, chorus, delay, compresor, reverb y EQ',
+      h2: 'Efectos: distorsión, filtro, chorus, delay, compresor, reverb y EQ',
       text: [
-        'Termina el sonido dentro del sintetizador: distorsión (soft o hard clip, con sobremuestreo), un chorus (cuatro voces que mueve un LFO, que puede seguir el tempo: la anchura de pads y supersaws), un delay (normal o ping-pong, con un filtro de banda en la realimentación y un desfase estéreo Haas), un compresor (de una banda, o de tres bandas que se aprietan y se levantan: el sonido denso de los bajos modernos), una reverb algorítmica de 16 líneas y un EQ de dos bandas (un estante, una campana o un paso alto o bajo cada una: los graves limpios, los medios recortados, aire arriba). Arrástralos en cualquier orden; cada uno tiene su Mix y sus presets. Un limitador en el máster evita que la salida sature.',
+        'Termina el sonido dentro del sintetizador: distorsión (soft o hard clip, con sobremuestreo), un filtro sobre todo el sonido (los tipos del filtro de una voz, con Drive y un Pan que separa los cortes del canal izquierdo y del derecho: barridos con un LFO o un macro), un chorus (cuatro voces que mueve un LFO, que puede seguir el tempo: la anchura de pads y supersaws), un delay (normal o ping-pong, con un filtro de banda en la realimentación y un desfase estéreo Haas), un compresor (de una banda, o de tres bandas que se aprietan y se levantan: el sonido denso de los bajos modernos), una reverb algorítmica de 16 líneas y un EQ de dos bandas (un estante, una campana o un paso alto o bajo cada una: los graves limpios, los medios recortados, aire arriba). Arrástralos en cualquier orden; cada uno tiene su Mix y sus presets. Un limitador en el máster evita que la salida sature.',
       ],
     },
     playing: {

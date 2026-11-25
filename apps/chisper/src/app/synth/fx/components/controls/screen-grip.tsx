@@ -4,6 +4,7 @@ import cls from 'classnames';
 import { number } from '@chisper/math';
 import { singlePointerTracker, theme, valueScale } from '@chisper/ui-kit';
 import type { FxParamDef } from '../../effects/types';
+import { FREQ_LABELS, FREQ_LINES, freqX, Size } from './eq-screen-geometry';
 
 // the lines and the points of a screen, as on the other charts of the synth
 export const SCREEN_COLOR = theme.colors.accent;
@@ -272,3 +273,225 @@ const Grip = (props: ScreenGripProps) => {
 export const ScreenGrip = React.memo(Grip) as <Param extends string>(
   props: ScreenGripProps<Param>
 ) => React.ReactElement;
+
+// what stands still on a screen of a frequency (the EQ, the FX Filter): a line at each frequency and dB of the grid,
+// 0 dB brighter, the labels of the decades
+export const FreqGrid = React.memo(
+  ({ size, dbLines, dbY }: { size: Size; dbLines: number[]; dbY: (db: number, size: Size) => number }) => (
+    <>
+      {FREQ_LINES.map((hz) => (
+        <rect
+          key={hz}
+          x={freqX(hz, size) - 0.5}
+          y='0'
+          width='1'
+          height={size[1]}
+          fill={theme.colors.white}
+          opacity='0.04'
+        />
+      ))}
+      {dbLines.map((db) => (
+        <rect
+          key={db}
+          x='0'
+          y={dbY(db, size) - 0.5}
+          width={size[0]}
+          height='1'
+          fill={theme.colors.white}
+          opacity={db === 0 ? 0.12 : 0.04}
+        />
+      ))}
+      {FREQ_LABELS.map(([hz, label]) => (
+        <text key={hz} x={freqX(hz, size) + 2} y={size[1] - 3}>
+          {label}
+        </text>
+      ))}
+    </>
+  )
+);
+
+// of 100 % a step of the wheel moves the resonance by (a notch: 100)
+const WHEEL_STEP = 0.05;
+
+const PointRoot = styled.div`
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  touch-action: none;
+  outline: none;
+  cursor: move;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    box-sizing: border-box;
+    border: 1.5px solid var(--grip-color, ${SCREEN_COLOR});
+    border-radius: 50%;
+    background: ${theme.colors.primaryDark};
+    transition: background 150ms;
+  }
+
+  &:hover::after,
+  &.active::after,
+  &:focus-visible::after {
+    background: var(--grip-color, ${SCREEN_COLOR});
+  }
+
+  // (one that moves across alone)
+  &.across {
+    cursor: ew-resize;
+  }
+
+  &.disabled {
+    cursor: default;
+    pointer-events: none;
+  }
+`;
+
+// a param a point moves: its key, its range, its value, and along an axis the value at a place (css px of the screen)
+export interface PointParam {
+  key: string;
+  def: FxParamDef;
+  value: number;
+  at: (px: number) => number;
+}
+
+interface PointGripProps {
+  // where it is, css px of the screen
+  x: number;
+  y: number;
+  // the params it moves: dragged across, up and down (a double click sets its default), by the wheel (without the
+  // last two it moves across alone: a filter of no resonance)
+  across: PointParam;
+  upDown?: PointParam;
+  wheel?: Omit<PointParam, 'at'>;
+  // its ring (absent: the one of the screens)
+  color?: string;
+  label: string;
+  valueText: string;
+  setParam: (key: string, value: number) => void;
+  // a pointer holds it, or lets it go
+  onHold: (held: boolean) => void;
+  disabled: boolean;
+}
+
+// a point of two params set on a screen (a band of the EQ, the FX Filter): dragged, one across and one up and down;
+// the arrows move them, a double click sets the one up and down to its default; the wheel over it a third one (the
+// resonance). Without the one up and down and the wheel it moves across alone
+export const PointGrip = (props: PointGripProps) => {
+  const { x, y, across, upDown, wheel, color, label, valueText, setParam, onHold, disabled } = props;
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [active, setActive] = React.useState(false);
+  const [trackPointer] = React.useState(singlePointerTracker);
+  const params = [across, upDown, wheel].filter((param) => param !== undefined);
+  const defs = Object.fromEntries(params.map(({ key, def }) => [key, def]));
+  // the values set last (a move sets only what changed)
+  const last = React.useRef<Record<string, number>>({});
+  const emit = (key: string, value: number) => {
+    const next = withinDef(defs[key], value);
+    if (next === last.current[key]) return;
+    last.current[key] = next;
+    setParam(key, next);
+  };
+  const now = () => {
+    last.current = Object.fromEntries(params.map(({ key, value }) => [key, value]));
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    now();
+    const scale = pointerScale(e.currentTarget);
+    const [fromX, fromY] = [e.clientX, e.clientY];
+    // an axis the pointer hasn't moved along yet keeps its value (a drag up and down sets no frequency: one off the
+    // screen, or between the steps of its precision, stays where the knob has it)
+    const moved = { across: false, upDown: false };
+    const tracked = trackPointer(
+      e,
+      (move) => {
+        const [dx, dy] = [(move.clientX - fromX) / scale, (move.clientY - fromY) / scale];
+        moved.across ||= dx !== 0;
+        moved.upDown ||= dy !== 0;
+        if (moved.across) emit(across.key, across.at(x + dx));
+        if (upDown && moved.upDown) emit(upDown.key, upDown.at(y + dy));
+      },
+      () => {
+        setActive(false);
+        onHold(false);
+      }
+    );
+    if (!tracked) return;
+    setActive(true);
+    onHold(true);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const sideways = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    const along = { ArrowUp: 1, ArrowDown: -1 }[e.key];
+    const param = sideways ? across : along ? upDown : undefined;
+    if (!param) return;
+    e.preventDefault();
+    now();
+    emit(param.key, keyStep(param.def, param.value, sideways ?? along ?? 0));
+  };
+
+  // the wheel (not passive: the page doesn't scroll under it). The value it moved to before the rounding goes on from
+  // one event to the next (a slow scroll of a trackpad moves it by less than a step of the knob an event: rounded each
+  // time it went up alone), forgotten once the knob is set to another value than it set
+  const wheeled = React.useRef<{ value: number; set: number | undefined } | null>(null);
+  React.useEffect(() => {
+    if (wheeled.current?.set !== wheel?.value) wheeled.current = null;
+  }, [wheel?.value]);
+  const current = React.useRef({ wheel, emit, now });
+  current.current = { wheel, emit, now };
+  const wheels = wheel !== undefined;
+  React.useEffect(() => {
+    const node = ref.current;
+    if (!node || disabled || !wheels) return undefined;
+    const onWheel = (e: WheelEvent) => {
+      const { wheel, emit, now } = current.current;
+      if (!wheel) return;
+      e.preventDefault();
+      // (going on, what it set last is the knob, whether it has come back yet or not)
+      if (!wheeled.current) now();
+      const { min, max } = wheel.def;
+      const value = number.thresholds(
+        (wheeled.current?.value ?? wheel.value) - e.deltaY * WHEEL_STEP,
+        min,
+        max
+      );
+      emit(wheel.key, value);
+      wheeled.current = { value, set: last.current[wheel.key] };
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => node.removeEventListener('wheel', onWheel);
+  }, [disabled, wheels]);
+
+  return (
+    <PointRoot
+      ref={ref}
+      className={cls({ active, disabled, across: !upDown })}
+      style={{ left: x, top: y, ...(color && { '--grip-color': color }) } as React.CSSProperties}
+      role='slider'
+      tabIndex={disabled ? -1 : 0}
+      aria-label={label}
+      aria-orientation='horizontal'
+      aria-valuemin={across.def.min}
+      aria-valuemax={across.def.max}
+      aria-valuenow={across.value}
+      aria-valuetext={valueText}
+      aria-disabled={disabled || undefined}
+      title={across.def.name}
+      {...(!disabled && {
+        onPointerDown,
+        onKeyDown,
+        ...(upDown && {
+          onDoubleClick: () => {
+            now();
+            emit(upDown.key, upDown.def.default);
+          },
+        }),
+      })}
+    />
+  );
+};

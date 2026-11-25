@@ -429,8 +429,10 @@ const DISTORTION = { mode: 0, drive: 8, tone: 20000, level: 0 };
 const DELAY = { time: 0.2, fb: 0.5, mode: 0, pan: 0, freq: 1000, q: 0.01 };
 // the knobs of a fresh EQ (FX_PARAMS.eq: its shelves at 0 dB)
 const EQ = { t1: 0, f1: 210, q1: 60, g1: 0, t2: 0, f2: 2040, q2: 60, g2: 0, level: 0.5 };
+// the knobs of a fresh filter (FX_PARAMS.fxfilter: MG Low 6 at 425 Hz, all wet), in the order of the core
+const FXFILTER = { type: 0, cutoff: 425, res: 0, drive: 0, var: 0, pan: 50, level: 0.5, mix: 1 };
 // the kinds of the chain by slot (FX_KINDS of chain-params.ts)
-const KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'];
+const KINDS = ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq', 'fxfilter'];
 const NEUTRAL = {
   distortion: DISTORTION,
   chorus: CHORUS,
@@ -438,6 +440,7 @@ const NEUTRAL = {
   compressor: COMPRESSOR,
   reverb: REVERB,
   eq: EQ,
+  fxfilter: FXFILTER,
 };
 
 // the state a chain is made with (ChainState of chain-params.ts): `kinds` in the chain in this order, each playing
@@ -575,6 +578,11 @@ const ENGINE_SCENES = [
     ['distortion', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
     OSC_SCENES[0]
   ),
+  engineScene(
+    'engine: a chord through every effect, the EQ and the filter',
+    ['distortion', 'fxfilter', 'chorus', 'delay', 'compressor', 'reverb', 'eq'],
+    OSC_SCENES[0]
+  ),
 ];
 
 export const SCENES = [
@@ -673,6 +681,49 @@ export const SCENES = [
           { target: target('eq', 'f1'), source: 4, amount: 2, min: 21.53, max: 20000, scale: 'log' },
           { target: target('eq', 'g2'), source: 0, amount: -18, min: -24, max: 24 },
           { target: target('eq', 'q2'), source: 5, amount: 40, min: 0, max: 100, bipolar: true },
+        ],
+      }
+    ),
+    { frames: 2 * RATE, input: () => notesAndSilences(2 * RATE) }
+  ),
+  // the filter: MG Low 24 driven and resonant with Fat (its saturating sections, the curve of Drive), half wet; then
+  // Low 12 with its channels apart (Pan) and its cutoff swept by an LFO and a note (the designs of its cells, its
+  // coefficients lines), its resonance by another LFO, a change of type during the sound (its crossfade): notes and
+  // silences (it rests and wakes)
+  chainScene(
+    'fxfilter, a driven ladder half wet',
+    chainState(['fxfilter'], {
+      fxfilter: { params: { type: 3, cutoff: 900, res: 75, drive: 40, var: 30, level: 0.6 }, mix: 0.5 },
+    }),
+    { frames: 2 * RATE, input: () => notesAndSilences(2 * RATE) }
+  ),
+  chainScene(
+    'fxfilter, its cutoff swept apart in its channels',
+    chainState(
+      ['fxfilter'],
+      { fxfilter: { params: { type: 5, cutoff: 1200, res: 45, pan: 30 } } },
+      {
+        lfos: LFOS,
+        note: { envelopes: [HELD, HELD, HELD], start: 0.1, release: 1.2, velo: 0.8 },
+        routes: [
+          {
+            target: target('fxfilter', 'cutoff'),
+            source: 4,
+            amount: 1.5,
+            min: 8.176,
+            max: 22050,
+            scale: 'log',
+          },
+          {
+            target: target('fxfilter', 'cutoff'),
+            source: 0,
+            amount: 1,
+            min: 8.176,
+            max: 22050,
+            scale: 'log',
+          },
+          { target: target('fxfilter', 'res'), source: 5, amount: 30, min: 0, max: 100, bipolar: true },
+          { target: target('fxfilter', 'pan'), source: 5, amount: 40, min: 0, max: 100, bipolar: true },
         ],
       }
     ),

@@ -1105,6 +1105,14 @@ fn droop_of(d2: f64) -> f64 {
     0.5 - sqrt(0.25 - ab)
 }
 
+/// the droop b (y = (1 - b) x + b x[n-1]) with `db` more of it at (f/fs)² = 1, its dB at θ = 2π/3 those of
+/// `droop_of` (whose exp(-d2 ln 10 / 90) is 1 - 3 b (1 - b): no logarithm): the FX Filter of the reference droops more
+/// than the filter of a voice (dsp/measurements/fxfilter.json)
+pub fn more_droop(b: f64, db: f64) -> f64 {
+    let ab = (1.0 - (1.0 - 3.0 * (b * (1.0 - b))) * exp(-db * (LN_10 / 90.0))) / 3.0;
+    0.5 - sqrt(0.25 - ab)
+}
+
 const TOP_CUTOFF: f64 = 0.46;
 const LATE_TOP: f64 = 1.0 / core::f64::consts::E;
 
@@ -1613,6 +1621,21 @@ impl LaneCoefs {
             saturation: core::array::from_fn(|i| {
                 core::array::from_fn(|k| pick(self.saturation[i][k], other.saturation[i][k]))
             }),
+        }
+    }
+
+    /// its lanes 1 and 2 swapped: of `of(p, q)` p in the lanes 0 and 2, q in 1 and 3 (the left and the right
+    /// channel of a stereo signal fed [L, R, L, R] each through its own filter)
+    pub fn mixed(&self) -> LaneCoefs {
+        let mix = |a: F32x4| a.pick::<0, 2, 1, 3>(a);
+        LaneCoefs {
+            svf: self.svf.map(|row| row.map(mix)),
+            pole: self.pole.map(mix),
+            droop: self.droop.map(mix),
+            drive: mix(self.drive),
+            fat: mix(self.fat),
+            sat: self.sat.map(|row| row.map(mix)),
+            saturation: self.saturation.map(|row| row.map(mix)),
         }
     }
 

@@ -122,7 +122,9 @@ reference may have no setting. A baseline of before it was taken at normal (256 
   its attack, the direct path and the mix builds under the budget), table building, the effects and the limiter
   each alone (units of the chain, a half of the engine core; in a tree before them their own cores, under the same
   names; the EQ: `eq` both bands, `eq neutral` its shelves at 0 dB, `chain eq` and `chain eq, lfos` its bands moved
-  as lines), the whole chain (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), each
+  as lines; the filter: `fxfilter ladder24 drive` MG Low 24 driven and resonant, `fxfilter low12` the plain sections,
+  `fxfilter low12 pan` its channels apart, `fxfilter at rest`, `fx fxfilter, cutoff lfo` its cutoff swept alone (the
+  designs of its cells), `fx fxfilter pan, cutoff lfo` with Pan moved too), the whole chain (`chain S5`, `chain every effect`, with LFOs on its knobs, with no effect, at rest), each
   effect alone in the chain without its limiter, whose cost follows the level it is given (`fx <effect>`: at rest;
   `, lfos`: two routes on its own knobs; `, lfo mix`: one on its mix, a line a sample of its slot; `fx none` the
   bare chain, what the others are read over), the whole node (`engine chord S5`, `engine chord, no effect`: the

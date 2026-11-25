@@ -18,6 +18,7 @@ pub mod glided;
 pub mod io;
 pub mod lfo;
 pub mod macros;
+pub mod model_spans;
 pub mod simd;
 pub mod sources;
 pub mod stereo;

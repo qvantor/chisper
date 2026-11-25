@@ -2,6 +2,7 @@ import { distinctUntilChanged, map, combineLatest, shareReplay } from 'rxjs';
 import { isEqual, mapValues } from 'lodash';
 import {
   FX_MIX_PARAMS,
+  FX_ORDER,
   FX_PARAMS,
   FX_TYPES,
   FxType,
@@ -150,7 +151,7 @@ export const fx = ({
   modulation: [{ $routes }],
 }: Dependencies) =>
   rxModel(() => {
-    const $order = new ArrayBS<FxType[]>([...FX_TYPES]);
+    const $order = new ArrayBS<FxType[]>([...FX_ORDER]);
     const $effects = new ObjectBS<Record<FxType, FxState>>(defaultEffects());
     // the slot of each effect in the chain of the synth core (one node for all of them)
     const slots = Object.fromEntries(

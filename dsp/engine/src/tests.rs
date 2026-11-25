@@ -8,7 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::*;
 use chain::chain::{Event, IN_PROCESS, LIMITER_STAGE, OUTSIDE, SET_ACTIVE, SET_MIX, SET_ORDER};
-use chain::units::{CHORUS, COMPRESSOR, DELAY, DISTORTION, EQ, MAX_PARAMS, REVERB, SLOTS};
+use chain::units::{CHORUS, COMPRESSOR, DELAY, DISTORTION, EQ, FXFILTER, MAX_PARAMS, REVERB, SLOTS};
 use dsp_core::biquad::FilterType;
 use wavetable_osc::envelope::EnvelopeParams;
 use wavetable_osc::filter::{FilterOptions, Kind};
@@ -62,6 +62,8 @@ fn params() -> [[f64; MAX_PARAMS]; SLOTS] {
         20.0, 0.02, 0.5, 2.0, 6000.0, 1.0, 0.2, 1.0, 0.5, 0.0, 24000.0, 0.0,
     ]);
     all[EQ as usize][..9].copy_from_slice(&[1.0, 300.0, 50.0, 6.0, 2.0, 8000.0, 40.0, 0.0, 0.6]);
+    // (Low 12 at 1 kHz, Res 50 %, Drive 20 %, Pan 60: its two channels apart, the level a touch up, all wet)
+    all[FXFILTER as usize][..8].copy_from_slice(&[5.0, 1000.0, 50.0, 20.0, 0.0, 60.0, 0.55, 1.0]);
     all
 }
 
@@ -228,7 +230,7 @@ fn trapped(call: impl FnOnce() -> u32) -> bool {
     catch_unwind(AssertUnwindSafe(call)).is_err()
 }
 
-const ALL: [u32; 6] = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ];
+const ALL: [u32; 7] = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ, FXFILTER];
 
 #[test]
 fn a_block_is_the_voices_then_the_chain_on_their_sum() {

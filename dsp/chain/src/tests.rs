@@ -9,7 +9,7 @@ use crate::modulation::{
     MACRO_SOURCE, MIX_KEY, NOTE,
 };
 use crate::units::*;
-use crate::{delay, eq};
+use crate::{delay, eq, fxfilter};
 use dsp_core::lfo::RATE;
 use dsp_core::sources::VELO;
 
@@ -27,6 +27,8 @@ fn params() -> [[f64; MAX_PARAMS]; SLOTS] {
         20.0, 0.02, 0.5, 2.0, 6000.0, 1.0, 0.2, 1.0, 0.5, 0.0, 24000.0, 0.0,
     ]);
     all[EQ as usize][..9].copy_from_slice(&[1.0, 300.0, 50.0, 6.0, 2.0, 8000.0, 40.0, 0.0, 0.6]);
+    // (Low 12 at 1 kHz, Res 50 %, Drive 20 %, Pan 60: its two channels apart, the level a touch up, all wet)
+    all[FXFILTER as usize][..8].copy_from_slice(&[5.0, 1000.0, 50.0, 20.0, 0.0, 60.0, 0.55, 1.0]);
     all
 }
 
@@ -37,6 +39,19 @@ pub(crate) fn noise(seed: u32) -> impl FnMut() -> f32 {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
         (state >> 8) as f32 / 8388608.0 - 1.0
     }
+}
+
+// blocks of one length
+pub(crate) fn blocks_of(length: usize) -> impl FnMut() -> usize {
+    move || length
+}
+
+// a sine of `level` in both channels at `rate`
+pub(crate) fn sine(hz: f64, frames: usize, level: f64, rate: f64) -> [Vec<f32>; 2] {
+    let left: Vec<f32> = (0..frames)
+        .map(|i| (level * jsmath::sin(2.0 * jsmath::PI * hz * i as f64 / rate)) as f32)
+        .collect();
+    [left.clone(), left]
 }
 
 pub(crate) fn signal(seed: u32, frames: usize, level: f32) -> [Vec<f32>; 2] {
@@ -160,7 +175,7 @@ fn a_slot_alone_is_its_unit() {
 fn a_slot_all_wet_after_a_clear_is_its_unit() {
     let rate = 48000.0;
     let input = signal(2, 30 * BLOCK, 0.4);
-    for kind in [DISTORTION, DELAY, REVERB, EQ] {
+    for kind in [DISTORTION, DELAY, REVERB, EQ, FXFILTER] {
         let mut chain = chain_of(rate, &[kind], 1.0, false);
         chain.push(event(CLEAR, 0.0, 0.0, &[]));
         let out = render(&mut chain, &input, |_, _| {});
@@ -395,7 +410,7 @@ fn a_rest_is_the_blocks_it_skipped() {
     for channel in input.iter_mut() {
         channel[20 * BLOCK..2400 * BLOCK].fill(0.0);
     }
-    let kinds = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ];
+    let kinds = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ, FXFILTER];
     let run = |restless: bool| {
         let mut chain = chain_of(rate, &kinds, 0.5, true);
         chain.restless = restless;
@@ -1229,13 +1244,19 @@ fn a_route_of_the_note_moves_a_knob_of_an_lfo_only_with_a_note() {
 fn a_route_moves_no_switch() {
     let mut modulation = Modulation::new(48000.0);
     let mut routes = Vec::new();
-    let knobs = [(DELAY, delay::MODE), (EQ, eq::T1), (EQ, eq::T2), (EQ, eq::LEVEL)];
+    let knobs = [
+        (DELAY, delay::MODE),
+        (EQ, eq::T1),
+        (EQ, eq::T2),
+        (FXFILTER, fxfilter::TYPE),
+        (EQ, eq::LEVEL),
+    ];
     for (slot, key) in knobs {
         route(&mut routes, slot as usize * KEYS + key, 0, 1.0, 0.0, 2.0);
     }
     modulation.set_routes(&routes);
     let moved = knobs.map(|(slot, key)| modulation.moves(slot as usize, key));
-    assert_eq!(moved, [false, false, false, true]);
+    assert_eq!(moved, [false, false, false, false, true]);
 }
 
 // the line of the frequency of a band is in octaves: a route of the log scale moves any knob by the same, so a
@@ -1606,7 +1627,7 @@ fn the_chain_renders_at_the_rates_of_an_export() {
         let input = signal(13, 300 * BLOCK, 0.4);
         let mut chain = chain_of(
             rate,
-            &[DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ],
+            &[DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ, FXFILTER],
             0.5,
             true,
         );

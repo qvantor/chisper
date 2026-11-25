@@ -105,8 +105,20 @@ const FULL = {
   },
   v: { leg: true, port: 0.12, max: 1, bd: 12, bu: 0 },
   fx: {
-    o: ['reverb', 'compressor', 'chorus', 'distortion', 'eq'],
+    o: ['reverb', 'compressor', 'chorus', 'distortion', 'fxfilter', 'eq'],
     distortion: { a: true, on: false, mix: 0.6, mode: 1, drive: 4, tone: 8000, level: -6 },
+    fxfilter: {
+      a: true,
+      on: true,
+      mix: 0.75,
+      type: 3,
+      cutoff: 1200,
+      res: 0,
+      drive: 35.5,
+      var: 20,
+      pan: 0,
+      level: 0.6,
+    },
     eq: {
       a: true,
       on: true,
@@ -237,20 +249,20 @@ const PRESETS: Record<string, unknown> = {
 };
 
 const PRESET_HASHES: Record<string, string> = {
-  empty: '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
-  full: 'd9572894cc934253a823ddba3dca6dabbbf9d8f9d192b9033e631fd3cb429de7',
-  legacy: '234daf0f7f1a6811bf3e25dbf28241dcc2fb358a8d822a3c6908bf706b144425',
-  partial: '9c889065db141472d4dd9490d97d2aa8bf58b9de2047ad8565e3c0acec2b6ea2',
-  'fx order without a type': 'b451078b0b175bd604fa796002ec86b74184e82add5510d2eccaf4b1c45b55ae',
-  'a model filter': '4680d5329eb726f28013693650a1237bfc17057882dd86fe52b312495c25b621',
-  'an unknown filter type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
-  'its default type': '135400b36dfaa916b964fb5e0886c59b9dd6ccd1f567f80cf5a8358bd07a6b81',
-  'the macros at 0': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
-  'no macros': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
-  macros: '0ae91c703e91fa0bfdbd0517469bf8e6d23982af9d6a315383b9b957d6efb559',
-  'empty macro names': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
-  'a macro name without routes': '56098bad4ed00d103148f0b994718df212a551ba44ee2ea2872320d3e3ff2d32',
-  'macro names': '1892d21859b5257edcd06fea22d874de01b06ed32cfe9da037de7a95ddff1cf0',
+  empty: '5f67da7da31e155c0fd485b0c34929b9dfc6720ef7b69b49f688766eb1ecbc6c',
+  full: 'ca37216ea7680de06c437e1db8a2863e0b174f99291af878a3acc420abc33843',
+  legacy: '616e74bf59216cb0f2e6e1e6b6bd487fde74cffd169c119a26e44ea844179786',
+  partial: '2e58f3fcd6a99b0d6f65ef5f78f66b395086dbef3b9276717191ceb7edd9e190',
+  'fx order without a type': '0bee72f914e7d97fe627abb399ca4a3b6dd452d980f837fd2bcf691a849296ec',
+  'a model filter': 'b6b70241b2164986ee5a527543f0decba7cb2163caece5fed2d0865ddacef090',
+  'an unknown filter type': '26fb0fcb2736d950f3c41fa81b6b04ebae2bccde33fb8493d3733f14fa976684',
+  'its default type': '26fb0fcb2736d950f3c41fa81b6b04ebae2bccde33fb8493d3733f14fa976684',
+  'the macros at 0': '5f67da7da31e155c0fd485b0c34929b9dfc6720ef7b69b49f688766eb1ecbc6c',
+  'no macros': '5f67da7da31e155c0fd485b0c34929b9dfc6720ef7b69b49f688766eb1ecbc6c',
+  macros: 'f9c67129a96c3b57b834800b544f67b0eb5e93e5b5349bb0ca8f37cafa1201f7',
+  'empty macro names': '5f67da7da31e155c0fd485b0c34929b9dfc6720ef7b69b49f688766eb1ecbc6c',
+  'a macro name without routes': '5f67da7da31e155c0fd485b0c34929b9dfc6720ef7b69b49f688766eb1ecbc6c',
+  'macro names': '446bab0c0b9e68f70dcefb6ec3d02d83a04d02c77d986e5e5181a7d782266a3e',
 };
 
 // not presets: the schema rejects them
@@ -302,19 +314,27 @@ const INVALID: Record<string, unknown> = {
   },
   'an fx order that is not a list': { fx: { o: 'reverb' } },
   'an EQ type that is none': { fx: { eq: { t1: 3 } } },
+  'a filter type that is none': { fx: { fxfilter: { type: 18 } } },
+  'a fractional filter type': { fx: { fxfilter: { type: 2.5 } } },
 };
 
 // the url snapshot of the fx: never fails, invalid values fall back to the defaults
 const FX_SNAPS: Record<string, unknown> = {
   null: null,
-  garbage: { o: 'reverb', delay: { time: 'abc', fb: 5, div: 3.6 }, reverb: { era: 1.6, a: 'yes' }, x: 1 },
+  garbage: {
+    o: 'reverb',
+    delay: { time: 'abc', fb: 5, div: 3.6 },
+    reverb: { era: 1.6, a: 'yes' },
+    fxfilter: { type: 30, pan: -4 },
+    x: 1,
+  },
   full: FULL.fx,
 };
 
 const FX_SNAP_HASHES: Record<string, string> = {
-  null: '86be5d469158d242c547b4be48ad0bf3c5af162ed3a5ad75292cf36d1a03942a',
-  garbage: 'a475dacb3581f11e3a5b5d9b3d89165c1fd887cf41402d7a5ab51ea442316fe6',
-  full: 'fefe4741f3993e95cf7747c0aa2f4fb9d0efbd20b1b3b851841dc51d2fbfe291',
+  null: 'c5d8471fe660b6845e0ff952f9931453f25b128aa438b9bd7d9a72f31a130882',
+  garbage: 'f1aefc542f2e063d20a835d5889eb54cfd06735d459e9b7f22a8fd3fb89a11d0',
+  full: 'beb90eb4dde534f0a62bf24677424186dafa7f105fbd7f3170951d741b9750c3',
 };
 
 // key order aside: the values of the output

@@ -9,4 +9,5 @@ export const FX_COLORS: Record<FxType, string> = {
   compressor: theme.colors.thirdAccent,
   reverb: theme.colors.accent,
   eq: theme.colors.fifthAccent,
+  fxfilter: theme.colors.sixthAccent,
 };
