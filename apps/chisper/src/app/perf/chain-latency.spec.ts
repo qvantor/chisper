@@ -1,4 +1,5 @@
 import { chainCore, chainState, makeChain, renderChain } from '../../test-utils/chain-render';
+import { mixGains } from '../../test-utils/chorus-render';
 import { oscScope } from '../../test-utils/voice-dsp';
 import type { FxKind } from '../synth/common/chain/chain-params';
 import { createLimiterWasm } from '../synth/common/limiter/limiter-wasm';
@@ -163,9 +164,10 @@ describe('the latency of the chain', () => {
       const dry = impulse(kind, 0, rate, at);
       expect(loudest(dry)).toBe(at);
       expect(dry[at]).toBe(0.25);
-      // mixed (equal power): the dry signal still at its frame, the echoes and the tail after it
+      // mixed (equal power; the echoes by the law of the chorus: the dry gain 1 - sin⁴): the dry signal still
+      // at its frame, the echoes and the tail after it
       const mixed = impulse(kind, 0.5, rate, at);
-      expect(mixed[at]).toBeCloseTo(0.25 * Math.cos(Math.PI / 4), 6);
+      expect(mixed[at]).toBeCloseTo(0.25 * (kind === 'delay' ? mixGains(0.5)[0] : Math.cos(Math.PI / 4)), 6);
       expect(mixed.subarray(0, at).every((value) => value === 0)).toBe(true);
     });
   });

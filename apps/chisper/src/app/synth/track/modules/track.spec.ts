@@ -320,12 +320,18 @@ describe('track', () => {
       actions.play();
       expect(model.positionAt()).toBeNull();
       await play(0.3);
-      // 0.25 s past the start at 120 BPM: half a beat, where the output plays (the latency before it)
+      // 0.25 s past the start at 120 BPM: half a beat, where the output plays (the latency before it); the clock of
+      // performance.now() held: the output of the mock is its time rendered minus the time since, which moved
+      // between two calls (2 ms on a slow runner: 4 ticks)
       const ms = performance.now();
-      const output = transportModel.contextTimeAt(ms);
-      expect(output).toBeLessThan(0.3);
-      // (the clock of the output of the mock moves between two calls)
-      expect(model.positionAt(ms)).toBeCloseTo((output - TRACK_LEAD) * 2 * CLIP_PPQ, 0);
+      const now = jest.spyOn(performance, 'now').mockReturnValue(ms);
+      try {
+        const output = transportModel.contextTimeAt(ms);
+        expect(output).toBeLessThan(0.3);
+        expect(model.positionAt(ms)).toBeCloseTo((output - TRACK_LEAD) * 2 * CLIP_PPQ, 6);
+      } finally {
+        now.mockRestore();
+      }
     });
 
     describe('led by a MIDI Clock', () => {

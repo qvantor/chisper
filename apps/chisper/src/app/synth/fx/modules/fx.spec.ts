@@ -359,7 +359,7 @@ describe('fx', () => {
       actions.setAdded('delay', true);
       actions.applyPreset('delay', 'stereo-widener');
       const snapshot = getSnapshot();
-      expect(snapshot['fx']).toMatchObject({ delay: { fb: 0, mix: 0.35, pan: 0.018 } });
+      expect(snapshot['fx']).toMatchObject({ delay: { fb: 0, mix: 0.48, pan: 0.018 } });
 
       actions.applyPreset('delay', 'dub');
       applySnapshot(snapshot);

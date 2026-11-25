@@ -392,6 +392,18 @@ impl StereoFixedAllpass {
     }
 }
 
+/// the one-pole of time constant `tau` (samples) after `length` samples of its input moving linearly from x0 to x1,
+/// from y (exact: y' = (x - y) / tau over the line); `pole` its exp(-length / tau), None: worked out here. The knob
+/// of a warp, the lines of the delay of the chain: a one-pole worked out at points, a line between them
+pub fn smooth(y: f64, x0: f64, x1: f64, length: f64, tau: f64, pole: Option<f64>) -> f64 {
+    let e = match pole {
+        Some(e) => e,
+        None => exp(-length / tau),
+    };
+    let lag = (x1 - x0) / length * tau;
+    x1 - lag + (y - x0 + lag) * e
+}
+
 /// createSmoothed: a param that glides to its target with a time constant, stepped once per block; `from` is
 /// its value at the start of the block
 #[derive(Clone)]

@@ -43,8 +43,8 @@ export const renderChorus = (
   return renderStereo(dsp, channels, changes);
 };
 
-// the laws of the core, as measured: the shares of the dry and the wet signal by the mix, what a tap is late by
-// with its knob at 0 (ms)
+// the laws of the core, as measured: the shares of the dry and the wet signal by the mix (the delay mixes its
+// echoes so too), what a tap is late by with its knob at 0 (ms)
 export const mixGains = (mix: number): [dry: number, wet: number] => {
   const wet = Math.sin((Math.PI / 2) * Math.min(Math.max(mix, 0), 1)) ** 2;
   return [1 - wet * wet, wet];

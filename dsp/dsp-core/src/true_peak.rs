@@ -3,13 +3,13 @@
 //! is, the three phases between them FIRs in f32 (fir::dot): their peaks within 1e-6 of the ones in doubles
 
 use crate::consts::{TRUE_PEAK_BOUND, TRUE_PEAK_PHASES};
-use crate::fir::{dot, lanes_of, phases};
+use crate::fir::{dot, lanes_of, phases, Phases};
 use crate::simd::F64x2;
 
 pub const TRUE_PEAK_TAPS: usize = 32;
 pub const TRUE_PEAK_DELAY: usize = TRUE_PEAK_TAPS / 2;
 
-static PHASES: [[f32; TRUE_PEAK_TAPS]; 3] = phases(&TRUE_PEAK_PHASES, false, 1.0);
+static PHASES: Phases<3> = phases(&TRUE_PEAK_PHASES, false, 1.0);
 
 /// the true peaks of the left and the right channel, in the low and the high lane
 pub struct StereoTruePeak {
@@ -52,7 +52,7 @@ impl StereoTruePeak {
         };
         if self.loud[channel] != 0 {
             let window = &history[pos..pos + TRUE_PEAK_TAPS];
-            for phase in &PHASES {
+            for phase in &PHASES.0 {
                 let between = dot(window, &lanes_of(phase)).abs();
                 // (a NaN is taken: samples near the top of f32 sum to an infinity, or to none)
                 if between > peak || between.is_nan() {

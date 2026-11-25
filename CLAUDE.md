@@ -80,9 +80,11 @@ Manual benches and stands (Playwright isn't a dependency: `npx -y -p playwright@
   (`state.mjs`), a signal of ours through it as a one-shot sample of its noise oscillator; renders of different
   samples never run at once (a block renders one sample after another, never back to one: a host has played the
   sample before it, twice alike) and each is rendered until two in a row agree (now and then one is of another
-  state). An effect sleeps in a silence: a signal that reads its LFO keeps a quiet tone under it.
-- `scripts/delay-native/run.mjs` — the delay of the native nodes the app played before the chain core, rendered in
-  Chromium into `dsp/measurements/delay.json` (the reference `delay-measured.spec.ts` holds the core to).
+  state). An effect sleeps in a silence: a signal that reads its LFO keeps a quiet tone under it. Two runs at once
+  (two checkouts, two sessions) play each other's samples or the init patch: a lock between them
+  (a port of localhost, `LOCK_PORT` of `run.mjs`, freed with its run: a run waits for the other). A job may tell
+  the host its tempo (`bpm`: what the Audio Unit syncs to; none is 120). `scripts/delay-fit/fit.mjs` reads the laws
+  of the delay out of `delay.json`.
 - `node scripts/noises/process.mjs` / `add.mjs` — noise samples from `assets/noises/manifest.json` into
   `tmp/noises/`. `upload.mjs` writes to the production bucket: dry run unless `--apply`, only when the user asks.
 
@@ -109,7 +111,7 @@ time).
   a loop (the chunks of the reverb, the voices filtered in pairs, the segments of the delay, the blocks a silent
   chain skips) gives the bits of the plain order: its cargo test holds it to them. A state in f32 that decays is flushed to 0 when written (`F32x4::flush`: wasm has no
   flush-to-zero); a state in doubles that a channel silent alone leaves to decay while the other plays (the bands of
-  the EQ, the bandpass of the delay) under `TINY_F64` at the end of a segment (`F64x2::flush`); a sample in doubles
+  the EQ, the bandpass of the delay) under `TINY_F64` at the end of a segment or every 32 samples (`F64x2::flush`); a sample in doubles
   that goes out as f32 under `TINY` (`F64x2::flush_under`: the out of the EQ). Nothing is worked out of a denormal: the audio thread of Chromium and Firefox takes them as 0, Node
   and WebKit don't (the mean square of a band of the compressor and its peak held are flushed at every sample; its cargo
   tests run the tail with the CPU flushing them). Any change of the bits is an explicit golden update, checked by the quality specs with their
@@ -122,6 +124,9 @@ time).
   polymorphic sites (V8 boxes them): run each stage over the block in typed arrays.
 - **Cores never allocate in a block**, only in constructors or when a buffer grows. Every core call restores the
   exported `__stack_pointer` (a trap leaves it moved; `instantiateCore` wraps the exports).
+- **A static table read in lanes is aligned to a line** (`Phases` of `fir.rs`): an array of f32 is aligned to 4,
+  and where the data before it grew a load of four of its lanes came across a page (16 KiB on Apple silicon): the
+  same code of the limiter 45 % slower in one build than in the other.
 - **Anything that moves every frame draws on a canvas**, never in the DOM (a changing svg `d` or a moved element
   repaints/relayouts the page in Chrome; `scripts/wasm-browsers/app.mjs` checks it).
 - **Persisted state**: extend the model's `modelToSnap`/`applySnap` **and** `presetDataSchema` in
@@ -236,12 +241,14 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `processorOptions`); `chain-wasm.ts` is its facade (`takeChainMessage` of `engine-messages.ts`: a message as the
   worklet and a render take it). In the core (`chain.rs`): events queued by frame (one without a time is never
   taken before one with a time sent before it), a slot per effect in the order
-  (`Law`: equal power, linear for the distortion and the EQ, inside for the chorus and the compressor; the dry signal late by
+  (`Law`: equal power, linear for the distortion and the EQ, the one of the echoes for the delay (measured: the wet
+  gain sin²(mix · π / 2), the dry one 1 - wet²), inside for the chorus and the compressor; the dry signal late by
   the latency of the effect; gains glide 10 ms; a slot that is off is a wire and its effect forgotten once faded;
   a slot whose effect is late crosses between its input as it is and the late one as it starts and stops; one that
   sounds and leaves the order fades out where it is, the new order waits for it), the mute (with a time: its fade
   ends that long after it, however late the message comes) and the master gain, the limiter (`chain_new` without it for a render at another rate). A silent chain
-  skips its slots (`Unit::rest`: the bits of rendering them). A trap inside an effect (its block, a knob, a rest, its sound forgotten: every call of a unit)
+  skips its slots (`Unit::rest`: the bits of rendering them; its routes are worked out at rest too, the knobs
+  they move set before). A trap inside an effect (its block, a knob, a rest, its sound forgotten: every call of a unit)
   drops that effect alone (`work` in memory before the call, `chain_fail`/`chain_resume` from the `step` the block
   was at, an event that trapped taken again without the unit; the limiter: the master silent) and is told back
   (`status(stage)` 'failed'; `retryStage`: 'loading' until the node tells the unit is made, `remade`, or failed
@@ -265,13 +272,27 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   facades). Reverb (16-line FDN), distortion (4× oversampled in two stages, the hard clip antialiased on top:
   `scripts/distortion-adaa/` holds the measurements and the tables), chorus, compressor, delay and EQ are units of
   the chain core.
-- Delay (`dsp/chain/src/delay.rs`, held to renders of the native nodes it replaced: `scripts/delay-native/`,
-  `dsp/measurements/delay.json`, `delay-measured.spec.ts`): a line a channel read as a `DelayNode` reads it (linear,
-  times in f32), a bandpass in the form of a `BiquadFilterNode` inside the feedback (its coefficients once a block),
-  normal or ping-pong, Pan a channel of the echoes late; Time glides through a pole of 100 ms a sample (a tape),
-  poles snap as Chromium's `setTargetAtTime` does. Deliberate copy of that graph: what a line feeds back comes a
-  quantum late with the gain of then (`LOOP_LATE`: an echo is Time + 128 samples after the one before; of ping-pong
-  only left → right), the sound the presets were made with.
+- Delay (`dsp/chain/src/delay.rs`, measured: `dsp/measurements/delay.json`, `delay-measured.spec.ts`; the knobs of
+  the Audio Unit as ours: `delayOfAudioUnit` of `test-utils/delay-render.ts`): a line a channel, a bandpass (the
+  cookbook's, its coefficients once a block) after each inside the feedback, what a line is fed back a sample late
+  (an echo comes Time after the sound, then every Time + 1 sample). Normal: each line into itself. Ping-pong: the
+  mono sum into the left line, its echoes into the right one, which gives them back as they are a Time later (no
+  filter, no gain) and feeds the left line: the feedback once a round. Pan a channel of the echoes late. A Time
+  that holds is whole samples (the nearest: no repeat loses highs to a read between two), an offset too; on its
+  way or under a route a read is linear between two, a tape: its knob through the one-pole of the Audio Unit
+  (`TIME_SMOOTHING`, 22.7 ms: measured, `lfo` of delay.json, LFO 1 on its times at 2 to 16 Hz) a sample, the routes
+  of Time and Pan through the same one at the points of their lines (`SMOOTHED` of `modulation.rs`: exact over the
+  line of the target between two, `smooth` of dsp-core; one gone is no more within `NEAR_SAMPLES` of 0), the two
+  the one pole of their sum; `delay-measured.spec` holds the echoes under an LFO to its renders. A line is never
+  read under 129 samples (`SHORTEST`: a segment of up to 128 reads before it writes). The bandpass runs two samples a
+  step (`Kept`: the second of a pair by the outputs before the pair, counted from the first sample that sounds), a
+  segment while nothing moves is one loop of four samples at once from the rings into them (`fused`), else the
+  passes of the plain order: the same bits (cargo tests hold them to a sample after the other, however the blocks
+  are cut). Its mix is the law of the echoes (`Law::Echoes`). Deliberate differences, measured and not ours: its
+  channels have a time and an offset each (and the feedback of the longer one turned down to decay alike), its
+  third mode (both channels through one line after the other), its level (4v² over the whole output), a read
+  between two samples with its HQ off, a free time under 3 ms or over 0.4 s, a route on Time a share of the travel
+  of its knob (ours seconds: its `law`, a curve, 25 samples off a line at the middle of 4 %); ours alone: Pan.
 - Compressor (`dsp/compressor`, measured: `dsp/measurements/compressor.json`, `compressor-measured.spec.ts`): one
   band (the louder channel at every sample against the threshold, the reduction smoothed in dB) or three (LR4
   crossovers on state variable filters, the mean square of each band held and released, compressed down and up,
@@ -409,8 +430,8 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   reads the levels of its pitch); a bend of a < 0 on a ramp at 0.9 and 1 is within 8 dB a third of an octave of it
   (its harmonics a comb from 5 kHz on).
 - Behaviour checked against the reference AU measurements (`dsp/measurements/`: unison, blend, spread, phases,
-  frames, frame fades, envelopes, aliasing, noise, sub, filter types, warp; `compressor`, `chorus`, `eq` and
-  `reverb` for the effects). Aliasing −70 dB, spurs −80 dB.
+  frames, frame fades, envelopes, aliasing, noise, sub, filter types, warp; `compressor`, `chorus`, `delay`,
+  `eq` and `reverb` for the effects). Aliasing −70 dB, spurs −80 dB.
 - The filter of a voice (`filter.rs`): the types of a BiquadFilterNode (a TPT SVF, bit for bit as before) and the
   model types of the AU (`dsp-core/src/filter_model.rs`, measured: `filter-types.json`, `filter-types-measured.spec.ts`;
   the resonance by the cutoff: `filter-resonance.json`, `filter-resonance-measured.spec.ts`):

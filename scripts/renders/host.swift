@@ -1,9 +1,10 @@
 // An offline host of an Audio Unit: `host params` lists its parameters, `host state <out.bin>` writes its
 // processor state (a magic, a JSON header, then a zstd frame of the CBOR of its modules; state.mjs),
 // `host render <job.json> <out.f32>` renders a job: { rate, seconds, state?: "<a processor state>", params:
-// { "<name>": value }, automation?: [{ name, points: [[seconds, value]] }], step?, notes: [{ note, on, off,
+// { "<name>": value }, automation?: [{ name, points: [[seconds, value]] }], step?, bpm?, notes: [{ note, on, off,
 // velocity }] } into interleaved stereo float32: an automated parameter moves linearly between its points (before
-// the first and after the last it holds them), set before each call of `step` samples (64 by default)
+// the first and after the last it holds them), set before each call of `step` samples (64 by default); `bpm` is
+// the tempo the host tells the Audio Unit (what it syncs to; without it the host tells none)
 import AVFoundation
 import AudioToolbox
 
@@ -51,6 +52,7 @@ struct Job: Decodable {
   let params: [String: Float]?
   let automation: [Automation]?
   let step: Int?
+  let bpm: Double?
   let notes: [Note]
 }
 
@@ -97,6 +99,18 @@ let parameter = { (name: String) -> AUParameter in
 }
 for (name, value) in job.params ?? [:] { parameter(name).value = value }
 let automations = (job.automation ?? []).map { (parameter($0.name), $0.points) }
+var frame = 0
+if let bpm = job.bpm {
+  // the tempo of the host, 4/4, the beats by the frames rendered
+  unit.auAudioUnit.musicalContextBlock = { tempo, numerator, denominator, beat, _, downbeat in
+    tempo?.pointee = bpm
+    numerator?.pointee = 4
+    denominator?.pointee = 4
+    beat?.pointee = Double(frame) / job.rate * bpm / 60
+    downbeat?.pointee = 0
+    return true
+  }
+}
 let engine = AVAudioEngine()
 let format = AVAudioFormat(standardFormatWithSampleRate: job.rate, channels: 2)!
 engine.attach(unit)
@@ -115,7 +129,6 @@ for n in job.notes {
 }
 events.sort { $0.frame < $1.frame }
 var next = 0
-var frame = 0
 while frame < total {
   for (p, points) in automations { p.value = AUValue(automated(points, Double(frame) / job.rate)) }
   // the events of this block go at its start (a block of `step` samples: their times rounded down to it)

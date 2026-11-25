@@ -20,7 +20,7 @@
 
 use crate::voice::{level_x, Phases, LEVEL_BAND, SPAN};
 use dsp_core::simd::{F32x4, U32x4};
-use jsmath::{ceil, exp, floor, log2, max, min};
+use jsmath::{ceil, floor, log2, max, min};
 
 /// the modes (WARP_MODES of the preset schema: a new one goes last)
 pub const OFF: u32 = 0;
@@ -48,16 +48,8 @@ pub fn knob_of(knob: f64) -> f64 {
     }
 }
 
-/// the one-pole of time constant `tau` (samples) after `length` samples of its input moving linearly from x0 to x1,
-/// from y (exact: y' = (x - y) / tau over the line); `pole` its exp(-length / tau), None: worked out here
-pub fn smooth(y: f64, x0: f64, x1: f64, length: f64, tau: f64, pole: Option<f64>) -> f64 {
-    let e = match pole {
-        Some(e) => e,
-        None => exp(-length / tau),
-    };
-    let lag = (x1 - x0) / length * tau;
-    x1 - lag + (y - x0 + lag) * e
-}
+/// the one-pole the knob goes through over a line of it (the one of the lines of the chain)
+pub use dsp_core::blocks::smooth;
 
 /// whether `mode` is a bend (else PWM; Off is no map)
 pub fn bends(mode: u32) -> bool {
@@ -576,6 +568,7 @@ fn pwm_line_pass(phases: &mut Phases, e0: f64, de: f64, buf: &mut [u32], s0: usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsmath::exp;
 
     const MODES: [u32; 4] = [BEND_UP, BEND_DOWN, BEND_BOTH, PWM];
     const CYCLE: f64 = 4294967296.0;

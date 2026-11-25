@@ -109,7 +109,8 @@ export interface ParamRange {
 // the dry/wet mix of an effect (0: dry, 1: wet); delay and reverb are mixed into the dry sound
 export const FX_MIX_PARAM: ParamRange = { min: 0, max: 1, default: 0.3 };
 // the mix of each effect, the default is the one of a freshly added effect: the distortion, the compressor and the
-// EQ replace the dry sound, the chorus is half of it (its own law: wet sin²(π mix / 2), dry 1 - wet²)
+// EQ replace the dry sound, the chorus is half of it (its own law: wet sin²(π mix / 2), dry 1 - wet²; the delay
+// mixes by the same one: the dry sound nearly whole under a half of the knob)
 export const FX_MIX_PARAMS: Record<FxType, ParamRange> = {
   distortion: { ...FX_MIX_PARAM, default: 1 },
   chorus: { ...FX_MIX_PARAM, default: 0.5 },

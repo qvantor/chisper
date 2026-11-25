@@ -88,7 +88,7 @@ describe('FxPanel', () => {
   it('selecting a preset applies it to the model', async () => {
     const { fx, user } = setup();
     await user.selectOptions(screen.getByRole('combobox'), 'Dub');
-    expect(fx[0].$effects.value.delay).toMatchObject({ mix: 0.35, params: { mode: 1, time: 0.5 } });
+    expect(fx[0].$effects.value.delay).toMatchObject({ mix: 0.45, params: { mode: 1, time: 0.5 } });
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('dub');
   });
 

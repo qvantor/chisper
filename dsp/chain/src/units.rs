@@ -39,12 +39,15 @@ pub struct Moves<'a> {
 pub const SLOTS: usize = 6;
 
 /// how a slot mixes its effect in: the dry and the wet gain by equal power (the wet signal unrelated to the dry
-/// one: echoes, a reverb), linear (in time with it: the distortion, the EQ), or the effect mixes inside (the param
-/// of its mix: the slot passes it alone)
+/// one: a reverb), linear (in time with it: the distortion, the EQ), as the delay of the Audio Unit mixes its
+/// echoes (measured, dsp/measurements/delay.json: the wet gain sin²(mix · π / 2), the dry one 1 - wet²: the dry
+/// signal nearly whole under a half of the knob), or the effect mixes inside (the param of its mix: the slot
+/// passes it alone)
 #[derive(Clone, Copy, PartialEq)]
 pub enum Law {
     EqualPower,
     Linear,
+    Echoes,
     Inside(usize),
 }
 
@@ -53,6 +56,7 @@ pub fn law(kind: u32) -> Law {
         DISTORTION | EQ => Law::Linear,
         CHORUS => Law::Inside(chorus::MIX),
         COMPRESSOR => Law::Inside(compressor::MIX),
+        DELAY => Law::Echoes,
         _ => Law::EqualPower,
     }
 }

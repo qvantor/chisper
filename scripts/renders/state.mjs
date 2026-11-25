@@ -74,7 +74,9 @@ const uint = (n) => (n < 24 ? n : { uint: n, info: 24 });
 
 // the init state (`host state`) with oscillator i of `oscs` (A, B: `Oscillator<i>`) on `Tables/<path>` (a table of
 // `frames` frames of 2048 samples) and with its plain params `params`; one not listed keeps the init's. Mod slot i
-// of `slots` routes `source` to `param` (its id) named `name` of `Oscillator<osc>` by `amount` (%), `bipolar`.
+// of `slots` routes `source` (LFO 1..10: 6..15, Macro 1: 25) to `param` (its id) named `name` of `Oscillator<osc>`
+// by `amount` (%), `bipolar`; of an effect of the main rack `type` is its module (FXDelay: kParamWet 1, kParamFreq
+// 2, kParamBW 3, kParamTimeL 6, kParamTimeR 7, kParamFeedback 9) and `osc` its index in the rack (0 the first).
 // `noise` puts the noise oscillator (`Oscillator3`, its `NoiseOsc3`) on the sample at `path` (under the noises of
 // the Audio Unit, noisesFolder(): `frames` frames of `channels` at `rate`) with the plain params of its sampler
 // `params` (kParamOneShot…). `fx` is the chain of the main rack (`FXRack0`, empty in the init state): each effect

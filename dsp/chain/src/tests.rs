@@ -5,7 +5,8 @@ use alloc::{vec, vec::Vec};
 
 use crate::chain::*;
 use crate::modulation::{
-    Bases, Modulation, KEYS, LFO_SOURCE, LFO_STATE, LFO_TARGET, LINE_EQ, MACRO_SOURCE, MIX_KEY, NOTE,
+    Bases, Modulation, KEYS, LFO_SOURCE, LFO_STATE, LFO_TARGET, LINE_EQ, LINE_FB, LINE_PAN, LINE_TIME,
+    MACRO_SOURCE, MIX_KEY, NOTE,
 };
 use crate::units::*;
 use crate::{delay, eq};
@@ -38,7 +39,7 @@ pub(crate) fn noise(seed: u32) -> impl FnMut() -> f32 {
     }
 }
 
-fn signal(seed: u32, frames: usize, level: f32) -> [Vec<f32>; 2] {
+pub(crate) fn signal(seed: u32, frames: usize, level: f32) -> [Vec<f32>; 2] {
     let mut source = noise(seed);
     [
         (0..frames).map(|_| source() * level).collect(),
@@ -388,23 +389,113 @@ fn a_mute_taken_late_ends_in_time() {
 #[test]
 fn a_rest_is_the_blocks_it_skipped() {
     let rate = 44100.0;
-    let frames = 700 * BLOCK;
+    let frames = 2500 * BLOCK;
     let mut input = signal(6, frames, 0.4);
-    // (a sound, a long silence of +0, a sound again)
+    // (a sound, a long silence of +0, a sound again: the reverb at rest after some 2100 blocks)
     for channel in input.iter_mut() {
-        channel[20 * BLOCK..600 * BLOCK].fill(0.0);
+        channel[20 * BLOCK..2400 * BLOCK].fill(0.0);
     }
     let kinds = [DISTORTION, CHORUS, DELAY, COMPRESSOR, REVERB, EQ];
     let run = |restless: bool| {
         let mut chain = chain_of(rate, &kinds, 0.5, true);
         chain.restless = restless;
-        render(&mut chain, &input, |_, _| {})
+        (render(&mut chain, &input, |_, _| {}), chain.rests)
     };
-    let (rested, rendered) = (run(false), run(true));
+    let ((rested, rests), (rendered, _)) = (run(false), run(true));
+    assert!(rests > 0);
     same(&rested, &rendered, "a rest");
     assert!(sounds(&[
-        rested[0][650 * BLOCK..].to_vec(),
-        rested[1][650 * BLOCK..].to_vec()
+        rested[0][2450 * BLOCK..].to_vec(),
+        rested[1][2450 * BLOCK..].to_vec()
+    ]));
+}
+
+// so with routes: the routes are worked out at rest too (the time and the offsets of the delay through their pole,
+// the lines that glide from where they were on a new note, a knob of a unit a macro moves in the silence; a route on
+// Time holds the delay awake for the length of its line)
+#[test]
+fn a_rest_with_routes_is_the_blocks_it_skipped() {
+    let rate = 44100.0;
+    let frames = 2100 * BLOCK;
+    let mut input = signal(14, frames, 0.4);
+    for channel in input.iter_mut() {
+        channel[20 * BLOCK..2000 * BLOCK].fill(0.0);
+    }
+    let kinds = [DISTORTION, CHORUS, DELAY, EQ];
+    let mut routes = Vec::new();
+    route(
+        &mut routes,
+        DELAY as usize * KEYS + delay::TIME,
+        LFO_SOURCE + 1,
+        0.004,
+        0.01,
+        1.0,
+    );
+    route(
+        &mut routes,
+        DELAY as usize * KEYS + delay::PAN,
+        LFO_SOURCE,
+        0.01,
+        -0.05,
+        0.05,
+    );
+    route(&mut routes, DELAY as usize * KEYS + delay::FB, 0, 0.3, 0.0, 0.9);
+    route(
+        &mut routes,
+        EQ as usize * KEYS + eq::F1,
+        LFO_SOURCE,
+        1.0,
+        20.0,
+        20000.0,
+    );
+    route(
+        &mut routes,
+        DISTORTION as usize * KEYS + MIX_KEY,
+        LFO_SOURCE + 1,
+        0.4,
+        0.0,
+        1.0,
+    );
+    route(
+        &mut routes,
+        DISTORTION as usize * KEYS + distortion::LEVEL,
+        MACRO_SOURCE + 1,
+        -12.0,
+        -24.0,
+        12.0,
+    );
+    let run = |restless: bool| {
+        let mut chain = chain_of(rate, &kinds, 0.5, true);
+        chain.restless = restless;
+        // sines of 10 and of 7.7 Hz on the clock (free)
+        let mut lfos = vec![0.0; 4 * LFO_STATE];
+        for (lfo, period) in [0.1, 0.13, 0.1, 0.1].into_iter().enumerate() {
+            lfos[lfo * LFO_STATE..(lfo + 1) * LFO_STATE]
+                .copy_from_slice(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, period, 0.0]);
+        }
+        chain.written(0).0.set_lfos(0.0, true, &lfos);
+        chain.written(0).0.set_routes(&routes);
+        let first = note(0.0, 0.05, 1.0);
+        chain.written(0).0.set_note(true, &first);
+        // MACRO 2 to 1 in the silence
+        let mut level = event(SET_MACROS, 0.0, 0.0, &[f64::NAN, 1.0, f64::NAN, f64::NAN]);
+        level.at = (1700 * BLOCK) as f64;
+        chain.push(level);
+        let out = render(&mut chain, &input, |chain, at| {
+            // (a note with the sound again)
+            if at == 1990 * BLOCK {
+                let next = note((2000 * BLOCK) as f64 / rate, 0.05, 0.7);
+                chain.written(0).0.set_note(true, &next);
+            }
+        });
+        (out, chain.rests)
+    };
+    let ((rested, rests), (rendered, _)) = (run(false), run(true));
+    assert!(rests > 0);
+    same(&rested, &rendered, "a rest with routes");
+    assert!(sounds(&[
+        rested[0][2050 * BLOCK..].to_vec(),
+        rested[1][2050 * BLOCK..].to_vec()
     ]));
 }
 
@@ -1277,6 +1368,148 @@ fn an_lfo_moves_the_lines_of_the_mix_and_of_the_delay() {
     let still = render(&mut plain, &clicks, |_, _| {});
     assert!(moved[0].iter().chain(&moved[1]).all(|value| value.is_finite()));
     assert_ne!(bits(&moved[0][tail..]), bits(&still[0][tail..]));
+}
+
+// the time of the delay and the offsets of its channels follow their routes through the pole of the Audio Unit: a
+// step of the target (the velocity of a note that comes) exact at the points, a line between them, no jump; the
+// feedback glides in GLIDE as before; a line gone goes down through the pole, no more once within NEAR_SAMPLES of
+// a sample of 0
+#[test]
+fn the_lines_of_the_times_of_the_delay_go_through_its_pole() {
+    let rate = 48000.0;
+    let tau = delay::TIME_SMOOTHING * rate;
+    let mut modulation = Modulation::new(rate);
+    modulation.grow(BLOCK);
+    let mut routes = Vec::new();
+    // the velocity: 10 ms more of the time, 2 ms of the left channel late, 0.3 of the feedback
+    route(
+        &mut routes,
+        DELAY as usize * KEYS + delay::TIME,
+        3,
+        0.01,
+        0.0,
+        1.0,
+    );
+    route(
+        &mut routes,
+        DELAY as usize * KEYS + delay::PAN,
+        3,
+        0.002,
+        -0.05,
+        0.05,
+    );
+    route(&mut routes, DELAY as usize * KEYS + delay::FB, 3, 0.3, 0.0, 0.9);
+    modulation.set_routes(&routes);
+    let step = 4 * BLOCK;
+    modulation.set_note(true, &note(step as f64 / rate, 0.01, 1.0));
+    let params = params();
+    let mix = [1.0; SLOTS];
+    let (on, mixes) = ([true; SLOTS], [true; SLOTS]);
+    let bases = Bases {
+        params: &params,
+        mix: &mix,
+        on: &on,
+        mixes: &mixes,
+    };
+    let lines = [LINE_TIME, LINE_PAN, LINE_FB];
+    let mut values: [Vec<f64>; 3] = Default::default();
+    let run = |modulation: &mut Modulation, block: usize, values: &mut [Vec<f64>; 3]| {
+        modulation.block((block * BLOCK) as f64, BLOCK, &bases, &mut |_, _, _| {});
+        for (line, values) in lines.iter().zip(values.iter_mut()) {
+            match modulation.line(*line, BLOCK) {
+                Some(block) => values.extend_from_slice(block),
+                None => values.extend_from_slice(&[0.0; BLOCK]),
+            }
+        }
+        lines.map(|line| modulation.line(line, BLOCK).is_some())
+    };
+    let held = 40;
+    for block in 0..held {
+        run(&mut modulation, block, &mut values);
+    }
+    // (the input a line from 0 over the sample before the step, then the target)
+    for (k, target) in [(0, 0.01), (1, 0.002)] {
+        let first = dsp_core::blocks::smooth(0.0, 0.0, target, 1.0, tau, None);
+        let exact = |n: usize| target - (target - first) * jsmath::exp(-((n - step) as f64) / tau);
+        assert!(values[k][..step].iter().all(|value| *value == 0.0));
+        let mut steepest = 0.0f64;
+        for n in step..held * BLOCK {
+            let off = (values[k][n] - exact(n)).abs();
+            // (the points: every 32 samples of a block and its last one)
+            let point = n % BLOCK == BLOCK - 1 || (n % BLOCK).is_multiple_of(32);
+            assert!(
+                off < if point { 1e-12 } else { 2e-4 } * target,
+                "line {k} at {n}: {off}"
+            );
+            steepest = jsmath::max(steepest, values[k][n] - values[k][n - 1]);
+        }
+        assert!(steepest <= 1.001 * target / tau, "line {k}: a step of {steepest}");
+    }
+    // the feedback: in GLIDE (10 ms) at its target, a line as before
+    let glided = step + (0.01 * rate) as usize;
+    assert!(values[2][glided..held * BLOCK]
+        .iter()
+        .all(|value| (value - 0.3).abs() < 1e-12));
+
+    // the routes gone: down through the pole, no step, none once within NEAR_SAMPLES of a sample of 0
+    modulation.set_routes(&[]);
+    let from = values[0][held * BLOCK - 1];
+    let mut block = held;
+    while run(&mut modulation, block, &mut values)[0] {
+        block += 1;
+        assert!(block < held + 1000);
+    }
+    let gone = (block - held) as f64 * BLOCK as f64;
+    let expected = tau * jsmath::log(from * rate / delay::NEAR_SAMPLES);
+    assert!((gone - expected).abs() < 2.0 * BLOCK as f64, "{gone} {expected}");
+    for n in held * BLOCK + 1..values[0].len() {
+        assert!(values[0][n] <= values[0][n - 1] && values[0][n] >= 0.0, "at {n}");
+    }
+}
+
+// a step of a route on the time (the velocity of a note that comes) bends the echoes, no jump in them: a sine
+// through the delay, its largest step between two samples within that of the delay left alone (before the pole a
+// jump of the read of 20 ms: up to twice the sine at once)
+#[test]
+fn a_step_of_a_route_on_the_time_bends_the_echoes_without_a_jump() {
+    let rate = 48000.0;
+    let frames = 120 * BLOCK;
+    let sine: Vec<f32> = (0..frames)
+        .map(|i| (0.25 * jsmath::sin(core::f64::consts::TAU * i as f64 / 256.0)) as f32)
+        .collect();
+    let input = [sine.clone(), sine];
+    let step = 60 * BLOCK;
+    let render_of = |moved: bool| {
+        let mut chain = chain_of(rate, &[DELAY], 1.0, false);
+        chain.push(event(CLEAR, 0.0, 0.0, &[]));
+        if moved {
+            let mut routes = Vec::new();
+            route(
+                &mut routes,
+                DELAY as usize * KEYS + delay::TIME,
+                3,
+                0.02,
+                0.0,
+                1.0,
+            );
+            chain.written(0).0.set_routes(&routes);
+            chain
+                .written(0)
+                .0
+                .set_note(true, &note(step as f64 / rate, 0.01, 1.0));
+        }
+        render(&mut chain, &input, |_, _| {})
+    };
+    let (moved, still) = (render_of(true), render_of(false));
+    let largest = |data: &[f32]| {
+        data.windows(2)
+            .map(|pair| (pair[1] - pair[0]).abs())
+            .fold(0.0f32, f32::max)
+    };
+    let tail = 20 * BLOCK;
+    assert!(largest(&still[0][tail..]) > 0.0);
+    assert!(largest(&moved[0][tail..]) <= 1.05 * largest(&still[0][tail..]));
+    assert_ne!(bits(&moved[0][step..]), bits(&still[0][step..]));
 }
 
 // a slot a route moves the mix of stops (off, or out of the order): the offset of the route goes down with its
