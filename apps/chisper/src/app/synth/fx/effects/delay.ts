@@ -118,6 +118,7 @@ export const delay: FxDefinition<DelayParam> = {
   },
   presets: DELAY_PRESETS,
   paramChange: delayParamChange,
+  tempo: { knob: 'time', stepsOf: delayStepsOf, divisionOf: delayDivisionOf },
   bounds: (params, bpm) => ({ time: delayTimeBounds(params, bpm) }),
   // Time as the seconds of the echoes: in BPM of its division at the tempo
   core: (params, bpm) => ({ ...pick(params, CORE_KNOBS), time: delayTime(params, bpm) }),

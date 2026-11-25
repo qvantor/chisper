@@ -8,6 +8,8 @@ import { useSynthCore } from '../../common/modules';
 // which keeps the peaks at its ceiling, so the sound gets louder without clipping. The lowest position is
 // silence
 export const MASTER_DB = { min: -40, max: 12 };
+// its step in dB (a knob rounds to 1 / precision)
+export const MASTER_PRECISION = 10;
 
 export const dbToGain = (db: number) => (db <= MASTER_DB.min ? 0 : 10 ** (db / 20));
 
@@ -35,7 +37,8 @@ export const MasterHandle = ({ label = 'Master' }: { label?: string | null }) =>
       formatValue={formatDb}
       // the volume the synth starts at: a gain of 1
       defaultValue={0}
-      precision={10}
+      precision={MASTER_PRECISION}
+      midiTarget='master'
     />
   );
 };

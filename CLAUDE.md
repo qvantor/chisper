@@ -176,6 +176,8 @@ time).
   `ResizeObserver` is stubbed.
 - Count `addModule` calls with `workletLoads` (the synth core adds `engine` itself, once).
 - Presets specs without the synth pass `immediateSoundSwitch` of test-utils.
+- MIDI Learn: `createMidiLearn()` (test-utils/models: the synth, the fx, a MIDI input and the model); a CC is
+  `midi[0].$cc.next({ cc, value })` on fake timers (the interval), one of an input `midiMessage(input, 176, cc, v)`.
 - What the app reports: `recordAnalytics()` (`test-utils/analytics.ts`: its events, its errors, `features()`); the
   SDK is mapped to `test-utils/posthog-mock.ts` (`analytics-sdk.spec` loads the real one by its file).
 - Server specs: the DB is the fake `sql` tag of `netlify/tests/fake-sql.ts` (records queries, answers by regex).
@@ -209,7 +211,7 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   `PrimitiveBS`, `ArrayBS`, `ObjectBS`; observables are `$`-prefixed.
 - Provider order is dependency order (`apps/chisper/src/app/synth/index.tsx`): InputController → SynthCore →
   Transport → Envelopes → Lfo → Modulation → Oscillator1/2 → Noise → Sub → MidiController → Filter → Synth → Fx →
-  SoundSwitch → Track → KeyboardController → Presets.
+  SoundSwitch → Track → KeyboardController → Presets → MidiLearn.
 
 ### Audio graph (`synth/common/modules`)
 
@@ -526,8 +528,9 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   shapes as 2048-point tables, `lfo/lfo-curve.ts` shared by main thread, worklets and specs, mirrored in `lfo.rs`),
   `modulation.ts` (routes `<source>:<knob>`, targets in `modulation-targets.ts`, at most 64 routes and 4 per knob;
   the levels of MACRO 1–4, `$macros`, `setMacro(id, level, at?, source?)`: every move with its time in `$macroMoves`,
-  which the synth tells the node, the routes stay (only a hand moves one yet: `at`, the sources `midi`/`track` and
-  `MACRO_CC` of the schema wait for a MIDI input and the automation of the track); their names as typed, `$macroNames`, `setMacroName`: the field
+  which the synth tells the node, the routes stay (a hand, or a CC of MIDI Learn as `midi`: a fresh map has the
+  macros on their `MACRO_CC`, its MSB; `at`, the source `track` and the LSB wait for the automation of the track);
+  their names as typed, `$macroNames`, `setMacroName`: the field
   under a macro with routes, the label of its routes on the knobs, `sourceLabel`; snapshot `mac`, a plugin of its own,
   `n1`–`n4` only of a macro with routes, trimmed; the server refuses a profane one, `profaneMacroName`).
   `synth/macros/` (not
@@ -537,6 +540,25 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
 - `input-controller.ts` — the shared note bus (`$onPress`, `$onRelease`, `$bend`); sources: on-screen piano,
   QWERTY (`keyboard-controller.ts`), MIDI (`midi-controller.ts`), the track, the roll keys. Each source holds its
   own notes.
+- MIDI Learn (`synth/common/midi-learn/`, `synth/midi-learn/`): `midi-controller.ts` tells the Control Changes of
+  the input on the channel listened to (`$cc`, none of 120–127); the model `midiLearn` binds a CC to a control by
+  its id (`midi-targets.ts`: every knob, switch and choice of the models, the id of its modulation target where it
+  has one, `env1.attack`, `delay.on`… else; a knob of a time in BPM is its division) and sets it through the action
+  a hand calls, where a mouse would put it (`cc-value.ts`: a share of the travel in the scale of the knob, its
+  precision; a switch at 64, a choice in equal zones, both only as the CC enters another zone; a switch bound by a
+  press whose release (a 0) came within `TOGGLE_WINDOW`, or toggled in its menu, flips at each press: `toggles` of the
+  map; a control the screen disables, `enabled` of its target, is not moved): the last value of a
+  control at most every `CC_INTERVAL` (16 ms, a drag's rate: a change of a knob renders its section, its snapshot
+  and posts to the node; a timer, not a frame: the tab may be hidden), nothing for a CC of no control nor for the
+  same value or step. Jump, or Pickup (a knob another moved waits until the CC passes it; only Pickup listens to
+  the knobs). The map (`midiMap` of localStorage, a fresh one the macros on CC 20–23, another tab's taken by its
+  `storage` event) is no part of a preset. The
+  kit: `midiTarget` of a control (`MidiLearnContext`: a control listens to its own mark, its CC, its wait, the mark
+  of Pickup, and has the items of MIDI Learn in its control menu), `data-midi-target` on its box; `MidiLearnLayer`
+  opens the menu of a switch or a choice (a right click no menu took), ends a wait (Escape, a press out of it), and
+  the Learn mode of the Midi panel (outlines by a class of the body; a press on a control is stopped in the capture
+  phase and chooses it). A new control: its target in `midi-targets.ts`, `midiTarget` on it
+  (`midi-learn-layer.spec` holds the ids of the sections to the registry and back).
 - Track (`synth/track/`, `modules/track.ts`): one looped clip (`libs/preset-schema/src/clip.ts`, 960 PPQ) played
   into the synth by a worker clock (`track-clock.worker.ts`) 50 ms ahead; piano roll, REC, undo
   (`track-history.ts`), pure edits in `track-edit.ts`, .mid import/export in `midi-file.ts`.

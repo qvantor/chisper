@@ -6,6 +6,7 @@ import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react
 import { number } from '@chisper/math';
 import { OSC_DEFAULTS } from '@chisper/preset-schema';
 import { OscillatorActions, OscillatorModel, useOscillator1 } from '../common/modules';
+import { OSC_PRECISION } from '../common/modules/oscillator';
 import { RxHandle } from '../../common/components';
 import { useKnobModulation } from '../modulation/use-knob-modulation';
 import { OscillatorContext, useCompact, useHeld, useOscillatorContext } from './hooks';
@@ -126,7 +127,7 @@ export const Oscillator = ({
               name='Volume'
               onChange={setGain}
               formatValue={(value) => number.percent(number.round(value, 100))}
-              precision={100}
+              precision={OSC_PRECISION.gain}
               defaultValue={OSC_DEFAULTS.g}
               {...gainModulation}
             />
@@ -140,7 +141,7 @@ export const Oscillator = ({
               label='Wave'
               name='Wave position'
               onChange={setPosition}
-              precision={1}
+              precision={OSC_PRECISION.wave}
               formatValue={formatWavePosition}
               defaultValue={OSC_DEFAULTS.w}
               {...waveModulation}
@@ -154,12 +155,12 @@ export const Oscillator = ({
                 name='Warp amount'
                 onChange={setWarp}
                 formatValue={(value) => number.percent(number.round(value, 100))}
-                precision={100}
+                precision={OSC_PRECISION.warp}
                 defaultValue={OSC_DEFAULTS.wa}
                 disabled={!warping}
                 {...warpModulation}
               />
-              <WarpMode compact={compact} />
+              <WarpMode compact={compact} target={target} />
             </WarpGroup>
           </HandlesGroup>
           <HandlesGroup>
@@ -171,7 +172,7 @@ export const Oscillator = ({
               min={ranges.detune[0]}
               max={ranges.detune[1]}
               onChange={(value) => setOscValue('detune', Math.round(value * 100000) / 100000)}
-              precision={1}
+              precision={OSC_PRECISION.detune}
               defaultValue={OSC_DEFAULTS.d}
               onActiveChange={holdUnison}
               {...detuneModulation}
@@ -187,7 +188,7 @@ export const Oscillator = ({
               max={ranges.blend[1]}
               onChange={(value) => setOscValue('blend', value)}
               formatValue={(value) => number.percent(number.round(value, 100))}
-              precision={100}
+              precision={OSC_PRECISION.blend}
               defaultValue={OSC_DEFAULTS.b}
               onActiveChange={holdUnison}
               {...blendModulation}

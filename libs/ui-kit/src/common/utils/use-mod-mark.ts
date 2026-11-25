@@ -72,3 +72,15 @@ export const useModulations = <R extends Route>(
   );
   return { modulations, mark, live, shown, spans };
 };
+
+// where the controller is while a knob waits for it (MIDI Learn in Pickup: `share` of its travel, null: none), its
+// mark painted once on a canvas of its own as the mark of the routes (the control renders the canvas while `shown`)
+export const usePickupMark = ({ paint, width, height }: MarkCanvas, share: number | null) => {
+  const { canvas, begin } = useCanvas(width, height);
+  React.useLayoutEffect(() => {
+    if (share === null) return;
+    const context = begin();
+    if (context) paint(context, share);
+  }, [share, paint, begin]);
+  return { pickupMark: canvas, pickupShown: share !== null };
+};

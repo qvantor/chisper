@@ -19,6 +19,8 @@ import { sub } from '../app/synth/common/modules/sub';
 import { synth } from '../app/synth/common/modules/synth';
 import { synthCore } from '../app/synth/common/modules/synth-core';
 import { transport } from '../app/synth/common/modules/transport';
+import { midiController } from '../app/synth/common/modules/midi-controller';
+import { midiLearn } from '../app/synth/common/midi-learn/midi-learn';
 import { dirtyOf, track } from '../app/synth/track/modules/track';
 import type { AuditionBlock, TrackModule } from '../app/synth/track/modules/track';
 import type { CreateTrackClock } from '../app/synth/track/track-clock';
@@ -273,4 +275,39 @@ export const createFx = (
     transport: transportModule,
     $fxNote,
   };
+};
+
+// the whole synth with the fx, a MIDI input (midi-controller: provideMidiAccess before) and MIDI Learn over them
+export const createMidiLearn = () => {
+  const synthModules = createSynth();
+  const { fx: fxModule } = createFx(
+    synthModules.synthCore,
+    synthModules.modulation,
+    synthModules.lfos,
+    synthModules.transport
+  );
+  const midi = initModel(
+    midiController({ inputController: synthModules.inputController, transport: synthModules.transport }),
+    'midiController',
+    {}
+  );
+  const learn = initModel(
+    midiLearn({
+      midiController: midi,
+      synthCore: synthModules.synthCore,
+      transport: synthModules.transport,
+      envelopes: synthModules.envelopes,
+      lfo: synthModules.lfos,
+      modulation: synthModules.modulation,
+      oscillators: [synthModules.osc1, synthModules.osc2],
+      noise: synthModules.noise,
+      sub: synthModules.sub,
+      filter: synthModules.filter,
+      synth: synthModules.synth,
+      fx: fxModule,
+    }),
+    'midiLearn',
+    undefined
+  );
+  return { ...synthModules, fx: fxModule, midi, learn };
 };

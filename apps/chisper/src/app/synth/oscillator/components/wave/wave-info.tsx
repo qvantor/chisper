@@ -3,6 +3,7 @@ import cls from 'classnames';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
 import { OSC_DEFAULTS } from '@chisper/preset-schema';
+import { OSC_PRECISION } from '../../../common/modules/oscillator';
 import { useOscillatorContext } from '../../hooks';
 import { Cell, Strip } from './value-strip';
 
@@ -11,6 +12,8 @@ export const formatWavePosition = (position: number) =>
   Number.isInteger(position) ? `${position + 1}` : (position + 1).toFixed(1);
 
 interface Props {
+  // the prefix of the ids of the oscillator (osc1.phase…)
+  target: 'osc1' | 'osc2';
   // Phase or Phase rand is held (true) or let go (false)
   onPhaseActiveChange: (active: boolean) => void;
   // Unison is held or let go: the chart shows the voices of the unison
@@ -21,7 +24,7 @@ interface Props {
 
 // under the wave, on its background: the frame it plays of the frames played, Phase, Phase rand and Unison
 // dragged to change them
-export const WaveInfo = ({ onPhaseActiveChange, onUnisonActiveChange, compact }: Props) => {
+export const WaveInfo = ({ target, onPhaseActiveChange, onUnisonActiveChange, compact }: Props) => {
   const [{ $position, $frames, $osc, ranges }, { setOscValue }] = useOscillatorContext();
   const position = useBehaviorSubject($position);
   // the frames played, as the Wave knob: of a table with a morph mark its 256
@@ -36,10 +39,11 @@ export const WaveInfo = ({ onPhaseActiveChange, onUnisonActiveChange, compact }:
         min={ranges.phase[0]}
         max={ranges.phase[1]}
         cyclic
-        precision={360}
+        precision={OSC_PRECISION.phase}
         formatValue={(value) => `${Math.round(value * 360)}°`}
         defaultValue={OSC_DEFAULTS.ph}
         onChange={(value) => setOscValue('phase', value)}
+        midiTarget={`${target}.phase`}
         onActiveChange={onPhaseActiveChange}
       />
       <Cell
@@ -47,10 +51,11 @@ export const WaveInfo = ({ onPhaseActiveChange, onUnisonActiveChange, compact }:
         value={phaseRand}
         min={ranges.phaseRand[0]}
         max={ranges.phaseRand[1]}
-        precision={100}
+        precision={OSC_PRECISION.phaseRand}
         formatValue={number.percent}
         defaultValue={OSC_DEFAULTS.pr}
         onChange={(value) => setOscValue('phaseRand', value)}
+        midiTarget={`${target}.phaseRand`}
         onActiveChange={onPhaseActiveChange}
       />
       <Cell
@@ -58,10 +63,11 @@ export const WaveInfo = ({ onPhaseActiveChange, onUnisonActiveChange, compact }:
         value={unison}
         min={ranges.unison[0]}
         max={ranges.unison[1]}
-        precision={1}
+        precision={OSC_PRECISION.unison}
         arrows
         defaultValue={OSC_DEFAULTS.u}
         onChange={(value) => setOscValue('unison', value)}
+        midiTarget={`${target}.unison`}
         onActiveChange={onUnisonActiveChange}
       />
     </Strip>

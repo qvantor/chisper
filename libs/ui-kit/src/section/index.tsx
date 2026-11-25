@@ -4,6 +4,7 @@ import cls from 'classnames';
 import { Checkbox } from '../checkbox';
 import { theme } from '../common/constants';
 import { text12, textBold12 } from '../common/styles';
+import { useMidiAttrs } from '../midi-learn';
 
 interface Props {
   name?: React.ReactNode;
@@ -13,6 +14,8 @@ interface Props {
   extra?: React.ReactNode;
   // the header without its padding: the name fills it (the ENV tabs), as high as the others
   plain?: boolean;
+  // the id of MIDI Learn of its switch (a CC switches it on and off)
+  midiTarget?: string;
 }
 
 const Root = styled.div`
@@ -78,12 +81,15 @@ export const Section = ({
   onClick,
   extra,
   plain,
+  midiTarget,
 }: React.PropsWithChildren<Props>) => {
+  const midi = useMidiAttrs(midiTarget);
   return (
     <Root>
       <Header onClick={onClick} className={cls({ plain })}>
         {/* the whole header is clickable, the title is the accessible toggle (the extra is not part of it) */}
         <Title
+          {...midi}
           {...(onClick && {
             role: 'button',
             tabIndex: 0,

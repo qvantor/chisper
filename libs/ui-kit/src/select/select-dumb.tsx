@@ -2,6 +2,7 @@ import React from 'react';
 import { styled, css } from 'styled-components';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { theme } from '../common/constants';
+import { useMidiAttrs } from '../midi-learn';
 
 const SelectContainer = styled.div`
   display: flex;
@@ -55,11 +56,19 @@ interface Props {
   prev: () => void;
   next: () => void;
   className?: string;
+  // its id of MIDI Learn (a CC chooses an option)
+  midiTarget?: string;
 }
 
-export const SelectDumb = ({ prev, next, children, className }: React.PropsWithChildren<Props>) => {
+export const SelectDumb = ({
+  prev,
+  next,
+  children,
+  className,
+  midiTarget,
+}: React.PropsWithChildren<Props>) => {
   return (
-    <SelectContainer className={className}>
+    <SelectContainer className={className} {...useMidiAttrs(midiTarget)}>
       <ArrowIcons>
         <button type='button' aria-label='Previous' onClick={prev}>
           <LeftOutlined />

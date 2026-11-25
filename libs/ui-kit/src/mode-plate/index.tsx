@@ -8,6 +8,7 @@ import { text10, textBold12 } from '../common/styles';
 import { keepFocus } from '../common/utils';
 import { MenuPanel } from '../control-menu';
 import { knobGeometry } from '../handle';
+import { useMidiAttrs } from '../midi-learn';
 import { keyTip, TIP_DELAY, TIP_STYLES } from '../switch-key';
 
 export interface ModeOption<T> {
@@ -32,6 +33,8 @@ interface Props<T> {
   // narrow: the glyph alone (the name in the tooltip and the menu)
   compact?: boolean;
   className?: string;
+  // its id of MIDI Learn (a CC chooses a mode)
+  midiTarget?: string;
 }
 
 // the box of a knob of the size beside it
@@ -216,6 +219,7 @@ export const ModePlate = <T,>({
   hint,
   compact = false,
   className,
+  midiTarget,
 }: Props<T>) => {
   const plateRef = React.useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = React.useState<DOMRect | null>(null);
@@ -223,6 +227,7 @@ export const ModePlate = <T,>({
   const current = options.find((option) => option.id === value) ?? options[0];
   const open = anchor !== null;
 
+  const midi = useMidiAttrs(midiTarget);
   const toggle = () => {
     const plate = plateRef.current;
     setAnchor(open || !plate ? null : plate.getBoundingClientRect());
@@ -247,6 +252,7 @@ export const ModePlate = <T,>({
           tabIndex={-1}
           onMouseDown={keepFocus}
           onClick={toggle}
+          {...midi}
         >
           <GlyphBox>{current.icon}</GlyphBox>
           <NameRow>

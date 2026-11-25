@@ -22,5 +22,6 @@ export const FilterTypeSelect = ({ type, setType }: Props) => (
     label={FILTER_TYPE_NAMES[type]}
     title='Filter type'
     status='success'
+    midiTarget='filter.type'
   />
 );

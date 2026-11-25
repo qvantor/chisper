@@ -14,10 +14,12 @@ interface Props {
   dot: boolean;
   onTrip: (on: boolean) => void;
   onDot: (on: boolean) => void;
+  // the prefix of the ids of MIDI Learn of the keys (lfo1: lfo1.trip, lfo1.dot)
+  midiTarget?: string;
 }
 
 // TRIP and DOT on a plate of the keys of the tempo (SwitchKeys), after BPM: a time in triplets and in dotted notes
-export const NoteValueKeys = ({ of, bpm, trip, dot, onTrip, onDot }: Props) => (
+export const NoteValueKeys = ({ of, bpm, trip, dot, onTrip, onDot, midiTarget }: Props) => (
   <>
     <SwitchKey
       icon={TRIPLET}
@@ -27,6 +29,7 @@ export const NoteValueKeys = ({ of, bpm, trip, dot, onTrip, onDot }: Props) => (
       on={trip}
       disabled={!bpm}
       onChange={onTrip}
+      midiTarget={midiTarget && `${midiTarget}.trip`}
     />
     <SwitchKey
       icon={DOTTED}
@@ -36,6 +39,7 @@ export const NoteValueKeys = ({ of, bpm, trip, dot, onTrip, onDot }: Props) => (
       on={dot}
       disabled={!bpm}
       onChange={onDot}
+      midiTarget={midiTarget && `${midiTarget}.dot`}
     />
   </>
 );

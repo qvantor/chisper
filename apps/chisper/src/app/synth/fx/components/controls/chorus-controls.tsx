@@ -33,6 +33,7 @@ const FilterKey = React.memo(
         hint='The filter cuts the lows of the wet signal, not its highs'
         on={high}
         onChange={(value) => setParam('hpf', +value)}
+        midiTarget='chorus.hpf'
       />
     </FilterPlate>
   )

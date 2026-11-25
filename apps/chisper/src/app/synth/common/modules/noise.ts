@@ -39,6 +39,15 @@ export type NoiseKnobs = {
   level: number;
 };
 export type NoiseNumeric = 'start' | 'rand' | 'pitch' | 'fine' | 'pan' | 'level';
+// the steps of its knobs and values (a knob rounds to 1 / precision): its knobs and a CC (MIDI Learn) set them alike
+export const NOISE_PRECISION: Record<NoiseNumeric, number> = {
+  start: 100,
+  rand: 100,
+  pitch: 1,
+  fine: 1,
+  pan: 100,
+  level: 100,
+};
 
 const KNOB_DEFAULTS: NoiseKnobs = {
   loop: NOISE_DEFAULTS.lp,

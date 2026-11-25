@@ -3,6 +3,7 @@ import cls from 'classnames';
 import { css, styled } from 'styled-components';
 import { theme } from '../common/constants';
 import { Label } from '../label';
+import { useMidiAttrs } from '../midi-learn';
 
 // the box of a checkbox of the synth: grey while off, lit in blue while on (for other checkboxes to look the same)
 export const checkboxOff = css`
@@ -40,32 +41,39 @@ interface Props {
   checked: boolean;
   label: React.ReactNode;
   onChange: (value: boolean) => void;
+  // its id of MIDI Learn (a CC switches it)
+  midiTarget?: string;
 }
 
 type OnChangeInternal = { onChangeInternal: () => void };
 
 type CheckboxProps = Partial<Pick<Props, 'label' | 'onChange'>> & Omit<Props, 'label' | 'onChange'>;
-type SimpleCheckboxProps = Pick<Props, 'checked'> & OnChangeInternal;
+type SimpleCheckboxProps = Pick<Props, 'checked' | 'midiTarget'> & OnChangeInternal;
 type LabeledCheckboxProps = Omit<Props, 'onChange'> & OnChangeInternal;
 
-const SimpleCheckbox = ({ onChangeInternal, checked }: SimpleCheckboxProps) => (
-  <Indicator onClick={onChangeInternal} className={cls({ checked: checked })} />
+const SimpleCheckbox = ({ onChangeInternal, checked, midiTarget }: SimpleCheckboxProps) => (
+  <Indicator onClick={onChangeInternal} className={cls({ checked: checked })} {...useMidiAttrs(midiTarget)} />
 );
 
-const LabeledCheckbox = ({ onChangeInternal, checked, label }: LabeledCheckboxProps) => {
+const LabeledCheckbox = ({ onChangeInternal, checked, label, midiTarget }: LabeledCheckboxProps) => {
   return (
-    <Root onClick={onChangeInternal}>
+    <Root onClick={onChangeInternal} {...useMidiAttrs(midiTarget)}>
       <Indicator className={cls({ checked: checked })} />
       <Label>{label}</Label>
     </Root>
   );
 };
 
-export const Checkbox = ({ checked, label, onChange }: CheckboxProps) => {
+export const Checkbox = ({ checked, label, onChange, midiTarget }: CheckboxProps) => {
   const onChangeInternal = () => onChange?.(!checked);
   return label ? (
-    <LabeledCheckbox label={label} onChangeInternal={onChangeInternal} checked={checked} />
+    <LabeledCheckbox
+      label={label}
+      onChangeInternal={onChangeInternal}
+      checked={checked}
+      midiTarget={midiTarget}
+    />
   ) : (
-    <SimpleCheckbox checked={checked} onChangeInternal={onChangeInternal} />
+    <SimpleCheckbox checked={checked} onChangeInternal={onChangeInternal} midiTarget={midiTarget} />
   );
 };

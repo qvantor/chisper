@@ -52,12 +52,15 @@ const withinLimits = (routes: ModRoute[]) =>
     []
   );
 
+// the step of the knob of a macro (a knob rounds to 1 / precision)
+export const MACRO_PRECISION = 100;
+
 const clampAmount = (amount: number) => Math.min(1, Math.max(-1, amount));
 const clampLevel = (level: number) => Math.min(1, Math.max(0, level));
 
-// who moved a macro: a hand on its knob, a CC of a MIDI input, the automation of the track (a recording takes what
-// a player did, not what the track plays itself). Only a hand moves one yet: 'midi', 'track' and the time `at` wait
-// for a MIDI input and the automation of the track (MACRO_CC of the schema)
+// who moved a macro: a hand on its knob, a CC of a MIDI input (MIDI Learn), the automation of the track (a recording
+// takes what a player did, not what the track plays itself). 'track' and the time `at` wait for the automation of
+// the track (MACRO_CC of the schema)
 export type MacroSource = 'hand' | 'midi' | 'track';
 // the levels of the macros the engine is told (null: that macro as it is) from `at` (seconds of the context; none:
 // the next block), and who moved them (none: a preset)

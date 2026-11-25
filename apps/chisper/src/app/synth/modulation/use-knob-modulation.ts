@@ -49,9 +49,12 @@ interface KnobScale {
 // the modulation props of the knob of a target (modulation-targets.ts): the drop target of the tabs (none once
 // the routes or the sources of the knob are full), the routes on it (a section of the amount dot each, the arc of
 // the one of the selected tab, the dot changes it, Shift+Alt+click on the knob switches its polarity; the menu of
-// the knob switches each on or off, its polarity, removes it, or all of them at once). Without the modulation
-// model (a spec of a section) the knob has none
-export type KnobModulation = Pick<HandleProps, 'modTarget' | 'modulations' | 'onClearModulations'>;
+// the knob switches each on or off, its polarity, removes it, or all of them at once), and its id of MIDI Learn (the
+// target: a CC moves the knob). Without the modulation model (a spec of a section) the knob has none
+export type KnobModulation = Pick<
+  HandleProps,
+  'modTarget' | 'modulations' | 'onClearModulations' | 'midiTarget'
+>;
 
 export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulation => {
   const module = React.useContext(ModulationContext);
@@ -172,6 +175,7 @@ export const useKnobModulation = (target: string, knob?: KnobScale): KnobModulat
       modTarget: full ? undefined : target,
       modulations,
       onClearModulations: () => actions?.removeRoutes(target),
+      midiTarget: target,
     };
     // (macroLabels: the names of its macros changed)
   }, [module, actions, routes, target, scale, min, max, level, live, selected, $macroNames, macroLabels]);

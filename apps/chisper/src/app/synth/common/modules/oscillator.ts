@@ -34,6 +34,21 @@ import type { SoundCoreModule } from './synth-core';
 const PLACEHOLDER_WAVE = [0, 1, 0, -1];
 // ms between two versions of an edited table at most: an edit rebuilds the whole table in the worker
 export const TABLE_THROTTLE = 100;
+// the steps of the knobs and the values of an oscillator (a knob rounds to 1 / precision): its knobs and a CC
+// (MIDI Learn) set them alike
+export const OSC_PRECISION = {
+  gain: 100,
+  wave: 1,
+  warp: 100,
+  detune: 1,
+  blend: 100,
+  phase: 360,
+  phaseRand: 100,
+  unison: 1,
+  octave: 1,
+  semi: 1,
+  fine: 1,
+} as const;
 
 interface Dependencies {
   synthCore: SoundCoreModule;

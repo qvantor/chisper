@@ -1,4 +1,4 @@
-import { LfoPoint, LfoShape } from '@chisper/preset-schema';
+import { LfoMode, LfoPoint, LfoShape } from '@chisper/preset-schema';
 import type { LfoParams } from '../common/modules/lfos';
 
 // the shapes the LFO section offers, by category: the shapes of an LFO (Basic) and points of its own (the others:
@@ -13,6 +13,12 @@ export type LfoShapeOption = { id: string; name: string; group: LfoShapeGroup } 
 
 // points of its own that are none of the list (a preset made by hand)
 export const CUSTOM_SHAPE = 'custom';
+
+// the modes of an LFO as its section offers them (a CC of MIDI Learn chooses among them in that order)
+export const LFO_MODE_OPTIONS: { name: string; value: LfoMode }[] = [
+  { name: 'Retrig', value: 'retrig' },
+  { name: 'Free', value: 'free' },
+];
 
 // a step is two points at one x; the last segment of the points goes to the first one over the end of the cycle,
 // so each run of a level ends in a point of its own (the last at 1): no ramp between the runs

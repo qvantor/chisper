@@ -50,12 +50,23 @@ interface Props {
   title: string;
   // the load of the list
   status: ListStatus;
+  // its id of MIDI Learn (a CC chooses a file: the types of the filter)
+  midiTarget?: string;
 }
 
 // a file of a list (a wavetable, a noise): its name between ◀ ▶, which go through all the files across folders; a
 // click on the name opens the browser of the list under it (BrowserKey). Value and setValue are whole paths, the
 // single folders included
-export const FileSelect = ({ options, value, setValue, progress, label, title, status }: Props) => {
+export const FileSelect = ({
+  options,
+  value,
+  setValue,
+  progress,
+  label,
+  title,
+  status,
+  midiTarget,
+}: Props) => {
   const leaves = React.useMemo(() => leafPaths(options), [options]);
   const { prefix } = skipSingleFolders(options);
   // the arrows go through all the files across folders and wrap around; from an unknown value (-1) next is
@@ -69,7 +80,7 @@ export const FileSelect = ({ options, value, setValue, progress, label, title, s
   };
 
   return (
-    <Strip prev={step(-1)} next={step(1)}>
+    <Strip prev={step(-1)} next={step(1)} midiTarget={midiTarget}>
       <Name>
         {progress}
         <Key

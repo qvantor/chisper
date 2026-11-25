@@ -3,6 +3,7 @@ import cls from 'classnames';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
 import { OSC_DEFAULTS } from '@chisper/preset-schema';
 
+import { OSC_PRECISION } from '../../../common/modules/oscillator';
 import { useKnobModulation } from '../../../modulation/use-knob-modulation';
 import { useOscillatorContext } from '../../hooks';
 import { Cell, Strip } from './value-strip';
@@ -36,7 +37,7 @@ export const PitchInfo = ({ target, compact }: Props) => {
       defaultValue: DEFAULTS[key],
       min,
       max,
-      precision: 1,
+      precision: OSC_PRECISION[key],
       travel: (max - min) * pxPerStep,
       arrows: !compact,
       onChange: (value: number) => setOscValue(key, value),
@@ -44,7 +45,7 @@ export const PitchInfo = ({ target, compact }: Props) => {
   };
   return (
     <Strip $edge='top' className={cls({ compact })}>
-      <Cell label='Oct' {...field('octave')} />
+      <Cell label='Oct' {...field('octave')} midiTarget={`${target}.oct`} />
       <Cell label='Semi' {...field('semi')} {...pitchModulation} />
       <Cell label='Fine' {...field('fine', PX_PER_CENT)} {...fineModulation} />
     </Strip>

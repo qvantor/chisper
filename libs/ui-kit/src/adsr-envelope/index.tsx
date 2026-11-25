@@ -9,7 +9,7 @@ import { AdsrCurves, envelopeLine, LineProps } from './envelope-line';
 import { CurveHandles, CurveStage } from './curve-handles';
 
 export { NoteDot, NOTE_DOT_COLOR, NOTE_DOT_RADIUS } from './note-dot';
-export { VelocityCurve, VelocityDot } from './velocity-curve';
+export { AMP_PRECISION, VelocityCurve, VelocityDot } from './velocity-curve';
 export { CurvePoint, POINT_HIT_RADIUS, POINT_RADIUS } from './curve-handles';
 export type { NotePath } from './note-dot';
 
@@ -84,7 +84,7 @@ export const formatTime = (seconds: number) => {
 };
 
 // the times in steps of 0.1 ms
-const TIME_PRECISION = 10000;
+export const TIME_PRECISION = 10000;
 
 type TimeStage = 'attack' | 'hold' | 'decay' | 'release';
 // the time knobs in steps of their own (the divisions of a tempo) instead of seconds; the chart draws the seconds
@@ -121,6 +121,8 @@ type Props = LineProps & {
   timeSteps?: AdsrSteps;
   // right of Release, as large as its knob (the switch of the units of the times)
   aside?: React.ReactNode;
+  // the prefix of the ids of MIDI Learn of the knobs (a CC moves them: env1 for env1.attack…)
+  midiTarget?: string;
 };
 
 // the chart scales to the whole envelope; the time knobs are nonlinear (pow): short times get most of their
@@ -135,14 +137,17 @@ export const AdsrEnvelope = ({
   children,
   timeSteps,
   aside,
+  midiTarget,
   ...rest
 }: Props) => {
   const { attack, hold, decay, sustain, release } = rest;
   const onChangeInternal = (key: keyof LineProps) => (value: number) =>
     onChange(key, number.round(value, TIME_PRECISION));
+  const midiTargetOf = (key: keyof LineProps) => midiTarget && `${midiTarget}.${key}`;
   // a time knob: by its travel (short times get most of it), or in its steps
-  const timeKnob = (stage: TimeStage) =>
-    timeSteps
+  const timeKnob = (stage: TimeStage) => ({
+    midiTarget: midiTargetOf(stage),
+    ...(timeSteps
       ? {
           min: 0,
           max: Math.max(...timeSteps.steps),
@@ -164,7 +169,8 @@ export const AdsrEnvelope = ({
           formatValue: formatTime,
           defaultValue: defaultValues?.[stage],
           onChange: onChangeInternal(stage),
-        };
+        }),
+  });
   const timeValue = (stage: TimeStage) =>
     timeSteps ? timeSteps.format(timeSteps.values[stage]) : formatTime(rest[stage]);
   const length = attack + hold + decay + release;
@@ -207,6 +213,7 @@ export const AdsrEnvelope = ({
               defaultValue={defaultValues?.sustain}
               onChange={onChangeInternal('sustain')}
               formatValue={(value) => Math.round(value * 100)}
+              midiTarget={midiTargetOf('sustain')}
             />
           </div>
         </HandlersGroup>

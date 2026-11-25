@@ -5,6 +5,7 @@ import { Fader } from '../fader';
 import { DragValue } from '../drag-value';
 import { DraggableNumber } from '../draggable-number';
 import { withElementSize } from '../common/test-utils/element-size';
+import { MIDI_TARGET_ATTR, MidiLearnApi, MidiLearnContext, MidiMark } from '../midi-learn';
 
 // jsdom has no PointerEvent: a mouse event with the pointer type and a pointerId works for React and the document
 // listeners of the pointer tracker
@@ -395,5 +396,148 @@ describe('the menu of the other controls', () => {
     expect(screen.getByRole('dialog', { name: 'Voices' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Default/ }));
     expect(onChange).toHaveBeenCalledWith(8);
+  });
+});
+
+describe('MIDI Learn in the menu of a control', () => {
+  // an api of MIDI Learn whose marks the spec sets, its items recorded
+  const midiApi = (marks: Record<string, MidiMark> = {}) => {
+    const listeners = new Map<string, () => void>();
+    const selected: string[] = [];
+    const api: MidiLearnApi = {
+      mark: (target) => marks[target] ?? NO_MARK,
+      subscribe: (target, listener) => {
+        listeners.set(target, listener);
+        return () => listeners.delete(target);
+      },
+      menuItems: (target) => [
+        { id: 'learn', label: 'MIDI Learn', onSelect: () => selected.push(`learn:${target}`) },
+        ...(marks[target]?.cc
+          ? [
+              {
+                id: 'remove',
+                label: `Remove MIDI CC ${marks[target].cc}`,
+                onSelect: () => selected.push('remove'),
+              },
+            ]
+          : []),
+      ],
+    };
+    const set = (target: string, mark: MidiMark) => {
+      marks[target] = mark;
+      act(() => listeners.get(target)?.());
+    };
+    return { api, selected, set };
+  };
+  const NO_MARK: MidiMark = { cc: null, waiting: false, pickup: null };
+
+  it('has the items of MIDI Learn under the routes; an item closes the menu', () => {
+    const { api, selected } = midiApi({ 'filter.cutoff': { cc: 74, waiting: false, pickup: null } });
+    render(
+      <MidiLearnContext.Provider value={api}>
+        <Handle label='Cutoff' value={0.5} min={0} max={1} modulations={[]} midiTarget='filter.cutoff' />
+      </MidiLearnContext.Provider>
+    );
+    fireEvent.contextMenu(screen.getByText('Cutoff'));
+    expect(within(menu() as HTMLElement).getByRole('button', { name: 'Remove MIDI CC 74' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'MIDI Learn' }));
+    expect(selected).toEqual(['learn:filter.cutoff']);
+    expect(menu()).toBeNull();
+  });
+
+  it('gives a control without a default nor routes a menu of MIDI Learn alone', () => {
+    const { api } = midiApi();
+    render(
+      <MidiLearnContext.Provider value={api}>
+        <Handle label='Master' value={0} min={-40} max={12} midiTarget='master' />
+      </MidiLearnContext.Provider>
+    );
+    fireEvent.contextMenu(screen.getByText('Master'));
+    expect(
+      within(menu() as HTMLElement)
+        .getAllByRole('button')
+        .map((item) => item.textContent)
+    ).toEqual(['MIDI Learn']);
+  });
+
+  it('marks the box of the control with its id, its CC and its wait; paints where the controller is (Pickup)', () => {
+    const { api, set } = midiApi();
+    const { container } = render(
+      <MidiLearnContext.Provider value={api}>
+        <Handle label='Gain' value={0.2} min={0} max={1} midiTarget='osc1.gain' />
+        <Fader label='Level' value={0.2} min={0} max={1} midiTarget='eq.level' />
+      </MidiLearnContext.Provider>
+    );
+    const knob = container.querySelector(`[${MIDI_TARGET_ATTR}='osc1.gain']`) as HTMLElement;
+    expect(knob.getAttribute('data-midi-cc')).toBeNull();
+    set('osc1.gain', { cc: 7, waiting: true, pickup: 0.8 });
+    expect(knob.getAttribute('data-midi-cc')).toBe('7');
+    expect(knob.hasAttribute('data-midi-waiting')).toBe(true);
+    expect(screen.getAllByTestId('pickup-mark')).toHaveLength(1);
+    set('eq.level', { cc: 8, waiting: false, pickup: 0.1 });
+    expect(screen.getAllByTestId('fader-pickup-mark')).toHaveLength(1);
+    set('osc1.gain', { cc: 7, waiting: false, pickup: null });
+    expect(screen.queryAllByTestId('pickup-mark')).toHaveLength(0);
+  });
+
+  it('paints where the controller is on a value without routes and on a number, on a line of their own (Pickup)', () => {
+    const { api, set } = midiApi();
+    const { container } = render(
+      <MidiLearnContext.Provider value={api}>
+        <DragValue
+          label='Oct'
+          value={0}
+          min={-3}
+          max={3}
+          precision={1}
+          onChange={jest.fn()}
+          midiTarget='osc1.oct'
+        />
+        <DragValue
+          label='Semi'
+          value={0}
+          min={-12}
+          max={12}
+          precision={1}
+          modulations={[]}
+          midiTarget='osc1.pitch'
+        />
+        <DraggableNumber
+          label='Poly'
+          value={4}
+          range={[1, 12]}
+          onChange={jest.fn()}
+          midiTarget='voicing.poly'
+        />
+      </MidiLearnContext.Provider>
+    );
+    const box = (target: string) =>
+      container.querySelector(`[${MIDI_TARGET_ATTR}='${target}']`) as HTMLElement;
+    const marks = (target: string) => box(target).querySelectorAll('[data-testid="value-pickup-mark"]');
+    const line = (target: string) => box(target).querySelector('[data-testid="pickup-track"]');
+    expect(screen.queryAllByTestId('value-pickup-mark')).toHaveLength(0);
+    expect(screen.queryAllByTestId('pickup-track')).toHaveLength(0);
+
+    set('osc1.oct', { cc: 30, waiting: false, pickup: 0.2 });
+    set('osc1.pitch', { cc: 31, waiting: false, pickup: 0.4 });
+    set('voicing.poly', { cc: 32, waiting: false, pickup: 0.9 });
+    ['osc1.oct', 'osc1.pitch', 'voicing.poly'].forEach((target) => expect(marks(target)).toHaveLength(1));
+    // a value with routes has its line already
+    expect(line('osc1.oct')).not.toBeNull();
+    expect(line('osc1.pitch')).toBeNull();
+    expect(line('voicing.poly')).not.toBeNull();
+
+    set('osc1.oct', { cc: 30, waiting: false, pickup: null });
+    set('voicing.poly', { cc: 32, waiting: false, pickup: null });
+    expect(line('osc1.oct')).toBeNull();
+    expect(line('voicing.poly')).toBeNull();
+    expect(screen.getAllByTestId('value-pickup-mark')).toHaveLength(1);
+  });
+
+  it('marks nothing and opens no menu of MIDI Learn without a provider', () => {
+    const { container } = render(<Handle label='Gain' value={0.2} min={0} max={1} midiTarget='osc1.gain' />);
+    expect(container.querySelector(`[${MIDI_TARGET_ATTR}]`)).toBeNull();
+    fireEvent.contextMenu(screen.getByText('Gain'));
+    expect(menu()).toBeNull();
   });
 });

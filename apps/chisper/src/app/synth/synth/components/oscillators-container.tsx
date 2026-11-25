@@ -25,7 +25,7 @@ const OscillatorComponentFactory =
       actions.toggleActive();
     };
     return (
-      <Section name={name} active={active} onClick={toggle}>
+      <Section name={name} active={active} onClick={toggle} midiTarget={`${target}.on`}>
         <Oscillator {...model} {...actions} useOscillator={useOscillator} target={target} />
       </Section>
     );

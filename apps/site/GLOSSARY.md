@@ -124,18 +124,23 @@ The names of the synth (knobs, sections, modes, buttons, presets, tables) stay i
 
 ## Playing
 
-| en                | es                       | de                   | Not                           |
-| ----------------- | ------------------------ | -------------------- | ----------------------------- |
-| key               | la tecla                 | die Taste            |                               |
-| Space (the key)   | Espacio                  | die Leertaste        | es: barra espaciadora         |
-| note              | la nota                  | die Note             |                               |
-| chord             | el acorde                | der Akkord           |                               |
-| computer keyboard | el teclado del ordenador | die Computertastatur | es: teclado de la computadora |
-| MIDI keyboard     | el teclado MIDI          | das MIDI-Keyboard    | de: MIDI-Tastatur             |
-| to play           | tocar                    | spielen              |                               |
-| to hold           | mantener (pulsada)       | halten               |                               |
-| to turn (a knob)  | girar                    | drehen               |                               |
-| to drag           | arrastrar                | ziehen               |                               |
-| to click          | hacer clic               | klicken              |                               |
-| to load           | cargar                   | laden                |                               |
-| latency           | la latencia              | die Latenz           |                               |
+| en                                              | es                       | de                   | Not                                          |
+| ----------------------------------------------- | ------------------------ | -------------------- | -------------------------------------------- |
+| key                                             | la tecla                 | die Taste            |                                              |
+| Space (the key)                                 | Espacio                  | die Leertaste        | es: barra espaciadora                        |
+| note                                            | la nota                  | die Note             |                                              |
+| chord                                           | el acorde                | der Akkord           |                                              |
+| computer keyboard                               | el teclado del ordenador | die Computertastatur | es: teclado de la computadora                |
+| MIDI keyboard                                   | el teclado MIDI          | das MIDI-Keyboard    | de: MIDI-Tastatur                            |
+| MIDI controller (knobs and faders that send CC) | el controlador MIDI      | der MIDI-Controller  | es: control MIDI; de: MIDI-Steuergerät       |
+| CC (Control Change)                             | el CC                    | der CC               | es: el control; de: die CC                   |
+| to bind (a CC to a control: MIDI Learn)         | asignar                  | zuweisen             | es: vincular, mapear; de: verknüpfen, mappen |
+| binding                                         | la asignación            | die Zuweisung        | es: el mapeo; de: das Mapping                |
+| control (a knob, switch or choice of the synth) | el control               | das Bedienelement    | es: el mando; de: die Steuerung              |
+| to play                                         | tocar                    | spielen              |                                              |
+| to hold                                         | mantener (pulsada)       | halten               |                                              |
+| to turn (a knob)                                | girar                    | drehen               |                                              |
+| to drag                                         | arrastrar                | ziehen               |                                              |
+| to click                                        | hacer clic               | klicken              |                                              |
+| to load                                         | cargar                   | laden                |                                              |
+| latency                                         | la latencia              | die Latenz           |                                              |

@@ -56,6 +56,7 @@ export type Feature =
   | 'preset'
   | 'input'
   | 'midi_clock'
+  | 'midi_learn'
   | 'latency'
   | 'export';
 

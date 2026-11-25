@@ -2,7 +2,7 @@ import React from 'react';
 import { styled } from 'styled-components';
 import { useBehaviorSubject } from '@chisper/rxjs-react';
 import { DraggableNumber, Section, Checkbox, theme } from '@chisper/ui-kit';
-import { PRESET_DEFAULTS } from '@chisper/preset-schema';
+import { PORTAMENTO_MAX, PRESET_DEFAULTS, VOICES_MAX } from '@chisper/preset-schema';
 import { RxHandle } from '../../../common/components';
 import { useSynth } from '../../common/modules';
 
@@ -53,13 +53,14 @@ export const VoicingSection = () => {
           <div />
           <DraggableNumber
             value={maxVoices}
-            range={[1, 12]}
+            range={[1, VOICES_MAX]}
             label='Poly'
             name='Voices'
             defaultValue={PRESET_DEFAULTS.v.max}
             onChange={setMaxVoices}
+            midiTarget='voicing.poly'
           />
-          <Checkbox checked={legato} onChange={setLegato} label='Legato' />
+          <Checkbox checked={legato} onChange={setLegato} label='Legato' midiTarget='voicing.legato' />
           <Voices>
             <span>{voicesCount} /</span> {maxVoices}
           </Voices>
@@ -68,7 +69,7 @@ export const VoicingSection = () => {
           <RxHandle
             $value={$portamento}
             min={0}
-            max={400}
+            max={PORTAMENTO_MAX}
             label='Portamento'
             name='Glide time'
             defaultValue={PRESET_DEFAULTS.v.port}
@@ -76,6 +77,7 @@ export const VoicingSection = () => {
             plotSize={200}
             precision={1}
             formatValue={(value) => `${value}ms`}
+            midiTarget='voicing.portamento'
           />
         </HandleContainer>
       </Root>

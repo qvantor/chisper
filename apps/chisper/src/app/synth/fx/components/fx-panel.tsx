@@ -49,6 +49,7 @@ export const FxPanel = ({ type }: { type: FxType }) => {
       name={FX_REGISTRY[type].label}
       active={on}
       onClick={() => setOn(type, !on)}
+      midiTarget={`${type}.on`}
       extra={<PresetSelect type={type} mix={mix} params={params} onSelect={(id) => applyPreset(type, id)} />}
     >
       <Clip>

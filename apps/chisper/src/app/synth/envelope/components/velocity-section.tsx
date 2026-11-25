@@ -44,6 +44,7 @@ export const VelocitySection = () => {
         amp={amp}
         onAmpChange={(value) => setVelocity('amp', value)}
         defaultAmp={VELOCITY_DEFAULTS.amp}
+        ampTarget='vel.amp'
       >
         <NoteVelocityDot k={k} />
       </VelocityCurve>

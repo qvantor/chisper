@@ -6,6 +6,7 @@ import { Tooltip } from 'antd';
 import { text10 } from '../common/styles';
 import { theme } from '../common/constants';
 import { keepFocus } from '../common/utils';
+import { midiInset, useMidiAttrs } from '../midi-learn';
 
 export {
   AnchorIcon,
@@ -51,6 +52,8 @@ interface Props {
   // the color it is lit in while on (a hex; the accent: green)
   lit?: string;
   className?: string;
+  // its id of MIDI Learn (a CC switches it)
+  midiTarget?: string;
 }
 
 // the hover of the tooltip: a disabled button takes no mouse events (Chrome), so it takes none and its wrapper does
@@ -184,8 +187,10 @@ const PlateKey = ({
   disabled = false,
   lit = theme.colors.accent,
   className,
+  midiTarget,
 }: KeyProps) => {
   const plate = React.useContext(PlateContext);
+  const midi = useMidiAttrs(midiTarget);
   const off = plate.disabled || disabled;
   const why = plate.disabled ? plate.disabledHint : disabledHint;
   return (
@@ -194,7 +199,7 @@ const PlateKey = ({
       styles={TIP_STYLES}
       title={keyTip(name, hint, off ? why : undefined)}
     >
-      <Wrap>
+      <Wrap {...midi}>
         <Key
           type='button'
           className={cls(className, { on: pressed })}
@@ -227,7 +232,8 @@ export const ActionKey = (props: Omit<Props, 'on' | 'onChange' | 'lit'> & { onCl
 
 const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
 
-const Plate = styled.div`
+// (it clips its keys: their marks of MIDI Learn inside them)
+const Plate = styled.div.attrs(midiInset)`
   flex: none;
   display: flex;
   height: 100%;
@@ -371,6 +377,8 @@ interface KeysProps {
   // two keys a row, every row as high (the categories of the FX Filter): its height is the one given
   grid?: boolean;
   className?: string;
+  // its id of MIDI Learn: the keys choose one option of a control (the shapes of the sub), a CC chooses one
+  midiTarget?: string;
 }
 
 // keys on one plate, a line between them (the strips of the oscillator)
@@ -382,12 +390,15 @@ export const SwitchKeys = ({
   disabled = false,
   disabledHint,
   className,
+  midiTarget,
   children,
   ...props
 }: React.PropsWithChildren<KeysProps>) => {
   const off = React.useMemo(() => ({ disabled, disabledHint }), [disabled, disabledHint]);
+  const midi = useMidiAttrs(midiTarget);
   return (
     <Plate
+      {...midi}
       role='group'
       aria-disabled={disabled || undefined}
       className={cls(className, { stack, fill, column, grid })}

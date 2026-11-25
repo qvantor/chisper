@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { cssColor, hoverSwitchKey, switchKeyTip } from '../common/test-utils';
 import { theme } from '../common/constants';
+import { MIDI_INSET_ATTR } from '../midi-learn';
 import {
   ActionKey,
   BandPassIcon,
@@ -346,5 +347,14 @@ describe('ActionKey', () => {
     );
     expect((screen.getByRole('button', { name: 'Quantize' }) as HTMLButtonElement).disabled).toBe(true);
     expect(switchKeyTip('Quantize')).toBe('QuantizeThe clock leads');
+  });
+
+  it('marks its plate as a box that clips its keys (their marks of MIDI Learn are drawn inside them)', () => {
+    render(
+      <SwitchKeys aria-label='Sync'>
+        <SwitchKey on label='T' name='Triplets' />
+      </SwitchKeys>
+    );
+    expect(screen.getByRole('group', { name: 'Sync' }).hasAttribute(MIDI_INSET_ATTR)).toBe(true);
   });
 });

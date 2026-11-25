@@ -94,6 +94,7 @@ export const chorus: FxDefinition<ChorusParam> = {
   },
   presets: CHORUS_PRESETS,
   paramChange: chorusParamChange,
+  tempo: { knob: 'rate', stepsOf: chorusStepsOf, divisionOf: chorusDivisionOf },
   bounds: (params, bpm) => ({ rate: chorusRateBounds(params, bpm) }),
   // Rate in BPM as the Hz of its division at the tempo (the mix of its slot is the mix inside the core)
   core: (params, bpm) => ({ ...pick(params, CORE_KNOBS), rate: chorusRate(params, bpm) }),

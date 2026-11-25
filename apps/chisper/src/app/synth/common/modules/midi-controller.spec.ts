@@ -119,12 +119,92 @@ describe('midiController', () => {
     const input = createInput('a');
     const { onPress, onRelease } = await setup(createAccess([input]));
 
-    message(input, 176, 1, 64); // control change
+    message(input, 176, 1, 64); // control change: no note
     message(input, 248); // clock: the tempo, not a note
     message(input, 242, 0, 0); // song position: not a message of channel 2
 
     expect(onPress).not.toHaveBeenCalled();
     expect(onRelease).not.toHaveBeenCalled();
+  });
+
+  describe('control change', () => {
+    const record = (midi: Awaited<ReturnType<typeof setup>>['midi']) => {
+      const ccs: [number, number][] = [];
+      midi[0].$cc.subscribe(({ cc, value }) => ccs.push([cc, value]));
+      return ccs;
+    };
+
+    it('tells the control and the value of a CC of the input, of any channel with all channels', async () => {
+      const input = createInput('a');
+      const { midi, onPress, input: inputModel } = await setup(createAccess([input]));
+      const ccs = record(midi);
+
+      message(input, 176, 74, 0);
+      message(input, 191, 74, 127);
+      message(input, 0xb3, 1, 64);
+
+      expect(ccs).toEqual([
+        [74, 0],
+        [74, 127],
+        [1, 64],
+      ]);
+      expect(onPress).not.toHaveBeenCalled();
+      expect(inputModel.$bend.value).toBe(0);
+    });
+
+    it('takes those of the channel listened to only', async () => {
+      const input = createInput('a');
+      const { midi } = await setup(createAccess([input]));
+      const ccs = record(midi);
+      midi[1].selectMidiChannel(2);
+
+      message(input, 176 + 2, 74, 10);
+      message(input, 176 + 3, 74, 20);
+      message(input, 176, 74, 30);
+
+      expect(ccs).toEqual([[74, 10]]);
+    });
+
+    it('takes none of an input not listened to', async () => {
+      const a = createInput('a');
+      const b = createInput('b');
+      const { midi } = await setup(createAccess([a, b]));
+      const ccs = record(midi);
+
+      message(b, 176, 74, 10);
+      midi[1].selectMidiInput('b');
+      message(a, 176, 74, 20);
+      message(b, 176, 74, 30);
+
+      expect(ccs).toEqual([[74, 30]]);
+    });
+
+    it('tells no channel mode message (All Sound Off, Reset All Controllers, All Notes Off…)', async () => {
+      const input = createInput('a');
+      const { midi } = await setup(createAccess([input]));
+      const ccs = record(midi);
+
+      [120, 121, 123, 127].forEach((cc) => message(input, 176, cc, 0));
+      message(input, 176, 119, 5);
+
+      expect(ccs).toEqual([[119, 5]]);
+    });
+
+    it('plays the notes and the bend between CCs as before', async () => {
+      const input = createInput('a');
+      const { midi, onPress, onRelease, input: inputModel } = await setup(createAccess([input]));
+      const ccs = record(midi);
+
+      message(input, 144, 60, 100);
+      message(input, 176, 7, 90);
+      message(input, 224, 0, 127);
+      message(input, 128, 60, 0);
+
+      expect(onPress).toHaveBeenCalledWith([4, 'C'], 100, MIDI);
+      expect(onRelease).toHaveBeenCalledWith([4, 'C'], MIDI);
+      expect(inputModel.$bend.value).toBe(midiBend(0, 127));
+      expect(ccs).toEqual([[7, 90]]);
+    });
   });
 
   it('holds the bit of a channel while the input holds a note of it, of a channel not listened to too', async () => {
@@ -343,6 +423,118 @@ describe('midiController pitch bend', () => {
     inputActions.setBend(0);
     message(input, 224, 1, 96);
     expect(bus.$bend.value).toBe(4097 / 8191);
+  });
+});
+
+describe('midiController channel mode messages', () => {
+  const ALL_NOTES_OFF = 123;
+
+  it('All Notes Off releases the notes of the input held on its channel', async () => {
+    const input = createInput('a');
+    const { onRelease, inputActions } = await setup(createAccess([input]));
+    message(input, 144, 60, 100);
+    message(input, 144, 62, 100);
+    message(input, 145, 64, 100);
+    // QWERTY: a note of its own
+    inputActions.onPress([4, 'C']);
+
+    message(input, 176, ALL_NOTES_OFF, 0);
+    expect(onRelease.mock.calls).toEqual([
+      [[4, 'C'], MIDI],
+      [[4, 'D'], MIDI],
+    ]);
+
+    // the note offs that come after it release nothing again
+    message(input, 128, 60, 0);
+    message(input, 128, 62, 0);
+    expect(onRelease).toHaveBeenCalledTimes(2);
+    message(input, 177, ALL_NOTES_OFF, 0);
+    expect(onRelease).toHaveBeenLastCalledWith([4, 'E'], MIDI);
+  });
+
+  it.each([
+    [120, 'All Sound Off'],
+    [124, 'Omni Off'],
+    [125, 'Omni On'],
+    [126, 'Mono On'],
+    [127, 'Poly On'],
+  ])('CC %i (%s) releases them too', async (cc) => {
+    const input = createInput('a');
+    const { onRelease } = await setup(createAccess([input]));
+    message(input, 147, 60, 100);
+
+    message(input, 176 + 3, cc, 0);
+    expect(onRelease).toHaveBeenCalledWith([4, 'C'], MIDI);
+  });
+
+  it('keeps a note held on another channel too until that one ends it', async () => {
+    const input = createInput('a');
+    const { onRelease } = await setup(createAccess([input]));
+    message(input, 144, 60, 100);
+    message(input, 145, 60, 100);
+
+    message(input, 176, ALL_NOTES_OFF, 0);
+    expect(onRelease).not.toHaveBeenCalled();
+    message(input, 177, ALL_NOTES_OFF, 0);
+    expect(onRelease).toHaveBeenCalledWith([4, 'C'], MIDI);
+  });
+
+  it('puts out the lamp of its channel, of a channel not listened to too; plays nothing of it', async () => {
+    const input = createInput('a');
+    const { midi, onRelease } = await setup(createAccess([input]));
+    const $held = midi[0].$heldChannels;
+    midi[1].selectMidiChannel(1);
+    message(input, 144, 60, 100);
+    message(input, 145, 62, 100);
+    expect($held.value).toBe(0b11);
+
+    message(input, 176, ALL_NOTES_OFF, 0);
+    expect($held.value).toBe(0b10);
+    expect(onRelease).not.toHaveBeenCalled();
+
+    message(input, 177, ALL_NOTES_OFF, 0);
+    expect($held.value).toBe(0);
+    expect(onRelease).toHaveBeenCalledWith([4, 'D'], MIDI);
+  });
+
+  it('Reset All Controllers puts the bend of its channel back at rest, its notes play on', async () => {
+    const input = createInput('a');
+    const { input: bus, onRelease } = await setup(createAccess([input]));
+    message(input, 145, 60, 100);
+    message(input, 225, 0, 127);
+
+    // of another channel: the bend stays
+    message(input, 176, 121, 0);
+    expect(bus.$bend.value).toBe(midiBend(0, 127));
+
+    message(input, 177, 121, 0);
+    expect(bus.$bend.value).toBe(0);
+    expect(onRelease).not.toHaveBeenCalled();
+    // the next bend of the wheel at the same place moves it again
+    message(input, 225, 0, 127);
+    expect(bus.$bend.value).toBe(midiBend(0, 127));
+  });
+
+  it('Reset All Controllers leaves the bend the wheel on the screen set since', async () => {
+    const input = createInput('a');
+    const { input: bus, inputActions } = await setup(createAccess([input]));
+    message(input, 224, 0, 127);
+    inputActions.setBend(0.5);
+
+    message(input, 176, 121, 0);
+    expect(bus.$bend.value).toBe(0.5);
+  });
+
+  it('Local Control changes nothing', async () => {
+    const input = createInput('a');
+    const { midi, input: bus, onRelease } = await setup(createAccess([input]));
+    message(input, 144, 60, 100);
+    message(input, 224, 0, 127);
+
+    message(input, 176, 122, 0);
+    expect(onRelease).not.toHaveBeenCalled();
+    expect(bus.$bend.value).toBe(midiBend(0, 127));
+    expect(midi[0].$heldChannels.value).toBe(0b1);
   });
 });
 

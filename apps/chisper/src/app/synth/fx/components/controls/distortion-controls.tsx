@@ -42,6 +42,7 @@ export const DistortionControls = ({ params, setParam, on, out }: FxControlsProp
           icons={DISTORTION_MODE_ICONS}
           value={params['mode']}
           onChange={(value) => setParam('mode', value)}
+          target='distortion.mode'
           disabled={!on}
         />
       </ControlsGroup>

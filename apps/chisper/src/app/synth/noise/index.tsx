@@ -14,7 +14,7 @@ import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react
 import { number } from '@chisper/math';
 import { NOISE_DEFAULTS } from '@chisper/preset-schema';
 import { NoiseModel, useNoise } from '../common/modules';
-import type { NoiseNumeric } from '../common/modules/noise';
+import { NOISE_PRECISION, NoiseNumeric } from '../common/modules/noise';
 import { useKnobModulation } from '../modulation/use-knob-modulation';
 import { Cell, Strip } from '../oscillator/components/wave/value-strip';
 import { NoiseOverview } from './components/noise-overview';
@@ -89,7 +89,7 @@ const PlaybackKeys = () => {
   const keytrack = useBehaviorSubjectField($noise, 'keytrack');
   return (
     <KeyStrip $edge='top'>
-      <SwitchKeys fill aria-label='Playback'>
+      <SwitchKeys fill aria-label='Playback' midiTarget='noise.loop'>
         <SwitchKey
           on={loop}
           onChange={() => setLoop(true)}
@@ -109,6 +109,7 @@ const PlaybackKeys = () => {
         <SwitchKey
           on={keytrack}
           onChange={setKeytrack}
+          midiTarget='noise.keytrack'
           name='Pitch Track'
           hint='The pitch follows the keys and the bend: C5 plays the sample at its own pitch'
           icon={<TrackIcon />}
@@ -130,20 +131,22 @@ const StartCells = () => {
         value={start}
         min={ranges.start[0]}
         max={ranges.start[1]}
-        precision={100}
+        precision={NOISE_PRECISION.start}
         formatValue={number.percent}
         defaultValue={NOISE_DEFAULTS.st}
         onChange={(value) => setNoiseValue('start', value)}
+        midiTarget='noise.start'
       />
       <Cell
         label='Rand'
         value={rand}
         min={ranges.rand[0]}
         max={ranges.rand[1]}
-        precision={100}
+        precision={NOISE_PRECISION.rand}
         formatValue={number.percent}
         defaultValue={NOISE_DEFAULTS.rd}
         onChange={(value) => setNoiseValue('rand', value)}
+        midiTarget='noise.rand'
       />
     </Strip>
   );
@@ -162,7 +165,7 @@ export const NoiseSection = () => {
     level: useKnobModulation('noise.level'),
   };
   return (
-    <Section name='Noise' active={active} onClick={toggleActive}>
+    <Section name='Noise' active={active} onClick={toggleActive} midiTarget='noise.on'>
       <Root>
         <Selector>
           <NoiseSelector />
@@ -181,7 +184,7 @@ export const NoiseSection = () => {
             name='Noise pitch'
             min={ranges.pitch[0]}
             max={ranges.pitch[1]}
-            precision={1}
+            precision={NOISE_PRECISION.pitch}
             formatValue={(value) => `${signed(value)} st`}
             defaultValue={NOISE_DEFAULTS.s}
             fillFrom={0}
@@ -195,7 +198,7 @@ export const NoiseSection = () => {
             name='Noise fine'
             min={ranges.fine[0]}
             max={ranges.fine[1]}
-            precision={1}
+            precision={NOISE_PRECISION.fine}
             formatValue={(value) => `${signed(value)} ct`}
             defaultValue={NOISE_DEFAULTS.f}
             fillFrom={0}
@@ -209,7 +212,7 @@ export const NoiseSection = () => {
             name='Noise pan'
             min={ranges.pan[0]}
             max={ranges.pan[1]}
-            precision={100}
+            precision={NOISE_PRECISION.pan}
             formatValue={formatPan}
             defaultValue={NOISE_DEFAULTS.pn}
             fillFrom={0}
@@ -223,7 +226,7 @@ export const NoiseSection = () => {
             name='Noise volume'
             min={ranges.level[0]}
             max={ranges.level[1]}
-            precision={100}
+            precision={NOISE_PRECISION.level}
             formatValue={(value) => number.percent(number.round(value, 100))}
             defaultValue={NOISE_DEFAULTS.g}
             onChange={(value) => setNoiseValue('level', value)}

@@ -4,6 +4,7 @@ import { styled } from 'styled-components';
 import cls from 'classnames';
 import hexToRgba from 'hex-to-rgba';
 import { CloseOutlined, UndoOutlined } from '@ant-design/icons';
+import { MdPiano } from 'react-icons/md';
 import { number } from '@chisper/math';
 import { theme } from '../common/constants';
 import { text10, text12, textBold12 } from '../common/styles';
@@ -12,6 +13,7 @@ import { OFF_OPACITY } from '../common/utils/mod-routes';
 import { Lamp } from '../lamp';
 import { AMOUNT_TRAVEL, amountText, LONG_PRESS, stepAmount, STILL } from '../amount-dot';
 import type { HandleModulation } from '../handle';
+import { midiAttrs, MidiLearnContext, MidiMenuItem, useMidiMark } from '../midi-learn';
 
 // what the menu of a control shows and changes
 export interface ControlMenuProps {
@@ -28,6 +30,8 @@ export interface ControlMenuProps {
   // switched on or off, bipolar or not, removed; Clear modulation removes them all
   modulations?: HandleModulation[];
   onClearModulations?: () => void;
+  // its id of MIDI Learn: the menu has its items (MIDI Learn, Remove MIDI CC) under the routes
+  midiTarget?: string;
 }
 
 // px of the menu, its distance from the control and from the edges of the viewport
@@ -410,6 +414,10 @@ interface MenuPanelProps {
   role?: string;
 }
 
+// the attribute of the box of a menu of a control (in a portal: out of the box of its control)
+export const CONTROL_MENU_ATTR = 'data-control-menu';
+const MENU_ATTRS = { [CONTROL_MENU_ATTR]: '' } as React.HTMLAttributes<HTMLDivElement>;
+
 // a menu of a control under it (over it where it doesn't fit), within the viewport, in a portal, the name and the
 // value of the control on top; closed by a press out of it, Escape, a scroll, a new size of the window or its blur
 export const MenuPanel = ({
@@ -468,6 +476,7 @@ export const MenuPanel = ({
       role={role}
       aria-label={name}
       style={place ?? { left: 0, top: 0, visibility: 'hidden' }}
+      {...MENU_ATTRS}
       {...ISOLATED}
     >
       <Header>
@@ -480,7 +489,29 @@ export const MenuPanel = ({
   );
 };
 
-// the menu of a control: the routes on it, Default and Clear modulation (with a route at least)
+// the items of MIDI Learn of a control (MIDI Learn, Cancel MIDI Learn, Remove MIDI CC 74): each closes the menu
+export const MidiMenuActions = ({ items, onClose }: { items: MidiMenuItem[]; onClose: () => void }) => (
+  <>
+    {items.map(({ id, label, detail, disabled, onSelect }) => (
+      <Action
+        key={id}
+        type='button'
+        disabled={disabled}
+        onClick={() => {
+          onSelect();
+          onClose();
+        }}
+      >
+        <MdPiano aria-hidden />
+        {label}
+        {detail && <ActionValue>{detail}</ActionValue>}
+      </Action>
+    ))}
+  </>
+);
+
+// the menu of a control: the routes on it, the items of MIDI Learn, Default and Clear modulation (with a route at
+// least)
 const ControlMenu = ({
   anchor,
   onClose,
@@ -493,9 +524,13 @@ const ControlMenu = ({
   onChange,
   modulations,
   onClearModulations,
+  midiTarget,
 }: ControlMenuProps & { anchor: DOMRect; onClose: () => void }) => {
   // laid out again with every route removed
   const rows = modulations?.length;
+  // (rendered again with the control as its mark changes)
+  const midi = React.useContext(MidiLearnContext);
+  const midiItems = midi && midiTarget ? midi.menuItems(midiTarget) : null;
   const format = (shown: number) => formatValue?.(shown) ?? shown;
   const reset = defaultValue === undefined ? undefined : number.thresholds(defaultValue, min, max);
   return (
@@ -508,6 +543,7 @@ const ControlMenu = ({
         </div>
       ) : null}
       {rows === 0 && <Hint>Drag a source tab here to add a modulation</Hint>}
+      {midiItems && <MidiMenuActions items={midiItems} onClose={onClose} />}
       {reset !== undefined && onChange && (
         <Action
           type='button'
@@ -542,9 +578,14 @@ const ControlMenu = ({
 // the menu of a control (a knob, a fader, a value): opened by a right click (onContextMenu: also Ctrl+click, the menu
 // key, a long press of Android), by a long press on a touch screen (a press `track` follows: held still LONG_PRESS
 // ms, within STILL px) or by its dot of the routes (`open`); `anchorRef` on the box it opens under, `menu` rendered
-// with the control. A control without a default nor routes has none: its right click is the browser's
+// with the control, `midi` the mark of MIDI Learn of the control (null without one) and `midiAttrs` the attributes of
+// its box. A control without a default, routes nor MIDI Learn has none: its right click is the browser's
 export const useControlMenu = (props: ControlMenuProps) => {
-  const enabled = props.modulations !== undefined || (props.defaultValue !== undefined && !!props.onChange);
+  const midi = useMidiMark(props.midiTarget);
+  const enabled =
+    props.modulations !== undefined ||
+    (props.defaultValue !== undefined && !!props.onChange) ||
+    midi !== null;
   const anchorRef = React.useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = React.useState<DOMRect | null>(null);
   const [trackPointer] = React.useState(singlePointerTracker);
@@ -615,5 +656,7 @@ export const useControlMenu = (props: ControlMenuProps) => {
     onContextMenu: enabled ? onContextMenu : undefined,
     track,
     menu: enabled && anchor ? <ControlMenu {...props} anchor={anchor} onClose={close} /> : null,
+    midi,
+    midiAttrs: midiAttrs(props.midiTarget, midi),
   };
 };

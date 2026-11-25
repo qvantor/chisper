@@ -67,6 +67,9 @@ export const VelocityDot = ({ k, velocity }: { k: number; velocity: number }) =>
   );
 };
 
+// the step of Amp (a knob rounds to 1 / precision)
+export const AMP_PRECISION = 100;
+
 interface Props {
   // the curve of VELO: k of curveShape over the share of the velocity (0 a line), |k| at most curveMax
   k: number;
@@ -77,6 +80,8 @@ interface Props {
   onAmpChange: (amp: number) => void;
   // the Amp its menu sets
   defaultAmp?: number;
+  // the id of MIDI Learn of Amp (a CC moves it)
+  ampTarget?: string;
   // in the chart, in its context: the VelocityDot of the last note (a note renders it alone, not the chart)
   children?: React.ReactNode;
 }
@@ -90,6 +95,7 @@ export const VelocityCurve = ({
   amp,
   onAmpChange,
   defaultAmp,
+  ampTarget,
   children,
 }: Props) => (
   <Root>
@@ -117,11 +123,12 @@ export const VelocityCurve = ({
           name='Velo amp'
           min={0}
           max={1}
-          precision={100}
+          precision={AMP_PRECISION}
           value={amp}
           defaultValue={defaultAmp}
           onChange={onAmpChange}
           formatValue={(value) => `${Math.round(value * 100)}%`}
+          midiTarget={ampTarget}
         />
       </div>
     </Handlers>
