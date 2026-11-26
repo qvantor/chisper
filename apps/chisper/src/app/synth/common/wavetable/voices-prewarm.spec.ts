@@ -168,7 +168,8 @@ describe('the warm-up of the voices', () => {
     expect(frames).toEqual([0, 128, 256, 384, 512, 640]);
     // the voice of both oscillators, its noise and its sub, then one for each path of the filters
     const notes = applied[0].flatMap((event) => (event.kind === 'on' ? [event] : []));
-    expect(notes.map(({ voice }) => voice)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    const voices = Array.from({ length: 16 }, (_, voice) => voice);
+    expect(notes.map(({ voice }) => voice)).toEqual(voices);
     // (its oscillators warped: a bend and PWM, the knob of the bend routed by ENV 2)
     expect(notes[0].options).toMatchObject({
       osc: [
@@ -193,8 +194,22 @@ describe('the warm-up of the voices', () => {
       'ladder12',
       'ladder12',
       'ladder12',
+      'low24',
+      'low24',
+      'ladder12',
+      'ladder12',
+      'ladder12',
+      'ladder12',
+      'low24',
       'lowpass',
     ]);
+    // (a pluck on the cutoff of a pair, four Ladders and one alone: ENV 2 sweeps it six octaves in its attack, a
+    // span in pieces, lines that step every sample; the others have no route)
+    const sweep = { source: 1, param: 'cutoff', amount: 6, min: 20, max: 20000, scale: 'log' };
+    expect(notes.slice(1).map(({ voice, options }) => [voice, options.routes])).toEqual(
+      notes.slice(1).map(({ voice }) => [voice, voice >= 8 && voice <= 14 ? [sweep] : []])
+    );
+    expect(notes.slice(8, 15).map(({ options }) => options.filter?.cutoff)).toEqual(Array(7).fill(200));
     // the automation of its params, its velocity, the bend and the LFOs (a state at once, one that glides)
     const kinds = new Set(applied.flat().map(({ kind }) => kind));
     expect([...kinds].sort()).toEqual(
@@ -216,7 +231,7 @@ describe('the warm-up of the voices', () => {
     });
     // every voice started on time; the first one, stolen in block 4, still fades when the scope is freed
     const started = told.flatMap((report) => report.started ?? []);
-    expect(started.map(([voice]) => voice).sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(started.map(([voice]) => voice).sort((a, b) => a - b)).toEqual(voices);
     started.forEach(([, frame, start]) => {
       expect(frame).toBe(0);
       expect(start).toBeCloseTo(0);
@@ -292,7 +307,7 @@ describe('the warm-up of the voices', () => {
     // (what it made is left where it is; the scope and its store play all the same)
     const voices = recorded(scope);
     prewarmVoices(scope, store, RATE, voices.factory);
-    expect(voices.told.flatMap((report) => report.started ?? [])).toHaveLength(9);
+    expect(voices.told.flatMap((report) => report.started ?? [])).toHaveLength(16);
     store.free();
   });
 

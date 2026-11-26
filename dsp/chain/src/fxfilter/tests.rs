@@ -8,6 +8,7 @@ use crate::tests::{bits, blocks_of, noise, sine};
 use alloc::vec;
 use alloc::vec::Vec;
 use dsp_core::filter_model::{design_gain2, model_design, more_droop};
+use dsp_core::simd::F32x4;
 use jsmath::cos;
 
 const RATE: f64 = 48000.0;
@@ -369,6 +370,112 @@ fn a_fast_sweep_makes_no_click() {
         assert!(out[0].iter().all(|x| x.is_finite()));
         assert!(steepest(&out[0]) < 0.06, "{ty:?}: {}", steepest(&out[0]));
     }
+}
+
+// A pluck on the cutoff: its line up 6 octaves in 77 samples, its attack curved (3.8 octaves in its third span: 4
+// pieces), noise in, at Pan 50 and past it (each channel through its own cutoff, the lanes mixed), a Low 12 and one
+// that saturates. Its spans, in pieces, stepping every sample, are near what a design at every sample renders along
+// the line, each channel at its cutoff (22 to 28 dB under it: a span of under 2 octaves is a line between two
+// designs, not one of their octaves)
+#[test]
+fn a_pluck_on_the_cutoff_goes_as_designs_at_every_sample() {
+    let frames = 4 * 128;
+    let start = 2 * 128 + 16;
+    let input = signal(9, frames, 0.5);
+    let line: Vec<f64> = (0..frames)
+        .map(|i| {
+            let x = min(max(0.0, (i as f64 - start as f64) / 77.0), 1.0);
+            6.15 * (jsmath::exp(2.0 * x) - 1.0) / (jsmath::exp(2.0) - 1.0)
+        })
+        .collect();
+    for (ty, res) in [(ModelType::Low12, 20.0), (ModelType::Low12, 60.0)] {
+        for pan in [50.0, 20.0] {
+            let knobs = params(&[(TYPE, index_of(ty)), (CUTOFF, 40.0), (RES, res), (PAN, pan)]);
+            let mut filter = FxFilter::new(RATE, &knobs);
+            let lines = [line.clone(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+            let out = render(&mut filter, &input, &mut blocks_of(128), |_, _| {}, Some(&lines));
+            let layout = gated(ty, false, false, res >= RESONANT as f64);
+            // (4 spans a block, 3 more of the pieces)
+            assert_eq!(filter.spans, 4 * 4 + 3, "{ty:?} res {res} pan {pan}");
+            for (channel, sign) in [(0, 1.0), (1, -1.0)] {
+                // (a channel at its cutoff: the knob, the line read a sample on, the octaves of Pan up or down)
+                let cutoff = |i: usize| {
+                    let at = (i + 1).min(frames - 1);
+                    pow(2.0, log2(40.0) + line[at] + sign * pan_octaves(pan))
+                };
+                let ideal = designed_along(ty, res, layout, &input[channel], cutoff);
+                let off = off(&out[channel], &ideal, start..start + 128);
+                assert!(off < -20.0, "{ty:?} res {res} pan {pan} channel {channel}: {off}");
+            }
+        }
+    }
+}
+
+// Pan off 50 for the first time in the span the cutoff jumps (lines on both: the cutoff up 1.5 octaves and Pan from
+// 50 to 86 in 32 samples): the left channel goes 0.5 octaves, the right one 2.5. Where it splits, the right channel
+// goes on from the filter both had, in pieces as far as it goes (its coefficients at once there: the crackle of a
+// jump), each channel near a design at every sample along its line
+#[test]
+fn a_pan_that_splits_it_in_a_jump_goes_in_pieces() {
+    let frames = 3 * 128;
+    let start = 128 + 32;
+    let input = signal(11, frames, 0.5);
+    let ramp = |to: f64| -> Vec<f64> {
+        (0..frames)
+            .map(|i| to * min(max(0.0, (i as f64 - start as f64) / 32.0), 1.0))
+            .collect()
+    };
+    let (cutoff, pan) = (ramp(1.5), ramp(36.0));
+    let ty = ModelType::Low12;
+    for res in [20.0, 60.0] {
+        let knobs = params(&[(TYPE, index_of(ty)), (CUTOFF, 400.0), (RES, res)]);
+        let mut filter = FxFilter::new(RATE, &knobs);
+        let lines = [cutoff.clone(), Vec::new(), Vec::new(), Vec::new(), pan.clone()];
+        let out = render(&mut filter, &input, &mut blocks_of(128), |_, _| {}, Some(&lines));
+        let layout = gated(ty, false, false, res >= RESONANT as f64);
+        // (4 spans a block, 2 more of the pieces of the right channel)
+        assert_eq!(filter.spans, 3 * 4 + 2, "res {res}");
+        for (channel, sign) in [(0, 1.0), (1, -1.0)] {
+            let along = |i: usize| {
+                let at = (i + 1).min(frames - 1);
+                pow(2.0, log2(400.0) + cutoff[at] + sign * pan_octaves(50.0 + pan[at]))
+            };
+            let ideal = designed_along(ty, res, layout, &input[channel], along);
+            let off = off(&out[channel], &ideal, start - 32..start + 64);
+            assert!(off < -20.0, "res {res} channel {channel}: {off}");
+        }
+    }
+}
+
+// a channel through a design at every sample (its cutoff in Hz at a sample), its sections as a voice alone runs them
+fn designed_along(
+    ty: ModelType,
+    res: f64,
+    layout: Layout,
+    input: &[f32],
+    cutoff: impl Fn(usize) -> f64,
+) -> Vec<f64> {
+    let coefs = |i: usize| {
+        let mut design = model_design(ty, cutoff(i), res / 100.0, 0.0, RATE);
+        design.droop = more_droop(design.droop, fx_droop(ty));
+        let coefs = filter_model::Coefs::of(&design, 0.0);
+        LaneCoefs::of(&coefs, &coefs)
+    };
+    let mut state = LaneState::default();
+    filter_model::keep_steps(&coefs(0), &mut state);
+    (0..input.len())
+        .map(|i| {
+            let x = F32x4::splat(input[i]);
+            filter_model::tick(layout, &coefs(i), &mut state, x, true).lanes()[0] as f64
+        })
+        .collect()
+}
+
+// how far a channel is from the one it should be over a window (dB under it)
+fn off(out: &[f32], ideal: &[f64], window: core::ops::Range<usize>) -> f64 {
+    let level = |x: &mut dyn Iterator<Item = f64>| x.map(|x| x * x).sum::<f64>();
+    let apart = level(&mut window.clone().map(|i| out[i] as f64 - ideal[i]));
+    10.0 * jsmath::log10(apart / level(&mut window.clone().map(|i| ideal[i])))
 }
 
 // Drive, or Var under Res 40 % (its FAT, the saturation with it), taken by a line through 0 and under it inside the

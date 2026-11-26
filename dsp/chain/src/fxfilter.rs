@@ -30,8 +30,8 @@ use dsp_core::blocks::{louder, loudest, Smoothed};
 use dsp_core::filter_model::{self, LaneCoefs, LaneState, Layout, ModelType};
 use dsp_core::finite;
 use dsp_core::model_spans::{
-    before, crossfade, gated, lanes_of_coefs, model_span, run_span, span_end, spans, Designs, ModelSlot,
-    RESONANT,
+    before, crossfade, gated, lanes_of_coefs, model_span, piece_end, run_span, span_end, spans, Designs,
+    ModelSlot, RESONANT,
 };
 use jsmath::{log2, max, min, pow, round, sin, PI};
 
@@ -368,41 +368,82 @@ impl FxFilter {
         out_l.copy_from_slice(in_l);
         out_r.copy_from_slice(in_r);
         let designs = Some(&self.designs);
-        let (mut c, mut d) = (before::<true>(self.slots(), moving), LaneCoefs::still());
+        let (mut c, mut d, mut every) = (before::<true>(self.slots(), moving), LaneCoefs::still(), None);
         let (low, high) = (log2(MIN_FREQ), log2(MAX_FREQ));
         let hz = |octaves: f64| pow(2.0, min(max(octaves, low), high));
         let mut s = 0;
         while s < n {
-            let e = end(s);
-            let (f, q, dr, v) = (at(0, e), at(1, e), at(2, e), at(3, e));
-            let pan = pan_octaves(at(4, e));
-            if pan != 0.0 && !self.split {
-                // (the right channel from the filter both had: its coefficients go on from there)
-                self.right = self.left;
-                self.split = true;
+            let span = end(s);
+            // (a span whose cutoff goes further than JUMP times in pieces, model_spans::pieces: the knobs read at
+            // their ends, the points of their lines; those of the right channel where it has its own, from the filter
+            // both had in the span it splits)
+            let (f, pan) = (at(0, span), pan_octaves(at(4, span)));
+            let cutoffs =
+                |f: f64, pan: f64, split: bool| (hz(f + pan), (split || pan != 0.0).then(|| hz(f - pan)));
+            let (left, right) = cutoffs(f, pan, self.split);
+            let mut count = 1;
+            if moving {
+                count = self.left.pieces(left, s, span, moving);
+                if let Some(right) = right {
+                    let from = if self.split { &self.right } else { &self.left };
+                    count = count.max(from.pieces(right, s, span, moving));
+                }
             }
-            self.left
-                .step(ty, [hz(f + pan), q, dr, v], s, e, moving, sweeps, designs, rate);
-            let fresh = self.left.take_fresh();
-            if self.split {
-                self.right
-                    .step(ty, [hz(f - pan), q, dr, v], s, e, moving, sweeps, designs, rate);
-                self.right.take_fresh();
+            let start = s;
+            for piece in 0..count {
+                let e = piece_end(start, span, piece, count);
+                let (pan, left, right) = if e == span {
+                    (pan, left, right)
+                } else {
+                    let (f, pan) = (at(0, e), pan_octaves(at(4, e)));
+                    let (left, right) = cutoffs(f, pan, self.split);
+                    (pan, left, right)
+                };
+                let (q, dr, v) = (at(1, e), at(2, e), at(3, e));
+                if pan != 0.0 && !self.split {
+                    // (the right channel from the filter both had: its coefficients go on from there)
+                    self.right = self.left;
+                    self.split = true;
+                }
+                let pieces = count > 1;
+                self.left
+                    .step(ty, [left, q, dr, v], s, e, moving, sweeps, designs, rate, pieces);
+                let fresh = self.left.take_fresh();
+                if self.split {
+                    // (a split filter has the cutoff of its right channel: worked out where it splits or is split)
+                    let right = right.unwrap_or(left);
+                    self.right
+                        .step(ty, [right, q, dr, v], s, e, moving, sweeps, designs, rate, pieces);
+                    self.right.take_fresh();
+                }
+                let slots = self.slots();
+                let ramps = slots.map(|slot| slot.ramps);
+                let line = spans::<true>(
+                    layout, &mut c, &mut d, &mut every, slots, ramps, moving, [true; 2],
+                );
+                if fresh {
+                    filter_model::keep_steps(&c, &mut self.lanes);
+                }
+                run_span(
+                    layout,
+                    line,
+                    &mut c,
+                    &d,
+                    &every,
+                    &mut self.lanes,
+                    s,
+                    e,
+                    out_l,
+                    out_r,
+                );
+                // (the tail of a filter decays: no denormals in its state)
+                self.lanes.flush();
+                #[cfg(test)]
+                {
+                    self.spans += 1;
+                }
+                s = e;
             }
-            let slots = self.slots();
-            let ramps = slots.map(|slot| slot.ramps);
-            let line = spans::<true>(layout, &mut c, &mut d, slots, ramps, moving, [true; 2]);
-            if fresh {
-                filter_model::keep_steps(&c, &mut self.lanes);
-            }
-            run_span(layout, line, &mut c, &d, &mut self.lanes, s, e, out_l, out_r);
-            // (the tail of a filter decays: no denormals in its state)
-            self.lanes.flush();
-            #[cfg(test)]
-            {
-                self.spans += 1;
-            }
-            s = e;
         }
         self.layout = layout;
         // (both filters at one design again: one again)

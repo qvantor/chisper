@@ -3371,6 +3371,44 @@ describe('the wavetable voice', () => {
       noise.forEach((level) => expect(level).toBeLessThan(-90));
     });
 
+    // A pluck (the preset of WAVEFORM-58: Low 12 at 17.7 Hz, Drive 42 %, Var 15 %, ENV 2 up 6.15 octaves in 1.744 ms,
+    // its attack curved: its steep end over 2 octaves a span) over a sine at E2, struck at offsets of the grid of its
+    // spans: over 4 kHz there is little but what the coefficients leave at the top of the sweep. A span whose cutoff
+    // went over 4 times took the coefficients of its knobs at once and the lines stepped every 4 samples: -35 to -31
+    // dB of the peak of the note, a click; now in pieces, a step every sample (-57 to -49)
+    it('plucks the cutoff of a driven low12 up 6 octaves in 1.7 ms without a click', () => {
+      const { store } = core.storeWith({ a: [sine] });
+      const pluck: EnvelopeParams = {
+        attack: 0.001744,
+        hold: 0,
+        decay: 0.4737,
+        sustain: 0.1293,
+        release: 0,
+        curves: { attack: -2.01, decay: 2.01, release: 2.01 },
+      };
+      const tops = [0, 7, 13, 20, 26].map((offset) => {
+        const start = 256 + offset;
+        const { left } = render({
+          store,
+          params: { frequency: 82.41 },
+          frames: 2048,
+          start: start / RATE,
+          envelopes: [pluck, FLAT],
+          routes: [{ source: 1, param: 'cutoff', amount: 6.15, min: 10, max: 22050, scale: 'log' }],
+          filter: { type: 'low12', cutoff: 17.7, resonance: 0, gain: 0, drive: 41.76, variation: 15.01 },
+        });
+        const highs = Array.from({ length: 4 }, () =>
+          createTestBiquad('highpass', { frequency: 4000, Q: 0, gain: 0 }, RATE)
+        );
+        const high = left.map((x) => highs.reduce((y, biquad) => biquad.process(y), x));
+        const peak = left.reduce((most, x) => Math.max(most, Math.abs(x)), 0);
+        // (the top of ENV 2: the first 3.5 ms of the note)
+        const top = high.subarray(start, start + Math.round(0.0035 * RATE));
+        return db(top.reduce((most, y) => Math.max(most, Math.abs(y)), 0) / peak);
+      });
+      tops.forEach((top) => expect(top).toBeLessThan(-45));
+    });
+
     it('filters both channels of a unison, the middle voice in both', () => {
       const { store } = core.storeWith({ a: [saw] });
       const { left, right } = render({

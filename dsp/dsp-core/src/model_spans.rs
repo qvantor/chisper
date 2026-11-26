@@ -13,7 +13,7 @@ use crate::filter_model::{self, Cell as GridCell, Coefs, LaneCoefs, LaneState, L
 use crate::simd::{transpose, F32x4, U32x4};
 use alloc::vec::Vec;
 use core::cell::Cell;
-use jsmath::{cos, PI};
+use jsmath::{ceil, cos, log2, min, pow, PI};
 
 /// the samples of a span while a knob moves
 pub const SEGMENT: usize = 32;
@@ -24,12 +24,79 @@ pub const REFRESH: usize = 4;
 // Res (%) from which the resonance of a model type saturates in a pass without Drive and FAT
 pub const RESONANT: f32 = 40.0;
 // The coefficients of a span whose knobs moved go to those of its knobs as a line from where the span before left
-// them, a step every REFRESH samples of a model type, every sample of a type of a BiquadFilterNode (held a span each they were a stair of SEGMENT samples: a noise over the note, more of a
-// steeper type; the filter is a span behind its knobs). A cutoff that went further than JUMP times in a span is no
-// line (a jump of a knob: the coefficients between two far designs are of no filter), nor is the first span of a note
+// them, a step every REFRESH samples of a model type (every sample of a fast one: FINE), every sample of a type of a
+// BiquadFilterNode (held a span each they were a stair of SEGMENT samples: a noise over the note, more of a steeper
+// type; the filter is a span behind its knobs). The first span of a note is no line. The coefficients between two
+// designs whose cutoffs are further than JUMP times apart are of no filter: a span whose cutoff goes that far is a
+// line in pieces (`pieces`)
 const JUMP: f64 = 4.0;
 pub fn glides(cutoff: f64, before: f64) -> bool {
     cutoff <= before * JUMP && before <= cutoff * JUMP
+}
+
+// A span whose cutoff goes further than JUMP times (the steep end of the attack of an envelope on it: over 2 octaves in
+// a span, a route that jumps) is a line in pieces, each a line to the design at its end: those of the cutoffs on the
+// way, a share of the octaves between the knobs of the span before and its own by the share of its samples (the
+// other knobs a share of their way, linear), no more than PIECE octaves a piece (two: the worst notes of a pluck 1.5
+// to 3 dB louder over 4 kHz). A piece goes from a refresh to a refresh (the spans of a group stay whole groups), as many
+// as the refreshes of the span at most; a span of under two takes its coefficients at once (the end of a pass:
+// `span_end`). Its coefficients at once were a crackle over the top of a fast sweep, as loud as the grid of the spans
+// fell on it (a pluck of 1.7 ms over 6 octaves: its worst clicks over 4 kHz 21 dB louder)
+const PIECE: f64 = 1.0;
+
+/// the pieces of a span s..e whose cutoff went from `before` to `cutoff` (Hz): 1 where it glides (no line at all: a
+/// `before` that is none, NaN)
+pub fn pieces(before: f64, cutoff: f64, s: usize, e: usize) -> usize {
+    if !(before > 0.0 && cutoff > 0.0) || glides(cutoff, before) {
+        return 1;
+    }
+    let count = refreshes(s, e);
+    if count < 2 {
+        return 1;
+    }
+    min(ceil(log2(cutoff / before).abs() / PIECE), count as f64) as usize
+}
+
+/// the end of the piece j of `count` of the span s..e: a refresh, the last one at e
+pub fn piece_end(s: usize, e: usize, j: usize, count: usize) -> usize {
+    if j + 1 >= count {
+        return e;
+    }
+    (s.div_ceil(REFRESH) + (j + 1) * refreshes(s, e) / count) * REFRESH
+}
+
+/// the knobs at the end of a piece that ends at `end` of the span s..e whose knobs go from `from` to `to` (the cutoff
+/// first: by its octaves; at e those of `to`)
+pub fn piece_knobs<const N: usize>(from: [f64; N], to: [f64; N], s: usize, e: usize, end: usize) -> [f64; N] {
+    if end >= e {
+        return to;
+    }
+    let t = (end - s) as f64 / (e - s) as f64;
+    core::array::from_fn(|k| {
+        if k == 0 {
+            from[0] * pow(to[0] / from[0], t)
+        } else {
+            from[k] + (to[k] - from[k]) * t
+        }
+    })
+}
+
+// A line whose cutoff goes faster than FINE octaves a sample (an eighth of an octave a span: the attack of an envelope
+// of a few ms over octaves, its pieces) steps every sample, the steps of its saturating sections too (`fine`): a step
+// every REFRESH samples of so fast a line was a stair at a quarter of the rate, its images around fs/4 and fs/2 over
+// the highs of the note (of an attack of 3 ms over 6 octaves 10 to 15 dB over the highs around them; a threshold of
+// half an octave a span left them, the slow start of a curved attack under it). Slower lines (an LFO of 4 Hz over ±1 octave
+// goes a sixtieth of an octave a span at most) step every refresh: their images are under those of the reference
+const FINE: f64 = 1.0 / 256.0;
+// 2^(FINE · SEGMENT): how far apart the cutoffs of a span of SEGMENT samples are on a fast line (no logarithm a span)
+const FINE_SEGMENT: f64 = 1.0905077326652577;
+fn fast(before: f64, cutoff: f64, samples: usize) -> bool {
+    let apart = if samples == SEGMENT {
+        FINE_SEGMENT
+    } else {
+        pow(2.0, FINE * samples as f64)
+    };
+    cutoff > before * apart || before > cutoff * apart
 }
 // the refreshes of the saturating sections in the samples s..e
 pub fn refreshes(s: usize, e: usize) -> usize {
@@ -66,8 +133,9 @@ pub struct ModelSlot {
     fresh: bool,
     pub narrow: Option<(ModelType, [f64; 2], u32)>,
     designed: Option<DesignKey>,
-    // its span is a line (`step`), 1 / its refreshes (0: none)
+    // its span is a line (`step`), a step every sample (`fine`), 1 / its steps (its refreshes, or samples; 0: none)
     pub ramps: bool,
+    fine: bool,
     inv: f32,
 }
 
@@ -97,10 +165,31 @@ impl ModelSlot {
         core::mem::take(&mut self.fresh)
     }
 
+    /// whether its span is a line that steps every sample (FINE)
+    pub fn fine(&self) -> bool {
+        self.ramps && self.fine
+    }
+
+    /// its knobs as `step` takes them (cutoff, resonance, Drive, variation): those of its last span
+    pub fn knobs(&self) -> [f64; 4] {
+        [self.last[0], self.last[1], self.last[3], self.last[2]]
+    }
+
+    /// the pieces of its span s..e to the cutoff f (`pieces`; `moving`: a knob of the pass moves): one of the first
+    /// span of a note, of a pass whose knobs stay
+    pub fn pieces(&self, f: f64, s: usize, e: usize, moving: bool) -> usize {
+        if moving && !self.fresh {
+            pieces(self.last[0], f, s, e)
+        } else {
+            1
+        }
+    }
+
     /// The span from s to `next` of a filter of the type `ty` at its knobs there (cutoff in Hz; resonance, Drive and the
     /// variation in %): its coefficients (a design, or between the designs of the cell of its cutoff while it moves
-    /// alone in the design: `sweeps`), whether the span is a line to them (`moving`: a knob of the pass moves), its
-    /// Drive. `designs`: those of its node (None: its own)
+    /// alone in the design: `sweeps`), whether the span is a line to them (`moving`: a knob of the pass moves; `piece`:
+    /// a piece of a span, a line however far its cutoff goes) and whether it steps every sample (FINE), its Drive.
+    /// `designs`: those of its node (None: its own)
     #[allow(clippy::too_many_arguments)]
     pub fn step(
         &mut self,
@@ -112,12 +201,15 @@ impl ModelSlot {
         sweeps: bool,
         designs: Option<&Designs>,
         sample_rate: f64,
+        piece: bool,
     ) {
         let redesign = f != self.last[0] || q != self.last[1] || v != self.last[2];
-        let line = moving && !self.fresh && (redesign || d != self.last[3]) && glides(f, self.last[0]);
+        let line =
+            moving && !self.fresh && (redesign || d != self.last[3]) && (piece || glides(f, self.last[0]));
         self.ramps = line;
+        self.fine = line && fast(self.last[0], f, next - s);
         if line {
-            let count = refreshes(s, next);
+            let count = if self.fine { next - s } else { refreshes(s, next) };
             self.inv = if count > 0 { 1.0 / count as f32 } else { 0.0 };
         }
         if redesign {
@@ -469,30 +561,74 @@ pub fn sample(
 }
 const _: () = assert!(REFRESH == 4);
 
+/// A sample of the lanes of a span some lanes of which step every sample (`fine`, FINE): their coefficients a step on
+/// before it, `d` at a refresh, `every` at the others (-0 of the lanes that step every refresh: x + -0 is x bit for
+/// bit), the steps of their saturating sections worked out at every sample (of the others at a refresh): each lane the
+/// operations `sample` does of its own
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub fn fine_sample(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &LaneCoefs,
+    every: &LaneCoefs,
+    fine: U32x4,
+    state: &mut LaneState,
+    x: F32x4,
+    refresh: bool,
+) -> F32x4 {
+    if refresh {
+        c.advance(layout, d);
+        return filter_model::tick(layout, c, state, x, true);
+    }
+    c.advance(layout, every);
+    filter_model::refresh_steps(layout, c, state, fine);
+    filter_model::tick(layout, c, state, x, false)
+}
+
 // (the spans of a pass that starts at 0 start at a refresh)
 const _: () = assert!(SEGMENT.is_multiple_of(REFRESH));
+
+/// the coefficients of the lanes over a span (`take_spans`): those of their knobs, still; lines, a step every
+/// refresh; lines some lanes of which step every sample (`Fine`: those lanes, FINE)
+#[derive(Clone, Copy)]
+pub enum Line {
+    Still,
+    Refresh,
+    Fine(U32x4),
+}
+
+impl Line {
+    /// whether a lane is on a line
+    pub fn moves(self) -> bool {
+        !matches!(self, Line::Still)
+    }
+}
 
 // The coefficients `c` of the lanes of two voices for the samples from here on, where the span of each one that
 // `stepped` starts, and whether a span of theirs is a line. None is: those of their knobs, as they were held before
 // the lines. One is: a voice whose span is a line goes on from where its coefficients are (`c`; before the first
 // span of a pass those of the block before: `before`), a step `d` a refresh to those of its knobs (LaneCoefs::steer);
 // another that stepped has those of its knobs, still; one that did not goes on along its line (one function for a
-// voice alone, a pair and the pairs of a group: in each of them it would be a fifth of the core)
+// voice alone, a pair and the pairs of a group: in each of them it would be a fifth of the core). A line that steps
+// every sample (FINE) has its step in `every` too, the step at the samples between the refreshes; `every` None: no
+// lane's line does (the others' are -0 there)
 #[inline(never)]
 pub fn take_spans<const MIXED: bool>(
     layout: Layout,
     c: &mut LaneCoefs,
     d: &mut LaneCoefs,
+    every: &mut Option<LaneCoefs>,
     slots: [&ModelSlot; 2],
     ramps: [bool; 2],
     stepped: [bool; 2],
-) -> bool {
+) -> Line {
     let to = lanes_of_coefs::<MIXED>(slots);
     let halves_of = |two: [bool; 2]| if MIXED { mixed_of(two) } else { halves_of(two) };
     if !ramps[0] && !ramps[1] {
         // (still: next to lanes that are on a line, a pair of a group, they step by nothing)
-        (*c, *d) = (to, LaneCoefs::still());
-        return false;
+        (*c, *d, *every) = (to, LaneCoefs::still(), None);
+        return Line::Still;
     }
     let jumps = [stepped[0] && !ramps[0], stepped[1] && !ramps[1]];
     if jumps[0] || jumps[1] {
@@ -505,26 +641,38 @@ pub fn take_spans<const MIXED: bool>(
         F32x4::new(slots[0].inv, slots[0].inv, slots[1].inv, slots[1].inv)
     };
     c.steer(d, &to, layout, inv, halves_of(ramping), halves_of(stepped));
-    true
+    let fine = [ramps[0] && slots[0].fine, ramps[1] && slots[1].fine];
+    if !fine[0] && !fine[1] {
+        *every = None;
+        return Line::Refresh;
+    }
+    // (the same steps of the lanes that step every sample, -0 of the others that stepped, the rest as they are: what
+    // `steer` gives `d` again, its coefficients read at the ends as they are already)
+    let fining = [ramping[0] && fine[0], ramping[1] && fine[1]];
+    let steps = every.get_or_insert_with(LaneCoefs::still);
+    c.steer(steps, &to, layout, inv, halves_of(fining), halves_of(stepped));
+    Line::Fine(halves_of(fine))
 }
 
 // `take_spans` where a knob of one of the voices moves; no knob does: no span is a line, their coefficients as they
 // were held before the lines (nothing more a block)
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 pub fn spans<const MIXED: bool>(
     layout: Layout,
     c: &mut LaneCoefs,
     d: &mut LaneCoefs,
+    every: &mut Option<LaneCoefs>,
     slots: [&ModelSlot; 2],
     ramps: [bool; 2],
     moving: bool,
     stepped: [bool; 2],
-) -> bool {
+) -> Line {
     if moving {
-        return take_spans::<MIXED>(layout, c, d, slots, ramps, stepped);
+        return take_spans::<MIXED>(layout, c, d, every, slots, ramps, stepped);
     }
     *c = lanes_of_coefs::<MIXED>(slots);
-    false
+    Line::Still
 }
 
 /// the coefficients of two filters in the lanes: by halves, or mixed (LaneCoefs::mixed)
@@ -700,27 +848,57 @@ pub fn halves_of([p, q]: [bool; 2]) -> U32x4 {
 }
 
 /// the samples s..e of a stereo signal through the sections of a layout, the span a line (`line`: from `c` on, a step
-/// `d` a refresh) or still
+/// `d` a refresh, of the lanes that step every sample `d` and `every`) or still
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_span(
     layout: Layout,
-    line: bool,
+    line: Line,
     c: &mut LaneCoefs,
     d: &LaneCoefs,
+    every: &Option<LaneCoefs>,
     lanes: &mut LaneState,
     s: usize,
     e: usize,
     left: &mut [f32],
     right: &mut [f32],
 ) {
-    if line && plain(layout) {
-        model_line_plain(layout, c, d, lanes, s, e, left, right);
-    } else if line {
-        model_line(layout, c, d, lanes, s, e, left, right);
-    } else {
-        model_span(layout, c, lanes, s, e, left, right);
+    match (line, every) {
+        (Line::Fine(fine), Some(every)) => fine_line(layout, c, d, every, fine, lanes, s, e, left, right),
+        (Line::Still, _) => model_span(layout, c, lanes, s, e, left, right),
+        _ if plain(layout) => model_line_plain(layout, c, d, lanes, s, e, left, right),
+        _ => model_line(layout, c, d, lanes, s, e, left, right),
     }
+}
+
+/// `model_line` of a span some lanes of which step every sample (`fine_sample`): a sample at a time (a few spans of a
+/// fast sweep: no loop of its own a layout)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub fn fine_line(
+    layout: Layout,
+    c: &mut LaneCoefs,
+    d: &LaneCoefs,
+    every: &LaneCoefs,
+    fine: U32x4,
+    lanes: &mut LaneState,
+    a: usize,
+    b: usize,
+    left: &mut [f32],
+    right: &mut [f32],
+) {
+    let last = (b > a).then(|| F32x4::new(left[b - 1], right[b - 1], left[b - 1], right[b - 1]));
+    let (left, right) = (&mut left[..b], &mut right[..b]);
+    let (mut state, mut now) = (*lanes, *c);
+    for i in a..b {
+        let x = F32x4::new(left[i], right[i], left[i], right[i]);
+        let refresh = i.is_multiple_of(REFRESH);
+        let y = fine_sample(layout, &mut now, d, every, fine, &mut state, x, refresh).lanes();
+        left[i] = y[0];
+        right[i] = y[1];
+    }
+    (*lanes, *c) = (state, now);
+    end_span(layout, c, lanes, last);
 }
 
 /// the new filter (`left`, `right` from a to b) in over the one before (`old`), the one before out: a raised cosine,
@@ -744,5 +922,29 @@ pub fn crossfade(
         left[i] = old_l[i] + share * (left[i] - old_l[i]);
         right[i] = old_r[i] + share * (right[i] - old_r[i]);
         *rest -= 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // a span of SEGMENT samples is fast past the ratio of FINE (FINE_SEGMENT), one of another length past its own
+    #[test]
+    fn a_fast_span_goes_further_than_fine() {
+        assert_eq!(FINE_SEGMENT, pow(2.0, FINE * SEGMENT as f64));
+        for (samples, octaves, is) in [
+            (SEGMENT, 0.13, true),
+            (SEGMENT, 0.12, false),
+            (8, 0.04, true),
+            (8, 0.02, false),
+        ] {
+            for (before, cutoff) in [
+                (1000.0, 1000.0 * pow(2.0, octaves)),
+                (1000.0 * pow(2.0, octaves), 1000.0),
+            ] {
+                assert_eq!(fast(before, cutoff, samples), is, "{samples} {octaves}");
+            }
+        }
     }
 }

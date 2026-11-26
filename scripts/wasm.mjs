@@ -45,8 +45,10 @@ const CORES = [
   // lines of the EQ and of a mix were 5 % slower); 216.3 KB with the FX Filter (a seventh slot, its unit: its
   // knobs, Pan as two filters mixed in the lanes, the crossfade of a type, the level and the mix inside, the lines
   // of its routes) on the spans of the model types of a filter in dsp-core (model_spans: the filter of a voice and
-  // of the chain run on them)
-  { crate: 'engine', name: 'engine', budget: 216600 },
+  // of the chain run on them); 226.0 KB with the fast lines of those filters (a span whose cutoff goes further than
+  // JUMP times in pieces, a line that steps every sample in loops of their own beside those of the refreshes:
+  // fine_line, fine_pair_samples, fine_group_samples; a sample of them a call of its own was 3.2 KB less)
+  { crate: 'engine', name: 'engine', budget: 226100 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -97,7 +99,7 @@ const cargo = (perf) => {
 // the functions of a core -O3 doesn't inline (patterns of their names in the build of cargo): the render of each
 // source of a voice (the noise, the sub) stays a function of its own (inlined into Voice::process, its one caller, its loops would share
 // the registers of everything else the voice does in a block); so do the spans of the filter of a voice alone
-// (inlined into run_alone, next to the design of a span: a third slower); so do the pass of a warped voice and its
+// (inlined into run_alone, next to the design of a span: a third slower) and its fast lines (fine_*); so do the pass of a warped voice and its
 // reads of a span (render_voices calls them where a voice is warped alone: inlined, each of its callers had a copy),
 // the levels of a bend sample by sample too, and the loop of the voices of a warp (render_voices_warped: inlined into
 // render_voices, the voices of no warp were 3 to 7 % slower)
@@ -108,6 +110,9 @@ const NO_INLINE = {
     '*model_spans10model_span*',
     '*model_spans10model_line*',
     '*model_spans16model_line_plain*',
+    '*model_spans9fine_line*',
+    '*filter17fine_pair_samples*',
+    '*filter18fine_group_samples*',
     '*warp11warp_phases*',
     '*voice12segment_warp*',
     '*voice18render_span_warped*',

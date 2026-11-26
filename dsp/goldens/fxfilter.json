@@ -14,7 +14,7 @@
     ]
   },
   "Pan apart, then back to the middle": {
-    "sha256": "7ead1456a11061f777f261880251c62cb01350727b17295937249e3296d23b85",
+    "sha256": "a1e399e5516f9d64f37edeadc1a657fec83d0c0f7f5e4fb3f1c1c3641baf1f6d",
     "at": 1,
     "head": [
       0.007237146608531475,
@@ -322,7 +322,7 @@
     ]
   },
   "the knobs glide far, a type changes in a glide, another during its fade": {
-    "sha256": "8f02a9ef0f2ad92c38e444b0f31eeafd790155bb419963c772a0f7b0e2618acc",
+    "sha256": "d2b247a3446d2c4df9a97a8a7fc482717ae936b38247150c858f4f6209fb704a",
     "at": 1,
     "head": [
       8.919127103546032e-10,

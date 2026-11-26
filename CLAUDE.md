@@ -481,9 +481,16 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   design isn't smooth across (`Coefs::near`, Res 100 % mostly) takes designs. The coefficients of a
   span whose knobs moved go to those of its knobs as a line from where the span before left them, never at once (held
   a span each they were a stair of `SEGMENT` samples: a noise over the note under a moving cutoff): a step every
-  `REFRESH` samples of a model type (`LaneCoefs::steer`/`advance`, `take_spans` of `filter.rs`), every sample of a
-  type of a BiquadFilterNode; the filter is a span behind its knobs. No line: the first span of a note, a cutoff that
-  went over `JUMP` times in a span. A saturating section goes along its g, k0, a, l, the products of its saturation
+  `REFRESH` samples of a model type (`LaneCoefs::steer`/`advance`, `take_spans` of `model_spans.rs`), every sample
+  of a type of a BiquadFilterNode; the filter is a span behind its knobs. A fast line (its cutoff over `FINE`, an
+  eighth of an octave a span: a pluck, an envelope of a few ms over octaves) steps every sample, the steps of its
+  saturating sections too (`fine_sample`, `Line::Fine`: the lanes that do, the others their bits; loops of their own:
+  `fine_line`, `fine_pair_samples`, `fine_group_samples`): a step every 4 samples left images around fs/4 and fs/2.
+  A cutoff that goes over `JUMP` times in a span is a line in pieces (`pieces`, `piece_end`, `piece_knobs`: an
+  octave at most each, from a refresh to a refresh, each to the design of a cutoff on the way, by its octaves; the
+  voice's `Pieces` of `Pass`, the FX Filter reads its lines at their ends): its coefficients at once were a crackle
+  at the top of a fast sweep (WAVEFORM-58; `a_fast_sweep_goes_as_designs_at_every_sample`). No line: the first span
+  of a note. A saturating section goes along its g, k0, a, l, the products of its saturation
   the same function of them at every refresh as in a design (`sat_products`: a line of the products went under 0 of
   damping where the cutoff and Res jump together, a burst; the cargo test
   `a_jump_of_the_cutoff_and_the_resonance_together_is_no_burst`). A short span at the end of a pass is the end of the

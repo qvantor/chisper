@@ -1910,6 +1910,24 @@ pub fn drive_rest(c: &LaneCoefs, s: &mut LaneState, x: F32x4) {
     s.drive = x * c.drive;
 }
 
+/// The steps of the saturating sections of a layout worked out again in the lanes of `lanes` (as `tick` does at a
+/// refresh: by the level of the sample before), the others keep theirs (a line a step every sample next to one a
+/// step every refresh); before a `tick` without its refresh (the steps read the state the sample before left, nothing
+/// of its input: the bits of those of `tick`)
+#[inline(always)]
+pub fn refresh_steps(layout: Layout, c: &LaneCoefs, s: &mut LaneState, lanes: U32x4) {
+    if layout.svfs == 0 || !layout.sat {
+        return;
+    }
+    let level = if layout.clip { s.droop } else { s.svf[0][0] };
+    let steps = sat_steps(&c.sat[0], level, layout.clip);
+    s.sat[0] = core::array::from_fn(|k| steps[k].or_else(lanes, s.sat[0][k]));
+    if layout.sat2 {
+        let steps = sat_steps(&c.sat[1], s.svf[1][0], false);
+        s.sat[1] = core::array::from_fn(|k| steps[k].or_else(lanes, s.sat[1][k]));
+    }
+}
+
 /// a sample of the lanes through the sections of a layout: Drive (its gain, then the curve), the state variable
 /// filters, the one-pole, the droop (the layout read at every sample: one loop for every type, the branches the same
 /// at every sample). `refresh`: the steps of the saturating sections worked out again (every 4 samples of a block)

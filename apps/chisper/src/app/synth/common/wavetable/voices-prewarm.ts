@@ -4,6 +4,7 @@ import type {
   VoiceFilterOptions,
   VoiceOptions,
   VoiceOscOptions,
+  VoiceRoute,
   VoiceWarpKnobs,
 } from './voice-options';
 import { noiseLevels } from './noise-layout';
@@ -48,7 +49,8 @@ export type WarmVoicesFactory = (store: TableStoreWasm, shared: VoiceSharedWasm)
 // In the scope its oscillators warped (the bend, PWM on the sine), the knob of the bend moved by ENV 2 (a route),
 // then their knobs changed (both glide: the passes of a moving knob; PWM into Bend -: a new mode on a note
 // crossfades).
-// After it in the scope, voices of a sine whose filters take each path of a node (`WARM_FILTERS`)
+// After it in the scope, voices of a sine whose filters take each path of a node (`WARM_FILTERS`), the cutoff of some
+// swept by a pluck (`WARM_SWEPT`)
 const WARM_ENVELOPE = { attack: 0.001, hold: 0, decay: 0.01, sustain: 0.5, release: 0.01 };
 const WARM_OSC: VoiceOscOptions = { table: 'warm', unison: 4, phase: 0.5, phaseRand: 1 };
 const WARM_SINE: VoiceOscOptions = { table: '', unison: 3, phase: 0, phaseRand: 0 };
@@ -137,8 +139,9 @@ const warmLfos = (at: number, phase: number, shape: 'square' | 'triangle', insta
 });
 // the filters of the voices after it, by the paths of a node: a Biquad (a pair of them with it in the lanes of one),
 // two of a model type of one layout with Drive (a pair), four wide ones (a Ladder that saturates: two pairs in one
-// loop, `interleaves` of filter.rs) and a Biquad after them. Their cutoff then glides by less than a cell a span (the
-// designs of its cells) and the last Ladder changes its type (the crossfade, the other three in one loop)
+// loop, `interleaves` of filter.rs), then those swept (`WARM_SWEPT`) and a Biquad after them. The cutoff of the
+// Ladders then glides by less than a cell a span (the designs of its cells) and the last Ladder changes its type (the
+// crossfade, the other three in one loop)
 const WARM_LADDER: VoiceFilterOptions = {
   type: 'ladder12',
   cutoff: 1500,
@@ -157,11 +160,23 @@ const WARM_DRIVEN: VoiceFilterOptions = {
 };
 // (the voices of the Ladders)
 const WARM_LADDERS = [4, 5, 6, 7];
+// The voices of a pluck: ENV 2 sweeps their cutoff six octaves up in its attack of 1 ms and three down in its decay (a
+// span in pieces, lines that step every sample: their loops of their own, `fine_*` of filter.rs and model_spans.rs,
+// compiled on the first pluck otherwise): a pair with Drive (`fine_pair_samples`), four Ladders (`fine_group_samples`)
+// and one with Drive alone next to the Biquad after it (`fine_line`)
+const WARM_SWEEP: VoiceRoute = { source: 1, param: 'cutoff', amount: 6, min: 20, max: 20000, scale: 'log' };
+const WARM_SWEPT = [8, 9, 10, 11, 12, 13, 14];
+const SWEPT_DRIVEN: VoiceFilterOptions = { ...WARM_DRIVEN, cutoff: 200 };
+const SWEPT_LADDER: VoiceFilterOptions = { ...WARM_LADDER, cutoff: 200 };
 const WARM_FILTERS: VoiceFilterOptions[] = [
   { type: 'bandpass', cutoff: 2000, resonance: 2, gain: 0, drive: 0, variation: 0 },
   WARM_DRIVEN,
   WARM_DRIVEN,
   ...WARM_LADDERS.map(() => WARM_LADDER),
+  SWEPT_DRIVEN,
+  SWEPT_DRIVEN,
+  ...[0, 1, 2, 3].map(() => SWEPT_LADDER),
+  SWEPT_DRIVEN,
   { type: 'lowpass', cutoff: 4000, resonance: 3, gain: 0, drive: 0, variation: 0 },
 ];
 const WARM_NOISE = WARM_VOICE.noise as NonNullable<VoiceOptions['noise']>;
@@ -247,7 +262,7 @@ export const prewarmVoices = (
           osc: [{ ...WARM_OSC, unison: 1 }, null],
           noise: null,
           sub: null,
-          routes: [],
+          routes: WARM_SWEPT.includes(index + 1) ? [WARM_SWEEP] : [],
           filter,
         },
         params: {},
