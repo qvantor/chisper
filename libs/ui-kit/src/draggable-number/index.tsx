@@ -4,6 +4,7 @@ import { number, vector2d, Vector2D } from '@chisper/math';
 import { text10 } from '../common/styles';
 import { theme } from '../common/constants';
 import { useControlMenu } from '../control-menu';
+import { PickupTrack } from '../drag-value/track';
 import { StepArrows } from './step-arrows';
 
 interface Props {
@@ -15,9 +16,13 @@ interface Props {
   defaultValue?: number;
   // the full name of what it sets, in the header of the menu; the label by default
   name?: string;
+  // its id of MIDI Learn (a CC moves it): its menu has the items of MIDI Learn, in Pickup the mark of the controller
+  // on a line along its bottom while it waits
+  midiTarget?: string;
 }
 
 const Root = styled.div`
+  position: relative;
   font-size: 12px;
   line-height: 12px;
   display: inline-flex;
@@ -44,6 +49,13 @@ const ValueContainer = styled.div`
   align-items: center;
 `;
 
+// the line of the controller within the rounded corners of the box (not the box: the CC of the Learn mode is over its
+// corner)
+const Pickup = styled(PickupTrack)`
+  border-radius: 0 0 3px 3px;
+  overflow: hidden;
+`;
+
 // as wide as the widest value of its range (style), digits of one width: it doesn't widen while dragged
 const Value = styled.div`
   min-width: 12px;
@@ -59,9 +71,19 @@ export const DraggableNumber = ({
   range = [0, 10],
   defaultValue,
   name = label,
+  midiTarget,
 }: Props) => {
   const [active, setActive] = React.useState(false);
-  const menu = useControlMenu({ name, value, defaultValue, min: range[0], max: range[1], onChange });
+  const menu = useControlMenu({
+    name,
+    value,
+    defaultValue,
+    min: range[0],
+    max: range[1],
+    onChange,
+    midiTarget,
+  });
+  const pickup = menu.midi?.pickup ?? null;
   const onPointerDown = (e: React.PointerEvent) => {
     const initial = vector2d.fromMouseEvent(e);
     let last = value;
@@ -79,12 +101,18 @@ export const DraggableNumber = ({
     if (tracked) setActive(true);
   };
   return (
-    <Root ref={menu.anchorRef} onPointerDown={onPointerDown} onContextMenu={menu.onContextMenu}>
+    <Root
+      ref={menu.anchorRef}
+      onPointerDown={onPointerDown}
+      onContextMenu={menu.onContextMenu}
+      {...menu.midiAttrs}
+    >
       <Label>{label}</Label>
       <ValueContainer>
         <Value style={{ width: `${Math.max(...range.map((end) => String(end).length))}ch` }}>{value}</Value>
         <StepArrows active={active} />
       </ValueContainer>
+      {pickup !== null && <Pickup share={pickup} />}
       {menu.menu}
     </Root>
   );

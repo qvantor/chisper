@@ -26,6 +26,14 @@ export type SubKnobs = {
   level: number;
 };
 export type SubNumeric = 'octave' | 'coarse' | 'phase' | 'pan' | 'level';
+// the steps of its knobs and values (a knob rounds to 1 / precision): its knobs and a CC (MIDI Learn) set them alike
+export const SUB_PRECISION: Record<SubNumeric, number> = {
+  octave: 1,
+  coarse: 100,
+  phase: 360,
+  pan: 100,
+  level: 100,
+};
 
 const KNOB_DEFAULTS: SubKnobs = {
   shape: SUB_DEFAULTS.sh,
@@ -174,7 +182,7 @@ export const sub = ({ synthCore: [{ wavetables }] }: Dependencies) =>
       sent.forEach((table) => wavetables.removeTable(table));
     });
 
-export const { ModelProvider: SubProvider, useModel: useSub } = rxModelReact('sub', sub);
+export const { ModelProvider: SubProvider, useModel: useSub, Context: SubContext } = rxModelReact('sub', sub);
 
 export type SubModule = ReturnType<typeof useSub>;
 export type SubModel = SubModule[0];

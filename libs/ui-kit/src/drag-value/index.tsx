@@ -7,7 +7,7 @@ import { number } from '@chisper/math';
 import { text12 } from '../common/styles';
 import { theme } from '../common/constants';
 import { useElementSize } from '../common/hooks';
-import { MarkCanvas, useModulations } from '../common/utils/use-mod-mark';
+import { useModulations, usePickupMark } from '../common/utils/use-mod-mark';
 import { OFF_OPACITY } from '../common/utils/mod-routes';
 import { ScaleMode, valueScale } from '../common/utils';
 import type { HandleModulation } from '../handle';
@@ -17,6 +17,7 @@ import { modDragHighlight } from '../mod-drag/highlight';
 import { StepArrows } from '../draggable-number/step-arrows';
 import { useControlMenu } from '../control-menu';
 import { keyTip, TIP_DELAY, TIP_STYLES } from '../switch-key';
+import { markCanvas, ModMark, PickupTrack, Track } from './track';
 
 interface DragValueProps {
   // shown before the value (none: '')
@@ -55,14 +56,13 @@ interface DragValueProps {
   // what it changes: hovered a while (as a key of a plate), a tooltip tells its name and this; none while it is held
   hint?: string;
   className?: string;
+  // its id of MIDI Learn (a CC moves it): its menu has the items of MIDI Learn, in Pickup the mark of the controller
+  // on the line of its routes (without routes on a line of its own while it waits)
+  midiTarget?: string;
 }
 
 // keyboard steps as parts of the range
 const PAGE_STEP = 0.1;
-// px of the line of the routes along its bottom, the mark a light dot as high as it
-const TRACK_HEIGHT = 4;
-const MARK_RADIUS = TRACK_HEIGHT / 2;
-const MARK_ALPHA = 0.9;
 
 const Root = styled.div`
   ${text12};
@@ -114,31 +114,11 @@ const Arrows = styled(StepArrows)`
   color: ${theme.colors.primaryDarkHighContrast};
 `;
 
-// the range of the value, as wide as it (--drag-value-track: its color where the default is too strong)
-const Track = styled.div`
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: ${TRACK_HEIGHT}px;
-  background: var(--drag-value-track, ${hexToRgba(theme.colors.white, 0.2)});
-  pointer-events: none;
-`;
-
 // the selected route: of the color of its source, from the value by its amount (a bipolar one around it)
 const ModBar = styled.div`
   position: absolute;
   top: 0;
   bottom: 0;
-`;
-
-// where the live routes move the value now: a canvas over the line the mark is painted on (MarkCanvas)
-const ModMark = styled.canvas`
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: ${TRACK_HEIGHT}px;
-  pointer-events: none;
 `;
 
 // the place of the dot of the routes right of the value, in its row, kept without routes: the value doesn't move
@@ -164,25 +144,6 @@ const ModHighlight = styled.div`
   ${modDragHighlight('>')}
 `;
 
-// the mark at a share of the line of `width` px: a light dot on it, within it
-const markCanvas = (width: number): MarkCanvas => ({
-  paint: (context, share) => {
-    context.globalAlpha = MARK_ALPHA;
-    context.fillStyle = theme.colors.white;
-    context.beginPath();
-    context.arc(
-      number.thresholds(share * width, MARK_RADIUS, width - MARK_RADIUS),
-      MARK_RADIUS,
-      MARK_RADIUS,
-      0,
-      2 * Math.PI
-    );
-    context.fill();
-  },
-  width,
-  height: TRACK_HEIGHT,
-});
-
 // a value shown as text, pressed and dragged to change it: right or up raises it, left or down lowers it
 // (both add up); arrows and page up/down when focused. With routes (Pitch on Semi, Fine) the line of its range
 // along its bottom
@@ -206,6 +167,7 @@ export const DragValue = ({
   onClearModulations,
   hint,
   className,
+  midiTarget,
 }: DragValueProps) => {
   const [active, setActive] = React.useState(false);
   const lastValue = React.useRef(value);
@@ -243,7 +205,11 @@ export const DragValue = ({
     onChange,
     modulations: routes,
     onClearModulations,
+    midiTarget,
   });
+  // where the controller is (Pickup): on the line of the routes, else on a line of its own while it waits
+  const pickup = menu.midi?.pickup ?? null;
+  const { pickupMark, pickupShown } = usePickupMark(mark, routes ? pickup : null);
 
   const onPointerDown = (e: React.PointerEvent) => {
     lastValue.current = value;
@@ -284,6 +250,7 @@ export const DragValue = ({
       className={cls(className, { editable, active })}
       onContextMenu={menu.onContextMenu}
       {...(modTarget && { [MOD_TARGET_ATTR]: modTarget })}
+      {...menu.midiAttrs}
       {...(editable && {
         role: 'slider',
         tabIndex: 0,
@@ -324,6 +291,10 @@ export const DragValue = ({
         </Track>
       )}
       {live && <ModMark {...modMark} style={{ width: trackWidth }} data-testid='value-mod-mark' />}
+      {pickupShown && (
+        <ModMark {...pickupMark} style={{ width: trackWidth }} data-testid='value-pickup-mark' />
+      )}
+      {!routes && pickup !== null && <PickupTrack share={pickup} />}
       {modTarget && <ModHighlight />}
       {menu.menu}
     </Root>

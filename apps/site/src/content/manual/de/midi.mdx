@@ -3,7 +3,7 @@ title: 'MIDI-Keyboard im Browser: Einrichtung, Chromebook, iPad, Hilfe'
 h1: 'MIDI-Keyboard, Chromebook, iPad: Einrichtung und Fehlerbehebung'
 description: 'MIDI-Keyboard oder DAW per MIDI Clock mit Chisper verbinden, auf Chromebook, iPad oder Handy spielen, Latenz einstellen. Kein Ton, Keyboard nicht erkannt?'
 nav: 'MIDI und Geräte'
-updated: 2026-11-12
+updated: 2026-11-25
 preset: theremin
 image: midi
 ---
@@ -37,7 +37,7 @@ gespielt, klick einmal auf die Seite.
 
 <Figure name='midi' alt='Das MIDI-Menü von Chisper: die Lampe IN, ein unter Input ausgewähltes Keyboard, die Channel-Tasten All und 1 bis 16 und die Lampe Sync to MIDI Clock, die auf eine Clock wartet' narrow>
 
-**Midi** in der Kopfzeile: der Eingang, sein Kanal und die Clock.
+**Midi** in der Kopfzeile: der Eingang, sein Kanal, die Clock und MIDI Learn.
 
 </Figure>
 
@@ -48,6 +48,7 @@ gespielt, klick einmal auf die Seite.
   Note spielt: So siehst du, auf welchem Kanal dein Keyboard sendet.
 - **IN** leuchtet, während du eine Taste hältst: der schnellste Test, ob Noten ankommen.
 - **Sync to MIDI Clock**: siehe unten.
+- **MIDI Learn**, **Takeover** und **Bindings**: siehe MIDI Learn weiter unten.
 
 Wechselst du den Eingang oder den Kanal, werden die auf dem alten gehaltenen Noten losgelassen.
 
@@ -58,14 +59,58 @@ Wechselst du den Eingang oder den Kanal, werden die auf dem alten gehaltenen Not
   Note, auf zwei Kanälen gehalten, ist eine Stimme.
 - **Pitch Bend**, so weit, wie die Felder **Up** und **Down** neben dem Pitch-Rad es sagen (0 bis 24 Halbtöne,
   Standard 2; das Preset speichert sie).
+- **All Notes Off** und **All Sound Off**, die eine DAW beim Stoppen sendet: Die auf ihrem Kanal gehaltenen
+  Noten werden losgelassen, jede mit ihrem Release. **Reset All Controllers** bringt den Pitch Bend in die
+  Ruhelage zurück.
 - **MIDI Clock** aus einer DAW oder einem Drumcomputer, mit Start, Stop, Continue und Song Position. Mit **Sync to
   MIDI Clock** eingeschaltet (Standard) folgt das Tempo von Chisper der Clock nach einem ihrer Schläge: Die Lampe
   wechselt von *Waiting for a clock* zum Tempo (*120 BPM*), und das Tempofeld der Piano Roll zeigt **EXT**. Eine
   halbe Sekunde ohne Clock, und Chisper hält wieder sein eigenes Tempo. Stop hält die Piano Roll an, wo sie ist;
   die LFOs laufen weiter.
 
-Noch nicht gelesen werden Control Change (das Modulationsrad, ein Sustain-Pedal, Regler und Fader), Aftertouch und
-Program Change. Chisper sendet kein MIDI.
+- **Control Change (CC)** von den Reglern und Fadern eines Controllers oder einer DAW, für die Bedienelemente, die du
+  mit MIDI Learn zuweist (weiter unten).
+
+Noch nicht gelesen werden ein CC, der keinem Bedienelement zugewiesen ist (das Modulationsrad und ein Sustain-Pedal
+tun nichts, bis du sie zuweist), Aftertouch und Program Change. Chisper sendet kein MIDI.
+
+## Wie bewege ich die Regler mit einem MIDI-Controller (MIDI Learn)?
+
+Jeder Regler, Schalter und jede Auswahl von Chisper kann einem Regler oder Fader deines MIDI-Controllers folgen,
+oder einem Regler eines MIDI-Plugins deiner DAW (etwa dem MIDI Out von FL Studio über den IAC Driver oder loopMIDI,
+mit seiner Automation):
+
+1. Klick mit der rechten Maustaste auf das Bedienelement (auf einem Touchscreen: halte es) und wähle **MIDI
+   Learn**. Sein Rahmen blinkt, und Chisper sagt *Move a control on your MIDI device* (beweg ein Bedienelement
+   deines MIDI-Geräts).
+2. Dreh einen Regler deines Controllers. Chisper sagt, welchen CC es genommen hat (*CC 74 → Filter Cutoff*), und
+   von da an folgt das Bedienelement diesem Regler wie deiner Maus.
+
+Um viele Bedienelemente nacheinander zuzuweisen, öffne **Midi** und schalte dort **MIDI Learn** ein. Jedes
+Bedienelement, das ein CC bewegen kann, bekommt einen Rahmen, ein zugewiesenes seinen CC, und die Taste **Midi** in
+der Kopfzeile heißt **Learn**. Klick oder tippe auf ein Bedienelement (es ändert sich nicht), dreh einen Regler
+deines Controllers, dann klick auf das nächste. Derselbe Schalter oder <kbd>Esc</kbd> beendet es.
+
+- Ein CC bewegt ein Bedienelement, und ein Bedienelement nimmt einen CC. Ein CC, den du einem anderen Bedienelement
+  zuweist, verlässt das erste (*CC 74: Filter Cutoff → Filter Res*).
+- Der CC kommt vom Eingang und vom Kanal des Menüs Midi: Mit **All** Kanälen ist CC 74 jedes Kanals derselbe CC.
+- Ein Regler geht dorthin, wo dein Regler auf seinem Weg steht, in seinen eigenen Schritten (Wave in ganzen Frames,
+  Poly in Stimmen). Ein Schalter ist über der Mitte deines Reglers an, darunter aus; eine Auswahl (ein Filtertyp,
+  ein Modus) nimmt die Option ihres Teils des Wegs. Beide ändern sich nur, wenn dein Regler in einen anderen Teil
+  wechselt, so bleibt ein Schalter, den du mit der Maus klickst, wie er ist.
+- Eine Taste oder ein Pad deines Controllers schaltet einen Schalter bei jedem Druck an und aus, wenn du sie mit
+  einem Druck zuweist: Chisper sieht, dass du gleich loslässt. Ein Pad, das beim Loslassen nichts sendet, tut es
+  auch, sobald du im Menü des Schalters **CC n: toggle on press** wählst; **CC n: on/off by value** macht es
+  rückgängig.
+- **Remove MIDI CC** im Menü eines Bedienelements hebt seine Zuweisung auf. **Bindings** im Menü Midi listet alle
+  nach CC, mit **×** für jede und **Clear all**.
+- Der Browser speichert die Zuweisungen, nicht das Preset: Sie bleiben, wenn du ein anderes Preset öffnest oder die
+  Seite neu lädst. Ein Browser beginnt mit den vier Makros auf CC 20 bis 23.
+- **Takeover**: Mit **Jump** (Standard) geht ein Bedienelement zu deinem Regler, sobald du ihn bewegst. Mit
+  **Pickup** wartet ein Bedienelement, das ein Preset oder die Maus bewegt hat, bis dein Regler seinen Wert
+  überquert, so springt der Klang nie; inzwischen zeigt eine blasse Marke darauf, wo dein Regler steht.
+- Nicht zuweisen lassen sich Bank Select, Data Entry, die RPN- und NRPN-Nummern und die Channel-Mode-Nachrichten
+  (All Notes Off, Reset All Controllers…).
 
 ## Wie spiele ich Chisper aus einer DAW und synchronisiere es mit dem Song?
 
@@ -89,6 +134,8 @@ Die DAW sendet an einen virtuellen MIDI-Port, und der Browser sieht diesen Port 
   führt: Der Clip wartet auf den Start der DAW und spielt dann im Takt des Songs, ab der Stelle, an der die DAW
   startet.
 - Mit eingeschalteter Anker-Taste eines LFO bleibt ein LFO im Modus Free auf den Schlägen des Songs.
+- Die Regler folgen auch der DAW: Schick CC aus ihrer Automation oder einem MIDI-Plugin an denselben Port und weise
+  sie mit MIDI Learn zu (weiter oben).
 - Chisper hört auf einen Eingang. Willst du auch dein Keyboard spielen, lass die DAW es annehmen und über denselben
   Port weiterreichen (unter Windows ist das ohnehin der Weg: Ein Gerät ist dort oft nur in einem Programm offen).
 - Der Sound kommt aus dem Browser, kurz nachdem die DAW eine Note sendet: Der Browser nimmt MIDI zwischen seiner
@@ -189,6 +236,9 @@ Browser bei Low 128 Samples auf einmal und bei Normal 256.
   andere Musik-App, die das Keyboard nutzt, und lade die Seite neu.
 - Noten kommen an (die Lampe **IN** leuchtet), aber nichts spielt: Stell **Channel** auf **All** oder auf den
   Kanal, dessen Taste aufleuchtet.
+- Ein zugewiesener Regler folgt deinem Controller nicht: Prüf **Channel** wie oben. Mit **Pickup** dreh deinen Regler
+  zuerst über den Wert des Bedienelements hinaus (seine blasse Marke zeigt, wo dein Regler steht).
+- **MIDI Learn** ist grau mit *No MIDI input*: Der Browser hat kein MIDI, siehe oben.
 
 ## Übung: mit dem Pitch-Rad spielen
 

@@ -239,20 +239,27 @@ const filterTargets: Record<string, FilterTarget> = {
   ),
 };
 
-// the knobs of each LFO: Rate in Hz (the knob shows its period)
-const LFO_KNOBS: Record<LfoKnob, Pick<LfoTarget, 'label' | 'scale' | 'range'>> = {
-  rate: { label: 'Rate', scale: 'log', range: [1 / LFO_RATE_MAX, 1 / LFO_RATE_MIN] },
-  delay: { label: 'Delay', scale: 'pow', range: [0, ENVELOPE_TIME_MAX] },
-  rise: { label: 'Rise', scale: 'pow', range: [0, ENVELOPE_TIME_MAX] },
-  smooth: { label: 'Smooth', scale: 'pow', range: [0, LFO_SMOOTH_MAX] },
-  phase: { label: 'Phase', scale: 'linear', range: [0, 1] },
+// the knobs of each LFO: Rate in Hz (the knob shows its period); the step a knob rounds to (1 / precision): its
+// knobs and a CC (MIDI Learn) set them alike (LFO_KNOB_DEFS of lfos.ts)
+export const LFO_KNOBS: Record<
+  LfoKnob,
+  Pick<LfoTarget, 'label' | 'scale' | 'range'> & { precision: number }
+> = {
+  rate: { label: 'Rate', scale: 'log', range: [1 / LFO_RATE_MAX, 1 / LFO_RATE_MIN], precision: 1000 },
+  delay: { label: 'Delay', scale: 'pow', range: [0, ENVELOPE_TIME_MAX], precision: 10000 },
+  rise: { label: 'Rise', scale: 'pow', range: [0, ENVELOPE_TIME_MAX], precision: 10000 },
+  smooth: { label: 'Smooth', scale: 'pow', range: [0, LFO_SMOOTH_MAX], precision: 10000 },
+  phase: { label: 'Phase', scale: 'linear', range: [0, 1], precision: 1000 },
 };
 const lfoTargets = Object.fromEntries(
   LFOS.flatMap((id, lfo) =>
-    (Object.keys(LFO_KNOBS) as LfoKnob[]).map((param): [string, LfoTarget] => [
-      `${id}.${param}`,
-      { kind: 'lfo', lfo, param, route: routeParam('lfo', lfo, param), ...LFO_KNOBS[param] },
-    ])
+    (Object.keys(LFO_KNOBS) as LfoKnob[]).map((param): [string, LfoTarget] => {
+      const { label, scale, range } = LFO_KNOBS[param];
+      return [
+        `${id}.${param}`,
+        { kind: 'lfo', lfo, param, route: routeParam('lfo', lfo, param), label, scale, range },
+      ];
+    })
   )
 );
 

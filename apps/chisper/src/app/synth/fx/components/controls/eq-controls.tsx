@@ -47,6 +47,7 @@ export const EqControls = ({ params, setParam, on, sampleRate, out }: FxControls
           icons={EQ_TYPE_ICONS[index]}
           value={params[type]}
           onChange={(value) => setParam(type, value)}
+          target={`eq.${type}`}
           disabled={!on}
         />
         {handle(freq)}

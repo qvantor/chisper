@@ -178,6 +178,7 @@ export const CompressorControls = ({ params, setParam, on, out, meter }: FxContr
           icons={MODE_ICONS}
           value={params['multi']}
           onChange={(value) => setParam('multi', value)}
+          target='compressor.multi'
           disabled={!on}
         />
       </ControlsGroup>

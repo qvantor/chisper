@@ -1,4 +1,5 @@
 import { createGlobalStyle } from 'styled-components';
+import { midiLearnStyle } from '../../midi-learn';
 
 export const GlobalStyle = createGlobalStyle`
   * {
@@ -23,4 +24,6 @@ export const GlobalStyle = createGlobalStyle`
       outline: none;
     }
   }
+
+  ${midiLearnStyle}
 `;

@@ -5,6 +5,7 @@ import {
   Deactivated,
   Handle,
   HandleProps,
+  midiInset,
   PulseIcon,
   RoundRectIcon,
   SawIcon,
@@ -18,9 +19,9 @@ import {
 } from '@chisper/ui-kit';
 import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react';
 import { number } from '@chisper/math';
-import { SUB_DEFAULTS, SubShape } from '@chisper/preset-schema';
+import { SUB_DEFAULTS, SUB_SHAPES, SubShape } from '@chisper/preset-schema';
 import { SubModel, useSub } from '../common/modules';
-import type { SubNumeric } from '../common/modules/sub';
+import { SUB_PRECISION, SubNumeric } from '../common/modules/sub';
 import { useKnobModulation } from '../modulation/use-knob-modulation';
 import { formatPan, signed } from '../noise';
 import { Cell, Strip } from '../oscillator/components/wave/value-strip';
@@ -54,7 +55,7 @@ const Layout = styled.div`
 `;
 
 // Oct alone, as high as the selects of the oscillators and the noise
-const OctaveBar = styled.div`
+const OctaveBar = styled.div.attrs(midiInset)`
   grid-area: octave;
   display: flex;
   height: 22px;
@@ -171,11 +172,16 @@ const SubKnob = ({
 );
 
 // the shapes, one key over another: they render on the shape
+// the names of the shapes in the order of SUB_SHAPES (a CC of MIDI Learn chooses among them)
+export const SUB_SHAPE_NAMES = SUB_SHAPES.map(
+  (shape) => SHAPE_KEYS.find((key) => key.shape === shape)?.name ?? shape
+);
+
 const ShapeKeys = () => {
   const [{ $sub }, { setShape }] = useSub();
   const shape = useBehaviorSubjectField($sub, 'shape');
   return (
-    <Shapes column aria-label='Shape'>
+    <Shapes column aria-label='Shape' midiTarget='sub.shape'>
       {SHAPE_KEYS.map((key) => (
         <SwitchKey
           key={key.shape}
@@ -202,11 +208,12 @@ const OctaveCell = () => {
         value={octave}
         min={min}
         max={max}
-        precision={1}
+        precision={SUB_PRECISION.octave}
         travel={(max - min) * PX_PER_STEP}
         arrows
         defaultValue={SUB_DEFAULTS.o}
         onChange={(value) => setSubValue('octave', value)}
+        midiTarget='sub.oct'
       />
     </OctaveBar>
   );
@@ -226,7 +233,7 @@ const CoarseCell = () => {
         value={coarse}
         min={min}
         max={max}
-        precision={100}
+        precision={SUB_PRECISION.coarse}
         travel={(max - min) * PX_PER_STEP}
         formatValue={formatCoarse}
         defaultValue={SUB_DEFAULTS.c}
@@ -250,15 +257,17 @@ const PhaseCells = () => {
         min={ranges.phase[0]}
         max={ranges.phase[1]}
         cyclic
-        precision={360}
+        precision={SUB_PRECISION.phase}
         formatValue={(value) => `${Math.round(value * 360)}°`}
         defaultValue={SUB_DEFAULTS.ph}
         onChange={(value) => setSubValue('phase', value)}
+        midiTarget='sub.phase'
       />
       <SwitchKeys aria-label='Phase of a note'>
         <SwitchKey
           on={contiguous}
           onChange={setContiguous}
+          midiTarget='sub.contiguous'
           name='Contiguous'
           hint='A note starts at the phase the note before has (or had at its end), not at Phase'
           icon={<ContiguousIcon />}
@@ -276,7 +285,7 @@ export const SubSection = () => {
   const [{ $active, $sub, ranges }, { toggleActive, setSubValue }] = useSub();
   const active = useBehaviorSubject($active);
   return (
-    <Section name='Sub' active={active} onClick={toggleActive}>
+    <Section name='Sub' active={active} onClick={toggleActive} midiTarget='sub.on'>
       <Root>
         <Layout>
           <OctaveCell />
@@ -298,7 +307,7 @@ export const SubSection = () => {
               name='Sub pan'
               min={ranges.pan[0]}
               max={ranges.pan[1]}
-              precision={100}
+              precision={SUB_PRECISION.pan}
               formatValue={formatPan}
               defaultValue={SUB_DEFAULTS.pn}
               fillFrom={0}
@@ -312,7 +321,7 @@ export const SubSection = () => {
               name='Sub volume'
               min={ranges.level[0]}
               max={ranges.level[1]}
-              precision={100}
+              precision={SUB_PRECISION.level}
               formatValue={(value) => number.percent(number.round(value, 100))}
               defaultValue={SUB_DEFAULTS.g}
               onChange={(value) => setSubValue('level', value)}

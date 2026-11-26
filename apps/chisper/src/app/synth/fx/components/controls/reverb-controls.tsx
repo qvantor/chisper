@@ -45,6 +45,7 @@ export const ReverbControls = ({ params, setParam, on, sampleRate, out }: FxCont
           icons={ERA_ICONS}
           value={params['era']}
           onChange={(value) => setParam('era', value)}
+          target='reverb.era'
           disabled={!on}
         />
       </ControlsGroup>

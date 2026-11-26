@@ -9,10 +9,12 @@ interface Props {
   value: number;
   onChange: (value: number) => void;
   disabled: boolean;
+  // its id of MIDI Learn (delay.mode: a CC chooses an option)
+  target: string;
 }
 
 // a switch over the options of the param, the value is the index of the option
-export const ParamSwitch = ({ def: { options }, icons, value, onChange, disabled }: Props) => {
+export const ParamSwitch = ({ def: { options }, icons, value, onChange, disabled, target }: Props) => {
   const items = React.useMemo(
     () => (options ?? []).map(({ id, label }) => ({ id, label, icon: icons[id] })),
     [options, icons]
@@ -23,6 +25,7 @@ export const ParamSwitch = ({ def: { options }, icons, value, onChange, disabled
       value={items[Math.round(value)]?.id ?? items[0]?.id}
       onChange={(id) => onChange(items.findIndex((option) => option.id === id))}
       disabled={disabled}
+      midiTarget={target}
     />
   );
 };

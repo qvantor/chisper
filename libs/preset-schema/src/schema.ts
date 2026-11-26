@@ -693,8 +693,9 @@ export const MACRO_NAME_KEYS = {
 // the longest name of a macro (a line under its knob)
 export const MACRO_NAME_MAX_LENGTH = 20;
 export const isMacro = (source: string): source is MacroId => (MACROS as readonly string[]).includes(source);
-// the MIDI CC of each macro, kept for a MIDI input, the files of the track and the automation of a clip (nothing reads
-// them yet): CC 20–23 (none of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32)
+// the MIDI CC of each macro: CC 20–23 (none of the General MIDI ones), 14 bits as a pair with the LSB 52–55 (msb + 32).
+// A fresh map of MIDI Learn binds the MSB to the macro (7 bits); the files of the track and the automation of a clip
+// will read them
 export const MACRO_CC: Record<MacroId, { msb: number; lsb: number }> = {
   macro1: { msb: 20, lsb: 52 },
   macro2: { msb: 21, lsb: 53 },
@@ -768,12 +769,15 @@ const modSchema = z
 // semitones the pitch bend moves the notes by at most, down and up (each 0..PITCH_BEND_MAX)
 export const PITCH_BEND_MAX = 24;
 export const PITCH_BEND_DEFAULT = 2;
+// the most voices (Poly) and the longest glide (Portamento, ms)
+export const VOICES_MAX = 12;
+export const PORTAMENTO_MAX = 400;
 
 const voicingSchema = z
   .object({
     leg: z.boolean().default(false),
-    port: range(0, 400).default(0),
-    max: intRange(1, 12).default(8),
+    port: range(0, PORTAMENTO_MAX).default(0),
+    max: intRange(1, VOICES_MAX).default(8),
     // the range of the pitch bend: semitones down and up
     bd: intRange(0, PITCH_BEND_MAX).default(PITCH_BEND_DEFAULT),
     bu: intRange(0, PITCH_BEND_MAX).default(PITCH_BEND_DEFAULT),

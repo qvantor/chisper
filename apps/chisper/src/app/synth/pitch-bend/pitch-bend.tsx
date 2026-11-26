@@ -72,6 +72,7 @@ export const PitchBend = React.memo(({ compact = false, wheelWidth }: Props) => 
           name='Bend up'
           defaultValue={PITCH_BEND_DEFAULT}
           onChange={setBendUp}
+          midiTarget='bend.up'
         />
         <DraggableNumber
           value={down}
@@ -80,6 +81,7 @@ export const PitchBend = React.memo(({ compact = false, wheelWidth }: Props) => 
           name='Bend down'
           defaultValue={PITCH_BEND_DEFAULT}
           onChange={setBendDown}
+          midiTarget='bend.down'
         />
       </Ranges>
       <Wheel width={wheelWidth} />

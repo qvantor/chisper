@@ -6,35 +6,34 @@ import {
   DIVISION_MAX,
   DIVISION_OFF,
   divisionSeconds,
-  ENVELOPE_TIME_MAX,
   isLfoKnob,
   LFO_DEFAULTS,
-  LFO_RATE_MAX,
-  LFO_RATE_MIN,
-  LFO_SMOOTH_MAX,
   LfoId,
   LfoKnob,
-  LfoMode,
   LFOS,
   TEMPO_DIVISIONS,
   TIME_DIVISIONS,
 } from '@chisper/preset-schema';
 import { NoteValueKeys } from '../../../common/components';
 import { useLfos } from '../../common/modules';
-import { DIVISION_KEYS, lfoDivision, LfoParams, LfoTimeKnob, rateStepsAt } from '../../common/modules/lfos';
+import {
+  DIVISION_KEYS,
+  LFO_KNOB_DEFS,
+  lfoDivision,
+  LfoParams,
+  lfoPeriodOf,
+  LfoTimeKnob,
+  rateKnobSteps,
+} from '../../common/modules/lfos';
 import { useKnobModulation } from '../../modulation/use-knob-modulation';
 import { useStepTravel, useTempo } from '../../modulation/step-travel';
 import { SourceTabs } from '../../modulation/source-tabs';
-import { CUSTOM_SHAPE, LFO_SHAPE_OPTIONS, shapeOptionOf } from '../lfo-shapes';
+import { CUSTOM_SHAPE, LFO_MODE_OPTIONS, LFO_SHAPE_OPTIONS, shapeOptionOf } from '../lfo-shapes';
 import { LfoChart } from './lfo-chart';
 
 // the shapes by category; points of its own that are none of them show as Custom, not chosen
 const SHAPES = LFO_SHAPE_OPTIONS.map(({ id, name, group }) => ({ name, value: id, group }));
 const SHAPES_CUSTOM = [...SHAPES, { name: 'Custom', value: CUSTOM_SHAPE, disabled: true }];
-const MODES: { name: string; value: LfoMode }[] = [
-  { name: 'Retrig', value: 'retrig' },
-  { name: 'Free', value: 'free' },
-];
 
 // the chart takes what the controls leave
 const Root = styled.div`
@@ -67,43 +66,15 @@ const KNOBS: Record<
   >
 > = {
   rate: {
-    min: 1 / LFO_RATE_MAX,
-    max: 1 / LFO_RATE_MIN,
-    mode: 'log',
-    precision: 1000,
-    label: 'Rate',
+    ...LFO_KNOB_DEFS.rate,
     name: 'LFO period',
     formatValue: (frequency) => formatTime(1 / frequency),
   },
-  delay: {
-    min: 0,
-    max: ENVELOPE_TIME_MAX,
-    mode: 'pow',
-    precision: 10000,
-    label: 'Delay',
-    formatValue: formatTime,
-  },
-  rise: {
-    min: 0,
-    max: ENVELOPE_TIME_MAX,
-    mode: 'pow',
-    precision: 10000,
-    label: 'Rise',
-    formatValue: formatTime,
-  },
-  smooth: {
-    min: 0,
-    max: LFO_SMOOTH_MAX,
-    mode: 'pow',
-    precision: 10000,
-    label: 'Smooth',
-    formatValue: formatTime,
-  },
+  delay: { ...LFO_KNOB_DEFS.delay, formatValue: formatTime },
+  rise: { ...LFO_KNOB_DEFS.rise, formatValue: formatTime },
+  smooth: { ...LFO_KNOB_DEFS.smooth, formatValue: formatTime },
   phase: {
-    min: 0,
-    max: 1,
-    precision: 1000,
-    label: 'Phase',
+    ...LFO_KNOB_DEFS.phase,
     formatValue: (phase) => `${Math.round(phase * 360)}°`,
     // around the cycle: a route moves it past 360° to 0°
     wrap: true,
@@ -181,9 +152,7 @@ const LfoKnobHandle = React.memo(
         {...KNOBS[knob]}
         value={rate ? 1 / value : value}
         defaultValue={rate ? 1 / LFO_DEFAULTS.rate : LFO_DEFAULTS[knob]}
-        onChange={(next) =>
-          setLfoValue(id, knob, rate ? Math.min(LFO_RATE_MAX, Math.max(LFO_RATE_MIN, 1 / next)) : next)
-        }
+        onChange={(next) => setLfoValue(id, knob, rate ? lfoPeriodOf(next) : next)}
         {...modulation}
       />
     );
@@ -204,6 +173,7 @@ const TempoKeys = React.memo(
           hint='Rate, Delay and Rise in note values'
           on={lfo.bpm}
           onChange={(on) => setBpm(id, on)}
+          midiTarget={`${id}.bpm`}
         />
         <SwitchKey
           icon={ANCHOR}
@@ -213,6 +183,7 @@ const TempoKeys = React.memo(
           on={lfo.host}
           disabled={!free}
           onChange={(on) => setHost(id, on)}
+          midiTarget={`${id}.host`}
         />
         <NoteValueKeys
           of='Rate'
@@ -221,6 +192,7 @@ const TempoKeys = React.memo(
           dot={lfo.dot}
           onTrip={(on) => setTrip(id, on)}
           onDot={(on) => setDot(id, on)}
+          midiTarget={id}
         />
       </SwitchKeys>
     );
@@ -243,8 +215,7 @@ export const LfoSection = () => {
   const lfo = lfos[id];
   const tempo = useTempo();
   // the steps of Rate at the tempo, right faster (the same steps: the same array, the knob is memoized)
-  const fitting = rateStepsAt(lfo, tempo);
-  const rateSteps = React.useMemo(() => [...fitting].reverse(), [fitting]);
+  const rateSteps = rateKnobSteps(lfo, tempo);
   const shape = shapeOptionOf(lfo);
   // a shape of the LFO, or the points of one of the list
   const chooseShape = (value: string) => {
@@ -265,8 +236,14 @@ export const LfoSection = () => {
             value={shape}
             options={shape === CUSTOM_SHAPE ? SHAPES_CUSTOM : SHAPES}
             onChange={chooseShape}
+            midiTarget={`${id}.shape`}
           />
-          <Select value={lfo.mode} options={MODES} onChange={(mode) => setMode(id, mode)} />
+          <Select
+            value={lfo.mode}
+            options={LFO_MODE_OPTIONS}
+            onChange={(mode) => setMode(id, mode)}
+            midiTarget={`${id}.mode`}
+          />
           <TempoKeys
             id={id}
             free={lfo.mode === 'free'}

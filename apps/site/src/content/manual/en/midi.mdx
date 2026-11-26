@@ -3,7 +3,7 @@ title: 'MIDI Keyboard in the Browser: Setup, Chromebook, iPad and Fixes'
 h1: 'MIDI keyboard, Chromebook, iPad: setup and troubleshooting'
 description: 'Connect a MIDI keyboard or your DAW to Chisper with MIDI Clock sync, play on a Chromebook, iPad or phone, set the latency, fix no sound or a missing device.'
 nav: 'MIDI and devices'
-updated: 2026-11-12
+updated: 2026-11-25
 preset: theremin
 image: midi
 ---
@@ -36,7 +36,7 @@ the page once.
 
 <Figure name='midi' alt='The MIDI menu of Chisper: the IN lamp, a keyboard selected under Input, the Channel keys All and 1 to 16, and the Sync to MIDI Clock lamp waiting for a clock' narrow>
 
-**Midi** in the header: the input, its channel and the clock.
+**Midi** in the header: the input, its channel, the clock and MIDI Learn.
 
 </Figure>
 
@@ -47,6 +47,7 @@ the page once.
   which channel your keyboard sends.
 - **IN** lights up while you hold a key: the quickest check that notes arrive.
 - **Sync to MIDI Clock**: see below.
+- **MIDI Learn**, **Takeover** and **Bindings**: see [MIDI Learn](#how-do-i-move-the-knobs-from-a-midi-controller-midi-learn).
 
 Changing the input or the channel lets go of the notes held on the old one.
 
@@ -56,14 +57,54 @@ Changing the input or the channel lets go of the notes held on the old one.
   volume of each note. The same note held on two channels is one voice.
 - **Pitch bend**, as far as the **Up** and **Down** boxes beside the pitch wheel say (0 to 24 semitones, 2 by
   default; the preset keeps them).
+- **All Notes Off** and **All Sound Off**, which a DAW sends as it stops: the notes held on their channel are
+  let go, each through its Release. **Reset All Controllers** puts the pitch bend back at rest.
 - **MIDI Clock** from a DAW or a drum machine, with Start, Stop, Continue and Song Position. With **Sync to MIDI
   Clock** on (the default), the tempo of Chisper follows the clock after one beat of it: the lamp goes from
   *Waiting for a clock* to the tempo (*120 BPM*), and the tempo box of the piano roll shows **EXT**. Half a second
   without a clock and Chisper keeps its own tempo again. Stop stops the piano roll where it is; the LFOs keep
   running.
 
-Not read yet: Control Change (the mod wheel, a sustain pedal, knobs and faders), aftertouch and program changes.
-Chisper sends no MIDI out.
+- **Control Change (CC)** from the knobs and faders of a controller or a DAW, to the controls you bind with
+  [MIDI Learn](#how-do-i-move-the-knobs-from-a-midi-controller-midi-learn).
+
+Not read yet: a CC bound to no control (the mod wheel and a sustain pedal do nothing until you bind them),
+aftertouch and program changes. Chisper sends no MIDI out.
+
+## How do I move the knobs from a MIDI controller (MIDI Learn)?
+
+Every knob, switch and choice of Chisper can follow a knob or a fader of your MIDI controller, or a knob of a MIDI
+plugin of your DAW (the MIDI Out of FL Studio through the IAC Driver or loopMIDI, say, and its automation):
+
+1. Right-click the control (on a touch screen, hold it) and choose **MIDI Learn**. Its outline blinks and Chisper
+   says *Move a control on your MIDI device*.
+2. Turn a knob of your controller. Chisper says which CC it took (*CC 74 → Filter Cutoff*), and from now on the
+   control follows that knob as it follows your mouse.
+
+To bind many controls in a row, open **Midi** and switch on **MIDI Learn** there. Every control a CC can move gets
+an outline, a bound one its CC, and the **Midi** key in the header reads **Learn**. Click or tap a control (it
+doesn't change), turn a knob of your controller, then click the next control. The same switch or <kbd>Esc</kbd>
+ends it.
+
+- One CC moves one control, and a control takes one CC. A CC you bind to another control leaves the first one
+  (*CC 74: Filter Cutoff → Filter Res*).
+- The CC comes from the input and the channel of the Midi menu: with **All** channels, CC 74 of any channel is the
+  same CC.
+- A knob goes where your knob is along its travel, in its own steps (Wave by whole frames, Poly by voices). A
+  switch is on over the middle of your knob, off under it; a choice (a filter type, a mode) takes the option of its
+  part of the travel. Both change only as your knob crosses into another part, so a switch you click stays.
+- A button or a pad of your controller switches a switch on and off at each press if you bind it with a press:
+  Chisper sees you let go at once. A pad that sends nothing as you let go does it too once you choose
+  **CC n: toggle on press** in the menu of the switch; **CC n: on/off by value** undoes it.
+- **Remove MIDI CC** in the menu of a control unbinds it. **Bindings** in the Midi menu lists them all by CC, with
+  **×** for each and **Clear all**.
+- The browser keeps the bindings, not the preset: they stay when you open another preset or reload the page. A
+  browser starts with the four macros on CC 20 to 23.
+- **Takeover**: with **Jump** (the default) a control goes to your knob as soon as you move it. With **Pickup** a
+  control that a preset or the mouse moved waits until your knob passes its value, so the sound never jumps; a
+  faint mark on the control shows where your knob is meanwhile.
+- Bank select, data entry, the RPN and NRPN numbers and the channel mode messages (All Notes Off, Reset All
+  Controllers…) can't be bound.
 
 ## How do I play Chisper from a DAW and sync it to the song?
 
@@ -86,6 +127,8 @@ virtual MIDI port, and the browser sees that port as one more MIDI device.
 - Start, Stop, Continue and Song Position come along. Press Play in the piano roll of Chisper while the clock
   leads: the clip waits for the Start of the DAW, then plays in time with the song, from where the DAW starts.
 - With the anchor key of an LFO on, a Free LFO stays on the beats of the song.
+- The knobs follow the DAW too: send CC from its automation or a MIDI plugin to the same port and bind them with
+  [MIDI Learn](#how-do-i-move-the-knobs-from-a-midi-controller-midi-learn).
 - Chisper listens to one input. To play your keyboard too, let the DAW take it and pass it on through the same port
   (on Windows that is the way anyway: a device is often open in one program only).
 - The sound comes out of the browser a little after the DAW sends a note: the browser takes MIDI in between its
@@ -179,6 +222,9 @@ Low and 256 at Normal.
   app that uses the keyboard, then reload the page.
 - Notes arrive (the **IN** lamp lights) but nothing plays: set **Channel** to **All**, or to the channel whose key
   lights up.
+- A bound knob doesn't follow your controller: check **Channel** as above. With **Pickup**, turn your knob past the
+  value of the control first (its faint mark shows where your knob is).
+- **MIDI Learn** is grey with *No MIDI input*: the browser has no MIDI, see above.
 
 ## Exercise: play with the pitch wheel
 

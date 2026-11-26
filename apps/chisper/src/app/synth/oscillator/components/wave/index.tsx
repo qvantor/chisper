@@ -98,6 +98,7 @@ export const Wave = ({
         )}
       </ChartArea>
       <WaveInfo
+        target={target}
         onPhaseActiveChange={holdPhase}
         onUnisonActiveChange={onUnisonActiveChange}
         compact={compact}

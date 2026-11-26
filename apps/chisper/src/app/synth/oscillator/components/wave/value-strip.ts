@@ -1,5 +1,5 @@
 import { styled, css } from 'styled-components';
-import { DragValue, theme } from '@chisper/ui-kit';
+import { DragValue, midiInset, theme } from '@chisper/ui-kit';
 
 const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
 
@@ -18,7 +18,8 @@ const EDGES = {
 // a strip of values of the block of the wave, on its background, over the wave (top) or under it (bottom): a line
 // between it and the wave and between its values; as wide as the block, whatever its values (they never widen the
 // oscillator)
-export const Strip = styled.div<{ $edge: keyof typeof EDGES }>`
+// (it clips its values: their marks of MIDI Learn inside them)
+export const Strip = styled.div.attrs(midiInset)<{ $edge: keyof typeof EDGES }>`
   display: flex;
   contain: inline-size;
   overflow: hidden;

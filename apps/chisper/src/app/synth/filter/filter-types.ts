@@ -58,6 +58,9 @@ const CATEGORIES: { value: string; label: string; types: FilterType[] }[] = [
   },
 ];
 
+// the types of a voice as ◀ ▶ steps through them (a CC of MIDI Learn chooses among them in that order)
+export const FILTER_TYPE_ORDER: FilterType[] = CATEGORIES.flatMap(({ types }) => types);
+
 // the browser of the types a filter offers (absent: all of a voice): a folder a category that has any, a file a type;
 // the path of a type, its category and itself (one it doesn't offer: itself alone); the categories that have any
 export const filterTypeBrowser = <T extends FilterType>(offered?: readonly T[]) => {

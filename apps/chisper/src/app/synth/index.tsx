@@ -31,6 +31,7 @@ import {
   SynthCoreProvider,
   useSynthCore,
   MidiControllerProvider,
+  useMidiController,
   SoundSwitchProvider,
   useSoundSwitch,
   TransportProvider,
@@ -50,6 +51,8 @@ import { FxScreen, FxProvider, useFx } from './fx';
 import { desktopScreen, SYNTH_SCREENS, SynthScreen } from './screens';
 import { DesktopPiano, KEY_HEIGHT } from './piano';
 import { ClipPreview, RollWindow, TrackProvider, useLinkPreset, useTrack } from './track';
+import { MidiLearnProvider } from './common/midi-learn/midi-learn';
+import { MidiLearnLayer } from './midi-learn/midi-learn-layer';
 
 // the row of the modulation (and the voicing) lower than the one of the sound: it stays under the fx too
 const Root = styled.div`
@@ -236,6 +239,42 @@ const FxInternal = ({ children }: React.PropsWithChildren) => {
   );
 };
 
+// MIDI Learn: a CC of the MIDI input moves the control bound to it (any knob, switch or choice of the models)
+const MidiLearnInternal = ({ children }: React.PropsWithChildren) => {
+  const midiController = useMidiController();
+  const synthCore = useSynthCore();
+  const transport = useTransport();
+  const envelopes = useEnvelopes();
+  const lfo = useLfos();
+  const modulation = useModulation();
+  const oscillator1 = useOscillator1();
+  const oscillator2 = useOscillator2();
+  const noise = useNoise();
+  const sub = useSub();
+  const filter = useFilter();
+  const synth = useSynth();
+  const fx = useFx();
+  return (
+    <MidiLearnProvider
+      initial={undefined}
+      midiController={midiController}
+      synthCore={synthCore}
+      transport={transport}
+      envelopes={envelopes}
+      lfo={lfo}
+      modulation={modulation}
+      oscillators={[oscillator1, oscillator2]}
+      noise={noise}
+      sub={sub}
+      filter={filter}
+      synth={synth}
+      fx={fx}
+    >
+      <MidiLearnLayer>{children}</MidiLearnLayer>
+    </MidiLearnProvider>
+  );
+};
+
 // a preset is applied through the sound switch, the track opens its clip
 const PresetsInternal = ({ children }: React.PropsWithChildren) => {
   const soundSwitch = useSoundSwitch();
@@ -316,15 +355,17 @@ const Internal = () => {
           <TrackInternal>
             <KeyboardControllerProvider initial={{}} app={app} inputController={inputController}>
               <PresetsInternal>
-                {/* nothing but in the perf build (scripts/bench-perf): above the layout switch, never remounted */}
-                <PerfHook />
-                {/* a failed master limiter, on every screen: above the layout switch too */}
-                <LimiterStatus />
-                {isMobile ? (
-                  <MobileLayout screen={screen} onScreenChange={setScreen} />
-                ) : (
-                  <DesktopLayout screen={screen} onScreenChange={setScreen} />
-                )}
+                <MidiLearnInternal>
+                  {/* nothing but in the perf build (scripts/bench-perf): above the layout switch, never remounted */}
+                  <PerfHook />
+                  {/* a failed master limiter, on every screen: above the layout switch too */}
+                  <LimiterStatus />
+                  {isMobile ? (
+                    <MobileLayout screen={screen} onScreenChange={setScreen} />
+                  ) : (
+                    <DesktopLayout screen={screen} onScreenChange={setScreen} />
+                  )}
+                </MidiLearnInternal>
               </PresetsInternal>
             </KeyboardControllerProvider>
           </TrackInternal>

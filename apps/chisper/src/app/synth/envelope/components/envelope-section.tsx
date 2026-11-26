@@ -33,6 +33,7 @@ const TempoKey = React.memo(
         hint='The times in note values'
         on={bpm}
         onChange={(on) => setBpm(id, on)}
+        midiTarget={`${id}.bpm`}
       />
     </Plate>
   )
@@ -67,6 +68,7 @@ const EnvelopeChart = ({ id }: { id: EnvelopeId }) => {
           : undefined
       }
       aside={<TempoKey id={id} bpm={knobs.bpm} setBpm={setEnvelopeBpm} />}
+      midiTarget={id}
       // the points on the curves: a double click gives a stage its default curve again
       curveMax={ENVELOPE_CURVE_MAX}
       defaultCurves={ENVELOPE_CURVES}

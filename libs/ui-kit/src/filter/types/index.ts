@@ -26,9 +26,12 @@ export type CommonFilterProps = FilterParams & {
   typeSelect: React.ReactNode;
   setNumericValue: (key: FilterNumerics, value: number) => void;
   ranges: FilterRanges;
-  // the modulation of each knob (its routes and drop target)
+  // the modulation of each knob (its routes and drop target) and its id of MIDI Learn
   modulation?: Partial<
-    Record<FilterNumerics, Pick<HandleProps, 'modulations' | 'modTarget' | 'onClearModulations'>>
+    Record<
+      FilterNumerics,
+      Pick<HandleProps, 'modulations' | 'modTarget' | 'onClearModulations' | 'midiTarget'>
+    >
   >;
   // the default of each knob (its menu sets it, within the range of the type)
   defaults?: Partial<FilterProps>;

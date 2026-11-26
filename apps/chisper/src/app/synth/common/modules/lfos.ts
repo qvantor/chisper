@@ -29,6 +29,7 @@ import {
   TEMPO_DIVISIONS,
   TIME_DIVISIONS,
 } from '@chisper/preset-schema';
+import { number } from '@chisper/math';
 import { urlSnapshotPlugin } from '../../../app';
 import { featureUsed } from '../../../common/services/analytics';
 import {
@@ -45,6 +46,7 @@ import {
   phaseAt,
   RETRIG,
 } from '../lfo/lfo-curve';
+import { LFO_KNOBS, ModScale } from '../modulation/modulation-targets';
 import type { SoundCoreModule } from './synth-core';
 import { TransportModule } from './transport';
 
@@ -78,6 +80,17 @@ const KNOB_RANGES: Record<LfoKnob, [number, number]> = {
   phase: [0, 1],
 };
 const KNOBS = Object.keys(KNOB_RANGES) as LfoKnob[];
+// each knob as the kit takes it (LFO_KNOBS of the routes): its label, its travel in the units it shows (Rate goes by
+// the frequency, right faster: its param is the period) and its step; its knobs and a CC (MIDI Learn) set them alike
+export const LFO_KNOB_DEFS = Object.fromEntries(
+  Object.entries(LFO_KNOBS).map(([knob, { label, scale, range, precision }]) => [
+    knob,
+    { label, min: range[0], max: range[1], mode: scale, precision },
+  ])
+) as Record<LfoKnob, { label: string; min: number; max: number; mode: ModScale; precision: number }>;
+// the period of Rate from the frequency its knob shows (within the range of its param)
+export const lfoPeriodOf = (frequency: number) =>
+  number.thresholds(1 / frequency, LFO_RATE_MIN, LFO_RATE_MAX);
 
 // points of a snapshot, as the schema takes them (a url snapshot skips presetDataSchema): 2..LFO_POINTS_MAX of
 // [x, y, k] within their ranges, from 0 up; else none
@@ -157,6 +170,14 @@ export const rateStepsAt = ({ trip, dot }: Pick<LfoSync, 'trip' | 'dot'>, bpm: n
   const fitting = steps.slice(first);
   RATE_STEPS.set(key, fitting);
   return fitting;
+};
+// the steps of Rate at a tempo as its knob goes, right faster (the same steps: the same array)
+const RATE_KNOB_STEPS = new WeakMap<number[], number[]>();
+export const rateKnobSteps = (lfo: Pick<LfoSync, 'trip' | 'dot'>, bpm: number) => {
+  const steps = rateStepsAt(lfo, bpm);
+  let reversed = RATE_KNOB_STEPS.get(steps);
+  if (!reversed) RATE_KNOB_STEPS.set(steps, (reversed = [...steps].reverse()));
+  return reversed;
 };
 // the division Rate plays at a tempo: its own, else (shorter than LFO_RATE_MIN there) the shortest of its steps
 // there; the preset keeps its own (a slower tempo plays it again)

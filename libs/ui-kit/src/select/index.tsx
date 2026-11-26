@@ -29,6 +29,8 @@ interface Props<T> {
   value: T;
   options: Option<T>[];
   onChange: (value: T) => void;
+  // its id of MIDI Learn (a CC chooses an option)
+  midiTarget?: string;
 }
 
 // the options in runs of one group (or of none)
@@ -40,7 +42,7 @@ const groupRuns = <T,>(options: Option<T>[]) =>
     return runs;
   }, []);
 
-export const Select = <T extends string | number>({ value, options, onChange }: Props<T>) => {
+export const Select = <T extends string | number>({ value, options, onChange, midiTarget }: Props<T>) => {
   const onChangeInternal = (e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value as T);
   // around the options that can be chosen; from a value that is none of them next is the first, previous the last
   const step = (delta: number) => () => {
@@ -56,7 +58,7 @@ export const Select = <T extends string | number>({ value, options, onChange }: 
   );
 
   return (
-    <SelectDumb prev={step(-1)} next={step(1)}>
+    <SelectDumb prev={step(-1)} next={step(1)} midiTarget={midiTarget}>
       <Root value={value} onChange={onChangeInternal}>
         {groupRuns(options).map(({ group, options }) =>
           group === undefined ? (

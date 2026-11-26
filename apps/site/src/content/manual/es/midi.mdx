@@ -3,7 +3,7 @@ title: 'Teclado MIDI en el navegador: ajustes, Chromebook, iPad y soluciones'
 h1: 'Teclado MIDI, Chromebook, iPad: configuración y solución de problemas'
 description: 'Conecta un teclado MIDI o tu DAW a Chisper con MIDI Clock, toca en Chromebook, iPad o móvil, elige la latencia y arregla la falta de sonido o los chasquidos.'
 nav: 'MIDI y dispositivos'
-updated: 2026-11-12
+updated: 2026-11-25
 preset: theremin
 image: midi
 ---
@@ -37,7 +37,7 @@ MIDI, haz clic una vez en la página.
 
 <Figure name='midi' alt='El menú MIDI de Chisper: la luz IN, un teclado elegido en Input, los botones de Channel All y de 1 a 16, y la luz de Sync to MIDI Clock esperando un reloj' narrow>
 
-**Midi** en la cabecera: la entrada, su canal y el reloj.
+**Midi** en la cabecera: la entrada, su canal, el reloj y MIDI Learn.
 
 </Figure>
 
@@ -48,6 +48,7 @@ MIDI, haz clic una vez en la página.
   él, así que ves por qué canal envía tu teclado.
 - **IN** se ilumina mientras mantienes pulsada una tecla: la forma más rápida de comprobar que llegan las notas.
 - **Sync to MIDI Clock**: mira más abajo.
+- **MIDI Learn**, **Takeover** y **Bindings**: mira MIDI Learn, más abajo.
 
 Al cambiar la entrada o el canal se sueltan las notas que se mantenían en el anterior.
 
@@ -57,13 +58,55 @@ Al cambiar la entrada o el canal se sueltan las notas que se mantenían en el an
   el volumen de cada nota. La misma nota mantenida en dos canales es una sola voz.
 - **Pitch bend**, hasta donde marquen los recuadros **Up** y **Down** junto a la rueda de pitch (de 0 a 24
   semitonos, 2 por defecto; el preset los guarda).
+- **All Notes Off** y **All Sound Off**, que un DAW envía al parar: se sueltan las notas que se mantenían en
+  su canal, cada una con su Release. **Reset All Controllers** devuelve el pitch bend al reposo.
 - **MIDI Clock** de un DAW o de una caja de ritmos, con Start, Stop, Continue y Song Position. Con **Sync to MIDI
   Clock** activado (por defecto), el tempo de Chisper sigue al reloj tras un pulso de este: la luz pasa de *Waiting
   for a clock* al tempo (*120 BPM*), y el recuadro de tempo del piano roll muestra **EXT**. Medio segundo sin reloj
   y Chisper vuelve a su propio tempo. Stop detiene el piano roll donde está; los LFO siguen en marcha.
 
-Todavía no se leen: Control Change (la rueda de modulación, un pedal de sustain, perillas y faders), aftertouch ni
-cambios de programa. Chisper no envía MIDI.
+- **Control Change (CC)** de las perillas y los faders de un controlador o de un DAW, para los controles que
+  asignes con MIDI Learn (más abajo).
+
+Todavía no se leen: un CC sin asignar a ningún control (la rueda de modulación y un pedal de sustain no hacen nada
+hasta que los asignas), aftertouch ni cambios de programa. Chisper no envía MIDI.
+
+## ¿Cómo muevo las perillas desde un controlador MIDI (MIDI Learn)?
+
+Cada perilla, interruptor y selector de Chisper puede seguir a una perilla o a un fader de tu controlador MIDI, o a
+una perilla de un plugin MIDI de tu DAW (por ejemplo, el MIDI Out de FL Studio por el IAC Driver o loopMIDI, con su
+automatización):
+
+1. Haz clic derecho en el control (en una pantalla táctil, mantenlo pulsado) y elige **MIDI Learn**. Su contorno
+   parpadea y Chisper dice *Move a control on your MIDI device* (mueve un control de tu dispositivo MIDI).
+2. Gira una perilla de tu controlador. Chisper dice qué CC tomó (*CC 74 → Filter Cutoff*) y desde ese momento el
+   control sigue a esa perilla igual que sigue a tu ratón.
+
+Para asignar muchos controles seguidos, abre **Midi** y activa ahí **MIDI Learn**. Cada control que un CC puede
+mover lleva un contorno, uno asignado su CC, y el botón **Midi** de la cabecera dice **Learn**. Haz clic o toca un
+control (no cambia), gira una perilla de tu controlador y luego haz clic en el siguiente control. El mismo
+interruptor o <kbd>Esc</kbd> lo terminan.
+
+- Un CC mueve un solo control, y un control toma un solo CC. Un CC que asignas a otro control deja el primero
+  (*CC 74: Filter Cutoff → Filter Res*).
+- El CC llega de la entrada y del canal del menú Midi: con **All** canales, el CC 74 de cualquier canal es el mismo
+  CC.
+- Una perilla va adonde está tu perilla a lo largo de su recorrido, en sus propios pasos (Wave por frames enteros,
+  Poly por voces). Un interruptor se enciende por encima de la mitad de tu perilla y se apaga por debajo; un
+  selector (un tipo de filtro, un modo) toma la opción de su parte del recorrido. Ambos cambian solo cuando tu
+  perilla pasa a otra parte, así que un interruptor que pulsas con el ratón se queda como está.
+- Un botón o un pad de tu controlador enciende y apaga un interruptor en cada pulsación si lo asignas pulsándolo:
+  Chisper ve que lo sueltas enseguida. Un pad que no envía nada al soltarlo también lo hace si eliges
+  **CC n: toggle on press** en el menú del interruptor; **CC n: on/off by value** lo deshace.
+- **Remove MIDI CC**, en el menú de un control, quita su asignación. **Bindings**, en el menú Midi, las lista todas
+  por CC, con **×** para cada una y **Clear all**.
+- El navegador guarda las asignaciones, no el preset: se quedan cuando abres otro preset o recargas la página. Un
+  navegador empieza con los cuatro macros en los CC 20 a 23.
+- **Takeover**: con **Jump** (por defecto) un control va a tu perilla en cuanto la mueves. Con **Pickup** un control
+  que movió un preset o el ratón espera a que tu perilla pase por su valor, así el sonido nunca salta; mientras
+  tanto, una marca tenue en el control muestra dónde está tu perilla.
+- No se pueden asignar el bank select, el data entry, los números RPN y NRPN ni los mensajes de modo de canal (All
+  Notes Off, Reset All Controllers…).
 
 ## ¿Cómo toco Chisper desde un DAW y lo sincronizo con la canción?
 
@@ -86,6 +129,8 @@ puerto MIDI virtual, y el navegador ve ese puerto como un dispositivo MIDI más.
 - Start, Stop, Continue y Song Position también llegan. Pulsa Play en el piano roll de Chisper mientras manda el
   reloj: el clip espera al Start del DAW y luego suena a tempo con la canción, desde donde arranque el DAW.
 - Con el botón del ancla de un LFO activado, un LFO en Free se mantiene sobre los tiempos de la canción.
+- Las perillas también siguen al DAW: envía CC desde su automatización o un plugin MIDI al mismo puerto y asígnalos
+  con MIDI Learn (más arriba).
 - Chisper escucha una sola entrada. Para tocar también tu teclado, deja que el DAW lo reciba y lo reenvíe por el
   mismo puerto (en Windows es la forma de hacerlo de todos modos: un dispositivo suele estar abierto en un solo
   programa).
@@ -185,6 +230,9 @@ muestras cada vez en Low y 256 en Normal.
   cualquier otra aplicación musical que use el teclado y recarga la página.
 - Llegan notas (la luz **IN** se enciende) pero no suena nada: pon **Channel** en **All**, o en el canal cuyo botón
   se ilumina.
+- Una perilla asignada no sigue a tu controlador: revisa **Channel** como arriba. Con **Pickup**, primero gira tu
+  perilla más allá del valor del control (su marca tenue muestra dónde está tu perilla).
+- **MIDI Learn** está en gris con *No MIDI input*: el navegador no tiene MIDI, mira arriba.
 
 ## Ejercicio: toca con la rueda de pitch
 

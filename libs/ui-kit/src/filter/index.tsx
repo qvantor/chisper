@@ -9,6 +9,7 @@ import { filterKnobLooks } from './services/knobs';
 export type { FilterNumerics, FilterParams, FilterRange, FilterRanges };
 export { FilterResponse };
 export { frequencyResponseDb } from './services';
+export { filterKnobLooks };
 
 const Root = styled.div`
   display: flex;

@@ -27,7 +27,7 @@ export const FilterSection = () => {
   };
 
   return (
-    <Section name='Filter' active={active} onClick={toggleActive}>
+    <Section name='Filter' active={active} onClick={toggleActive} midiTarget='filter.on'>
       <Filter
         {...filter}
         type={filterType}

@@ -27,6 +27,7 @@ import {
 } from '../../common/components';
 import { useMidiController, useTransport } from '../common/modules';
 import { useLights } from './use-lights';
+import { MidiLearnGroup, useLearnMode } from './midi-learn-section';
 
 const { colors } = theme;
 
@@ -281,13 +282,17 @@ const MidiGroups = () => (
     <PopoverGroup>
       <ClockSync />
     </PopoverGroup>
+    <MidiLearnGroup access />
   </>
 );
 
 const NoMidi = () => (
-  <PopoverGroup>
-    <PopoverNote>MIDI isn&apos;t available: no Web MIDI in this browser, or access was denied.</PopoverNote>
-  </PopoverGroup>
+  <>
+    <PopoverGroup>
+      <PopoverNote>MIDI isn&apos;t available: no Web MIDI in this browser, or access was denied.</PopoverNote>
+    </PopoverGroup>
+    <MidiLearnGroup access={false} />
+  </>
 );
 
 export const MidiInput = () => {
@@ -296,6 +301,8 @@ export const MidiInput = () => {
   // none without WebMIDI (or its permission): no groups, no lamp
   const access = useBehaviorSubject($midiAccess);
   const selected = useBehaviorSubject($selectedInputId);
+  // the Learn mode on: the key lit and named so while the panel is closed (a press on a control chooses it)
+  const learning = useLearnMode();
   return (
     <SectionPopover
       title='MIDI'
@@ -305,8 +312,8 @@ export const MidiInput = () => {
       open={open}
       onOpenChange={setOpen}
     >
-      <PanelButton icon={<MdPiano />} active={open} indicator={selected !== null}>
-        Midi
+      <PanelButton icon={<MdPiano />} active={open || learning} indicator={selected !== null}>
+        {learning ? 'Learn' : 'Midi'}
       </PanelButton>
     </SectionPopover>
   );

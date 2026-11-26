@@ -4,6 +4,7 @@ import { styled } from 'styled-components';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { theme } from '../common/constants';
 import { text10, textBold12 } from '../common/styles';
+import { useMidiAttrs } from '../midi-learn';
 
 interface Option<T extends string> {
   id: T;
@@ -17,6 +18,8 @@ interface Props<T extends string> {
   onChange: (id: T) => void;
   disabled?: boolean;
   className?: string;
+  // its id of MIDI Learn (a CC chooses an option)
+  midiTarget?: string;
 }
 
 const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
@@ -139,7 +142,9 @@ export const ModeSwitch = <T extends string>({
   onChange,
   disabled = false,
   className,
+  midiTarget,
 }: Props<T>) => {
+  const midi = useMidiAttrs(midiTarget);
   const index = Math.max(
     0,
     options.findIndex((option) => option.id === value)
@@ -147,7 +152,7 @@ export const ModeSwitch = <T extends string>({
   const current = options[index];
   const step = (by: number) => onChange(options[(index + by + options.length) % options.length].id);
   return (
-    <Root className={cls(className, { disabled })}>
+    <Root className={cls(className, { disabled })} {...midi}>
       <Display type='button' disabled={disabled} onClick={() => step(1)} aria-label={current?.label}>
         {current?.icon && <Icon>{current.icon}</Icon>}
         <Name>{current?.label}</Name>

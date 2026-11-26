@@ -9,7 +9,7 @@ import { ScaleMode, valueScale } from '../common/utils';
 import { Tooltip } from '../tooltip';
 import { ValueTooltip } from '../tooltip/value-tooltip';
 import { Label } from '../label';
-import { MarkCanvas, useModulations } from '../common/utils/use-mod-mark';
+import { MarkCanvas, useModulations, usePickupMark } from '../common/utils/use-mod-mark';
 import { ModTravel, OFF_OPACITY } from '../common/utils/mod-routes';
 import { AMOUNT_DOT_SIZE, RoutesDot } from '../amount-dot';
 import { MOD_TARGET_ATTR } from '../mod-drag';
@@ -84,6 +84,8 @@ export interface HandleProps {
   onClearModulations?: () => void;
   // pressed and let go (a chart shows what it changes while it is held)
   onActiveChange?: (active: boolean) => void;
+  // its id of MIDI Learn (a CC moves it): its menu has the items of MIDI Learn, in Pickup the mark of the controller
+  midiTarget?: string;
 }
 
 interface StyledProps {
@@ -304,6 +306,7 @@ export const Handle = ({
   defaultValue,
   onClearModulations,
   onActiveChange,
+  midiTarget,
 }: HandleProps) => {
   const { svg, arc: travelRadii } = sizes[size];
   const { ring, track, travel, dot } = shapes[size];
@@ -369,7 +372,9 @@ export const Handle = ({
     onChange,
     modulations: disabled ? undefined : routes,
     onClearModulations,
+    midiTarget,
   });
+  const { pickupMark, pickupShown } = usePickupMark(markCanvases[size], menu.midi?.pickup ?? null);
 
   const onPointerDown = (e: React.PointerEvent) => {
     const initialPosition = vector2d.fromMouseEvent(e);
@@ -407,6 +412,7 @@ export const Handle = ({
         onContextMenu={menu.onContextMenu}
         className={cls({ disabled: disabled })}
         {...(modTarget && !disabled && { [MOD_TARGET_ATTR]: modTarget })}
+        {...menu.midiAttrs}
       >
         <HandleContainer $size={size} ref={menu.anchorRef}>
           <ModHighlight $size={size} />
@@ -417,6 +423,7 @@ export const Handle = ({
           </HandleCircle>
           <HandleCircleShadow $size={size} />
           {live && <ModMark {...modMark} $size={size} data-testid='mod-mark' />}
+          {pickupShown && <ModMark {...pickupMark} $size={size} data-testid='pickup-mark' />}
           <Svg $size={size} className={cls({ scale: !routes })}>
             <g transform={`translate(${svg / 2},${svg / 2})`}>
               {routes ? (

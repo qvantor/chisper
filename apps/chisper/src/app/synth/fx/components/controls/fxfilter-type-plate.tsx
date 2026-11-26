@@ -7,12 +7,14 @@ import {
   HighPassIcon,
   keepFocus,
   LowPassIcon,
+  midiInset,
   NotchPeakIcon,
   SwitchKey,
   SwitchKeys,
   text10,
   textBold12,
   theme,
+  useMidiAttrs,
 } from '@chisper/ui-kit';
 import { BrowserKey } from '../../../../common/components';
 import { FILTER_TYPE_NAMES, filterTypeBrowser, typeInCategory } from '../../../filter/filter-types';
@@ -36,8 +38,9 @@ const KEYS: Record<string, { icon: React.ReactNode; hint: string }> = {
 const LINE = `1px solid ${theme.colors.primaryDarkMediumContrast}`;
 
 // one dark plate as high as the screen beside it (as the switch of a mode of the EQ is): the keys of the categories
-// over the strip of the type; bypassed, faded as a whole
-const Plate = styled.div`
+// over the strip of the type; bypassed, faded as a whole. The outline and the CC of MIDI Learn inside its box (it
+// clips)
+const Plate = styled.div.attrs(midiInset)`
   flex: none;
   display: flex;
   flex-direction: column;
@@ -133,8 +136,10 @@ export const FxFilterTypePlate = React.memo(({ type, on, setParam }: Props) => {
     const { types } = category;
     setType(types[(types.indexOf(type) + delta + types.length) % types.length]);
   };
+  // (a CC of MIDI Learn chooses a type of all, in the order of FX_FILTER_TYPES)
+  const midi = useMidiAttrs('fxfilter.type');
   return (
-    <Plate className={cls({ disabled })} role='group' aria-label='Filter type'>
+    <Plate {...midi} className={cls({ disabled })} role='group' aria-label='Filter type'>
       <Categories aria-label='Category' disabled={disabled} disabledHint='Turn on the FX Filter' grid>
         {categories.map(({ value, label, types }) => {
           const { icon, hint } = KEYS[value];

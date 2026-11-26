@@ -6,7 +6,7 @@ import { number } from '@chisper/math';
 import { theme } from '../common/constants';
 import { scaleTicks, TickKind } from '../common/constants/scale-ticks';
 import { valueScale } from '../common/utils';
-import { MarkCanvas, useModulations } from '../common/utils/use-mod-mark';
+import { MarkCanvas, useModulations, usePickupMark } from '../common/utils/use-mod-mark';
 import { OFF_OPACITY } from '../common/utils/mod-routes';
 import { Tooltip } from '../tooltip';
 import { ValueTooltip } from '../tooltip/value-tooltip';
@@ -232,6 +232,7 @@ export const Fader = ({
   modTarget,
   defaultValue,
   onClearModulations,
+  midiTarget,
 }: FaderProps) => {
   const scale = React.useMemo(
     () => valueScale(mode).domain([min, max]).range([0, 1]).clamp(true),
@@ -268,7 +269,9 @@ export const Fader = ({
     onChange,
     modulations: disabled ? undefined : routes,
     onClearModulations,
+    midiTarget,
   });
+  const { pickupMark, pickupShown } = usePickupMark(MARK_CANVAS, menu.midi?.pickup ?? null);
   const bodyRef = menu.anchorRef;
   const capRef = React.useRef<HTMLDivElement>(null);
   const slotRef = React.useRef<HTMLDivElement>(null);
@@ -326,6 +329,7 @@ export const Fader = ({
         onPointerDown={onPointerDown}
         onContextMenu={menu.onContextMenu}
         {...(modTarget && !disabled && { [MOD_TARGET_ATTR]: modTarget })}
+        {...menu.midiAttrs}
       >
         <Body
           ref={bodyRef}
@@ -378,6 +382,7 @@ export const Fader = ({
             />
           )}
           {live && <ModMark {...modMark} data-testid='fader-mod-mark' />}
+          {pickupShown && <ModMark {...pickupMark} data-testid='fader-pickup-mark' />}
           {modulations.length > 0 && (
             <DotBox ref={dotRef}>
               <Dot modulations={modulations} onLongPress={menu.open} />

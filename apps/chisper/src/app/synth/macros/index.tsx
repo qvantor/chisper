@@ -7,6 +7,7 @@ import { useBehaviorSubject, useBehaviorSubjectField } from '@chisper/rxjs-react
 import { number } from '@chisper/math';
 import { MACRO_NAME_MAX_LENGTH, MacroId, MACROS } from '@chisper/preset-schema';
 import { useEnvelopes, useModulation } from '../common/modules';
+import { MACRO_PRECISION } from '../common/modules/modulation';
 import { useRouteCount, useSourceTab } from '../modulation/source-tabs';
 import { SOURCE_COLORS, SOURCE_LABELS } from '../envelope/envelope-colors';
 
@@ -269,11 +270,12 @@ const MacroKnob = ({ id, index }: { id: MacroId; index: number }) => {
         value={level}
         min={0}
         max={1}
-        precision={100}
+        precision={MACRO_PRECISION}
         name={SOURCE_LABELS[id]}
         formatValue={formatLevel}
         defaultValue={0}
         onChange={(value) => setMacro(id, value)}
+        midiTarget={id}
       />
     </Knob>
   );

@@ -21,7 +21,7 @@ export const KeysPlate = styled(SwitchKeys)`
 interface Props extends Pick<FxControlsProps, 'on' | 'setParam'>, Record<'sync' | 'trip' | 'dot', boolean> {
   // the knob they are beside (Time, Rate) and its effect (delay, chorus)
   of: string;
-  effect: string;
+  effect: 'delay' | 'chorus';
 }
 
 // BPM over TRIP and DOT on one plate beside the knob of a time: its params `sync`, `trip` and `dot`. Memoized: the
@@ -34,6 +34,7 @@ export const TempoKeys = React.memo(({ of, effect, on, sync, trip, dot, setParam
       hint={`${of} in note values`}
       on={sync}
       onChange={(value) => setParam('sync', +value)}
+      midiTarget={`${effect}.sync`}
     />
     <NoteValueKeys
       of={of}
@@ -42,6 +43,7 @@ export const TempoKeys = React.memo(({ of, effect, on, sync, trip, dot, setParam
       dot={dot}
       onTrip={(value) => setParam('trip', +value)}
       onDot={(value) => setParam('dot', +value)}
+      midiTarget={effect}
     />
   </KeysPlate>
 ));

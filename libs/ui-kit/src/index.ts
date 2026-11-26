@@ -15,6 +15,16 @@ export {
 export { Handle } from './handle';
 export { AmountDot } from './amount-dot';
 export { startModDrag, MOD_DWELL_ATTR } from './mod-drag';
+export { CONTROL_MENU_ATTR, MenuPanel, MidiMenuActions } from './control-menu';
+export {
+  MIDI_INSET_ATTR,
+  MIDI_LEARN_CLASS,
+  MIDI_TARGET_ATTR,
+  MidiLearnContext,
+  midiInset,
+  useMidiAttrs,
+} from './midi-learn';
+export type { MidiLearnApi, MidiMark, MidiMenuItem } from './midi-learn';
 export { Fader } from './fader';
 export { Tooltip } from './tooltip';
 export { ValueTooltip } from './tooltip/value-tooltip';
@@ -26,7 +36,9 @@ export { PianoKeyboard } from './piano-keyboard';
 export { PitchWheel, PITCH_WHEEL_WIDTH } from './pitch-wheel';
 export {
   AdsrEnvelope,
+  AMP_PRECISION,
   formatTime,
+  TIME_PRECISION,
   NoteDot,
   NOTE_DOT_COLOR,
   NOTE_DOT_RADIUS,
@@ -41,7 +53,7 @@ export { Section } from './section';
 export { VolumeAnalyser } from './volume-analyser';
 export { FqAnalyser } from './fq-analyser';
 export { QUIET_MS } from './common/utils/meter-loop';
-export { Filter, FilterResponse, frequencyResponseDb } from './filter';
+export { Filter, filterKnobLooks, FilterResponse, frequencyResponseDb } from './filter';
 export { Select, SelectDumb, ContentContainer } from './select';
 export { MiddleEllipsis } from './middle-ellipsis';
 export { LoadProgress } from './load-progress';

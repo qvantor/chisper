@@ -58,4 +58,11 @@ export interface FxDefinition<K extends string = string> {
   core: (params: Record<K, number>, bpm: number, sampleRate: number) => Record<string, number>;
   // it tells a meter while a screen watches it (FxSlot.meter)
   metered?: boolean;
+  // its knob of a time in BPM (Time of the delay, Rate of the chorus): with `sync` on it is its param `div`, one of
+  // its steps by TRIP and DOT (left to right), the division it is at
+  tempo?: {
+    knob: K;
+    stepsOf: (params: Record<string, number>) => number[];
+    divisionOf: (params: Record<string, number>) => number;
+  };
 }

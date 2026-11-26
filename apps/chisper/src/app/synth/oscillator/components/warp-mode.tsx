@@ -35,6 +35,9 @@ const WARP_LOOKS: Record<WarpModeId, WarpLook> = {
   pwm: { label: 'PWM', hint: 'Squeezes the frame to the left, as a pulse narrows', knobs: [0.375] },
 };
 
+// the labels of the modes by index (a CC of MIDI Learn chooses among them)
+export const WARP_MODE_LABELS = WARP_MODES.map((id) => WARP_LOOKS[id].label);
+
 const OPTIONS: ModeOption<number>[] = WARP_MODES.map((id, index) => {
   const { knobs, ...look } = WARP_LOOKS[id];
   return { id: index, ...look, icon: <WarpModeIcon mode={index} knobs={knobs} />, off: id === 'off' };
@@ -43,11 +46,13 @@ const OPTIONS: ModeOption<number>[] = WARP_MODES.map((id, index) => {
 interface Props {
   // a narrow oscillator: the glyph alone
   compact: boolean;
+  // the prefix of the ids of the oscillator (osc1.warpMode)
+  target: 'osc1' | 'osc2';
 }
 
 // the mode of the Warp on a plate right of its knob: its glyph and its name, a press lists the modes; it renders on
 // the mode
-export const WarpMode = ({ compact }: Props) => {
+export const WarpMode = ({ compact, target }: Props) => {
   const [{ $warpMode }, { setWarpMode }] = useOscillatorContext();
   const mode = useBehaviorSubject($warpMode);
   return (
@@ -58,6 +63,7 @@ export const WarpMode = ({ compact }: Props) => {
       value={mode}
       onChange={setWarpMode}
       compact={compact}
+      midiTarget={`${target}.warpMode`}
     />
   );
 };

@@ -63,6 +63,7 @@ export const DelayControls = ({ params, setParam, on, sampleRate, out }: FxContr
           icons={MODE_ICONS}
           value={params['mode']}
           onChange={(value) => setParam('mode', value)}
+          target='delay.mode'
           disabled={!on}
         />
       </ControlsGroup>
