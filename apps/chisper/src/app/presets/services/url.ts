@@ -10,9 +10,9 @@ export const getUrlPresetId = () => param(PRESET_PARAM);
 export const getUrlClipId = () => param(CLIP_PARAM);
 
 // the url of a page (this one) with a preset and a clip (null: none), no other params (legacy snapshot ones,
-// those a link brought)
+// those a link brought); repeated slashes of the path as one (a path `//` is no url relative to the origin)
 const pageUrl = (preset: string | null, clip: string | null, page: URL | Location = window.location) => {
-  const url = new URL(page.pathname, page.origin);
+  const url = new URL(page.pathname.replace(/\/{2,}/g, '/'), page.origin);
   if (preset !== null) url.searchParams.set(PRESET_PARAM, preset);
   if (clip !== null) url.searchParams.set(CLIP_PARAM, clip);
   return url.toString();

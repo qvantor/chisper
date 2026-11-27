@@ -5,6 +5,7 @@ import {
   getUrlClipId,
   getUrlPresetId,
   presetUrl,
+  publicUrl,
   setUrlClipId,
   setUrlPresetId,
   shareClip,
@@ -58,6 +59,40 @@ describe('url', () => {
     window.history.replaceState(null, '', '/?preset=x');
     expect(clipUrl('c1', 'p1')).toBe(`${window.location.origin}/?preset=p1&clip=c1`);
     expect(clipUrl('c1', null)).toBe(`${window.location.origin}/?clip=c1`);
+  });
+
+  describe('a path of repeated slashes', () => {
+    // a relative `//` is another origin to jsdom: the page is set by its whole url
+    const open = (path: string) => window.history.replaceState(null, '', `${window.location.origin}${path}`);
+    afterEach(() => window.history.replaceState(null, '', '/'));
+
+    it('replaces the url with the preset id and the path as one slash', () => {
+      open('//?preset=old&clip=c1');
+      const length = window.history.length;
+      expect(() => setUrlPresetId('p1')).not.toThrow();
+      expect(window.location.pathname).toBe('/');
+      expect(window.location.search).toBe('?preset=p1&clip=c1');
+      expect(window.history.length).toBe(length);
+    });
+
+    it('clears the preset id, each run of slashes of the path as one', () => {
+      open('//synth//a?preset=x&osc1-u=3');
+      clearUrlPresetId();
+      expect(window.location.pathname).toBe('/synth/a');
+      expect(window.location.search).toBe('');
+    });
+
+    it('builds the links of a preset and a clip', () => {
+      open('//');
+      expect(presetUrl('p1')).toBe(`${window.location.origin}/?preset=p1`);
+      expect(clipUrl('c1', 'p1')).toBe(`${window.location.origin}/?preset=p1&clip=c1`);
+    });
+
+    it('gives the public url of a page', () => {
+      expect(publicUrl('https://chisper.qvantor.org//?preset=p1&utm_source=x#h')).toBe(
+        'https://chisper.qvantor.org/?preset=p1'
+      );
+    });
   });
 
   describe('sharePreset', () => {

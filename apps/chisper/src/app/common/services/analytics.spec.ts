@@ -302,6 +302,15 @@ describe('analytics', () => {
       expect(result).not.toHaveProperty('$set_once');
     });
 
+    it('the URL of a path of repeated slashes with one', () => {
+      const result = beforeSend({
+        uuid: '1',
+        event: 'feature_used',
+        properties: { $current_url: 'https://chisper.qvantor.org//?preset=p1&fbclid=X' },
+      } as unknown as CaptureResult);
+      expect(result?.properties['$current_url']).toBe('https://chisper.qvantor.org/?preset=p1');
+    });
+
     it('drops every event of the SDK of its own', () => {
       for (const event of ['$pageview', '$pageleave', '$autocapture', '$web_vitals', '$set', '$identify'])
         expect(beforeSend({ uuid: '1', event, properties: {} } as CaptureResult)).toBeNull();
