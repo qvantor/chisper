@@ -26,9 +26,15 @@ pub const RESONANT: f32 = 40.0;
 // The coefficients of a span whose knobs moved go to those of its knobs as a line from where the span before left
 // them, a step every REFRESH samples of a model type (every sample of a fast one: FINE), every sample of a type of a
 // BiquadFilterNode (held a span each they were a stair of SEGMENT samples: a noise over the note, more of a steeper
-// type; the filter is a span behind its knobs). The first span of a note is no line. The coefficients between two
-// designs whose cutoffs are further than JUMP times apart are of no filter: a span whose cutoff goes that far is a
-// line in pieces (`pieces`)
+// type). The knobs of a span are read at its end, a point of the routes (the last sample of a pass for its last span):
+// its line goes from those of the end of the span before to them (read at its start, the filter of a voice was a span
+// behind its knobs: the top of a pluck came 0.7 ms late, the start of the note darker). The first span of a note of the
+// voice (and the first after a change of type) is a line too, from the design of its knobs at its start (`Pass::start`
+// of the voice: at once to those of its end, a span ahead of them, a fall of the cutoff from the top of an envelope lost
+// its top, its first 3 ms 3 to 23 dB further from a design at every sample), and so is the first after a retrigger of
+// the note, its pass cut there (`Pass::cut`); a slot with no knobs before (reset: NaN, the FX Filter from a silence)
+// takes those of its end at once. The coefficients between two designs whose cutoffs are further than JUMP times apart are
+// of no filter: a span whose cutoff goes that far is a line in pieces (`pieces`)
 const JUMP: f64 = 4.0;
 pub fn glides(cutoff: f64, before: f64) -> bool {
     cutoff <= before * JUMP && before <= cutoff * JUMP
@@ -175,10 +181,10 @@ impl ModelSlot {
         [self.last[0], self.last[1], self.last[3], self.last[2]]
     }
 
-    /// the pieces of its span s..e to the cutoff f (`pieces`; `moving`: a knob of the pass moves): one of the first
-    /// span of a note, of a pass whose knobs stay
+    /// the pieces of its span s..e to the cutoff f (`pieces`; `moving`: a knob of the pass moves): one of a pass whose
+    /// knobs stay, of a slot with no knobs before (reset)
     pub fn pieces(&self, f: f64, s: usize, e: usize, moving: bool) -> usize {
-        if moving && !self.fresh {
+        if moving {
             pieces(self.last[0], f, s, e)
         } else {
             1
@@ -204,8 +210,7 @@ impl ModelSlot {
         piece: bool,
     ) {
         let redesign = f != self.last[0] || q != self.last[1] || v != self.last[2];
-        let line =
-            moving && !self.fresh && (redesign || d != self.last[3]) && (piece || glides(f, self.last[0]));
+        let line = moving && (redesign || d != self.last[3]) && (piece || glides(f, self.last[0]));
         self.ramps = line;
         self.fine = line && fast(self.last[0], f, next - s);
         if line {

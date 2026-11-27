@@ -110,6 +110,8 @@ pub struct VoiceFilter {
     // the layout of its pass over the whole block and whether a knob of it moves, worked out by `wide` for this
     // block, by the knobs they are of (where each is, its length): `pass` takes them for those knobs
     scanned: Option<(KnobKeys, Option<Layout>, bool)>,
+    // the sample of this block the note starts again at (a retrigger: `restart`)
+    restart: Option<usize>,
 }
 
 impl VoiceFilter {
@@ -135,6 +137,7 @@ impl VoiceFilter {
             pending: None,
             scratch: [vec![0.0; BLOCK], vec![0.0; BLOCK]],
             scanned: None,
+            restart: None,
         };
         filter.apply(options, false);
         filter
@@ -268,7 +271,13 @@ impl VoiceFilter {
         n: usize,
         moved: impl FnOnce() -> [Option<&'m [f32]>; KNOBS],
     ) -> Option<Layout> {
-        if !matches!(self.kind, Kind::Model(_)) || !self.on || a != 0 || b != n || self.alone() {
+        if !matches!(self.kind, Kind::Model(_))
+            || !self.on
+            || a != 0
+            || b != n
+            || self.alone()
+            || self.restart.is_some()
+        {
             return None;
         }
         let (keys, layout, moving) = {
@@ -284,10 +293,24 @@ impl VoiceFilter {
         layout.filter(|layout| interleaves(*layout, moving))
     }
 
-    /// the knobs of a block of n samples; `spans` Some(a): the cutoff (in Hz, a power of 2 a sample) is read only at
-    /// the starts of the spans of a pass from a (a, a + SEGMENT…: no route reads it), worked out only there
-    pub fn glide(&mut self, n: usize, spans: Option<usize>) {
+    /// the sample of this block the note starts again at (a retrigger of its envelopes and LFOs; None: none), told
+    /// every block before `glide`: the line of its knobs starts again there as at the start of a note (`Pass::cut`)
+    pub fn restart(&mut self, at: Option<usize>) {
+        self.restart = at;
+    }
+
+    /// the sample of its last block the note started again at
+    #[cfg(test)]
+    pub fn restarted(&self) -> Option<usize> {
+        self.restart
+    }
+
+    /// the knobs of a block of n samples; `spans` Some((a, b)): the cutoff (in Hz, a power of 2 a sample) is read only
+    /// at the points of a pass a..b, those of the routes (`point`: the ends of its spans; a: the start of the first
+    /// span of a note, `Pass::start`; no route reads it), worked out only there
+    pub fn glide(&mut self, n: usize, spans: Option<(usize, usize)>) {
         self.scanned = None;
+        let restart = self.restart;
         for k in 0..KNOBS {
             let mut value = self.values[k];
             let target = self.targets[k];
@@ -299,10 +322,10 @@ impl VoiceFilter {
                 let step = self.step;
                 let out = &mut self.gliding[k];
                 match (k, spans) {
-                    (0, Some(a)) => {
+                    (0, Some((a, b))) => {
                         for (i, slot) in out.iter_mut().enumerate().take(n) {
                             value += (target - value) * step;
-                            if i >= a && (i - a).is_multiple_of(SEGMENT) {
+                            if point(i, a, b, restart) {
                                 *slot = pow(2.0, value) as f32;
                             }
                         }
@@ -350,6 +373,7 @@ impl VoiceFilter {
             fade,
             scratch,
             scanned,
+            restart,
             ..
         } = self;
         // (a fade that ended: the new filter alone)
@@ -404,7 +428,19 @@ impl VoiceFilter {
             active: false,
             next: 0,
             pieces: None,
+            restart: *restart,
         }
+    }
+}
+
+/// whether the sample i of a pass a..b is a point of the routes of the knobs of its filter: a, a + SEGMENT… and b - 1,
+/// the ends of its spans; with a retrigger at r inside it (`restart`) those of a..r, then those of r..b (its spans cut
+/// there: `Pass::cut`)
+pub fn point(i: usize, a: usize, b: usize, restart: Option<usize>) -> bool {
+    match restart {
+        Some(r) if r > a && r < b && i >= r => (i - r).is_multiple_of(SEGMENT) || i + 1 == b,
+        Some(r) if r > a && r < b => i >= a && ((i - a).is_multiple_of(SEGMENT) || i + 1 == r),
+        _ => i >= a && ((i - a).is_multiple_of(SEGMENT) || i + 1 == b),
     }
 }
 
@@ -457,9 +493,11 @@ enum Engine<'a> {
     },
 }
 
-/// the filter of a voice over the samples a..b of a block: its knobs are read at the start of each span (SEGMENT
-/// samples from a while one moves, the last one up to b: `span_end`; else the whole a..b), its coefficients worked
-/// out when they changed
+/// the filter of a voice over the samples a..b of a block: its knobs are read at the end of each span (SEGMENT
+/// samples from a while one moves, the last one up to b: `span_end`; else the whole a..b), a point of the routes (b - 1
+/// of the last span), as the FX Filter reads them; its coefficients worked out when they changed. The first span of a
+/// note whose knobs move (and the first after a change of type) goes from the design of its knobs at its start
+/// (`start`); a retrigger of the note cuts the pass there and starts the line again the same way (`cut`)
 pub struct Pass<'a> {
     sample_rate: f64,
     // the designs of the node (None: a voice alone)
@@ -481,11 +519,13 @@ pub struct Pass<'a> {
     next: usize,
     // the span in pieces it plays (model_spans::pieces)
     pieces: Option<Pieces>,
+    // the sample its note starts again at (a retrigger: VoiceFilter::restart)
+    restart: Option<usize>,
 }
 
 // A span in pieces (model_spans::pieces): the knobs of the span before and its own (a model type: cutoff, resonance,
 // Drive, variation; one of a BiquadFilterNode: cutoff, resonance, gain, 0), where it starts and ends, how many pieces,
-// the one that plays. A span is read at its start alone (the points of the routes), its pieces on the way
+// the one that plays. A span is read at its end alone (a point of the routes), its pieces on the way
 #[derive(Clone, Copy)]
 struct Pieces {
     from: [f64; 4],
@@ -586,6 +626,67 @@ impl<'a> Pass<'a> {
         }
     }
 
+    // The first span of a filter with no knobs yet (reset: a note, a change of type on a playing note) whose knobs
+    // move goes as a line from the design of its knobs at its start, a, a point of the routes, as every span after it
+    // goes from those of the end of the span before: designed here, before the coefficients of the lanes are taken
+    // (`before_of`), as a span before would have left them (at once to those of its end, a span ahead of them, a fall
+    // of the cutoff from the top of an envelope was a span late, the start of the note darker). A retrigger of the
+    // note starts the line again so at its sample (`cut`)
+    fn start(&mut self) {
+        if !self.moving || self.a >= self.b {
+            return;
+        }
+        let fresh = match &self.engine {
+            Engine::Web { last, .. } => last[0].is_nan(),
+            Engine::Model { slot, .. } => slot.last[0].is_nan(),
+        };
+        if fresh {
+            self.design_at(self.a);
+        }
+    }
+
+    // Where its note starts again inside a..b (a retrigger: its envelopes and LFOs from there, a voice of mono that
+    // takes a note over) while its knobs move: its spans up to there, the last read at the sample before (the knobs of
+    // the note before), then from the design of its knobs there as at the start of a note (`run_alone`): on the spans
+    // of the block, the span of the retrigger went from the knobs of the span before (a fall of the cutoff from the
+    // top of an envelope lost its top). Still knobs are one design: a retrigger changes nothing of them
+    fn cut(&self) -> Option<usize> {
+        self.restart
+            .filter(|r| self.moving && *r >= self.a && *r < self.b)
+    }
+
+    // the coefficients of the design of its knobs at `at`, a point of the routes: those the line of a span from there
+    // goes from (through the designs of the node, its cell kept: a cutoff that moves alone goes on between the designs
+    // of its cell, as after the first span of a note it did)
+    fn design_at(&mut self, at: usize) {
+        let read = |values: &[f32]| values[if values.len() > 1 { at } else { 0 }] as f64;
+        let (sample_rate, designs, sweeps) = (self.sample_rate, self.designs, self.sweeps);
+        match &mut self.engine {
+            Engine::Web {
+                ty,
+                coefficients,
+                k,
+                power,
+                last,
+                ..
+            } => {
+                let [f, q, g] = [read(self.knobs[0]), read(self.knobs[1]), read(self.knobs[2])];
+                **power = power_of(*ty, q, g);
+                **k = svf_into(coefficients, *ty, f, q, **power, sample_rate);
+                **last = [f, q, g];
+            }
+            Engine::Model { ty, slot } => {
+                let knobs = [
+                    read(self.knobs[0]),
+                    read(self.knobs[1]),
+                    read(self.knobs[3]),
+                    read(self.knobs[4]),
+                ];
+                slot.step(*ty, knobs, at, at, false, sweeps, designs, sample_rate, false);
+            }
+        }
+    }
+
     // the span that starts at s (the end of the one before), or the next piece of a span in pieces
     fn step(&mut self, s: usize) {
         if s < self.a || s >= self.b {
@@ -598,12 +699,14 @@ impl<'a> Pass<'a> {
             self.pieces = None;
             return;
         }
-        let at = |values: &[f32]| (if values.len() > 1 { values[s] } else { values[0] }) as f64;
         let (sample_rate, designs, sweeps) = (self.sample_rate, self.designs, self.sweeps);
         let (moving, next) = (
             self.moving,
             if self.moving { span_end(s, self.b) } else { self.b },
         );
+        // (the knobs at the end of the span: a point of the routes, the last sample of the pass for its last span)
+        let end_at = if next < self.b { next } else { self.b - 1 };
+        let at = |values: &[f32]| values[if values.len() > 1 { end_at } else { 0 }] as f64;
         let piece = next_piece(&mut self.pieces, s);
         let kept = &mut self.pieces;
         let end = match &mut self.engine {
@@ -810,6 +913,7 @@ fn tick(c: &[F32x4; 6], ic1: &mut F32x4, ic2: &mut F32x4, x: F32x4) -> F32x4 {
 /// the channels of a voice (silent outside the a..b of its pass) through its filter, in place; while the filter
 /// before a change of type fades out, it runs on a copy of them and the two are crossfaded
 pub fn run(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
+    pass.start();
     if let Some((fade, scratch)) = pass.fade.take() {
         // (the filter before runs only while it fades out: the fade ends with the pass)
         let (a, b) = (pass.a, pass.b.min(pass.a + fade.left));
@@ -909,8 +1013,32 @@ fn spans_of(
     spans::<false>(layout, c, d, every, slots, ramps, moving, stepped)
 }
 
+// a voice alone; where its note starts again (`cut`), its spans up to there, then from the design of its knobs there
 #[inline(never)]
 fn run_alone(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
+    let (a, b, cut) = (pass.a, pass.b, pass.cut());
+    let mut from = a;
+    loop {
+        let to = match cut {
+            Some(r) if from < r => r,
+            _ => b,
+        };
+        if cut == Some(from) {
+            pass.design_at(from);
+        }
+        (pass.a, pass.b) = (from, to);
+        run_spans(pass, left, right);
+        if to == b {
+            break;
+        }
+        from = to;
+    }
+    pass.a = a;
+}
+
+// the spans of a voice alone over a..b of its pass
+#[inline(never)]
+fn run_spans(pass: &mut Pass, left: &mut [f32], right: &mut [f32]) {
     if let Some(layout) = pass.layout {
         let state = pass.model().state;
         let mut lanes = lanes_of(&state, &state);
@@ -1010,7 +1138,14 @@ fn web_span(
 pub fn run_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
     let [p, q] = passes;
     let [[pl, pr], [ql, qr]] = outs;
-    let shared = p.fade.is_none() && q.fade.is_none() && p.layout == q.layout;
+    p.start();
+    q.start();
+    // (a voice whose note starts again in the block alone: its pass cut there, `run_alone`)
+    let shared = p.fade.is_none()
+        && q.fade.is_none()
+        && p.layout == q.layout
+        && p.cut().is_none()
+        && q.cut().is_none();
     if !shared {
         run(p, pl, pr);
         run(q, ql, qr);
@@ -1026,11 +1161,16 @@ pub fn run_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
 /// four of one layout of sections that play their whole block (of whole groups of REFRESH): two pairs of lanes in one
 /// loop (`run_model_group`); the others in pairs (`run_pair`), the last of three alone
 pub fn run_group(passes: &mut [Pass], outs: &mut [[&mut [f32]; 2]], n: usize) {
+    for pass in passes.iter_mut() {
+        pass.start();
+    }
     // (a block of whole groups of REFRESH, as every block of a node is: every span of the group starts at a refresh,
     // the loop of the group has no sample alone)
     if passes.len() > 2 && n > 0 && n.is_multiple_of(REFRESH) {
         let layout = passes[0].layout;
-        let whole = |pass: &Pass| pass.fade.is_none() && pass.a == 0 && pass.b == n && pass.layout == layout;
+        let whole = |pass: &Pass| {
+            pass.fade.is_none() && pass.a == 0 && pass.b == n && pass.layout == layout && pass.cut().is_none()
+        };
         if let (Some(layout), true) = (layout, passes.iter().all(whole)) {
             if interleaves(layout, passes.iter().any(|pass| pass.moving)) {
                 return run_model_group(layout, passes, outs, n);
@@ -1670,18 +1810,20 @@ fn run_web_pair(passes: [&mut Pass; 2], outs: [[&mut [f32]; 2]; 2], n: usize) {
             stepped[1] = true;
         }
         let e = n.min(p.next).min(q.next);
+        // (where neither plays too: a voice that ended has no filter in its lanes, FROZEN, its state kept as `run`
+        // keeps it, next to the first span of the other, a line from the design of its start)
+        let line = p.ramps() || q.ramps();
+        let ((cp, dp), (cq, dq)) = (p.web_line(), q.web_line());
+        let mask = halves_of(stepped);
+        c = core::array::from_fn(|k| {
+            let starts = F32x4::new(cp[k], cp[k], cq[k], cq[k]);
+            if line {
+                starts.or_else(mask, c[k])
+            } else {
+                starts
+            }
+        });
         if p.active || q.active {
-            let line = p.ramps() || q.ramps();
-            let ((cp, dp), (cq, dq)) = (p.web_line(), q.web_line());
-            let mask = halves_of(stepped);
-            c = core::array::from_fn(|k| {
-                let starts = F32x4::new(cp[k], cp[k], cq[k], cq[k]);
-                if line {
-                    starts.or_else(mask, c[k])
-                } else {
-                    starts
-                }
-            });
             let on = [p.active, q.active];
             let mut channels = (&mut *pl, &mut *pr, &mut *ql, &mut *qr);
             if line {
@@ -1868,7 +2010,7 @@ mod tests {
                     );
                 }
                 for k in 0..2 {
-                    assert_eq!(one[k].state, two[k].state);
+                    assert_eq!(one[k].state, two[k].state, "{ranges:?} {moving} voice {k}");
                 }
             }
         }
@@ -2135,7 +2277,9 @@ mod tests {
     // whose knobs are still plays the bits it plays alone, so does each voice on a line, however the spans of the
     // other cut its own (voices that start late, blocks that are not of whole spans), the saturating sections too
     // whose resonance moves with the cutoff (in pairs and in groups). So do voices whose cutoff goes fast (`pluck`:
-    // spans in pieces, lines a step every sample) next to slow ones and still ones
+    // spans in pieces, lines a step every sample) next to slow ones and still ones, and those whose note starts again
+    // in a block (a retrigger: their pass cut there, `Pass::cut`; at 70 of a block of 100, at the start of a block and
+    // at 93)
     #[test]
     fn the_lines_of_voices_in_the_lanes_are_those_of_each_alone() {
         let ladder = |ty: ModelType, resonance: f64| {
@@ -2297,9 +2441,16 @@ mod tests {
                         channel
                     })
                     .collect();
+                let restart = |k: usize| match (block, k) {
+                    (2, 1) => Some(70),
+                    (3, 0) => Some(0),
+                    (3, k) if k + 1 == count => Some(93),
+                    _ => None,
+                };
                 let mut alone = input.clone();
                 for (k, filter) in one.iter_mut().enumerate() {
                     let (left, right) = alone[2 * k..2 * k + 2].split_at_mut(1);
+                    filter.restart(restart(k));
                     run(
                         &mut filter.pass(start(k), n, moved(k)),
                         &mut left[0],
@@ -2311,7 +2462,10 @@ mod tests {
                     let mut passes: Vec<Pass> = all
                         .iter_mut()
                         .enumerate()
-                        .map(|(k, filter)| filter.pass(start(k), n, moved(k)).shared(&designs))
+                        .map(|(k, filter)| {
+                            filter.restart(restart(k));
+                            filter.pass(start(k), n, moved(k)).shared(&designs)
+                        })
                         .collect();
                     let mut outs: Vec<[&mut [f32]; 2]> = grouped
                         .chunks_mut(2)
@@ -2337,10 +2491,10 @@ mod tests {
     // of a span, a refresh each or a sample each of a fast one, add up to them within the rounding of f32), on the way
     // between those of the span before and them by the share of its steps (of a saturating section its g, k0, a, l,
     // the products of its saturation those of them; the steps of its integrators, read at the ends alone, those of its
-    // knobs at once). The first span of a note is no line; a cutoff that jumped is a line in pieces. A block starts
-    // from the coefficients of its slot (`before`), where the lines of the block before ended: a note that starts late
-    // in its block (29: spans from 29, 61, 93) has a last span long enough to get there in its refreshes (`span_end`:
-    // none of under half a span)
+    // knobs at once). The first span of a note too, from the design of its start (`Pass::start`); a cutoff that jumped
+    // is a line in pieces. A block starts from the coefficients of its slot (`before`), where the lines of the block
+    // before ended: a note that starts late in its block (29: spans from 29, 61, 93) has a last span long enough to get
+    // there in its refreshes (`span_end`: none of under half a span)
     #[test]
     fn a_span_of_a_moving_cutoff_is_a_line_to_the_coefficients_of_its_knobs() {
         let n = 128;
@@ -2382,6 +2536,7 @@ mod tests {
                     None,
                 ];
                 let mut pass = filter.pass(start, n, knobs);
+                pass.start();
                 let (mut left, mut right) = silence();
                 let mut lanes = LaneState::default();
                 let mut c = before_of(&pass, &pass);
@@ -2390,11 +2545,11 @@ mod tests {
                 while s < n {
                     let was = c;
                     pass.step(s);
-                    let fresh = pass.take_fresh();
+                    pass.take_fresh();
                     let e = pass.next;
                     let line = spans_of(layout, &mut c, &mut d, &mut every, &pass, &pass, [true; 2]);
-                    // (the first span of the note alone is no line)
-                    assert_eq!(line.moves(), !fresh, "{ty:?} block {block} at {s}");
+                    // (the first span of the note too: from the design of its start)
+                    assert!(line.moves(), "{ty:?} block {block} at {s}");
                     assert!(
                         refreshes(s, e) >= SEGMENT / REFRESH / 2,
                         "{ty:?} block {block}: {s}..{e}"
@@ -2463,13 +2618,13 @@ mod tests {
             }
         }
         assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
-        // A cutoff that jumps (over JUMP times a span: 300 and 3000 Hz in turn, 3.3 octaves) is a line in pieces of an
-        // octave at most, 4, each to the design of a cutoff on the way (its share of the octaves by its samples) and
-        // over on a refresh, the last at the end of the span with the design of its knobs; so fast a line steps every
-        // sample. The first span of the note is no line
+        // A cutoff that jumps (over JUMP times a span: 300 and 3000 Hz in turn at the ends of the spans, 3.3 octaves) is
+        // a line in pieces of an octave at most, 4, each to the design of a cutoff on the way (its share of the octaves
+        // by its samples) and over on a refresh, the last at the end of the span with the design of its knobs; so fast a
+        // line steps every sample. The first span of the note too, from the design of its start (`start`)
         let jumping: Vec<f32> = (0..n)
             .map(|i| {
-                if (i / SEGMENT).is_multiple_of(2) {
+                if ((i + 1) / SEGMENT).is_multiple_of(2) {
                     300.0
                 } else {
                     3000.0
@@ -2483,21 +2638,19 @@ mod tests {
                 model_of(ModelType::Low12, 500.0, 20.0, 0.0, 0.0)
             };
             let mut pass = filter.pass(0, n, [Some(jumping.as_slice()), None, None, None, None]);
-            pass.step(0);
-            pass.take_fresh();
-            assert!(!pass.ramps(), "web {web}");
-            assert_eq!(pass.next, SEGMENT);
+            pass.start();
             let mut ends = vec![];
-            let mut s = SEGMENT;
+            let mut s = 0;
             while s < n {
                 pass.step(s);
                 pass.take_fresh();
                 let e = pass.next;
                 assert!(pass.ramps(), "web {web} at {s}");
-                // (the span the piece is of: from the knob read at its start before to the one read at its start)
+                // (the span the piece is of: from the knob read at the end of the span before, its start, to the one
+                // read at its end, the last sample of the last span)
                 let span = s / SEGMENT * SEGMENT;
-                let (from, to) = (jumping[span - SEGMENT] as f64, jumping[span] as f64);
                 let end = span_end(span, n);
+                let (from, to) = (jumping[span] as f64, jumping[end.min(n - 1)] as f64);
                 let [cutoff] = piece_knobs([from], [to], span, end, e);
                 let at = format!("web {web} at {s}..{e}");
                 match &pass.engine {
@@ -2518,7 +2671,7 @@ mod tests {
             }
             assert_eq!(
                 ends,
-                [40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128],
+                [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128],
                 "web {web}"
             );
             // (and one that moves by less: a line, of a type of a BiquadFilterNode too)
@@ -2527,6 +2680,85 @@ mod tests {
             pass.step(0);
             pass.step(SEGMENT);
             assert!(pass.ramps(), "web {web}");
+        }
+    }
+
+    // The knobs of a span are read at its end, a point of the routes (a + SEGMENT…; the last sample of the pass, b - 1,
+    // for its last span), as the FX Filter reads them, its line from those read at the end of the span before (the first
+    // span of a note from those at its start, a: `start`; the first of the next block from those at b - 1 of its block
+    // before): a pass from 0, one that starts late, one that ends early and a block of 100, a model type and one of a
+    // BiquadFilterNode
+    #[test]
+    fn the_knobs_of_a_span_are_read_at_its_end() {
+        let n = 128;
+        let cutoffs =
+            |block: usize| -> Vec<f32> { (0..n).map(|i| 500.0 + 10.0 * (block * n + i) as f32).collect() };
+        let resonances =
+            |block: usize| -> Vec<f32> { (0..n).map(|i| 20.0 + 0.1 * (block * n + i) as f32).collect() };
+        let web_design = |f: f64| {
+            let mut design = [0.0; 6];
+            let power = power_of(Some(FilterType::Lowpass), 3.0, 0.0);
+            svf_into(&mut design, Some(FilterType::Lowpass), f, 3.0, power, RATE);
+            design
+        };
+        let model_design = |f: f64, q: f64| design_coefs(ModelType::Low24, [f, q, 0.0], RATE);
+        for web in [false, true] {
+            for (a, b) in [(0, 128), (29, 128), (5, 107), (0, 100)] {
+                let mut filter = if web {
+                    filter_of(FilterType::Lowpass, 500.0, 3.0, 0.0)
+                } else {
+                    model_of(ModelType::Low24, 500.0, 20.0, 0.0, 0.0)
+                };
+                // (the knobs the line of the next span goes from: none before the first span of the note)
+                let mut from: Option<(f64, f64)> = None;
+                for block in 0..2 {
+                    let (cutoffs, resonances) = (cutoffs(block), resonances(block));
+                    let resonance = (!web).then_some(resonances.as_slice());
+                    let start = if block == 0 { a } else { 0 };
+                    let mut pass =
+                        filter.pass(start, b, [Some(cutoffs.as_slice()), resonance, None, None, None]);
+                    pass.start();
+                    if from.is_none() {
+                        // (the design of the knobs at the start of the note, where the lanes take it: `before_of`)
+                        let (f, q) = (cutoffs[a] as f64, resonances[a] as f64);
+                        match &pass.engine {
+                            Engine::Web { coefficients, .. } => {
+                                assert_eq!(**coefficients, web_design(f), "{a}")
+                            }
+                            Engine::Model { .. } => {
+                                let lanes = before_of(&pass, &pass).svf.map(|row| row.map(|x| x.lanes()[0]));
+                                assert_eq!(lanes, model_design(f, q).svf, "{a}");
+                            }
+                        }
+                        from = Some((f, q));
+                    }
+                    let mut s = start;
+                    while s < b {
+                        let at = format!("web {web}: {a}..{b} block {block} at {s}");
+                        let (f0, q0) = from.expect("knobs before");
+                        if let Engine::Model { slot, .. } = &pass.engine {
+                            assert_eq!([slot.knobs()[0], slot.knobs()[1]], [f0, q0], "{at}");
+                        }
+                        pass.step(s);
+                        let e = pass.next;
+                        let read = if e < b { e } else { b - 1 };
+                        assert!(e == b || e == s + SEGMENT, "{at}..{e}");
+                        assert!(pass.ramps(), "{at}..{e}");
+                        let (f, q) = (cutoffs[read] as f64, resonances[read] as f64);
+                        match &pass.engine {
+                            Engine::Web { coefficients, .. } => {
+                                assert_eq!(**coefficients, web_design(f), "{at}..{e}");
+                                assert_eq!(pass.web_line().0, web_design(f0), "{at}..{e}");
+                            }
+                            Engine::Model { slot, .. } => {
+                                assert_eq!(slot.coefs.svf, model_design(f, q).svf, "{at}..{e}");
+                            }
+                        }
+                        from = Some((f, q));
+                        s = e;
+                    }
+                }
+            }
         }
     }
 
@@ -2704,9 +2936,9 @@ mod tests {
             .is_some());
     }
 
-    // a cutoff knob turned (it glides) that no route reads: worked out at the starts of the spans of the pass only,
-    // the bits of the glide worked out at every sample (a pass from 0 and one that starts late, a model type and one of
-    // a BiquadFilterNode, blocks of 128 and of 100)
+    // a cutoff knob turned (it glides) that no route reads: worked out at the points of the pass only (the ends of its
+    // spans), the bits of the glide worked out at every sample (a pass from 0, one that starts late and one that ends
+    // early, a model type and one of a BiquadFilterNode, blocks of 128 and of 100)
     #[test]
     fn a_cutoff_glide_no_route_reads_is_worked_out_at_the_spans() {
         let knob = |kind: Kind, cutoff: f64| FilterOptions {
@@ -2722,7 +2954,13 @@ mod tests {
             Kind::Model(ModelType::Low12),
             Kind::Web(Some(FilterType::Lowpass)),
         ] {
-            for (a, n) in [(0, 128), (37, 128), (0, 100), (99, 100)] {
+            for (a, b, n) in [
+                (0, 128, 128),
+                (37, 128, 128),
+                (0, 100, 100),
+                (99, 100, 100),
+                (5, 107, 128),
+            ] {
                 let (mut full, mut sparse) = (
                     VoiceFilter::new(RATE, Some(knob(kind, 300.0))),
                     VoiceFilter::new(RATE, Some(knob(kind, 300.0))),
@@ -2735,17 +2973,17 @@ mod tests {
                     }
                     let from = if block == 0 { a } else { 0 };
                     full.glide(n, None);
-                    sparse.glide(n, Some(from));
+                    sparse.glide(n, Some((from, b)));
                     assert!(block % 4 != 1 || sparse.base(0).len() == n, "the knob glides");
                     let play = |filter: &mut VoiceFilter| {
                         let (mut left, mut right) = (noise(n, block + 3), noise(n, block + 4));
-                        run(&mut filter.pass(from, n, [None; KNOBS]), &mut left, &mut right);
+                        run(&mut filter.pass(from, b, [None; KNOBS]), &mut left, &mut right);
                         left.iter().chain(&right).map(|x| x.to_bits()).collect::<Vec<_>>()
                     };
                     assert_eq!(
                         play(&mut full),
                         play(&mut sparse),
-                        "{kind:?} from {a} of {n}, block {block}"
+                        "{kind:?} {a}..{b} of {n}, block {block}"
                     );
                 }
             }
@@ -2758,7 +2996,7 @@ mod tests {
     fn the_designs_a_node_keeps_are_those_worked_out_again() {
         let n = 128;
         let lfo: Vec<f32> = (0..n).map(|i| 800.0 + 7.0 * i as f32).collect();
-        let own: Vec<f32> = (0..n).map(|i| 5000.0 - 11.0 * i as f32).collect();
+        let own: Vec<f32> = (0..n).map(|i| 5352.0 - 11.0 * i as f32).collect();
         let types = [
             ModelType::Low12,
             ModelType::Low12,
@@ -2806,9 +3044,11 @@ mod tests {
             assert_eq!(bits(&alone[k]), bits(&kept[k]), "channel {k}");
         }
         // (4 spans each, over a cell a span: Low 12 under the LFO, Ladder 24 under it, Low 12 under its own, then
-        // Low 12 under the LFO again: the pair before threw its designs out. The cutoff of its own comes to the cell
-        // next to its first one: the 3 designs of that cell for the 1 of its span)
-        assert_eq!(designs.worked_out(), 4 * 4 + 2);
+        // Low 12 under the LFO again: the pair before threw its designs out; and the designs of the starts of the
+        // notes, one for the first pair, one for each voice after it. The cutoff of its own goes from the cell of its
+        // start to the one next to it and on to the next: the 3 designs of the first, 2 of the second (an edge kept),
+        // for the 2 of its spans)
+        assert_eq!(designs.worked_out(), 4 * 4 + 4 + 3);
     }
 
     // the coefficients a filter ends a pass with (the gain of Drive apart)
@@ -2839,17 +3079,17 @@ mod tests {
             run(&mut pass, &mut left, &mut right);
             left.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
         };
-        // 1030 to 1055 Hz: the cell of 1024 to 1088 Hz. Its first span a design, then the three of the cell
+        // 1030 to 1055 Hz: the cell of 1024 to 1088 Hz. The start of the note a design, then the three of the cell
         let inside = sweep(1030.0, 0.1);
         let mut first = model_of(ty, 700.0, 60.0, 0.0, 30.0);
         let shared = play(&mut first, &inside, Some(&designs));
         assert_eq!(designs.worked_out(), 1 + 3);
-        let last = inside[n - SEGMENT] as f64;
+        let last = inside[n - 1] as f64;
         let share = ((last - 1024.0) / 64.0) as f32;
         assert_eq!(coefs_of(&first), design(1024.0).between(&design(1088.0), share));
         assert_ne!(coefs_of(&first), design(last));
-        // a second voice in the cell: no design (that of its first span is the last the node kept); alone, with no
-        // node: the same bits
+        // a second voice in the cell: no design (that of its start is one the node kept); alone, with no node: the
+        // same bits
         let mut second = model_of(ty, 700.0, 60.0, 0.0, 30.0);
         assert_eq!(play(&mut second, &inside, Some(&designs)), shared);
         assert_eq!(designs.worked_out(), 1 + 3);
@@ -2859,7 +3099,7 @@ mod tests {
         let on = sweep(1056.0, 0.2);
         let shared = play(&mut first, &on, Some(&designs));
         assert_eq!(designs.worked_out(), 1 + 3 + 2);
-        let last = on[n - SEGMENT] as f64;
+        let last = on[n - 1] as f64;
         let share = ((last - 1088.0) / 64.0) as f32;
         assert_eq!(coefs_of(&first), design(1088.0).between(&design(1152.0), share));
         assert_eq!(play(&mut alone, &on, None), shared);
@@ -2872,7 +3112,7 @@ mod tests {
             .collect();
         let before = designs.worked_out();
         play(&mut first, &jump, Some(&designs));
-        let last = jump[n - SEGMENT] as f64;
+        let last = jump[n - 1] as f64;
         let cell = filter_model::cutoff_cell(last, RATE).unwrap();
         assert_eq!(
             coefs_of(&first),
@@ -2884,7 +3124,7 @@ mod tests {
     }
 
     // a resonance (or a variation) the type is designed by that moves with the cutoff (Band 12, the gain of
-    // Band EQ 12), a still cutoff: a design a span, as before
+    // Band EQ 12), a still cutoff: a design a span, as before, and one of the start of the note
     #[test]
     fn a_resonance_that_moves_takes_a_design_a_span() {
         let n = 128;
@@ -2902,8 +3142,8 @@ mod tests {
                 &mut left,
                 &mut right,
             );
-            assert_eq!(designs.worked_out(), n / SEGMENT);
-            let at = n - SEGMENT;
+            assert_eq!(designs.worked_out(), 1 + n / SEGMENT);
+            let at = n - 1;
             let mut last = [cutoff[at] as f64, 60.0, 30.0];
             last[knob] = resonance[at] as f64;
             assert_eq!(coefs_of(&filter), design_coefs(ty, last, RATE));
@@ -2924,8 +3164,8 @@ mod tests {
     }
 
     // a knob a type is not designed by that moves with the cutoff (the FAT of Band 12, the resonance and the
-    // variation of a one-pole, the resonance of an EQ one-pole): the cutoff in the cells of its grid as alone (its
-    // first span a design, then the three of its cell), its FAT that of the last span; alone, the same bits
+    // variation of a one-pole, the resonance of an EQ one-pole): the cutoff in the cells of its grid as alone (the
+    // start of its note a design, then the three of its cell), its FAT that of the last span; alone, the same bits
     #[test]
     fn a_knob_a_type_is_not_designed_by_keeps_the_cutoff_in_its_cells() {
         let n = 128;
@@ -2956,7 +3196,7 @@ mod tests {
             let designs = Designs::default();
             let (filter, shared) = play(ty, moved, Some(&designs));
             assert_eq!(designs.worked_out(), 1 + 3, "{ty:?} {moved:?}");
-            let at = n - SEGMENT;
+            let at = n - 1;
             let mut knobs = [60.0, 30.0];
             for &k in moved.iter().filter(|&&k| k != 3) {
                 knobs[if k == 1 { 0 } else { 1 }] = moving[at] as f64;
@@ -2972,9 +3212,9 @@ mod tests {
     }
 
     // a knob a type is not designed by that moves alone (the FAT of a ladder and of a state variable filter, the
-    // resonance and the variation of a one-pole, the resonance of an EQ one-pole): its first span a design, then
-    // none; its coefficients are those of the design of the knobs of its last span (FAT with them), the same bits in
-    // a node and alone. The resonance of Low 24 (it is designed by it): a design a span
+    // resonance and the variation of a one-pole, the resonance of an EQ one-pole): the start of its note a design,
+    // then none; its coefficients are those of the design of the knobs of its last span (FAT with them), the same bits
+    // in a node and alone. The resonance of Low 24 (it is designed by it): a design a span, and the start
     #[test]
     fn a_knob_a_type_is_not_designed_by_moves_no_design() {
         let n = 128;
@@ -2997,13 +3237,13 @@ mod tests {
             (ModelType::Low6, 1, 1),
             (ModelType::High6, 4, 1),
             (ModelType::LowEq6, 1, 1),
-            (ModelType::Low24, 1, n / SEGMENT),
+            (ModelType::Low24, 1, 1 + n / SEGMENT),
         ] {
             let designs = Designs::default();
             let (filter, shared) = play(ty, moved, Some(&designs));
             assert_eq!(designs.worked_out(), designed, "{ty:?} {moved}");
             let mut last = [1030.0, 60.0, 30.0];
-            last[if moved == 1 { 1 } else { 2 }] = moving[n - SEGMENT] as f64;
+            last[if moved == 1 { 1 } else { 2 }] = moving[n - 1] as f64;
             assert_eq!(coefs_of(&filter), design_coefs(ty, last, RATE), "{ty:?} {moved}");
             assert_eq!(play(ty, moved, None).1, shared, "{ty:?} {moved}");
         }
@@ -3041,9 +3281,9 @@ mod tests {
             &mut left,
             &mut right,
         );
-        assert_eq!(coefs_of(&filter), design(cutoff[n - SEGMENT] as f64));
-        // (the first span, the three of the cell, then one a span)
-        assert_eq!(designs.worked_out(), 1 + 3 + 3);
+        assert_eq!(coefs_of(&filter), design(cutoff[n - 1] as f64));
+        // (the start of the note, the three of the cell, then one a span)
+        assert_eq!(designs.worked_out(), 1 + 3 + 4);
     }
 
     // Without resonance, a cutoff swept down from the top as ENV 2 of a preset does (16.8 kHz to 8 kHz in 90 ms):
@@ -3110,12 +3350,13 @@ mod tests {
                     &mut left,
                     &mut right,
                 );
-                let design = design_coefs(ty, [cutoff[n - SEGMENT] as f64, 100.0, 0.0], RATE);
+                let design = design_coefs(ty, [cutoff[n - 1] as f64, 100.0, 0.0], RATE);
                 assert_eq!(coefs_of(&filter), design);
             }
             assert!(filter.model.narrow.is_some(), "{ty:?}");
-            // (a design a span, the three of a cell every NARROW_CELLS + 1 spans: not three a span)
-            let most = spans + 3 * spans.div_ceil(NARROW_CELLS as usize + 1);
+            // (the start of the note, a design a span, the three of a cell every NARROW_CELLS + 1 spans: not three a
+            // span)
+            let most = 1 + spans + 3 * spans.div_ceil(NARROW_CELLS as usize + 1);
             assert!(
                 designs.worked_out() <= most,
                 "{ty:?}: {} of {most}",
@@ -3328,6 +3569,70 @@ mod tests {
             // no step: a sample at most what a 220 Hz sine of the level moves by, and a bit
             let jump = out.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
             assert!(jump < 0.05, "{from:?} -> {to:?}: {jump}");
+        }
+    }
+
+    // A change of type on a playing note under a moving cutoff: the filter of the new type has no knobs yet (reset),
+    // its first span goes as a line from the design of its knobs at the start of the pass (`Pass::start`), as the
+    // first span of a note does: from a type of a BiquadFilterNode to another (no fade, its state kept), between two
+    // model types and into one (the filter before fades out)
+    #[test]
+    fn a_change_of_type_under_a_moving_cutoff_goes_from_the_design_of_the_new_type_at_its_start() {
+        let n = 128;
+        let options = |kind| FilterOptions {
+            kind,
+            cutoff: 1000.0,
+            resonance: if matches!(kind, Kind::Model(_)) { 30.0 } else { 3.0 },
+            gain: 0.0,
+            drive: 0.0,
+            variation: 0.0,
+        };
+        let changes = [
+            (
+                Kind::Web(Some(FilterType::Lowpass)),
+                Kind::Web(Some(FilterType::Highpass)),
+            ),
+            (Kind::Model(ModelType::Low12), Kind::Model(ModelType::High12)),
+            (
+                Kind::Web(Some(FilterType::Lowpass)),
+                Kind::Model(ModelType::Ladder24),
+            ),
+        ];
+        for (from, to) in changes {
+            let mut filter = VoiceFilter::new(RATE, Some(options(from)));
+            for block in 0..3 {
+                let cutoffs: Vec<f32> = (0..n).map(|i| 800.0 + 2.0 * (block * n + i) as f32).collect();
+                let knobs = [Some(cutoffs.as_slice()), None, None, None, None];
+                if block < 2 {
+                    let mut left = noise(n, block as u32 + 3);
+                    let mut right = left.clone();
+                    run(&mut filter.pass(0, n, knobs), &mut left, &mut right);
+                    continue;
+                }
+                filter.set(Some(options(to)));
+                let mut pass = filter.pass(0, n, knobs);
+                pass.start();
+                let f = cutoffs[0] as f64;
+                match (&pass.engine, to) {
+                    (Engine::Web { coefficients, .. }, Kind::Web(ty)) => {
+                        let mut design = [0.0; 6];
+                        svf_into(&mut design, ty, f, 3.0, power_of(ty, 3.0, 0.0), RATE);
+                        assert_eq!(**coefficients, design, "{from:?} -> {to:?}");
+                    }
+                    (Engine::Model { .. }, Kind::Model(ty)) => {
+                        let lanes = before_of(&pass, &pass).svf.map(|row| row.map(|x| x.lanes()[0]));
+                        assert_eq!(
+                            lanes,
+                            design_coefs(ty, [f, 30.0, 0.0], RATE).svf,
+                            "{from:?} -> {to:?}"
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+                // (its first span a line from there)
+                pass.step(0);
+                assert!(pass.ramps(), "{from:?} -> {to:?}");
+            }
         }
     }
 
@@ -3616,8 +3921,8 @@ mod tests {
     // A pluck: an envelope with its attack curved (its steep end 2.3 times its mean slope) moves the cutoff up 6.15
     // octaves from 17.7 Hz in 77 samples, read at the points (over 2 octaves in the spans of its end), a Low 12 with
     // Drive (its section saturates), a Low 24 and a ladder with Drive and FAT, noise in. Its spans in pieces, stepping
-    // every sample, are near what a design at every sample renders along the same way (each span from the knobs of the
-    // one before to its own: the filter a span behind its knobs), around fs/4 and fs/2 as quiet; the coefficients of a
+    // every sample, are near what a design at every sample renders along the same way (each span from the knobs at the
+    // end of the one before to those at its own end), around fs/4 and fs/2 as quiet; the coefficients of a
     // span at once (a stair of its spans: the crackle at the top of the sweep) and lines a step a refresh (a stair of 4
     // samples: images around fs/4 and fs/2) are far from it
     #[test]
@@ -3642,11 +3947,24 @@ mod tests {
                 coefs.drive = filter_model::drive_gain(drive / 100.0) as f32;
                 coefs
             };
-            // (the knobs of the span of a sample: those read at the start of the span before and of its own)
+            // (the knobs of the span of a sample: those read at the end of the span before and of its own, of the last
+            // span of a block at its last sample; the first span of the note from those at its start)
+            let read = |s: usize| {
+                let e = s + SEGMENT;
+                cutoffs[if e.is_multiple_of(n) { e - 1 } else { e }] as f64
+            };
             let span = |i: usize| {
                 let s = i / SEGMENT * SEGMENT;
-                let to = cutoffs[s] as f64;
-                (s, if s == 0 { to } else { cutoffs[s - SEGMENT] as f64 }, to)
+                let to = read(s);
+                (
+                    s,
+                    if s == 0 {
+                        cutoffs[0] as f64
+                    } else {
+                        read(s - SEGMENT)
+                    },
+                    to,
+                )
             };
             let render = |coefs: &dyn Fn(usize) -> Coefs, refresh: &dyn Fn(usize) -> bool| {
                 let mut state = LaneState::default();
@@ -3705,15 +4023,265 @@ mod tests {
             let around = |x: &[f64], lo: f64, hi: f64| db(band_energy(&apart(x), lo, hi) / of_ideal);
             let quarter = |x: &[f64]| around(x, 0.2, 0.3);
             let half = |x: &[f64]| around(x, 0.42, 0.5);
-            // (dB under the sweep: ours -33 to -35, the stairs of the spans 5 over to 1 under, the lines of the
-            // refreshes -9 to -14; around fs/4 and fs/2 the lines 20 to 31 dB over ours)
+            // (dB under the sweep: ours -38 to -42, the stairs of the spans -5 to -7, the lines of the refreshes -19 to
+            // -20; around fs/4 and fs/2 the lines 17 to 31 dB over ours)
             let at = format!("{ty:?}");
-            assert!(off(&ours) < -30.0, "{at}: {}", off(&ours));
+            assert!(off(&ours) < -35.0, "{at}: {}", off(&ours));
             assert!(off(&stairs) > off(&ours) + 25.0, "{at}: {}", off(&stairs));
-            assert!(off(&lines) > off(&ours) + 18.0, "{at}: {}", off(&lines));
+            assert!(off(&lines) > off(&ours) + 15.0, "{at}: {}", off(&lines));
             for (band, of) in [("fs/4", &quarter as &dyn Fn(&[f64]) -> f64), ("fs/2", &half)] {
                 let (ours, lines) = (of(&ours), of(&lines));
                 assert!(ours < lines - 15.0, "{at} {band}: {ours} {lines}");
+            }
+        }
+    }
+
+    // The first span of a note whose knobs move goes from the design of its knobs at its start (`start`), as every span
+    // after it from those at the end of the one before. A fall of the cutoff from the top of an envelope (ENV 2 at
+    // once, a decay of 20 ms, its start 4.1 times as steep as its mean, 6 octaves down to 284 Hz) in the first 3 ms of a
+    // note, noise in at once: near a design at every sample along the fall (dB under it: -19 to -35), the knobs of the
+    // end of the first span at once 9 to 21 dB further (its top lost). A pluck (up 6.15 octaves in 77 samples) as near
+    // as at once (within 0.4 dB: what the first span of a pluck filters is under 25 Hz). From the start of a block and
+    // from 29 (its first span 29..61); a model type of each layout and one of a BiquadFilterNode
+    #[test]
+    fn the_first_span_of_a_note_goes_from_the_design_of_its_start() {
+        let n: usize = 128;
+        let blocks = 2;
+        let window = 144;
+        let ms = |x: f64| x * RATE / 1000.0;
+        let fall = |t: f64| {
+            let (c, x) = (4.0, min(t / ms(20.0), 1.0));
+            284.0 * pow(2.0, 6.0 * (exp(-c * x) - exp(-c)) / (1.0 - exp(-c)))
+        };
+        let pluck = |t: f64| {
+            let x = min(t / 77.0, 1.0);
+            17.7 * pow(2.0, 6.15 * (exp(2.0 * x) - 1.0) / (exp(2.0) - 1.0))
+        };
+        #[derive(Clone, Copy, Debug)]
+        enum Ty {
+            Model(ModelType, f64, f64, f64),
+            Web,
+        }
+        for ty in [
+            Ty::Model(ModelType::Low12, 20.0, 42.0, 0.0),
+            Ty::Model(ModelType::Low24, 0.0, 0.0, 0.0),
+            Ty::Model(ModelType::Ladder24, 60.0, 40.0, 50.0),
+            Ty::Web,
+        ] {
+            for (falls, sweep) in [(true, &fall as &dyn Fn(f64) -> f64), (false, &pluck)] {
+                for a in [0usize, 29] {
+                    let cutoffs: Vec<f32> = (0..blocks * n)
+                        .map(|i| sweep(i.saturating_sub(a) as f64) as f32)
+                        .collect();
+                    let input: Vec<f32> = noise(blocks * n, 3)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| if i < a { 0.0 } else { 2.0 * x })
+                        .collect();
+                    // (a design at every sample along the sweep)
+                    let ideal: Vec<f64> = match ty {
+                        Ty::Model(model, resonance, drive, variation) => {
+                            let layout =
+                                gated(model, drive > 0.0, variation > 0.0, resonance >= RESONANT as f64);
+                            let coefs_of = |f: f32| {
+                                let mut coefs = design_coefs(model, [f as f64, resonance, variation], RATE);
+                                coefs.fat = model.fat_of(resonance / 100.0, variation / 100.0) as f32;
+                                coefs.drive = filter_model::drive_gain(drive / 100.0) as f32;
+                                coefs
+                            };
+                            let mut state = LaneState::default();
+                            let first = coefs_of(cutoffs[a]);
+                            filter_model::keep_steps(&LaneCoefs::of(&first, &first), &mut state);
+                            (a..a + window)
+                                .map(|i| {
+                                    let at = coefs_of(cutoffs[i]);
+                                    let c = LaneCoefs::of(&at, &at);
+                                    let x = F32x4::splat(input[i]);
+                                    filter_model::tick(layout, &c, &mut state, x, true).lanes()[0] as f64
+                                })
+                                .collect()
+                        }
+                        Ty::Web => {
+                            let (mut left, mut right) = (input.clone(), input.clone());
+                            let [mut ic1, mut ic2] = web_lanes([0.0; 4]);
+                            let power = power_of(Some(FilterType::Lowpass), 3.0, 0.0);
+                            for i in a..a + window {
+                                let mut design = [0.0; 6];
+                                let f = cutoffs[i] as f64;
+                                svf_into(&mut design, Some(FilterType::Lowpass), f, 3.0, power, RATE);
+                                let mut c = design.map(F32x4::splat);
+                                web_span(&mut c, None, &mut ic1, &mut ic2, i, i + 1, &mut left, &mut right);
+                            }
+                            left[a..a + window].iter().map(|x| *x as f64).collect()
+                        }
+                    };
+                    // (ours: `run`, its first span from the design of its start; or the knobs of the end of its first
+                    // span at once, the pass without `start`)
+                    let render = |starts: bool| {
+                        let mut filter = match ty {
+                            Ty::Model(model, resonance, drive, variation) => {
+                                model_of(model, cutoffs[a] as f64, resonance, drive, variation)
+                            }
+                            Ty::Web => filter_of(FilterType::Lowpass, cutoffs[a] as f64, 3.0, 0.0),
+                        };
+                        let mut out = Vec::new();
+                        for block in 0..blocks {
+                            let mut left = input[block * n..(block + 1) * n].to_vec();
+                            let mut right = left.clone();
+                            let knobs = &cutoffs[block * n..(block + 1) * n];
+                            let from = if block == 0 { a } else { 0 };
+                            let mut pass = filter.pass(from, n, [Some(knobs), None, None, None, None]);
+                            if starts {
+                                run(&mut pass, &mut left, &mut right);
+                            } else {
+                                run_alone(&mut pass, &mut left, &mut right);
+                            }
+                            assert_eq!(left, right);
+                            out.extend(left[from..].iter().map(|x| *x as f64));
+                        }
+                        out
+                    };
+                    let level = |x: &[f64]| x.iter().map(|x| x * x).sum::<f64>();
+                    let off = |x: &[f64]| {
+                        let apart: Vec<f64> = (0..window).map(|i| x[i] - ideal[i]).collect();
+                        10.0 * log10(level(&apart) / level(&ideal))
+                    };
+                    let (ours, at_once) = (off(&render(true)), off(&render(false)));
+                    let at = format!("{ty:?} from {a}, falls {falls}: {ours} {at_once}");
+                    if falls {
+                        assert!(ours < -18.0, "{at}");
+                        assert!(at_once > ours + 8.0, "{at}");
+                    } else {
+                        assert!((ours - at_once).abs() < 0.5, "{at}");
+                    }
+                }
+            }
+        }
+    }
+
+    // A retrigger of the note (a voice of mono that takes a note over: its envelopes and LFOs start again at its
+    // sample) cuts the pass of its filter there: its spans up to it, the last read at the sample before, then from the
+    // design of its knobs there, as the first span of a note goes (`cut`). A fall of the cutoff from the top of an
+    // envelope (ENV 2 started again with no attack, from the bottom of its fall, 284 Hz: 6 octaves down in 20 ms) over
+    // 3 ms from a span before it, noise all along: near a design at every sample (dB under it: -17 to -36); on the
+    // spans of the block 7 to 34 dB further (the span of the retrigger went from the knobs of the span before: its top
+    // lost, or the span before it brighter where it ended at the retrigger). A pluck from its bottom (up 6.15 octaves
+    // in 77 samples) as near or nearer. At 64 (the end of a span on the grid), at 70 (between two refreshes) and at the
+    // start of a block; a model type of each layout and one of a BiquadFilterNode
+    #[test]
+    fn a_retrigger_starts_the_line_of_the_filter_from_the_design_of_its_knobs_there() {
+        let n: usize = 128;
+        let blocks = 3;
+        let window = 144;
+        let ms = |x: f64| x * RATE / 1000.0;
+        let fall = |t: f64| {
+            let (c, x) = (4.0, min(t / ms(20.0), 1.0));
+            284.0 * pow(2.0, 6.0 * (exp(-c * x) - exp(-c)) / (1.0 - exp(-c)))
+        };
+        let pluck = |t: f64| {
+            let x = min(t / 77.0, 1.0);
+            17.7 * pow(2.0, 6.15 * (exp(2.0 * x) - 1.0) / (exp(2.0) - 1.0))
+        };
+        #[derive(Clone, Copy, Debug)]
+        enum Ty {
+            Model(ModelType, f64, f64, f64),
+            Web,
+        }
+        for ty in [
+            Ty::Model(ModelType::Low12, 20.0, 42.0, 0.0),
+            Ty::Model(ModelType::Low24, 0.0, 0.0, 0.0),
+            Ty::Model(ModelType::Ladder24, 60.0, 40.0, 50.0),
+            Ty::Web,
+        ] {
+            for (falls, sweep) in [(true, &fall as &dyn Fn(f64) -> f64), (false, &pluck)] {
+                for r in [64usize, 70, n] {
+                    // (the bottom of the sweep up to the retrigger, then the sweep)
+                    let cutoffs: Vec<f32> = (0..blocks * n)
+                        .map(|i| {
+                            if i < r {
+                                sweep(if falls { 1e9 } else { 0.0 }) as f32
+                            } else {
+                                sweep((i - r) as f64) as f32
+                            }
+                        })
+                        .collect();
+                    let input: Vec<f32> = noise(blocks * n, 7).iter().map(|x| 2.0 * x).collect();
+                    let from = r - SEGMENT;
+                    // (a design at every sample from the start of the note)
+                    let ideal: Vec<f64> = match ty {
+                        Ty::Model(model, resonance, drive, variation) => {
+                            let layout =
+                                gated(model, drive > 0.0, variation > 0.0, resonance >= RESONANT as f64);
+                            let coefs_of = |f: f32| {
+                                let mut coefs = design_coefs(model, [f as f64, resonance, variation], RATE);
+                                coefs.fat = model.fat_of(resonance / 100.0, variation / 100.0) as f32;
+                                coefs.drive = filter_model::drive_gain(drive / 100.0) as f32;
+                                coefs
+                            };
+                            let mut state = LaneState::default();
+                            let first = coefs_of(cutoffs[0]);
+                            filter_model::keep_steps(&LaneCoefs::of(&first, &first), &mut state);
+                            (0..r + window)
+                                .map(|i| {
+                                    let at = coefs_of(cutoffs[i]);
+                                    let c = LaneCoefs::of(&at, &at);
+                                    let x = F32x4::splat(input[i]);
+                                    filter_model::tick(layout, &c, &mut state, x, true).lanes()[0] as f64
+                                })
+                                .collect::<Vec<_>>()[from..]
+                                .to_vec()
+                        }
+                        Ty::Web => {
+                            let (mut left, mut right) = (input.clone(), input.clone());
+                            let [mut ic1, mut ic2] = web_lanes([0.0; 4]);
+                            let power = power_of(Some(FilterType::Lowpass), 3.0, 0.0);
+                            for i in 0..r + window {
+                                let mut design = [0.0; 6];
+                                let f = cutoffs[i] as f64;
+                                svf_into(&mut design, Some(FilterType::Lowpass), f, 3.0, power, RATE);
+                                let mut c = design.map(F32x4::splat);
+                                web_span(&mut c, None, &mut ic1, &mut ic2, i, i + 1, &mut left, &mut right);
+                            }
+                            left[from..r + window].iter().map(|x| *x as f64).collect()
+                        }
+                    };
+                    // (ours: the pass cut at the retrigger; or on the spans of the block, no retrigger told)
+                    let render = |restarts: bool| {
+                        let mut filter = match ty {
+                            Ty::Model(model, resonance, drive, variation) => {
+                                model_of(model, cutoffs[0] as f64, resonance, drive, variation)
+                            }
+                            Ty::Web => filter_of(FilterType::Lowpass, cutoffs[0] as f64, 3.0, 0.0),
+                        };
+                        let mut out = Vec::new();
+                        for block in 0..blocks {
+                            let mut left = input[block * n..(block + 1) * n].to_vec();
+                            let mut right = left.clone();
+                            let knobs = &cutoffs[block * n..(block + 1) * n];
+                            let at = r.checked_sub(block * n).filter(|at| *at < n);
+                            filter.restart(if restarts { at } else { None });
+                            let mut pass = filter.pass(0, n, [Some(knobs), None, None, None, None]);
+                            assert_eq!(pass.cut(), if restarts { at } else { None });
+                            run(&mut pass, &mut left, &mut right);
+                            assert_eq!(left, right);
+                            out.extend(left.iter().map(|x| *x as f64));
+                        }
+                        out[from..r + window].to_vec()
+                    };
+                    let level = |x: &[f64]| x.iter().map(|x| x * x).sum::<f64>();
+                    let off = |x: &[f64]| {
+                        let apart: Vec<f64> = (0..ideal.len()).map(|i| x[i] - ideal[i]).collect();
+                        10.0 * log10(level(&apart) / level(&ideal))
+                    };
+                    let (ours, grid) = (off(&render(true)), off(&render(false)));
+                    let at = format!("{ty:?} at {r}, falls {falls}: {ours} {grid}");
+                    if falls {
+                        assert!(ours < -17.0, "{at}");
+                        assert!(grid > ours + 7.0, "{at}");
+                    } else {
+                        assert!(ours < grid + 0.01, "{at}");
+                    }
+                }
             }
         }
     }

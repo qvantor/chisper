@@ -482,17 +482,30 @@ export const { ModelProvider: FooProvider, useModel: useFoo } = rxModelReact('fo
   span whose knobs moved go to those of its knobs as a line from where the span before left them, never at once (held
   a span each they were a stair of `SEGMENT` samples: a noise over the note under a moving cutoff): a step every
   `REFRESH` samples of a model type (`LaneCoefs::steer`/`advance`, `take_spans` of `model_spans.rs`), every sample
-  of a type of a BiquadFilterNode; the filter is a span behind its knobs. A fast line (its cutoff over `FINE`, an
-  eighth of an octave a span: a pluck, an envelope of a few ms over octaves) steps every sample, the steps of its
-  saturating sections too (`fine_sample`, `Line::Fine`: the lanes that do, the others their bits; loops of their own:
-  `fine_line`, `fine_pair_samples`, `fine_group_samples`): a step every 4 samples left images around fs/4 and fs/2.
-  A cutoff that goes over `JUMP` times in a span is a line in pieces (`pieces`, `piece_end`, `piece_knobs`: an
-  octave at most each, from a refresh to a refresh, each to the design of a cutoff on the way, by its octaves; the
-  voice's `Pieces` of `Pass`, the FX Filter reads its lines at their ends): its coefficients at once were a crackle
-  at the top of a fast sweep (WAVEFORM-58; `a_fast_sweep_goes_as_designs_at_every_sample`). No line: the first span
-  of a note. A saturating section goes along its g, k0, a, l, the products of its saturation
-  the same function of them at every refresh as in a design (`sat_products`: a line of the products went under 0 of
-  damping where the cutoff and Res jump together, a burst; the cargo test
+  of a type of a BiquadFilterNode. The knobs of a span are read at its end, a point of the routes (`b - 1` of the
+  last span of a pass), as the FX Filter reads them (read at its start the filter was a span behind its knobs: the
+  top of a pluck 0.7 ms late, WAVEFORM-59; `the_knobs_of_a_span_are_read_at_its_end`). A fast line (its cutoff over
+  `FINE`, an eighth of an octave a span: a pluck, an envelope of a few ms over octaves) steps every sample, the steps
+  of its saturating sections too (`fine_sample`, `Line::Fine`: the lanes that do, the others their bits; loops of
+  their own: `fine_line`, `fine_pair_samples`, `fine_group_samples`): a step every 4 samples left images around fs/4
+  and fs/2. A cutoff that goes over `JUMP` times in a span is a line in pieces (`pieces`, `piece_end`, `piece_knobs`:
+  an octave at most each, from a refresh to a refresh, each to the design of a cutoff on the way, by its octaves; the
+  voice's `Pieces` of `Pass`, the FX Filter reads its lines at their ends): its coefficients at once were a crackle at
+  the top of a fast sweep (WAVEFORM-58; `a_fast_sweep_goes_as_designs_at_every_sample`). The first span of a note whose
+  knobs move is a line too, from the design of its knobs at its start (`Pass::start`, the point a of the routes; at
+  once to the knobs of its end a fall of the cutoff from the top of an envelope lost its top, its first 3 ms 3 to 23 dB
+  further from a design at every sample; `the_first_span_of_a_note_goes_from_the_design_of_its_start`); so is the first
+  after a change of type (reset). A note that takes the voice over (a retrigger: mono, a stolen voice that plays the
+  new note) cuts its pass at its sample (`Pass::cut`, `VoiceFilter::restart`): its spans up to there, the last read at
+  the sample before, then from the design of its knobs there as a note starts (the routes of the knobs of the filter
+  worked out at those points, `filter::point`, an LFO at them too: its points run again from the state of the block,
+  `cut` of `LfoBlock`, its knobs worked out there and at the points of the block both, the others keep their bits; on
+  the spans of the block the span of the retrigger went from the knobs of the span before, the top of a fall lost:
+  the cargo test `a_retrigger_starts_the_line_of_the_filter_from_the_design_of_its_knobs_there`); such a voice runs
+  alone, out of the lanes of another. A saturating
+  section goes along its g, k0, a, l, the products of its saturation the same function of them at every refresh as in a
+  design (`sat_products`: a line of the products went under 0 of damping where the cutoff and Res jump together, a
+  burst; the cargo test
   `a_jump_of_the_cutoff_and_the_resonance_together_is_no_burst`). A short span at the end of a pass is the end of the
   one before (`span_end`: in its few refreshes, or none, it went the way of a whole span at once). A voice on a line
   next to another, or alone: the same bits (the cargo test
