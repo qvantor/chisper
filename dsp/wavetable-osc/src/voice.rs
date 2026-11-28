@@ -2360,9 +2360,11 @@ impl Voice {
         self.linger = self.lead_length;
     }
 
-    fn retrigger(&mut self, at: f64) {
+    // the envelopes and the LFOs start again at `at` (a note that takes the voice over); false: a stolen voice, it
+    // fades out
+    fn retrigger(&mut self, at: f64) -> bool {
         if self.kill_from != f64::INFINITY {
-            return;
+            return false;
         }
         for envelope in self.envelopes.iter_mut() {
             envelope.retrigger(at, self.block_frame);
@@ -2374,6 +2376,7 @@ impl Voice {
         self.released = false;
         self.stop_frame = f64::INFINITY;
         self.wake_routes();
+        true
     }
 
     // the levels the routes read may move again (a release, a start again, another velocity, a state of the
@@ -2403,8 +2406,18 @@ impl Voice {
     }
 
     // the LFOs the routes of the params read at the points of the block (from a to b of n at `frame`), their knobs
-    // moved by their own routes; a new state of the LFOs of the shared wakes them and the routes
-    fn render_lfos(&mut self, frame: f64, a: f64, b: f64, n: usize, shared: &mut Shared) {
+    // moved by their own routes; a new state of the LFOs of the shared wakes them and the routes. `restart`: the
+    // sample of a retrigger, their levels at the points of the pass of the filter cut there too (their knobs worked
+    // out at those points: a route of ENV 2 on a Phase reads it there, not on its line between the points of the block)
+    fn render_lfos(
+        &mut self,
+        frame: f64,
+        a: f64,
+        b: f64,
+        n: usize,
+        restart: Option<f64>,
+        shared: &mut Shared,
+    ) {
         if shared.lfo_epoch != self.lfo_epoch {
             self.lfo_epoch = shared.lfo_epoch;
             self.wake_routes();
@@ -2447,7 +2460,7 @@ impl Voice {
                 lfos: &[],
                 macros: &shared.macros,
             };
-            self.lfo_mod.apply(&bases, &sources, frame, a, b, n);
+            self.lfo_mod.apply(&bases, &sources, frame, a, b, n, restart);
         }
         for (i, lfo) in self.lfos.iter_mut().enumerate() {
             if !self.modulation.uses(LFO + i) {
@@ -2455,12 +2468,18 @@ impl Voice {
             }
             let lfo_mod = &self.lfo_mod;
             let moved: [Option<&[f32]>; KNOBS] = core::array::from_fn(|k| lfo_mod.moved(lfo_target(i, k)));
-            lfo.render(frame, a, b, n, &shared.lfos[i], &moved);
+            lfo.render(frame, a, b, n, &shared.lfos[i], &moved, restart);
         }
     }
 
     pub fn set_filter(&mut self, filter: Option<FilterOptions>) {
         self.filter.set(filter);
+    }
+
+    /// the sample of its last block a note took it over at (the line of its filter starts again there)
+    #[cfg(test)]
+    pub fn restarted(&self) -> Option<usize> {
+        self.filter.restarted()
     }
 
     /// new knobs of `module` (a `knobs` event: the noise's level, pan and cents), for its sources that play it
@@ -2551,11 +2570,15 @@ impl Voice {
         // (a constant gate is seen at its first sample: the others change nothing)
         let end = if is_constant(gate) { a + 1.0 } else { nf };
         let mut i = a;
+        // (the sample of the last retrigger of the block: the line of the knobs of the filter starts again there)
+        let mut restart = None;
         while i < end && frame + i < self.stop_frame {
             let value = read(gate, i as usize) as f64;
             if value > 0.0 && value < RELEASE_GATE {
                 if value != self.held_gate || self.released {
-                    self.retrigger(frame + i);
+                    if self.retrigger(frame + i) {
+                        restart = Some(i as usize);
+                    }
                     self.held_gate = value;
                 }
                 i += 1.0;
@@ -2586,6 +2609,7 @@ impl Voice {
             break;
         }
         let b = max(a, min(nf, self.stop_frame - frame));
+        self.filter.restart(restart);
         self.envelopes[0].render(frame, a, b);
         // (the ranges of the routes of the knobs of the filter held for a change of its type: with it, before the
         // sources of the routes are asked for, which render those the routes held read, and the routes of the cutoff)
@@ -2604,13 +2628,14 @@ impl Voice {
         }
         self.velocity.render(a as usize, b as usize);
         if lfos {
-            self.render_lfos(frame, a, b, n, shared);
+            self.render_lfos(frame, a, b, n, restart.map(|r| r as f64), shared);
         }
         if self.filter.on {
-            // (the cutoff no route reads: the filter alone, at the starts of its spans from a)
+            // (the cutoff no route reads: the filter alone, at the points of its pass: the ends of its spans, the
+            // start of the first span of a note, those of a retrigger: filter::point)
             let read = targets::target(FILTER, 0, CUTOFF);
             let alone = !(self.modulation.active && self.modulation.moves(read));
-            self.filter.glide(n, alone.then_some(a as usize));
+            self.filter.glide(n, alone.then_some((a as usize, b as usize)));
         }
         each_source!(self.slots, source => source.glide(a as usize, b as usize));
         if self.modulation.active {
@@ -2627,7 +2652,8 @@ impl Voice {
                 lfos: &self.lfos,
                 macros: &shared.macros,
             };
-            self.modulation.apply(&bases, &sources, frame, a, b, n);
+            self.modulation
+                .apply(&bases, &sources, frame, a, b, n, restart.map(|r| r as f64));
         }
         let (a, b) = (a as usize, b as usize);
         shared.scratch.bus.clear(a, b);
@@ -5021,6 +5047,17 @@ fn mix_blend(s: &mut Scratch, a: usize, b: usize, width: Option<(f64, f64)>, ble
 
 #[cfg(test)]
 impl Voice {
+    /// the values of param `param` the routes moved in its last block (one for the block, or one a sample; None: no
+    /// route moves it)
+    pub(crate) fn moved(&self, param: usize) -> Option<&[f32]> {
+        self.modulation.moved(param)
+    }
+
+    /// the levels of LFO `lfo` at the points of its last block
+    pub(crate) fn lfo_values(&self, lfo: usize) -> &[f32] {
+        &self.lfos[lfo].values
+    }
+
     /// the knob of the warp of oscillator `osc` through its one-pole, at the start of the next block (NaN: none)
     pub(crate) fn warp_smoothed(&self, osc: usize) -> f64 {
         self.slots.oscs[osc]

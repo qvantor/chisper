@@ -3,7 +3,8 @@
 //! as the routes read it). What the voices of a scope share is in the shared (LfoGlobal: the clock of each LFO, its
 //! knobs from the time a state takes over, its shape crossfaded into a new one); each voice runs each LFO a route
 //! reads (LfoBlock) from the start of its envelopes, at the points of its routes: every 32 samples and the last one
-//! of a block. Without a route of an LFO none of it runs
+//! of a block (those of a pass of its filter cut at a retrigger too, run again from the state of the block: `cut`).
+//! Without a route of an LFO none of it runs
 
 use alloc::{vec, vec::Vec};
 use jsmath::{ceil, cos, exp, floor, max, min, PI};
@@ -359,8 +360,24 @@ pub struct LfoBlock {
     next_coefficient: usize,
     flat_until: f64,
     pub values: Vec<f32>,
+    /// its levels at the points of a pass cut at a retrigger r (a, a + 32 … r - 1, then r, r + 32 … b - 1: the
+    /// knobs of the filter of a voice are worked out there, `filter::point` of the voices), run again from its state
+    /// at a: `render` with a cut. Those of `values` keep their bits
+    pub cut: Vec<f32>,
     pub constant: bool,
     pub value: f64,
+}
+
+// what its points carry from one to the next (point()): a block cut at a retrigger runs its points again from it
+#[derive(Clone, Copy)]
+struct Carried {
+    start: f64,
+    restart: f64,
+    t_d: f64,
+    phase_d: f64,
+    delta: f64,
+    out: f64,
+    last: f64,
 }
 
 impl LfoBlock {
@@ -383,6 +400,7 @@ impl LfoBlock {
             next_coefficient: 0,
             flat_until: f64::NEG_INFINITY,
             values: Vec::new(),
+            cut: Vec::new(),
             constant: false,
             value: 0.0,
         }
@@ -393,6 +411,31 @@ impl LfoBlock {
         if self.values.len() < BLOCK {
             self.values = vec![0.0; BLOCK];
         }
+        if self.cut.len() < BLOCK {
+            self.cut = vec![0.0; BLOCK];
+        }
+    }
+
+    fn carried(&self) -> Carried {
+        Carried {
+            start: self.start,
+            restart: self.restart,
+            t_d: self.t_d,
+            phase_d: self.phase_d,
+            delta: self.delta,
+            out: self.out,
+            last: self.last,
+        }
+    }
+
+    fn carry(&mut self, carried: Carried) {
+        self.start = carried.start;
+        self.restart = carried.restart;
+        self.t_d = carried.t_d;
+        self.phase_d = carried.phase_d;
+        self.delta = carried.delta;
+        self.out = carried.out;
+        self.last = carried.last;
     }
 
     /// it starts at `frame` (the envelopes of a voice processed late, of a note of a phrase), nothing run yet
@@ -575,7 +618,10 @@ impl LfoBlock {
     }
 
     /// its levels at the points a, a + 32 … b - 1 of the block of `n` at `frame` (values[a] when b is a), the knobs
-    /// the routes move (one value for the block, or one a sample; None: the knob). One value while it is flat
+    /// the routes move (one value for the block, or one a sample; None: the knob). One value while it is flat.
+    /// `cut`: the sample a retrigger cuts the pass of the filter of the voice at, its levels at the points of that
+    /// pass in `cut` too (only where the block isn't one value)
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         frame: f64,
@@ -584,6 +630,7 @@ impl LfoBlock {
         n: usize,
         lfo: &LfoGlobal,
         moved: &[Option<&[f32]>; KNOBS],
+        cut: Option<f64>,
     ) {
         if self.values.len() < n {
             self.values = vec![0.0; n];
@@ -598,6 +645,60 @@ impl LfoBlock {
             self.last = frame + b - 1.0;
             return;
         }
+        let (first, constant) = match cut.filter(|&r| r > a && r < b) {
+            Some(r) => self.points_cut(frame, a, b, n, r, lfo, moved),
+            None => self.points::<false>(frame, a, b, b, lfo, moved),
+        };
+        self.constant = constant;
+        self.value = first as f64;
+        self.flat_until = if constant {
+            self.flat_from(frame + b, lfo, moved[DELAY].is_some(), moved[RATE].is_some())
+        } else {
+            f64::NEG_INFINITY
+        };
+    }
+
+    // the points of the block and those of its pass cut at r (a < r < b), the first from the state at a again, then
+    // the state of the block goes on; one value only while they are that value too. Once a note: a function of its
+    // own, out of `render` (two passes of the points in it kept the LFOs of a voice out of its block, a call of their
+    // own)
+    #[allow(clippy::too_many_arguments)]
+    #[cold]
+    #[inline(never)]
+    fn points_cut(
+        &mut self,
+        frame: f64,
+        a: f64,
+        b: f64,
+        n: usize,
+        r: f64,
+        lfo: &LfoGlobal,
+        moved: &[Option<&[f32]>; KNOBS],
+    ) -> (f32, bool) {
+        let begun = self.carried();
+        let (first, constant) = self.points::<false>(frame, a, b, b, lfo, moved);
+        if self.cut.len() < n {
+            self.cut = vec![0.0; n];
+        }
+        let ended = self.carried();
+        self.carry(begun);
+        let (_, same) = self.points::<true>(frame, a, b, r, lfo, moved);
+        self.carry(ended);
+        (first, constant && same)
+    }
+
+    // its levels at the points of a pass a..b (a, a + 32 … b - 1) into `values`, or (CUT) of one cut at `cut` (a, a +
+    // 32 … cut - 1, then cut, cut + 32 … b - 1) into `cut`; the first and whether all of them are it
+    #[inline(always)]
+    fn points<const CUT: bool>(
+        &mut self,
+        frame: f64,
+        a: f64,
+        b: f64,
+        cut: f64,
+        lfo: &LfoGlobal,
+        moved: &[Option<&[f32]>; KNOBS],
+    ) -> (f32, bool) {
         let last = b - 1.0;
         let mut p = a;
         let mut first = 0.0f32;
@@ -608,7 +709,11 @@ impl LfoBlock {
                 moved[k].map(|values| values[if values.len() > 1 { i } else { 0 }] as f64)
             });
             let level = self.point(frame + p, lfo, &mods) as f32;
-            self.values[i] = level;
+            if CUT {
+                self.cut[i] = level;
+            } else {
+                self.values[i] = level;
+            }
             if p == a {
                 first = level;
             } else if level != first {
@@ -617,15 +722,17 @@ impl LfoBlock {
             if p == last {
                 break;
             }
-            p = min(p + SEGMENT, last);
+            p = if !CUT {
+                min(p + SEGMENT, last)
+            } else if p < cut - 1.0 {
+                min(p + SEGMENT, cut - 1.0)
+            } else if p < cut {
+                cut
+            } else {
+                min(p + SEGMENT, last)
+            };
         }
-        self.constant = constant;
-        self.value = first as f64;
-        self.flat_until = if constant {
-            self.flat_from(frame + b, lfo, moved[DELAY].is_some(), moved[RATE].is_some())
-        } else {
-            f64::NEG_INFINITY
-        };
+        (first, constant)
     }
 }
 
@@ -674,7 +781,7 @@ mod tests {
     ) -> Vec<(f64, f64)> {
         let mut levels = Vec::new();
         for frame in (from..to).step_by(128) {
-            block.render(frame as f64, 0.0, 128.0, 128, lfo, moved);
+            block.render(frame as f64, 0.0, 128.0, 128, lfo, moved, None);
             let mut p = 0.0;
             loop {
                 let level = if block.constant {
@@ -834,14 +941,14 @@ mod tests {
     fn a_block_in_the_delay_is_one_value_until_the_delay_ends() {
         let lfo = lfo_of(|s| s.delay = 0.1);
         let mut block = LfoBlock::new(RATE_48, 0.0);
-        block.render(0.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS]);
+        block.render(0.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
         assert!(block.constant);
         assert_eq!(block.flat_until(), 4800.0);
         // the blocks before it are not worked out again: one value
-        block.render(4608.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS]);
+        block.render(4608.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
         assert!(block.constant && block.value == 0.0);
         // the block of the end of the delay moves (a sine from 0 rises at once)
-        block.render(4736.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS]);
+        block.render(4736.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
         assert!(!block.constant);
         assert_eq!(block.values[64], 0.0);
         assert!(block.values[127] > 0.0);
@@ -859,11 +966,12 @@ mod tests {
             128,
             &lfo,
             &[None, Some(&delays), None, None, None],
+            None,
         );
         assert!(block.constant);
         assert_eq!(block.flat_until(), f64::NEG_INFINITY);
         lfo.set(0.5, &state(|s| s.delay = 0.2), false);
-        block.render(128.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS]);
+        block.render(128.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
         assert_eq!(block.flat_until(), 24000.0);
     }
 
@@ -1005,6 +1113,48 @@ mod tests {
             let expected = if f < 24000.0 { 1.0 } else { 0.0 };
             assert_eq!(level, expected, "{f}");
         }
+    }
+
+    // A retrigger at 70 of the block at 128 cuts the pass of a filter there: the levels at the points of that pass (0,
+    // 32, 64, 69, then 70, 102, 127) are those of the points worked out one by one (smoothed: each from the one before);
+    // the points of the block and of the block after keep their bits
+    #[test]
+    fn a_cut_block_has_the_levels_of_the_points_of_its_cut_pass_too() {
+        let lfo = lfo_of(|s| {
+            s.smooth = 0.002;
+            s.anchor = Some(Anchor {
+                period: 0.02,
+                ..FIRST_ANCHOR
+            });
+        });
+        let render = |cut: Option<f64>| {
+            let mut block = LfoBlock::new(RATE_48, 0.0);
+            block.render(0.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
+            block.retrigger(198.0);
+            block.render(128.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], cut);
+            let (values, levels) = (block.values.clone(), block.cut.clone());
+            assert!(!block.constant);
+            block.render(256.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
+            (values, levels, block.values.clone())
+        };
+        let (values, cut, after) = render(Some(70.0));
+        let (plain, _, plain_after) = render(None);
+        let points = [0, 32, 64, 96, 127];
+        for p in points {
+            assert_eq!(values[p], plain[p], "{p}");
+            assert_eq!(after[p], plain_after[p], "{p}");
+        }
+        let mut one_by_one = LfoBlock::new(RATE_48, 0.0);
+        for p in points {
+            one_by_one.point(p as f64, &lfo, &NONE);
+        }
+        one_by_one.retrigger(198.0);
+        for p in [0, 32, 64, 69, 70, 102, 127] {
+            let level = one_by_one.point(128.0 + p as f64, &lfo, &NONE) as f32;
+            assert_eq!(cut[p], level, "{p}");
+        }
+        // (the last point after another one before it)
+        assert_ne!(cut[127], values[127]);
     }
 
     #[test]

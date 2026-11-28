@@ -63,15 +63,19 @@ pub struct Sources<'a> {
 
 const BLOCK: usize = 128;
 const SEGMENT: f64 = 32.0;
-// (the filter reads its cutoff and gain at the starts of its spans: the points of the routes, `sparse`)
+// (the filter reads its cutoff and gain at the ends of its spans, and at the start of the first span of a note: the
+// points of the routes, `sparse`; a retrigger cuts its spans at its sample, `filter::point`)
 const _: () = assert!(SEGMENT as usize == crate::filter::SEGMENT);
 
-// the levels of a source of the routes in a block: one value while it is flat (`constant`), else one a sample
+// the levels of a source of the routes in a block: one value while it is flat (`constant`), else one a sample; at
+// the points of a pass of the filter cut at a retrigger `cut` (an LFO's run again there: LfoBlock::cut; the others
+// have every sample in `values`)
 #[derive(Clone, Copy)]
 struct Level<'a> {
     constant: bool,
     value: f64,
     values: &'a [f32],
+    cut: &'a [f32],
 }
 
 // source `k` that is the velocity or a macro: flat but for a glide
@@ -94,6 +98,7 @@ fn source<'a>(sources: &Sources<'a>, k: usize) -> Level<'a> {
             constant: glided.constant,
             value: glided.value(),
             values: &glided.values,
+            cut: &glided.values,
         }
     } else if k >= LFO {
         let lfo = &sources.lfos[k - LFO];
@@ -101,6 +106,7 @@ fn source<'a>(sources: &Sources<'a>, k: usize) -> Level<'a> {
             constant: lfo.constant,
             value: lfo.value,
             values: &lfo.values,
+            cut: &lfo.cut,
         }
     } else {
         let envelope = &sources.envelopes[k];
@@ -108,6 +114,7 @@ fn source<'a>(sources: &Sources<'a>, k: usize) -> Level<'a> {
             constant: envelope.constant,
             value: envelope.value,
             values: &envelope.values,
+            cut: &envelope.values,
         }
     }
 }
@@ -192,9 +199,10 @@ struct Target {
     scale: u32,
     // the Phase of an LFO: around the cycle, not clamped
     wrap: bool,
-    // read only at the points the routes work out (a..b by SEGMENT, from a): the cutoff and the gain of the filter,
-    // which reads them at the start of each of its spans; the lines between the points and the values outside a..b
-    // are left out
+    // read only at the points the routes work out (a..b by SEGMENT, from a, and b - 1; of the knobs of the filter
+    // where a retrigger cuts its spans, those of a..r and of r..b: `filter::point`): the cutoff and the gain of the
+    // filter, which reads them at the end of each of its spans (and at a the start of the first span of a note); the
+    // lines between the points and the values outside a..b are left out
     sparse: bool,
     values: Vec<f32>,
     one: [f32; 1],
@@ -511,8 +519,60 @@ impl Modulation {
     }
 
     /// the moved params of the samples a..b of a block of n; `bases` the base of each param in the block (asked
-    /// only for the params it moves), the levels of the sources there
-    pub fn apply<B: BaseOf>(&mut self, bases: &B, sources: &Sources, frame: f64, a: f64, b: f64, n: usize) {
+    /// only for the params it moves), the levels of the sources there; `restart`: the sample the note starts again at
+    /// (a retrigger: the knobs of the filter are worked out at the points of its spans cut there, `filter::point`;
+    /// the knobs of an LFO at those points and at the points of the block both, as the LFO runs both: LfoBlock::cut)
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    pub fn apply<B: BaseOf>(
+        &mut self,
+        bases: &B,
+        sources: &Sources,
+        frame: f64,
+        a: f64,
+        b: f64,
+        n: usize,
+        restart: Option<f64>,
+    ) {
+        match restart {
+            Some(r) if r > a && r < b => self.apply_cut(bases, sources, frame, a, b, n, r),
+            _ => self.apply_points::<B, false>(bases, sources, frame, a, b, n, b),
+        }
+    }
+
+    // `apply` of a block a retrigger cuts at r (a < r < b), once a note: a function of its own. The points of a cut
+    // in the one loop of every block kept `apply` out of the block of a voice, a call of its own: a voice with routes
+    // 2 to 3 % slower in every block (`voice u1 routed` of the perf suite)
+    #[allow(clippy::too_many_arguments)]
+    #[cold]
+    #[inline(never)]
+    fn apply_cut<B: BaseOf>(
+        &mut self,
+        bases: &B,
+        sources: &Sources,
+        frame: f64,
+        a: f64,
+        b: f64,
+        n: usize,
+        r: f64,
+    ) {
+        self.apply_points::<B, true>(bases, sources, frame, a, b, n, r);
+    }
+
+    // `apply` at the points of a..b (CUT: those of the knobs of the filter and of the LFOs where the retrigger at r
+    // cuts the pass; the plain points the bits of a block with no cut)
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn apply_points<B: BaseOf, const CUT: bool>(
+        &mut self,
+        bases: &B,
+        sources: &Sources,
+        frame: f64,
+        a: f64,
+        b: f64,
+        n: usize,
+        r: f64,
+    ) {
         if self.dropped {
             self.dropped = false;
             self.index();
@@ -575,16 +635,33 @@ impl Modulation {
             }
             let values = &mut target.values;
             let last = b - 1.0;
+            // (the knobs of the filter where its note starts again at r: the points of a..r, the last r - 1, then
+            // those of r..b, as its pass is cut there: `filter::point`; the knobs of an LFO at the points of a..b
+            // and of that pass both, the LFO runs both: LfoBlock::cut; else the points of a..b)
+            let (cut, both) = if !CUT {
+                (b, false)
+            } else if of_filter(target.module) {
+                (r, false)
+            } else if target.module == LFO_KNOBS {
+                (r, true)
+            } else {
+                (b, false)
+            };
             let mut from = a;
             let mut p = a;
+            // (the next point of the pass and the next of the block: `both`)
+            let (mut pass, mut block) = (a, a);
             loop {
                 let mut sum = 0.0;
                 for route in &target.routes {
                     let envelope = source(sources, route.source);
                     let amount = toward(route.amount, route.step, route.target, p - a);
                     let offset = toward(route.offset, route.offset_step, route.offset_target, p - a);
+                    // (the routes of the knobs of an LFO read no LFO: every sample of their sources is in `values`)
                     let level = if envelope.constant {
                         envelope.value
+                    } else if CUT && cut < b && !both {
+                        envelope.cut[p as usize] as f64
                     } else {
                         envelope.values[p as usize] as f64
                     };
@@ -614,7 +691,23 @@ impl Modulation {
                     break;
                 }
                 from = p;
-                p = min(p + SEGMENT, last);
+                if !CUT {
+                    p = min(p + SEGMENT, last);
+                    continue;
+                }
+                if pass == p {
+                    pass = if p < cut - 1.0 {
+                        min(p + SEGMENT, cut - 1.0)
+                    } else if p < cut {
+                        cut
+                    } else {
+                        min(p + SEGMENT, last)
+                    };
+                }
+                if block == p {
+                    block = min(p + SEGMENT, last);
+                }
+                p = if both { min(pass, block) } else { pass };
             }
             // the glides go on
             for route in target.routes.iter_mut() {
@@ -741,7 +834,7 @@ mod tests {
             lfos: &[],
             macros: &Macros::default(),
         };
-        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
         modulation.moved(param).map(|values| values[0])
     }
 
@@ -797,7 +890,7 @@ mod tests {
                 macros: &Macros::default(),
             };
             for _ in 0..blocks {
-                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128, None);
                 frame += 128.0;
             }
             modulation.moved(param).map(|values| values[values.len() - 1])
@@ -859,7 +952,7 @@ mod tests {
                 macros: &Macros::default(),
             };
             for _ in 0..blocks {
-                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128, None);
                 frame += 128.0;
             }
             modulation.moved(param).map(|values| values[values.len() - 1])
@@ -905,9 +998,9 @@ mod tests {
             lfos: &[],
             macros: &Macros::default(),
         };
-        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
         modulation.set(&[ranged(50.0)]);
-        modulation.apply(&bases, &sources, 128.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 128.0, 0.0, 128.0, 128, None);
         let last = modulation.moved(resonance).expect("moved")[127];
         assert!(last > 11.0 && last < 51.0, "{last}");
     }
@@ -994,7 +1087,7 @@ mod tests {
                 lfos: &[],
                 macros: &macros,
             };
-            modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+            modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
             (
                 modulation.moved(param).map(|values| values[0]),
                 modulation.quiet_until,
@@ -1066,7 +1159,7 @@ mod tests {
                 macros: &macros,
             };
             let frame = played.len() as f64;
-            modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+            modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128, None);
             quiet.push(modulation.quiet_until);
             let moved = modulation.moved(GAIN1).expect("moved");
             played.extend((0..128).map(|i| moved[if moved.len() > 1 { i } else { 0 }]));
@@ -1118,16 +1211,178 @@ mod tests {
         let mut lfos: Vec<LfoBlock> = (0..LFOS).map(|_| LfoBlock::new(RATE_48, 0.0)).collect();
         let one = [0.5f32];
         let bases = Bases::new(&one);
-        lfos[0].render(0.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS]);
+        lfos[0].render(0.0, 0.0, 128.0, 128, &lfo, &[None; KNOBS], None);
         let sources = Sources {
             envelopes: &envelopes,
             velocity: &velocity,
             lfos: &lfos,
             macros: &Macros::default(),
         };
-        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
         assert_eq!(modulation.moved(GAIN1).map(|values| values[0]), Some(0.5));
         assert_eq!(modulation.quiet_until, 4800.0);
+    }
+
+    // A retrigger at 70 (`restart`): the knobs of the filter are worked out at the points of its pass cut there (0,
+    // 32, 64, 69, then 70, 102 and 127: `filter::point`), each as at that point alone; one the filter reads at every
+    // sample (its resonance) a line between them. Those of the other modules keep the points of the block, their bits
+    #[test]
+    fn a_retrigger_moves_the_points_of_the_knobs_of_the_filter() {
+        use crate::targets::RESONANCE;
+        let resonance = target(FILTER, 0, RESONANCE);
+        let routes = [
+            route(1.0, CUTOFF1, 2.0, LOG, true),
+            route(1.0, resonance, 10.0, LINEAR, false),
+            route(1.0, GAIN1, 10.0, LINEAR, false),
+        ];
+        let accesses = only(CUTOFF1) | only(resonance) | only(GAIN1);
+        // (ENV 2 falls over the block: a value a sample)
+        let falls = EnvelopeParams {
+            decay: 0.01,
+            sustain: 0.0,
+            ..EnvelopeParams::default()
+        };
+        let envelopes: Vec<EnvelopeBlock> = (0..3)
+            .map(|_| {
+                let mut envelope = EnvelopeBlock::new(falls, RATE_48, 0.0);
+                envelope.render(0.0, 0.0, 128.0);
+                envelope
+            })
+            .collect();
+        let velocity = Glided::new(0.0);
+        let one = [4.0f32];
+        let bases = Bases::new(&one);
+        let sources = Sources {
+            envelopes: &envelopes,
+            velocity: &velocity,
+            lfos: &[],
+            macros: &Macros::default(),
+        };
+        let apply = |a: f64, b: f64, restart: Option<f64>| {
+            let mut modulation = Modulation::new(RATE_48, 3, false, &routes, accesses);
+            modulation.apply(&bases, &sources, 0.0, a, b, 128, restart);
+            let values = |param: usize| modulation.moved(param).expect("moved").to_vec();
+            (values(CUTOFF1), values(resonance), values(GAIN1))
+        };
+        let (cutoff, resonances, gain) = apply(0.0, 128.0, Some(70.0));
+        let points = [0, 32, 64, 69, 70, 102, 127];
+        for p in points {
+            let (alone, resonance_alone, _) = apply(p as f64, p as f64 + 1.0, None);
+            assert_eq!(cutoff[p], alone[p], "{p}");
+            assert_eq!(resonances[p], resonance_alone[p], "{p}");
+        }
+        for pair in points.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            let start = resonances[from] as f64;
+            let slope = (resonances[to] as f64 - start) / (to - from) as f64;
+            for i in from + 1..to {
+                assert_eq!(resonances[i], (start + slope * (i - from) as f64) as f32, "{i}");
+            }
+        }
+        let (_, _, kept) = apply(0.0, 128.0, None);
+        assert_eq!(gain, kept);
+    }
+
+    // A retrigger at 70: a knob of an LFO (its Phase, around the cycle) is worked out at the points of the block (0,
+    // 32, 64, 96, 127) and at those of the pass of the filter cut there (69, 70, 102), as the LFO runs both
+    // (LfoBlock::cut), each as at that point alone, a line between them; those of the block keep their bits
+    #[test]
+    fn a_retrigger_works_the_knobs_of_an_lfo_out_at_the_points_of_the_block_and_of_the_cut_pass() {
+        let phase = target(LFO_KNOBS, 0, PHASE);
+        let routes = [route(1.0, phase, 10.0, LINEAR, false)];
+        // (ENV 2 falls over the block: a value a sample)
+        let falls = EnvelopeParams {
+            decay: 0.01,
+            sustain: 0.0,
+            ..EnvelopeParams::default()
+        };
+        let envelopes: Vec<EnvelopeBlock> = (0..3)
+            .map(|_| {
+                let mut envelope = EnvelopeBlock::new(falls, RATE_48, 0.0);
+                envelope.render(0.0, 0.0, 128.0);
+                envelope
+            })
+            .collect();
+        let velocity = Glided::new(0.0);
+        let one = [0.25f32];
+        let bases = Bases::new(&one);
+        let sources = Sources {
+            envelopes: &envelopes,
+            velocity: &velocity,
+            lfos: &[],
+            macros: &Macros::default(),
+        };
+        let apply = |a: f64, b: f64, restart: Option<f64>| {
+            let mut modulation = Modulation::new(RATE_48, 3, false, &routes, only(phase));
+            modulation.apply(&bases, &sources, 0.0, a, b, 128, restart);
+            modulation.moved(phase).expect("moved").to_vec()
+        };
+        let phases = apply(0.0, 128.0, Some(70.0));
+        let points = [0, 32, 64, 69, 70, 96, 102, 127];
+        for p in points {
+            assert_eq!(phases[p], apply(p as f64, p as f64 + 1.0, None)[p], "{p}");
+        }
+        for pair in points.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            let start = phases[from] as f64;
+            let slope = (phases[to] as f64 - start) / (to - from) as f64;
+            for i in from + 1..to {
+                assert_eq!(phases[i], (start + slope * (i - from) as f64) as f32, "{i}");
+            }
+        }
+        let kept = apply(0.0, 128.0, None);
+        for p in [0, 32, 64, 96, 127] {
+            assert_eq!(phases[p], kept[p], "{p}");
+        }
+        // (the line of the block across the retrigger: another Phase)
+        assert_ne!(phases[69], kept[69]);
+        assert_ne!(phases[70], kept[70]);
+    }
+
+    // A retrigger at 70: a route of an LFO on the cutoff reads it at the points of the pass of the filter cut there
+    // from its levels there (`cut` of the LFO, run again from the state of the block), one on the gain of an
+    // oscillator from those of the block (`values`)
+    #[test]
+    fn the_knobs_of_the_filter_read_an_lfo_at_the_points_of_its_cut_pass() {
+        let routes = [
+            route(4.0, CUTOFF1, 2.0, LOG, true),
+            route(4.0, GAIN1, 0.5, LINEAR, false),
+        ];
+        let accesses = only(CUTOFF1) | only(GAIN1);
+        let envelopes = envelopes(1.0);
+        let velocity = Glided::new(0.0);
+        let one = [4.0f32];
+        let bases = Bases::new(&one);
+        let ramp = |from: f32| (0..128).map(|i| from + i as f32 / 512.0).collect::<Vec<f32>>();
+        let (values, cut) = (ramp(0.1), ramp(0.6));
+        let apply = |values: &[f32], cut: &[f32]| {
+            let lfos: Vec<LfoBlock> = (0..LFOS)
+                .map(|_| {
+                    let mut lfo = LfoBlock::new(RATE_48, 0.0);
+                    lfo.values = values.to_vec();
+                    lfo.cut = cut.to_vec();
+                    lfo
+                })
+                .collect();
+            let sources = Sources {
+                envelopes: &envelopes,
+                velocity: &velocity,
+                lfos: &lfos,
+                macros: &Macros::default(),
+            };
+            let mut modulation = Modulation::new(RATE_48, 3, true, &routes, accesses);
+            modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, Some(70.0));
+            let values = |param: usize| modulation.moved(param).expect("moved").to_vec();
+            (values(CUTOFF1), values(GAIN1))
+        };
+        let (cutoff, gain) = apply(&values, &cut);
+        let (cutoff_of_cut, _) = apply(&cut, &cut);
+        let (cutoff_of_values, gain_of_values) = apply(&values, &values);
+        for p in [0, 32, 64, 69, 70, 102, 127] {
+            assert_eq!(cutoff[p], cutoff_of_cut[p], "{p}");
+            assert_ne!(cutoff[p], cutoff_of_values[p], "{p}");
+        }
+        assert_eq!(gain, gain_of_values);
     }
 
     #[test]
@@ -1149,7 +1404,7 @@ mod tests {
         let mut render = |modulation: &mut Modulation, blocks: usize| {
             for _ in 0..blocks {
                 let frame = played.len() as f64;
-                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+                modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128, None);
                 let moved = modulation.moved(GAIN1).expect("moved");
                 played.extend((0..128).map(|i| moved[if moved.len() > 1 { i } else { 0 }]));
             }
@@ -1194,7 +1449,7 @@ mod tests {
             lfos: &[],
             macros: &Macros::default(),
         };
-        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
         assert_eq!(
             bases.asked.borrow().as_slice(),
             [(OSC, 0, GAIN), (FILTER, 0, CUTOFF)].as_slice()
@@ -1202,7 +1457,7 @@ mod tests {
         // a param out of the accesses takes no route, so no base is asked for it
         let mut modulation = Modulation::new(RATE_48, 3, false, &routes, only(GAIN1));
         let bases = Bases::new(&one);
-        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128);
+        modulation.apply(&bases, &sources, 0.0, 0.0, 128.0, 128, None);
         assert_eq!(bases.asked.borrow().as_slice(), [(OSC, 0, GAIN)].as_slice());
         assert_eq!(modulation.moved(CUTOFF1), None);
     }

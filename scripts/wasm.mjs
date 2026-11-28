@@ -45,8 +45,21 @@ const CORES = [
   // lines of the EQ and of a mix were 5 % slower); 216.3 KB with the FX Filter (a seventh slot, its unit: its
   // knobs, Pan as two filters mixed in the lanes, the crossfade of a type, the level and the mix inside, the lines
   // of its routes) on the spans of the model types of a filter in dsp-core (model_spans: the filter of a voice and
-  // of the chain run on them)
-  { crate: 'engine', name: 'engine', budget: 216600 },
+  // of the chain run on them); 226.0 KB with the fast lines of those filters (a span whose cutoff goes further than
+  // JUMP times in pieces, a line that steps every sample in loops of their own beside those of the refreshes:
+  // fine_line, fine_pair_samples, fine_group_samples; a sample of them a call of its own was 3.2 KB less); 226.5 KB
+  // with the first span of a note of a voice from the design of its start (Pass::start); 228.3 KB with a retrigger
+  // that cuts the pass of that filter (Pass::cut, the points of the routes of its knobs there: Modulation::apply is no
+  // longer inlined in the block of a voice, a call of its own; inlined always, 4.8 KB more; the points of a retrigger
+  // in a function of their own, 1 KB more); 228.9 KB with the levels of the LFOs of a voice at the points of that cut
+  // pass (LfoBlock::cut: its points run again from the state of the block, a function of their own; the LFOs of a
+  // voice no longer inlined in its block); 229.2 KB with the knobs of those LFOs worked out at the points of that pass
+  // too, besides those of the block (the routes of the knobs of an LFO given the retrigger: Modulation::apply);
+  // 232.6 KB with a block of no retrigger as fast as before them: Modulation::apply inlined in the block of a voice
+  // again (always), the points of a cut a copy of its loop of their own (apply_cut, cold: one for the routes of a
+  // voice, one for those of its LFOs; LfoBlock::points_cut the same). A call of its own, the routes of a voice were 2
+  // to 3 % slower in every block (`voice u1 routed` of the perf suite)
+  { crate: 'engine', name: 'engine', budget: 232700 },
   // jsmath exported to the specs (not bundled)
   { crate: 'jsmath-check', name: 'jsmath-check', budget: null },
 ];
@@ -97,7 +110,7 @@ const cargo = (perf) => {
 // the functions of a core -O3 doesn't inline (patterns of their names in the build of cargo): the render of each
 // source of a voice (the noise, the sub) stays a function of its own (inlined into Voice::process, its one caller, its loops would share
 // the registers of everything else the voice does in a block); so do the spans of the filter of a voice alone
-// (inlined into run_alone, next to the design of a span: a third slower); so do the pass of a warped voice and its
+// (inlined into run_alone, next to the design of a span: a third slower) and its fast lines (fine_*); so do the pass of a warped voice and its
 // reads of a span (render_voices calls them where a voice is warped alone: inlined, each of its callers had a copy),
 // the levels of a bend sample by sample too, and the loop of the voices of a warp (render_voices_warped: inlined into
 // render_voices, the voices of no warp were 3 to 7 % slower)
@@ -108,6 +121,9 @@ const NO_INLINE = {
     '*model_spans10model_span*',
     '*model_spans10model_line*',
     '*model_spans16model_line_plain*',
+    '*model_spans9fine_line*',
+    '*filter17fine_pair_samples*',
+    '*filter18fine_group_samples*',
     '*warp11warp_phases*',
     '*voice12segment_warp*',
     '*voice18render_span_warped*',

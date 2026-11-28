@@ -1241,6 +1241,299 @@ fn the_gain_of_a_voice_follows_an_lfo_of_the_shared_from_its_note_on() {
     }
 }
 
+// A note that takes a voice over (mono: its gate held at another value, at a sample of a block) starts its envelopes and
+// LFOs again there: the line of the knobs of its filter starts again at that sample (`VoiceFilter::restart`, its pass cut
+// there), not in the blocks after, nor where the gate stays; a stolen voice (its fade) is taken over by none
+#[test]
+fn a_note_that_takes_a_voice_over_starts_the_line_of_its_filter_again_at_its_sample() {
+    use crate::filter::{FilterOptions, Kind as FilterKind};
+    use crate::modulation::{VoiceRoute, LOG};
+    use crate::targets::{target, CUTOFF, FILTER};
+    use dsp_core::filter_model::ModelType;
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    // ENV 2 on the cutoff: no attack, down to 0 in 20 ms
+    let falls = EnvelopeParams {
+        decay: 0.02,
+        sustain: 0.0,
+        ..EnvelopeParams::default()
+    };
+    let flat = EnvelopeParams {
+        sustain: 1.0,
+        ..EnvelopeParams::default()
+    };
+    let mut voice = Voice::new(
+        RATE,
+        VoiceOptions {
+            envelopes: vec![flat, falls, flat],
+            routes: vec![VoiceRoute {
+                source: 1.0,
+                param: target(FILTER, 0, CUTOFF),
+                amount: 6.0,
+                min: 20.0,
+                max: 20000.0,
+                scale: LOG,
+                bipolar: false,
+            }],
+            filter: Some(FilterOptions {
+                kind: FilterKind::Model(ModelType::Low12),
+                cutoff: 300.0,
+                resonance: 20.0,
+                gain: 0.0,
+                drive: 0.0,
+                variation: 0.0,
+            }),
+            ..note()
+        },
+        &mut shared,
+    );
+    voice.attach(&mut store, &mut shared);
+    // (the gate of each block: held, taken over at 70 of block 2 (1.5), held so, stolen at 10 of block 4, at 1.8 in
+    // block 5)
+    let gates: [Vec<f32>; 6] = [
+        vec![1.0],
+        vec![1.0],
+        (0..128).map(|i| if i < 70 { 1.0 } else { 1.5 }).collect(),
+        vec![1.5],
+        (0..128).map(|i| if i < 10 { 1.5 } else { -1.0 }).collect(),
+        vec![1.8],
+    ];
+    let mut restarts = Vec::new();
+    let (mut left, mut right) = (vec![0.0f32; 128], vec![0.0f32; 128]);
+    for (block, gate) in gates.iter().enumerate() {
+        let mut params: [&[f32]; PARAMS] = [&[0.0]; PARAMS];
+        params[1] = gate;
+        voice.process(
+            (block * 128) as f64,
+            &params,
+            &[0.0],
+            &mut left,
+            &mut right,
+            &mut store,
+            &mut shared,
+        );
+        restarts.push(voice.restarted());
+    }
+    assert_eq!(restarts, [None, None, Some(70), None, None, None]);
+    voice.end(&mut store, &mut shared);
+}
+
+// A note that takes a voice over at 70 with LFO 1 (a sine of 20 ms, bipolar, an octave) on the cutoff of its filter:
+// the cutoff the filter reads at the points of its pass cut there (0, 32, 64, 69, then 70, 102, 127) is the one of the
+// LFO worked out at those points, after the points of the blocks before, started again at 70
+#[test]
+fn a_note_that_takes_a_voice_over_reads_its_lfos_at_the_points_of_its_cut_filter() {
+    use crate::filter::{FilterOptions, Kind as FilterKind};
+    use crate::lfo::{LfoBlock, KNOBS};
+    use crate::modulation::{VoiceRoute, LOG};
+    use crate::shared::LFO_STATE;
+    use crate::targets::{target, CUTOFF, FILTER};
+    use dsp_core::filter_model::ModelType;
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    let mut state = [0.0; 4 * LFO_STATE];
+    for lfo in 0..4 {
+        state[lfo * LFO_STATE + 7] = if lfo == 0 { 0.02 } else { 0.5 };
+    }
+    shared.set_lfos(0.0, true, &state);
+    let cutoff = target(FILTER, 0, CUTOFF);
+    let mut voice = Voice::new(
+        RATE,
+        VoiceOptions {
+            routes: vec![VoiceRoute {
+                source: 4.0,
+                param: cutoff,
+                amount: 1.0,
+                min: 20.0,
+                max: 20000.0,
+                scale: LOG,
+                bipolar: true,
+            }],
+            filter: Some(FilterOptions {
+                kind: FilterKind::Model(ModelType::Low12),
+                cutoff: 1000.0,
+                resonance: 20.0,
+                gain: 0.0,
+                drive: 0.0,
+                variation: 0.0,
+            }),
+            ..note()
+        },
+        &mut shared,
+    );
+    voice.attach(&mut store, &mut shared);
+    let gates: [Vec<f32>; 3] = [
+        vec![1.0],
+        vec![1.0],
+        (0..128).map(|i| if i < 70 { 1.0 } else { 1.5 }).collect(),
+    ];
+    let (mut left, mut right) = (vec![0.0f32; 128], vec![0.0f32; 128]);
+    for (block, gate) in gates.iter().enumerate() {
+        let mut params: [&[f32]; PARAMS] = [&[0.0]; PARAMS];
+        params[1] = gate;
+        voice.process(
+            (block * 128) as f64,
+            &params,
+            &[0.0],
+            &mut left,
+            &mut right,
+            &mut store,
+            &mut shared,
+        );
+    }
+    assert_eq!(voice.restarted(), Some(70));
+    let moved = voice.moved(cutoff).expect("moved").to_vec();
+    let mut lfo = LfoBlock::new(RATE, 0.0);
+    for frame in [0, 128] {
+        for p in [0, 32, 64, 96, 127] {
+            lfo.point((frame + p) as f64, &shared.lfos[0], &[None; KNOBS]);
+        }
+    }
+    lfo.retrigger(256.0 + 70.0);
+    for p in [0, 32, 64, 69, 70, 102, 127] {
+        let level = lfo.point(256.0 + p as f64, &shared.lfos[0], &[None; KNOBS]) as f32 as f64;
+        let expected = 1000.0 * pow(2.0, level - 0.5);
+        assert!(
+            (moved[p] as f64 / expected - 1.0).abs() < 1e-6,
+            "{p}: {} against {expected}",
+            moved[p]
+        );
+    }
+    voice.end(&mut store, &mut shared);
+}
+
+// The same with ENV 2 (an attack of 0, a decay of 2 ms to 0) on the Phase of LFO 1 (half a cycle at its top): the
+// Phase the LFO reads at the points of the cut pass is the one of the envelope there (0 at 69, the note before
+// decayed; 0.5 at 70, the note), not its line between the points of the block (64, 96) across the retrigger (the
+// cutoff 1316 Hz at 69 instead of 1201, 730 Hz at 70 instead of 1414); the points of the block keep theirs
+#[test]
+fn a_note_that_takes_a_voice_over_works_the_knobs_of_its_lfos_out_at_the_points_of_its_cut_filter() {
+    use crate::envelope::EnvelopeBlock;
+    use crate::filter::{FilterOptions, Kind as FilterKind};
+    use crate::lfo::{frac, LfoBlock, KNOBS, PHASE};
+    use crate::modulation::{VoiceRoute, LINEAR, LOG};
+    use crate::shared::LFO_STATE;
+    use crate::targets::{target, CUTOFF, FILTER, LFO_KNOBS};
+    use dsp_core::filter_model::ModelType;
+    let (mut store, mut shared) = (Store::default(), Shared::default());
+    let mut state = [0.0; 4 * LFO_STATE];
+    for lfo in 0..4 {
+        state[lfo * LFO_STATE + 7] = if lfo == 0 { 0.02 } else { 0.5 };
+    }
+    shared.set_lfos(0.0, true, &state);
+    let (cutoff, phase) = (target(FILTER, 0, CUTOFF), target(LFO_KNOBS, 0, PHASE));
+    let decay = EnvelopeParams {
+        attack: 0.0,
+        decay: 0.002,
+        sustain: 0.0,
+        ..EnvelopeParams::default()
+    };
+    let mut options = note();
+    options.envelopes[1] = decay;
+    let mut voice = Voice::new(
+        RATE,
+        VoiceOptions {
+            routes: vec![
+                VoiceRoute {
+                    source: 4.0,
+                    param: cutoff,
+                    amount: 1.0,
+                    min: 20.0,
+                    max: 20000.0,
+                    scale: LOG,
+                    bipolar: true,
+                },
+                VoiceRoute {
+                    source: 1.0,
+                    param: phase,
+                    amount: 0.5,
+                    min: 0.0,
+                    max: 1.0,
+                    scale: LINEAR,
+                    bipolar: false,
+                },
+            ],
+            filter: Some(FilterOptions {
+                kind: FilterKind::Model(ModelType::Low12),
+                cutoff: 1000.0,
+                resonance: 20.0,
+                gain: 0.0,
+                drive: 0.0,
+                variation: 0.0,
+            }),
+            ..options
+        },
+        &mut shared,
+    );
+    voice.attach(&mut store, &mut shared);
+    let gates: [Vec<f32>; 3] = [
+        vec![1.0],
+        vec![1.0],
+        (0..128).map(|i| if i < 70 { 1.0 } else { 1.5 }).collect(),
+    ];
+    let (mut left, mut right) = (vec![0.0f32; 128], vec![0.0f32; 128]);
+    for (block, gate) in gates.iter().enumerate() {
+        let mut params: [&[f32]; PARAMS] = [&[0.0]; PARAMS];
+        params[1] = gate;
+        voice.process(
+            (block * 128) as f64,
+            &params,
+            &[0.0],
+            &mut left,
+            &mut right,
+            &mut store,
+            &mut shared,
+        );
+    }
+    assert_eq!(voice.restarted(), Some(70));
+    // LFO 1 at `points` of the block at 256, after the points of the blocks before, started again at 326; its Phase
+    // the envelope at each point
+    let lfo_at = |points: &[usize]| -> Vec<f32> {
+        let mut envelope = EnvelopeBlock::new(decay, RATE, 0.0);
+        let mut lfo = LfoBlock::new(RATE, 0.0);
+        let mut levels = Vec::new();
+        for frame in [0, 128, 256] {
+            if frame == 256 {
+                envelope.retrigger(326.0, 256.0);
+                lfo.retrigger(326.0);
+            }
+            envelope.render(frame as f64, 0.0, 128.0);
+            let block: &[usize] = if frame == 256 {
+                points
+            } else {
+                &[0, 32, 64, 96, 127]
+            };
+            for &p in block {
+                let level = if envelope.constant {
+                    envelope.value
+                } else {
+                    envelope.values[p] as f64
+                };
+                let mut mods = [None; KNOBS];
+                mods[PHASE] = Some(frac(0.5 * level) as f32 as f64);
+                let level = lfo.point((frame + p) as f64, &shared.lfos[0], &mods) as f32;
+                if frame == 256 {
+                    levels.push(level);
+                }
+            }
+        }
+        levels
+    };
+    let moved = voice.moved(cutoff).expect("moved").to_vec();
+    let cut = [0, 32, 64, 69, 70, 102, 127];
+    for (&p, level) in cut.iter().zip(lfo_at(&cut)) {
+        let expected = 1000.0 * pow(2.0, level as f64 - 0.5);
+        assert!(
+            (moved[p] as f64 / expected - 1.0).abs() < 1e-6,
+            "{p}: {} against {expected}",
+            moved[p]
+        );
+    }
+    let points = [0, 32, 64, 96, 127];
+    for (&p, level) in points.iter().zip(lfo_at(&points)) {
+        assert_eq!(voice.lfo_values(0)[p], level, "{p}");
+    }
+    voice.end(&mut store, &mut shared);
+}
+
 // --- the macros of the shared ---
 
 // the gain of a voice of a frame of 0.5 moved by MACRO 1 (amount 0.5 up from a gain of 0.5), rendered block by block
@@ -1474,7 +1767,7 @@ fn the_routes_on_the_pitch_add_their_offsets_to_the_detune_within_their_bounds()
                 lfos: &[],
                 macros: &Macros::default(),
             };
-            modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128);
+            modulation.apply(&bases, &sources, frame, 0.0, 128.0, 128, None);
             [PITCH1, FINE1].map(|param| modulation.moved(param).expect("moved").to_vec())
         })
         .collect();
